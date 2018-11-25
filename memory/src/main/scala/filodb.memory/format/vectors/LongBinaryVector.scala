@@ -123,9 +123,10 @@ trait LongVectorDataReader extends VectorDataReader {
    * Sums up the Long values in the vector from position start to position end.
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param start the starting element # in the vector to sum, 0 == first element
-   * @param end the ending element # in the vector to sum
+   * @param end the ending element # in the vector to sum, inclusive
+   * @return a Double, since Longs might possibly overflow
    */
-  // def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long
+  def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double
 
   /**
    * Efficiently searches for the first element # where the vector element is greater than or equal to item.
@@ -174,6 +175,26 @@ object LongVectorDataReader64 extends LongVectorDataReader {
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
     new Long64Iterator(vector + OffsetData + startElement * 8)
 
+  // end is inclusive
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var sum: Double = 0d
+    // Fetch and add multiple points at once for efficiency
+    while ((addr + 64) <= untilAddr) {
+      sum += UnsafeUtils.getLong(addr) + UnsafeUtils.getLong(addr + 8) +
+             UnsafeUtils.getLong(addr + 16) + UnsafeUtils.getLong(addr + 24)
+             UnsafeUtils.getLong(addr + 32) + UnsafeUtils.getLong(addr + 40)
+             UnsafeUtils.getLong(addr + 48) + UnsafeUtils.getLong(addr + 56)
+      addr += 64
+    }
+    while (addr < untilAddr) {
+      sum += UnsafeUtils.getLong(addr)
+      addr += 8
+    }
+    sum
+  }
+
   /**
    * Default O(log n) binary search implementation assuming fast random access, which is true here.
    * Everything should be intrinsic and registers so should be super fast
@@ -212,6 +233,9 @@ object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
     LongBinaryVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    LongBinaryVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end)
 
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int =
     LongBinaryVector(subvectAddr(vector)).binarySearch(subvectAddr(vector), item)

@@ -52,14 +52,7 @@ class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedDoubleRang
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    var rowNo = startRowNum
-    var _sum = 0d
-    val it = doubleReader.iterate(doubleVect, startRowNum)
-    while (rowNo <= endRowNum) {
-      _sum += it.next
-      rowNo += 1
-    }
-    sum += _sum
+    sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
   }
 
   def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {

@@ -184,6 +184,12 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     if (item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
   }
 
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    val inner = vector + InnerVectorOffset
+    DeltaDeltaConstDataReader.slopeSum(initValue(vector), slope(vector), start, end) +
+      IntBinaryVector.simple(inner).sum(inner, start, end)
+  }
+
   // Efficient iterator as we keep track of current value and inner iterator
   class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: NativePointer) extends LongIterator {
     final def next: Long = {
@@ -219,6 +225,18 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     else if (guess >= length(vector))      { 0x80000000 | length(vector) }
     else if (item != apply(vector, guess)) { 0x80000000 | guess }
     else                                   { guess }
+  }
+
+  // Formula for sum of items on a sloped line:
+  // let len = end - start + 1
+  //   = initVal + start*slope + initVal + (start+1)*slope + .... + initVal + end*slope
+  //   = len * initVal + len*start*slope + ((end-start)*len/2) * slope
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    slopeSum(initValue(vector), slope(vector), start, end)
+
+  private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
+    val len = end - start + 1
+    len.toDouble * (initVal + start * slope) + ((end-start)*len/2) * slope
   }
 
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {

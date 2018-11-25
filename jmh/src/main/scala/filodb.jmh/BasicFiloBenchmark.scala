@@ -72,6 +72,13 @@ class BasicFiloBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumAllLongsSumMethod(): Double = {
+    ivReader.sum(iv, 0, numValues - 1)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesApply(): Long = {
     var total = 0L
     for { i <- 0 until numValues optimized } {
@@ -90,5 +97,12 @@ class BasicFiloBenchmark {
       total += it.next
     }
     total
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumTimeSeriesBytesSum(): Double = {
+    byteReader.sum(byteVect, 0, numValues - 1)
   }
 }

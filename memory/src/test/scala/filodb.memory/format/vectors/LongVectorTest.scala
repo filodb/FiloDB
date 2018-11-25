@@ -47,6 +47,9 @@ class LongVectorTest extends NativeVectorTest {
       builder.length should equal (numInts)
       builder.isAllNA should be (false)
       builder.noNAs should be (true)
+
+      val optimized = builder.optimize(memFactory)
+      LongBinaryVector(optimized).sum(optimized, 0, numInts - 1) shouldEqual (0 until numInts).sum.toDouble
     }
 
     it("should be able to return minMax accurately with NAs") {
@@ -82,6 +85,8 @@ class LongVectorTest extends NativeVectorTest {
       LongBinaryVector(optimized)(optimized, 0) should equal (0L)
       LongBinaryVector(optimized).toBuffer(optimized).toList shouldEqual orig
       BinaryVector.totalBytes(optimized) shouldEqual (28 + 3)   // nbits=4, 3 bytes of data + 28 overhead for DDV
+
+      LongBinaryVector(optimized).sum(optimized, 0, 4) shouldEqual (2+1+4+3)
     }
 
     it("should be able to optimize longs with fewer nbits off-heap NoNAs to DeltaDeltaVector") {
@@ -108,6 +113,8 @@ class LongVectorTest extends NativeVectorTest {
       BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
       val readVect = LongBinaryVector(BinaryVector.asBuffer(optimized))
       readVect.toBuffer(optimized).toList shouldEqual orig
+
+      readVect.sum(optimized, 0, 13) shouldEqual orig.take(14).sum.toDouble
     }
 
     it("should iterate with startElement > 0") {

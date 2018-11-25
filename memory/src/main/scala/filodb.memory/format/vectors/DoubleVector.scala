@@ -122,6 +122,14 @@ trait DoubleVectorDataReader extends VectorDataReader {
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
 
   /**
+   * Sums up the Double values in the vector from position start to position end.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param start the starting element # in the vector to sum, 0 == first element
+   * @param end the ending element # in the vector to sum, inclusive
+   */
+  def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double
+
+  /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
@@ -156,6 +164,26 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + OffsetData + n * 8)
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new Double64Iterator(vector + OffsetData + startElement * 8)
+
+  // end is inclusive
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var sum: Double = 0d
+    // Fetch and add multiple points at once for efficiency
+    while ((addr + 64) <= untilAddr) {
+      sum += UnsafeUtils.getDouble(addr) + UnsafeUtils.getDouble(addr + 8) +
+             UnsafeUtils.getDouble(addr + 16) + UnsafeUtils.getDouble(addr + 24)
+             UnsafeUtils.getDouble(addr + 32) + UnsafeUtils.getDouble(addr + 40)
+             UnsafeUtils.getDouble(addr + 48) + UnsafeUtils.getDouble(addr + 56)
+      addr += 64
+    }
+    while (addr < untilAddr) {
+      sum += UnsafeUtils.getDouble(addr)
+      addr += 8
+    }
+    sum
+  }
 }
 
 /**
@@ -168,6 +196,9 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
   }
 
   override def length(vector: BinaryVectorPtr): Int = super.length(subvectAddr(vector))
+
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    DoubleVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end)
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
@@ -281,6 +312,8 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   override def length(vector: BinaryVectorPtr): Int = LongBinaryVector(vector).length(vector)
   final def apply(vector: BinaryVectorPtr, n: Int): Double =
     LongBinaryVector(vector)(vector, n).toDouble
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    LongBinaryVector(vector).sum(vector, start, end)
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
 }
