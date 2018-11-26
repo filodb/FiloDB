@@ -2,10 +2,26 @@ package filodb.prometheus.parse
 
 import org.scalatest.{FunSpec, Matchers}
 
+import filodb.prometheus.ast.TimeStepParams
+
 
 //noinspection ScalaStyle
 // scalastyle:off
 class ParserSpec extends FunSpec with Matchers {
+
+  it("metadata matcher query") {
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method!=\"GET\"}")
+    parseError("job{__name__=\"prometheus\"}")
+    parseError("job[__name__=\"prometheus\"]")
+    val queryToLpString = ("http_requests_total{job=\"prometheus\", method=\"GET\"}" ->
+      "SeriesKeysByFilters(List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),1524855988000,1524855988000)")
+    val start: Long = 1524855988L
+    val end: Long = 1524855988L
+    val lp = Parser.metadataQueryToLogicalPlan(queryToLpString._1, TimeStepParams(start, -1, end))
+    lp.toString shouldEqual queryToLpString._2
+  }
 
   it("parse basic scalar expressions") {
     parseSuccessfully("1")
@@ -325,6 +341,4 @@ class ParserSpec extends FunSpec with Matchers {
       Parser.parseQuery(query)
     }
   }
-
-
 }

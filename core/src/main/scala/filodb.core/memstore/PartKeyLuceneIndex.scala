@@ -58,7 +58,6 @@ object PartKeyLuceneIndex {
     tempDir.mkdir()
     tempDir
   }
-
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
@@ -428,6 +427,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
     collector.intIterator()
   }
 }
+
+
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
 
