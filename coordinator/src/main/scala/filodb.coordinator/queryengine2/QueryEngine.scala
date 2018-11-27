@@ -205,7 +205,7 @@ class QueryEngine(dataset: Dataset,
       // expected - filters don't have enough info to derive shard mapping, send query to all the shards
       // reusing the existing logic
       case e: BadQueryException =>
-        logger.error("exception while materializing the plan", e)
+        logger.warn("exception while materializing the LabelValues query plan", e)
         shards = shardMapperFunc.assignedShards
     }
     shards.map { shard =>
