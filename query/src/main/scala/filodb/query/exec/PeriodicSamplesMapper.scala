@@ -68,9 +68,12 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
                             end: Long,
                             window: Long,
                             rangeFunction: ChunkedRangeFunction,
-                            queryConfig: QueryConfig) extends Iterator[TransientRow] {
-  var curWindowEnd = start
-  var curWindowStart = start - window + 1  // Ensure windows do not overlap by 1
+                            queryConfig: QueryConfig,
+                            // Put vars in constructor for better performance
+                            var curWindowEnd: Long = -1L,
+                            var curWindowStart: Long = -1L) extends Iterator[TransientRow] {
+  curWindowEnd = start
+  curWindowStart = start - window + 1  // Ensure windows do not overlap by 1
   private val sampleToEmit = new TransientRow()
 
   override def hasNext: Boolean = curWindowEnd <= end

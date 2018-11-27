@@ -530,11 +530,12 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   // curIdx has to be initialized to one less than the starting logical index
   // NOTE: This always fetches items using the official API.  This is slower, but guarantees that no matter
   // how slowly the iterator user pulls, it will always be pulling the right thing even if state/mapPtr changes.
-  private class SortedIDMapElemIterator(inst: MapHolder, var curIdx: Int, continue: NativePointer => Boolean)
+  private class SortedIDMapElemIterator(inst: MapHolder,
+                                        var curIdx: Int,
+                                        continue: NativePointer => Boolean,
+                                        var closed: Boolean = false,
+                                        var nextElem: NativePointer = 0L)
   extends ElementIterator {
-    var closed: Boolean = false
-    var nextElem: NativePointer = _
-
     final def close(): Unit = {
       if (!closed) doClose()
     }
@@ -547,7 +548,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     final def hasNext: Boolean = {
       if (closed) return false
       nextElem = at(inst, curIdx + 1)
-      val result = curIdx < (doLength(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
+      val result = curIdx < (doLength(inst) - 1) && continue(nextElem)
       if (!result) doClose()
       result
     }

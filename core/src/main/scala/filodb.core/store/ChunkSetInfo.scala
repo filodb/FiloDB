@@ -272,10 +272,11 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
   def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
 }
 
-class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo => Boolean) extends ChunkInfoIterator {
-  var nextnext: ChunkSetInfo = ChunkSetInfo(0)
-  var gotNext: Boolean = false
-
+class FilteredChunkInfoIterator(base: ChunkInfoIterator,
+                                filter: ChunkSetInfo => Boolean,
+                                // Move vars here for better performance -- no init field
+                                var nextnext: ChunkSetInfo = ChunkSetInfo(0),
+                                var gotNext: Boolean = false) extends ChunkInfoIterator {
   def close(): Unit = {
     base.close()
   }
