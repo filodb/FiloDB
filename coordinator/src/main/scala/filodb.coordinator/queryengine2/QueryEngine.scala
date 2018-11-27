@@ -198,7 +198,18 @@ class QueryEngine(dataset: Dataset,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       lp: LabelValues): Seq[LabelValuesExec] = {
-    shardsFromFilters(lp.filters, options).map { shard =>
+
+    var shards: Seq[Int] = Seq.empty
+    try {
+      shards = shardsFromFilters(lp.filters, options)
+    } catch {
+      // expected - filters don't have enough info to derive shard mapping, send query to all the shards
+      // reusing the existing logic
+      case e: BadQueryException =>
+        logger.error("exception while materializing the plan", e)
+        shards = shardMapperFunc.assignedShards
+    }
+    shards.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, lp.labelName, lp.lookbackTimeInMillis)
