@@ -187,7 +187,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
 
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 50000L, 100000, 1100000L, 100000,
-      RangeFunction(Some(RangeFunctionId.SumOverTime)), queryConfig)
+      RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false), queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual Seq(
       50000->0.0,
       150000->1.0,

@@ -140,7 +140,8 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
 
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
-            funcParams: Seq[Any] = Nil): RangeFunction = {
+            funcParams: Seq[Any] = Nil,
+            useChunked: Boolean = true): RangeFunction = {
     func match {
       case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
       case Some(Rate)             => RateFunction
@@ -153,8 +154,8 @@ object RangeFunction {
       case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
       case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
       case Some(CountOverTime)    => new CountOverTimeFunction()
-      case Some(SumOverTime)      => new SumOverTimeChunkedFunction()
-      // case Some(SumOverTime)      => new SumOverTimeFunction()
+      case Some(SumOverTime) if useChunked => new SumOverTimeChunkedFunction()
+      case Some(SumOverTime)      => new SumOverTimeFunction()
       case Some(AvgOverTime)      => new AvgOverTimeFunction()
       case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
       case Some(StdVarOverTime)   => new StdVarOverTimeFunction()

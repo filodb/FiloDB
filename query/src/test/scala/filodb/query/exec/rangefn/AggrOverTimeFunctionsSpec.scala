@@ -8,6 +8,7 @@ import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.memstore.TimeSeriesPartitionSpec
 import filodb.core.query.RawDataRangeVector
+import filodb.core.store.AllChunkScan
 import filodb.core.MachineMetricsData
 import filodb.memory._
 import filodb.memory.format.SeqRowReader
@@ -24,11 +25,11 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
 
   it ("aggregation functions should work correctly on a sliding window") {
 
-    val sum = RangeFunction(Some(RangeFunctionId.SumOverTime))
-    val count = RangeFunction(Some(RangeFunctionId.CountOverTime))
-    val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime))
-    val min = RangeFunction(Some(RangeFunctionId.MinOverTime))
-    val max = RangeFunction(Some(RangeFunctionId.MaxOverTime))
+    val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false)
+    val count = RangeFunction(Some(RangeFunctionId.CountOverTime), useChunked = false)
+    val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime), useChunked = false)
+    val min = RangeFunction(Some(RangeFunctionId.MinOverTime), useChunked = false)
+    val max = RangeFunction(Some(RangeFunctionId.MaxOverTime), useChunked = false)
 
     val fns = Array(sum, count, avg, min, max)
 
@@ -77,6 +78,26 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
     }
   }
 
+  /**
+   * Raw data used for the Chunked window iterator tests
+   * timestamp    value
+   * 100000L        1.0  // Start of first window: 80001 -> 110000
+   * 101000         2.0
+   * 102000         3.0
+   * 103000         4.0
+   * 104000         5.0
+   * 105000         6.0
+   * 106000         7.0
+   * 107000         8.0
+   * 108000         9.0
+   * 109000        10.0
+   * 110000        11.0
+   *
+   * 111000        12.0  // Second window: 110001 -> 1400000
+   * 112000        13.0
+   * ....
+   * 140000        41.0
+   */
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 1)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize, true)
@@ -86,12 +107,12 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
     val data = linearMultiSeries().take(50).map(SeqRowReader)
     data.foreach { d => part.ingest(d, ingestBlockHolder) }
 
-    val rv = RawDataRangeVector(null, part, null, Array(0, 1))
+    val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
 
     val sumFunc = new SumOverTimeChunkedFunction()
-    val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, null)
+    val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, queryConfig)
     val aggregated = windowIt.map(_.getDouble(1)).toBuffer
-    aggregated(0) shouldEqual ((1 to 11).sum)
+    aggregated shouldEqual Seq((1 to 11).sum, (12 to 41).sum)
   }
 
 }

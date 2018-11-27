@@ -183,8 +183,8 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     // Fetch and add multiple points at once for efficiency
     while ((addr + 64) <= untilAddr) {
       sum += UnsafeUtils.getLong(addr) + UnsafeUtils.getLong(addr + 8) +
-             UnsafeUtils.getLong(addr + 16) + UnsafeUtils.getLong(addr + 24)
-             UnsafeUtils.getLong(addr + 32) + UnsafeUtils.getLong(addr + 40)
+             UnsafeUtils.getLong(addr + 16) + UnsafeUtils.getLong(addr + 24) +
+             UnsafeUtils.getLong(addr + 32) + UnsafeUtils.getLong(addr + 40) +
              UnsafeUtils.getLong(addr + 48) + UnsafeUtils.getLong(addr + 56)
       addr += 64
     }

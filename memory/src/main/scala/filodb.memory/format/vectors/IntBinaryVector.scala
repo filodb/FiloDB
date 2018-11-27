@@ -302,9 +302,9 @@ object OffheapSignedIntVector32 extends IntVectorDataReader {
     var sum: Long = 0L
     // Fetch and add multiple points at once for efficiency
     while ((addr + 32) <= untilAddr) {
-      sum += UnsafeUtils.getInt(addr) + UnsafeUtils.getInt(addr + 4)
-      sum += UnsafeUtils.getInt(addr + 8).toLong + UnsafeUtils.getInt(addr + 12).toLong
-             UnsafeUtils.getInt(addr + 16).toLong + UnsafeUtils.getInt(addr + 20).toLong
+      sum += UnsafeUtils.getInt(addr) + UnsafeUtils.getInt(addr + 4) +
+             UnsafeUtils.getInt(addr + 8).toLong + UnsafeUtils.getInt(addr + 12).toLong +
+             UnsafeUtils.getInt(addr + 16).toLong + UnsafeUtils.getInt(addr + 20).toLong +
              UnsafeUtils.getInt(addr + 24).toLong + UnsafeUtils.getInt(addr + 28).toLong
       addr += 32
     }
@@ -325,8 +325,8 @@ object OffheapSignedIntVector16 extends IntVectorDataReader {
     // Fetch and add multiple points at once for efficiency
     while ((addr + 16) <= untilAddr) {
       sum += UnsafeUtils.getShort(addr) + UnsafeUtils.getShort(addr + 2) +
-             UnsafeUtils.getShort(addr + 4) + UnsafeUtils.getShort(addr + 6)
-             UnsafeUtils.getShort(addr + 8) + UnsafeUtils.getShort(addr + 10)
+             UnsafeUtils.getShort(addr + 4) + UnsafeUtils.getShort(addr + 6) +
+             UnsafeUtils.getShort(addr + 8) + UnsafeUtils.getShort(addr + 10) +
              UnsafeUtils.getShort(addr + 12) + UnsafeUtils.getShort(addr + 14)
       addr += 16
     }
@@ -347,8 +347,8 @@ object OffheapSignedIntVector8 extends IntVectorDataReader {
     // Fetch and add multiple points at once for efficiency
     while ((addr + 8) <= untilAddr) {
       sum += UnsafeUtils.getByte(addr) + UnsafeUtils.getByte(addr + 1) +
-             UnsafeUtils.getByte(addr + 2) + UnsafeUtils.getByte(addr + 3)
-             UnsafeUtils.getByte(addr + 4) + UnsafeUtils.getByte(addr + 5)
+             UnsafeUtils.getByte(addr + 2) + UnsafeUtils.getByte(addr + 3) +
+             UnsafeUtils.getByte(addr + 4) + UnsafeUtils.getByte(addr + 5) +
              UnsafeUtils.getByte(addr + 6) + UnsafeUtils.getByte(addr + 7)
       addr += 8
     }
