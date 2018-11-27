@@ -209,6 +209,8 @@ object SerializableRangeVector extends StrictLogging {
       rv.rows.take(limit).foreach { row =>
         numRows += 1
         builder.addFromReader(row)
+        // Do not remove Unit below. Scala compiler tries to box the long for addFromReader return value otherwise (!!)
+        Unit
       }
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.

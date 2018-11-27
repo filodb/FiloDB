@@ -198,7 +198,6 @@ class QueryEngine(dataset: Dataset,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       lp: LabelValues): Seq[LabelValuesExec] = {
-
     var shards: Seq[Int] = Seq.empty
     try {
       shards = shardsFromFilters(lp.filters, options)
