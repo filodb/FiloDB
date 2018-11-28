@@ -97,6 +97,8 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
    * 112000        13.0
    * ....
    * 140000        41.0
+   *
+   * The second window spans multiple chunks.
    */
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 1)
@@ -105,7 +107,11 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
   it("should aggregate using ChunkedRangeFunction / ChunkedWindowIterator") {
     val part = TimeSeriesPartitionSpec.makePart(0, dataset1)
     val data = linearMultiSeries().take(50).map(SeqRowReader)
-    data.foreach { d => part.ingest(d, ingestBlockHolder) }
+    data.take(25).foreach { d => part.ingest(d, ingestBlockHolder) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(ingestBlockHolder)
+    part.encodeAndReleaseBuffers(ingestBlockHolder)
+    data.drop(25).foreach { d => part.ingest(d, ingestBlockHolder) }
 
     val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
 
