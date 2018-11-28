@@ -63,6 +63,9 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     case (Column.ColumnType.StringColumn, colNo) =>
       // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
       (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
+    case (Column.ColumnType.PartitionKeyColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) =>
+        builder.addBlob(row.getBlobBase(colNo), row.getBlobOffset(colNo), row.getBlobNumBytes(colNo))
     case (t: Column.ColumnType, colNo) =>
       // TODO: add more efficient methods
       (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))
@@ -153,6 +156,10 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
       case (TimestampColumn, i) => getLong(base, offset, i)
       case (BitmapColumn, i) => getInt(base, offset, i) != 0
       case (MapColumn, i)    =>
+        val consumer = new StringifyMapItemConsumer
+        consumeMapItems(base, offset, i, consumer)
+        consumer.prettyPrint
+      case (PartitionKeyColumn, i)    =>
         val consumer = new StringifyMapItemConsumer
         consumeMapItems(base, offset, i, consumer)
         consumer.prettyPrint
@@ -288,6 +295,7 @@ object RecordSchema {
                                                        DoubleColumn -> 8,
                                                        TimestampColumn -> 8,  // Just a long ms timestamp
                                                        StringColumn -> 4,
+                                                       PartitionKeyColumn -> 4,
                                                        MapColumn -> 4)
 
   /**

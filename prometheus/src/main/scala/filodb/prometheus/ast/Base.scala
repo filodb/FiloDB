@@ -1,12 +1,13 @@
 package filodb.prometheus.ast
 
-import filodb.query._
+import filodb.query.{MetadataQueryPlan, PeriodicSeriesPlan, RawSeriesPlan, _}
 
 sealed trait TimeRangeParams {
   def start: Long   // in seconds sine Epoch
   def end: Long
   def step: Long
 }
+
 
 /**
  * NOTE: start and end are in SECONDS since Epoch
@@ -34,6 +35,10 @@ trait Base {
     def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan
   }
 
+  trait Metadata extends Expression {
+    def toMetadataQueryPlan(timeParam: TimeRangeParams): MetadataQueryPlan
+  }
+
   /**
    * Converts a TimeRangeParams into a RangeSelector at timeParam.start - startOffset
    * timeParam.start is in seconds, startOffset is in millis
@@ -48,6 +53,5 @@ trait Base {
     * An identifier is an unquoted string
     */
   case class Identifier(str: String) extends Expression
-
 
 }
