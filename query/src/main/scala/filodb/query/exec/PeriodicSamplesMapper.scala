@@ -4,6 +4,7 @@ import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.query.{IteratorBackedRangeVector, RangeVector, RawDataRangeVector, ResultSchema}
+import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo}
 import filodb.memory.format.RowReader
 import filodb.query.{Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
@@ -42,7 +43,7 @@ final case class PeriodicSamplesMapper(start: Long,
         case c: ChunkedRangeFunction if rv.isInstanceOf[RawDataRangeVector] =>
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                      window.getOrElse(0L), c, queryConfig))
+                                      window.getOrElse(0L), c, queryConfig)())
         case f: RangeFunction =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L), f, queryConfig))
@@ -71,24 +72,44 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
                             queryConfig: QueryConfig,
                             // Put vars in constructor for better performance
                             var curWindowEnd: Long = -1L,
-                            var curWindowStart: Long = -1L) extends Iterator[TransientRow] {
+                            var curWindowStart: Long = -1L,
+                            var curInfo: ChunkSetInfo = ChunkSetInfo.nullInfo)
+                           (val infoIt: ChunkInfoIterator = rv.chunkInfos(start - window, end)
+                           ) extends Iterator[TransientRow] {
   curWindowEnd = start
   curWindowStart = start - window + 1  // Ensure windows do not overlap by 1
   private val sampleToEmit = new TransientRow()
 
   override def hasNext: Boolean = curWindowEnd <= end
   override def next: TransientRow = {
-    val infos = rv.chunkInfos(curWindowStart, curWindowEnd)
     rangeFunction.reset()
     // TODO: detect if rangeFunction needs items completely sorted.  For example, it is possible
     // to do rate if only each chunk is sorted
     // Pass the infos/chunks to the RangeFunction and enable it to do optimal calculations
-    while (infos.hasNext) {
-      rangeFunction.addChunks(rv.timestampColID, rv.valueColID, infos.nextInfo, curWindowStart, curWindowEnd)
+    if (curInfo == ChunkSetInfo.nullInfo) {
+      // NOTE: We use the same chunk iterator that the SlidingWindowIterator is based on, and count on that
+      // windows are always increasing.  When the current window extends beyond the boundary of the current chunk then
+      // we move on to the next chunk (ie when curWindowEnd > curChunk.endTime).
+      // Similar to SlidingWindowIterator we assume that chunks are increasing in time; this might need to be redone
+      // for out of order calculation.
+      // NOTE2: Due to current locking restrictions the next needs to be called in same thread always
+      if (infoIt.hasNext) curInfo = infoIt.nextInfo
     }
-    rangeFunction.apply(end, sampleToEmit)
+    if (curInfo != ChunkSetInfo.nullInfo) {
+      // TODO: abstract out this chunk calculation logic out to a separate WindowingInfoIterator
+      if (curWindowStart <= curInfo.endTime) {
+        rangeFunction.addChunks(rv.timestampColID, rv.valueColID, curInfo, curWindowStart, curWindowEnd)
+      }
+      while (curInfo != ChunkSetInfo.nullInfo && curWindowEnd > curInfo.endTime) {
+        curInfo = if (infoIt.hasNext) infoIt.nextInfo else ChunkSetInfo.nullInfo
+        if (curInfo != ChunkSetInfo.nullInfo && curWindowStart <= curInfo.endTime)
+          rangeFunction.addChunks(rv.timestampColID, rv.valueColID, curInfo, curWindowStart, curWindowEnd)
+      }
+      rangeFunction.apply(end, sampleToEmit)
+    }
     curWindowEnd += step
     curWindowStart += step
+    if (curWindowEnd > end) infoIt.close()    // release shared lock proactively
     sampleToEmit
   }
 }

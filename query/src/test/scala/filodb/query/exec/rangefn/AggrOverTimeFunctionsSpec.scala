@@ -24,7 +24,6 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
   val queryConfig = new QueryConfig(config.getConfig("query"))
 
   it ("aggregation functions should work correctly on a sliding window") {
-
     val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false)
     val count = RangeFunction(Some(RangeFunctionId.CountOverTime), useChunked = false)
     val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime), useChunked = false)
@@ -116,7 +115,7 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
     val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
 
     val sumFunc = new SumOverTimeChunkedFunction()
-    val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, queryConfig)
+    val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, queryConfig)()
     val aggregated = windowIt.map(_.getDouble(1)).toBuffer
     aggregated shouldEqual Seq((1 to 11).sum, (12 to 41).sum)
   }

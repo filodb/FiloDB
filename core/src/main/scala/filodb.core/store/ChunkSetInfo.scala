@@ -117,6 +117,7 @@ object ChunkSetInfo extends StrictLogging {
 
   val emptySkips = new SkipMap()
   val log = logger
+  val nullInfo = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[NativePointer])
 
   /**
    * ChunkSetInfo metadata schema:
