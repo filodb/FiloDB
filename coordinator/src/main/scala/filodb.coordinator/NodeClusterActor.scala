@@ -216,6 +216,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
              }.recover {
                case e: Exception =>
                  logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
+                 // Continue the protocol, so that the singleton can come up
+                 initiateShardStateRecovery()
              }
   }
 
