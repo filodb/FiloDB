@@ -91,10 +91,11 @@ class QueryEngineSpec extends FunSpec with Matchers {
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
-        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        val l3 = l2.asInstanceOf[ExecPlan]
+        l3.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l3.rangeVectorTransformers.size shouldEqual 2
+        l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
       }
     }
   }

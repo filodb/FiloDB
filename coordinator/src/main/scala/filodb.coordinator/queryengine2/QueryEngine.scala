@@ -3,7 +3,7 @@ package filodb.coordinator.queryengine2
 import java.util.{SplittableRandom, UUID}
 
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration._
+import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
@@ -11,13 +11,13 @@ import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
+import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.Types
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query._
+import filodb.query.{exec, _}
 import filodb.query.exec._
 
 /**
@@ -50,7 +50,11 @@ class QueryEngine(dataset: Dataset,
         justOne
       case many =>
         val targetActor = pickDispatcher(many)
-        DistConcatExec(queryId, targetActor, many)
+        many(0) match {
+          case lve: LabelValuesExec => LabelValuesDistConcatExec(queryId, targetActor, many)
+          case ske: PartKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
+          case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
+        }
     }
     logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
@@ -111,6 +115,8 @@ class QueryEngine(dataset: Dataset,
       case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp)
       case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
+      case lp: LabelValues =>                 materializeLabelValues(queryId, submitTime, options, lp)
+      case lp: SeriesKeysByFilters =>         materializeSeriesKeysByFilters(queryId, submitTime, options, lp)
     }
   }
 
@@ -185,6 +191,28 @@ class QueryEngine(dataset: Dataset,
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         renamedFilters, toRowKeyRange(lp.rangeSelector), colIDs)
+    }
+  }
+
+  private def materializeLabelValues(queryId: String,
+                                      submitTime: Long,
+                                      options: QueryOptions,
+                                      lp: LabelValues): Seq[LabelValuesExec] = {
+    shardsFromFilters(lp.filters, options).map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+        lp.filters, lp.labelName, lp.lookbackTimeInMillis)
+    }
+  }
+
+  private def materializeSeriesKeysByFilters(queryId: String,
+                                     submitTime: Long,
+                                     options: QueryOptions,
+                                     lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
+    shardsFromFilters(lp.filters, options).map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+        lp.filters, lp.start, lp.end)
     }
   }
 
