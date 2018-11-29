@@ -160,6 +160,7 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
         consumeMapItems(base, offset, i, consumer)
         consumer.prettyPrint
       case (PartitionKeyColumn, i)    =>
+        // FIXME: Looks like we are assuming that partition key is always a map. This is not necessarily true
         val consumer = new StringifyMapItemConsumer
         consumeMapItems(base, offset, i, consumer)
         consumer.prettyPrint
