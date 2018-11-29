@@ -198,10 +198,18 @@ class QueryEngine(dataset: Dataset,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       lp: LabelValues): Seq[LabelValuesExec] = {
-    shardsFromFilters(lp.filters, options).map { shard =>
+    val filters = lp.labelConstraints.map { case (k, v) =>
+      new ColumnFilter(k, Filter.Equals(v))
+    }.toSeq
+    val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
+                        shardsFromFilters(filters, options)
+                      } else {
+                        shardMapperFunc.assignedShards
+                      }
+    shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, lp.labelName, lp.lookbackTimeInMillis)
+        filters, lp.labelName, lp.lookbackTimeInMillis)
     }
   }
 

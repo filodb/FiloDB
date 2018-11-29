@@ -189,6 +189,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     * @param topK the number of top k results to fetch
     */
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
+    // FIXME this API returns duplicate values because same value can be present in multiple lucene segments
     val searcher = searcherManager.acquire()
     val indexReader = searcher.getIndexReader
     val segments = indexReader.leaves()
