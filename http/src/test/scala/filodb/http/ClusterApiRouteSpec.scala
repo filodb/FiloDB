@@ -42,6 +42,7 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
 
   before {
     probe.send(cluster.coordinatorActor, NodeProtocol.ResetState)
+    probe.expectMsg(NodeProtocol.StateReset)
     cluster.metaStore.clearAllData().futureValue
     cluster.metaStore.newDataset(dataset6).futureValue shouldEqual Success
     probe.send(clusterProxy, NodeProtocol.ResetState)

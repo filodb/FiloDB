@@ -35,7 +35,8 @@ trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with Sca
 
   def assertShutdown(): Unit = {
     shutdown()
-    eventually(cluster.isTerminated) shouldEqual true
+    val probe = TestProbe()(system)
+    probe.awaitCond(cluster.isTerminated, cluster.settings.GracefulStopTimeout)
   }
 }
 

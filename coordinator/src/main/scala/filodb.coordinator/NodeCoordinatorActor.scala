@@ -230,6 +230,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     ingesters.clear()
     queryActors.clear()
     memStore.reset()
+    origin ! NodeProtocol.StateReset
   }
 
   private def clearState(ref: DatasetRef): Unit = {
