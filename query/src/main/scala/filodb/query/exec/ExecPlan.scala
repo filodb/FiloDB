@@ -9,6 +9,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
@@ -79,6 +80,13 @@ trait ExecPlan extends QueryCommand {
   }
 
   /**
+    * callback to set per-row schema - e.g for decoding TSPartition back
+    */
+  def rowSchema(dataset: Dataset, recordSchema: RecordSchema): RecordSchema = {
+    recordSchema
+  }
+
+  /**
     * Facade for the execution orchestration of the plan sub-tree
     * starting from this node.
     *
@@ -111,7 +119,7 @@ trait ExecPlan extends QueryCommand {
           case r: SerializableRangeVector => r
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            SerializableRangeVector(rv, builder, recSchema, limit)
+            SerializableRangeVector(rv, builder, rowSchema(dataset, recSchema), limit)
         }
         .take(queryConfig.vectorsLimit)
         .toListL

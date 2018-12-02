@@ -6,6 +6,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{MemStore, TSPartitionRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
@@ -16,8 +17,8 @@ import filodb.query._
 import filodb.query.Query.qLogger
 
 final case class PartKeysDistConcatExec(id: String,
-                                      dispatcher: PlanDispatcher,
-                                      children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                        dispatcher: PlanDispatcher,
+                                        children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 
@@ -36,7 +37,7 @@ final case class PartKeysDistConcatExec(id: String,
     * Compose the sub-query/leaf results here.
     */
   override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
-      Observable[RangeVector] = {
+  Observable[RangeVector] = {
 
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
@@ -48,11 +49,14 @@ final case class PartKeysDistConcatExec(id: String,
     Observable.fromTask(taskOfResults)
   }
 
+  override def rowSchema(dataset: Dataset, recordSchema: RecordSchema): RecordSchema =
+    dataset.partKeySchema
+
 }
 
 final case class LabelValuesDistConcatExec(id: String,
-                                    dispatcher: PlanDispatcher,
-                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                           dispatcher: PlanDispatcher,
+                                           children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 

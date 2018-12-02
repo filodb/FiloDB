@@ -21,6 +21,7 @@ import scalaxy.loops._
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, SeqIndexValueConsumer}
 import filodb.core.store._
@@ -477,12 +478,21 @@ class TimeSeriesShard(val dataset: Dataset,
       val partId = partIterator.next()
       val nextPart = getPartitionFromPartId(partId)
       if (nextPart != UnsafeUtils.ZeroPointer) {
-        val consumer = new SeqIndexValueConsumer(indexName)
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
-        result ++= consumer.labelValues
+        dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
+          c.columnType match {
+            case StringColumn if c.name equals indexName =>
+              result += dataset.partKeySchema.asZCUTF8Str(nextPart.partKeyBase, nextPart.partKeyOffset, pos)
+            case MapColumn =>
+              val consumer = new SeqIndexValueConsumer(indexName)
+              dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
+              result ++= consumer.labelValues
+            case other: Any =>
+              logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
+          }
+        }
       } else {
         // FIXME partKey is evicted. Get partition key from lucene index
       }
