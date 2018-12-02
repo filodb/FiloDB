@@ -46,7 +46,7 @@ class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
 }
 
 /**
-  * Range Vector Key backed by a BinaryRecord v2 partition key, whic is basically a pointer to memory on or offheap.
+  * Range Vector Key backed by a BinaryRecord v2 partition key, which is basically a pointer to memory on or offheap.
   */
 final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partOffset: Long,
