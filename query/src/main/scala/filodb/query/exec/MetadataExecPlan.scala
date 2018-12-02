@@ -49,8 +49,7 @@ final case class PartKeysDistConcatExec(id: String,
     Observable.fromTask(taskOfResults)
   }
 
-  override def rowSchema(dataset: Dataset, recordSchema: RecordSchema): RecordSchema =
-    dataset.partKeySchema
+  override def rowSchema(dataset: Dataset, recordSchema: RecordSchema): RecordSchema = dataset.partKeySchema
 
 }
 
