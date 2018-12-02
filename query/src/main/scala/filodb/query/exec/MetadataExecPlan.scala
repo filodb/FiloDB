@@ -37,7 +37,7 @@ final case class PartKeysDistConcatExec(id: String,
     * Compose the sub-query/leaf results here.
     */
   override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
-  Observable[RangeVector] = {
+      Observable[RangeVector] = {
 
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
