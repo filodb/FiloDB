@@ -89,6 +89,7 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   }
 
   def cluster: Cluster = _cluster.get.getOrElse {
+    logger.info(s"Filodb cluster node starting on $selfAddress")
     val c = Cluster(system)
     _cluster.set(Some(c))
     c.registerOnMemberUp(startListener())
@@ -100,7 +101,6 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   /** The address including a `uid` of this cluster member. */
   def selfUniqueAddress: UniqueAddress = cluster.selfUniqueAddress
 
-  logger.info(s"Filodb cluster node starting on $selfAddress")
 
   /** Current snapshot state of the cluster. */
   def state: ClusterEvent.CurrentClusterState = cluster.state
@@ -249,7 +249,12 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
   /** The `ActorSystem` used to create the FilodbCluster Akka Extension. */
   final lazy val system = {
     val allConfig = roleConfig.withFallback(role match {
-      case ClusterRole.Cli => ConfigFactory.empty
+      // For CLI: leave off Cluster extension as cluster is not needed.  Turn off normal shutdown for quicker exit.
+      case ClusterRole.Cli => ConfigFactory.parseString(
+        """akka.actor.provider=akka.remote.RemoteActorRefProvider
+          |akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+          |akka.extensions = ["com.romix.akka.serialization.kryo.KryoSerializationExtension$"]
+        """.stripMargin)
       case _ => ConfigFactory.parseString(s"""akka.cluster.roles=["${role.roleName}"]""")
     }).withFallback(systemConfig)
 
