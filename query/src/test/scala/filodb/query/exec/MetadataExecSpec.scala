@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
@@ -14,7 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -31,9 +30,6 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
   val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
   val jobQueryResult1 = "myCoolService"
-  val jobQueryResult2 = ArrayBuffer(("__name__".utf8, "http_req_total".utf8),
-    ("instance".utf8, "someHost:8787".utf8),
-    ("job".utf8, "myCoolService".utf8))
 
   val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
   val now = System.currentTimeMillis()
@@ -110,13 +106,11 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
         val record = response(0).rows.next()
-        val seqMapConsumer = new SeqMapConsumer()
-        response(0).schema.consumeMapItems(record.getBlobBase(0),
-          record.getBlobOffset(0), 0, seqMapConsumer)
-        seqMapConsumer.pairs
+        val schema = response(0).schema
+        schema.mapify(record.getBlobBase(0), record.getBlobOffset(0))
       }
     }
-    result shouldEqual jobQueryResult2
+    result shouldEqual partKeyLabelValues
   }
 
 }
