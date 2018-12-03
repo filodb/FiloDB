@@ -46,7 +46,7 @@ class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
 }
 
 /**
-  * Range Vector Key backed by a BinaryRecord v2 partition key, whic is basically a pointer to memory on or offheap.
+  * Range Vector Key backed by a BinaryRecord v2 partition key, which is basically a pointer to memory on or offheap.
   */
 final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partOffset: Long,
@@ -97,25 +97,6 @@ object CustomRangeVectorKey {
 trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
-
-  /**
-    * Pretty prints all the elements into strings.
-    */
-  def prettyPrint(schema: ResultSchema, formatTime: Boolean = true): String = {
-    val curTime = System.currentTimeMillis
-    key.toString + "\n\t" +
-      rows.map {
-        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
-        case reader =>
-          val firstCol = if (formatTime && schema.isTimeSeries) {
-            val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
-          } else {
-            reader.getAny(0).toString
-          }
-          (firstCol +: (1 until schema.length).map(reader.getAny(_).toString)).mkString("\t")
-      }.mkString("\n\t") + "\n"
-  }
 }
 
 final case class RawDataRangeVector(key: RangeVectorKey,
@@ -162,7 +143,7 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   /**
     * Pretty prints all the elements into strings using record schema
     */
-  override def prettyPrint(schema1: ResultSchema, formatTime: Boolean = true): String = {
+  def prettyPrint(schema1: ResultSchema, formatTime: Boolean = true): String = {
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
       rows.map {
@@ -173,13 +154,12 @@ final class SerializableRangeVector(val key: RangeVectorKey,
             s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             schema.columnTypes(0) match {
-              case StringColumn => reader.getString(0) // Below stringify did not work in case of ZeroCopyUTF8
-              case _ => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              // FIXME: underlying stringify method assumes that partition key is a map. Not necessarily true
+              case PartitionKeyColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case _ => reader.getAny(0).toString
             }
-
           }
-          (firstCol +: (1 until schema1.length)
-            .map(i => schema.stringify(reader.getBlobBase(i), reader.getBlobOffset(i))).mkString("\t"))
+          (firstCol +: (1 until schema1.length).map(reader.getAny(_).toString)).mkString("\t")
       }.mkString("\n\t") + "\n"
   }
 }
