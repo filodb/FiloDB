@@ -580,7 +580,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
       tdig.asSmallBytes(buf)
       buf.flip()
       val len = buf.limit() - buf.position()
-      row.setBlob(1, buf.array, buf.arrayOffset + buf.position + UnsafeUtils.arayOffset, len)
+      row.setBlob(1, buf.array, buf.arrayOffset + buf.position() + UnsafeUtils.arayOffset, len)
       row
     }
 
