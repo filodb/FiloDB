@@ -80,7 +80,8 @@ trait ExecPlan extends QueryCommand {
   }
 
   /**
-    * callback to set per-row schema - e.g for decoding PartitionKey back
+    * callback to set per-row schema - e.g for decoding PartitionKey back.
+    * No-Op in most cases.
     */
   def rowSchema(dataset: Dataset, recordSchema: RecordSchema): RecordSchema = {
     recordSchema
