@@ -15,7 +15,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   val schema1 = RecordSchema.ingestion(dataset1)
   val schema2 = RecordSchema.ingestion(dataset2)
-  val longStrSchema = new RecordSchema(Seq(ColumnType.LongColumn, ColumnType.StringColumn))
+  val longStrSchema = new RecordSchema(Seq("lc", "sc"), Seq(ColumnType.LongColumn, ColumnType.StringColumn))
 
   val records = new collection.mutable.ArrayBuffer[(Any, Long)]
 
@@ -284,7 +284,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
     it("should hash correctly with different ways of adding UTF8 fields") {
       // schema for part key with only a string
-      val stringSchema = new RecordSchema(Seq(ColumnType.StringColumn), Some(0))
+      val stringSchema = new RecordSchema(Seq("sc"), Seq(ColumnType.StringColumn), Some(0))
       val builder = new RecordBuilder(nativeMem, stringSchema)
 
       val str = "Serie zero"

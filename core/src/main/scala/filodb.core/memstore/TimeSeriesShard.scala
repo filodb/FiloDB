@@ -103,9 +103,8 @@ object TimeSeriesShard {
     }
   }
 
-  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnType.LongColumn,  // startTime
-                                               ColumnType.LongColumn,       // endTime
-                                               ColumnType.StringColumn))    // partKey bytes
+  val indexTimeBucketSchema = new RecordSchema(Seq("startTime", "endTime", "partKey"),
+                                       Seq(ColumnType.LongColumn, ColumnType.LongColumn, ColumnType.StringColumn))
 
   // TODO make configurable if necessary
   val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt

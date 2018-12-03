@@ -12,7 +12,7 @@ import filodb.core.MetricsTestData.{builder, timeseriesDataset}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
+import filodb.core.metadata.Column.ColumnType.{BinaryRecordColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -56,12 +56,12 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, now, now - 5000, 10)
-    val schema = new RecordSchema(Seq(ColumnType.PartitionKeyColumn))
+    val schema = new RecordSchema(Seq("brc"), Seq(ColumnType.BinaryRecordColumn))
     val seqMapConsumer = new SeqMapConsumer()
     val record = metadata.next()
     val result = (schema.columnTypes.map(columnType => columnType match {
       case StringColumn => record.toString
-      case PartitionKeyColumn => schema.consumeMapItems(record.partKeyBase, record.partKeyOffset, 0, seqMapConsumer)
+      case BinaryRecordColumn => schema.consumeMapItems(record.partKeyBase, record.partKeyOffset, 0, seqMapConsumer)
         seqMapConsumer.pairs
       case _ => ???
     }))

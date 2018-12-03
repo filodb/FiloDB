@@ -15,7 +15,6 @@ import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
-
 /**
   * Identifier for a single RangeVector
   */
@@ -143,23 +142,23 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   /**
     * Pretty prints all the elements into strings using record schema
     */
-  def prettyPrint(schema1: ResultSchema, formatTime: Boolean = true): String = {
+  def prettyPrint(formatTime: Boolean = true): String = {
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
       rows.map {
         case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
         case reader =>
-          val firstCol = if (formatTime && schema1.isTimeSeries) {
+          val firstCol = if (formatTime && schema.isTimeSeries) {
             val timeStamp = reader.getLong(0)
             s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             schema.columnTypes(0) match {
               // FIXME: underlying stringify method assumes that partition key is a map. Not necessarily true
-              case PartitionKeyColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
               case _ => reader.getAny(0).toString
             }
           }
-          (firstCol +: (1 until schema1.length).map(reader.getAny(_).toString)).mkString("\t")
+          (firstCol +: (1 until schema.columnTypes.length).map(reader.getAny(_).toString)).mkString("\t")
       }.mkString("\n\t") + "\n"
   }
 }
@@ -221,8 +220,13 @@ object SerializableRangeVector extends StrictLogging {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo]): RecordSchema =
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols.map(_.colType)) })
+  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
+    val brSchemas = brColInfos.mapValues(toSchema(_))
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(colNames = cols.map(_.name),
+                                                                      columnTypes = cols.map(_.colType),
+                                                                      brSchema = brSchemas)
+                                           })
+  }
 
   def toBuilder(schema: RecordSchema): RecordBuilder =
     new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)

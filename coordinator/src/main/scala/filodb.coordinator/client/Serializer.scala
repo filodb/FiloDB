@@ -124,7 +124,8 @@ class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
 class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
   override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema2]): RecordSchema2 = {
     val tuple = kryo.readClassAndObject(input)
-    RecordSchema2.fromSerializableTuple(tuple.asInstanceOf[(Seq[Column.ColumnType], Option[Int], Seq[String])])
+    RecordSchema2.fromSerializableTuple(tuple.asInstanceOf[(Seq[String], Seq[Column.ColumnType],
+                                                            Option[Int], Seq[String], Map[Int, RecordSchema2])])
   }
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema2): Unit = {

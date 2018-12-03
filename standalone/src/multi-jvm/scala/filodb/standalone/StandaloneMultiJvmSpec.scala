@@ -197,7 +197,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",app=\"App-2\"})"
     val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, TimeStepParams(0, 60, Int.MaxValue))
     client.logicalPlan2Query(dataset, logicalPlan) match {
-      case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+      case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
       case e: QueryError => fail(e.t)
     }
   }
