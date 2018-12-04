@@ -6,7 +6,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.{MemStore, TSPartitionRowReader}
+import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -109,9 +109,9 @@ final case class PartKeysExec(id: String,
 
 
     if (source.isInstanceOf[MemStore]) {
-      var memStore = source.asInstanceOf[MemStore]
+      val memStore = source.asInstanceOf[MemStore]
       val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
-      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new TSPartitionRowReader(response)))
+      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new PartKeyRowReader(response)))
     } else {
       Observable.empty
     }
@@ -122,8 +122,13 @@ final case class PartKeysExec(id: String,
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  def schemaOfDoExecute(dataset: Dataset): ResultSchema = new ResultSchema(Seq(ColumnInfo("TimeSeries",
-    ColumnType.PartitionKeyColumn)), 1)
+  def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
+    val partKeyResultSchema = new ResultSchema(dataset.partitionColumns.map(c=>ColumnInfo(c.name, c.columnType)),
+                                               dataset.partitionColumns.length)
+    new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
+      Map(0->partKeyResultSchema.columns.map(c => ColumnInfo(c.name, c.colType))))
+  }
+
 }
 
 final case class  LabelValuesExec(id: String,

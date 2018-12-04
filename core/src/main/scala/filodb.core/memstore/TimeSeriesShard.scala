@@ -22,7 +22,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, SeqIndexValueConsumer}
+import filodb.core.query.{ColumnFilter, ColumnInfo, SeqIndexValueConsumer}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
@@ -103,9 +103,9 @@ object TimeSeriesShard {
     }
   }
 
-  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnType.LongColumn,  // startTime
-                                               ColumnType.LongColumn,       // endTime
-                                               ColumnType.StringColumn))    // partKey bytes
+  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
+                                                   ColumnInfo("endTime", ColumnType.LongColumn),
+                                                   ColumnInfo("partKey", ColumnType.StringColumn)))
 
   // TODO make configurable if necessary
   val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt

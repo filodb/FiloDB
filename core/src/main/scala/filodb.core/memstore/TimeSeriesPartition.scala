@@ -361,7 +361,7 @@ extends ReadablePartition with MapHolder {
   }
 }
 
-final case class TSPartitionRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
+final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
   var currVal: TimeSeriesPartition = _
 
   private val rowReader = new RowReader {
