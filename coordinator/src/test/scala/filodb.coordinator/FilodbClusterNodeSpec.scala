@@ -40,22 +40,6 @@ trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with Sca
   }
 }
 
-class ClusterNodeCliSpec extends FilodbClusterNodeSpec {
-
-  override val role = ClusterRole.Cli
-
-  "Cli" must {
-    "have the expected config for ClusterRole.Cli" in {
-      val roles = akka.japi.Util.immutableSeq(cluster.settings.allConfig.getStringList("akka.cluster.roles"))
-      roles.size shouldEqual 1
-      roles.forall(_ == ClusterRole.Cli.roleName) shouldEqual true
-    }
-    "become initialized after the coordinator is created" in {
-      assertInitialized()
-    }
-  }
-}
-
 class ClusterNodeDriverSpec extends FilodbClusterNodeSpec {
 
   override val role = ClusterRole.Driver

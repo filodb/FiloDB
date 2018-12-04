@@ -89,10 +89,10 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   }
 
   def cluster: Cluster = _cluster.get.getOrElse {
-    logger.info(s"Filodb cluster node starting on $selfAddress")
     val c = Cluster(system)
     _cluster.set(Some(c))
     c.registerOnMemberUp(startListener())
+    logger.info(s"Filodb cluster node starting on ${c.selfAddress}")
     c
   }
 
