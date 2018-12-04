@@ -153,12 +153,11 @@ final class SerializableRangeVector(val key: RangeVectorKey,
             s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             schema.columnTypes(0) match {
-              // FIXME: underlying stringify method assumes that partition key is a map. Not necessarily true
               case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
               case _ => reader.getAny(0).toString
             }
           }
-          (firstCol +: (1 until schema.columnTypes.length).map(reader.getAny(_).toString)).mkString("\t")
+          (firstCol +: (1 until schema.numColumns).map(reader.getAny(_).toString)).mkString("\t")
       }.mkString("\n\t") + "\n"
   }
 }

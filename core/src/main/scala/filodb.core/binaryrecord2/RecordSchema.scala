@@ -77,6 +77,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))
   }.toArray
 
+  def numColumns: Int = columns.length
 
   def isTimeSeries: Boolean = columnTypes.length >= 1 &&
     (columnTypes.head == LongColumn || columnTypes.head == TimestampColumn)
@@ -274,9 +275,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   }
 
   // For serialization purposes
-  private[filodb] def toSerializableTuple: (Seq[String], Seq[Column.ColumnType],
-                                            Option[Int], Seq[String], Map[Int, RecordSchema]) =
-    (colNames, columnTypes, partitionFieldStart, predefinedKeys, brSchema)
+  private[filodb] def toSerializableTuple: (Seq[ColumnInfo], Option[Int], Seq[String], Map[Int, RecordSchema]) =
+    (columns, partitionFieldStart, predefinedKeys, brSchema)
 }
 
 trait MapItemConsumer {
