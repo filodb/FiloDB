@@ -60,7 +60,7 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
   // the schema so we don't need to do a full table scan.  It is justified because the ingestion config table
   // almost never changes, this read is done only on new cluster startup, and the table is only written to with
   // the setup command (which always runs well after cluster startup).
-  val readAllCql = session.prepare(s"SELECT * FROM $tableString")
+  lazy val readAllCql = session.prepare(s"SELECT * FROM $tableString")
                           .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readAllConfigs(): Future[Seq[IngestionConfig]] =

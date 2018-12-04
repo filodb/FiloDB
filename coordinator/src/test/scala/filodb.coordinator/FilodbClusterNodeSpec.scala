@@ -1,7 +1,7 @@
 package filodb.coordinator
 
 import akka.testkit.TestProbe
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -9,6 +9,11 @@ import filodb.coordinator.client.MiscCommands
 import filodb.core.{AbstractSpec, Success}
 
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
+  // Ensure that CoordinatedShutdown does not shutdown the whole test JVM, otherwise Travis CI/CD fails
+  override protected lazy val roleConfig = ConfigFactory.parseString(
+        """akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+          |akka.coordinated-shutdown.exit-jvm = off
+        """.stripMargin)
 
   implicit abstract override val patienceConfig: PatienceConfig =
     PatienceConfig(
