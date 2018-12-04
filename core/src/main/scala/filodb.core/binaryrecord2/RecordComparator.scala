@@ -21,8 +21,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
   require(ingestSchema.partitionFieldStart.isDefined)
   require(ingestSchema.columnTypes.length > ingestSchema.partitionFieldStart.get, "no partition fields")
 
-  val partitionKeySchema = new RecordSchema(ingestSchema.colNames.drop(ingestSchema.partitionFieldStart.get),
-                                            ingestSchema.columnTypes.drop(ingestSchema.partitionFieldStart.get),
+  val partitionKeySchema = new RecordSchema(ingestSchema.columns.drop(ingestSchema.partitionFieldStart.get),
                                             Some(0),
                                             ingestSchema.predefinedKeys)
   // NOTE: remember that private final val results in a Java field, much much faster

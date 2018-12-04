@@ -2,6 +2,7 @@ package filodb.core.binaryrecord2
 
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
+import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => bv}
@@ -24,19 +25,20 @@ import filodb.memory.format.{vectors => bv}
  *   partition key fields share the same schema (they can start at differend field #'s).  This takes advantage of
  *   the fact that all variable length fields after the partitionFieldStart are contiguous and can be binary compared
  *
- * @param columnTypes In order, the field or column type of each field in this schema
+ * @param columns In order, the column of each field in this schema
  * @param brSchema schema of any binary record type column
  * @param partitionFieldStart Some(n) from n to the last field are considered the partition key.  A field number.
  * @param predefinedKeys A list of predefined keys to save space for the tags/MapColumn field(s)
  */
-final class RecordSchema(val colNames: Seq[String],
-                         val columnTypes: Seq[Column.ColumnType],
+final class RecordSchema(val columns: Seq[ColumnInfo],
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
                          val brSchema: Map[Int, RecordSchema] = Map.empty) {
   import RecordSchema._
   import BinaryRegion.NativePointer
 
+  val colNames = columns.map(_.name)
+  val columnTypes = columns.map(_.colType)
   require(columnTypes.nonEmpty, "columnTypes cannot be empty")
   require(predefinedKeys.length < 4096, "Too many predefined keys")
   require(partitionFieldStart.isEmpty ||
@@ -156,7 +158,7 @@ final class RecordSchema(val colNames: Seq[String],
    * representation of the contents of this BinaryRecord.
    */
   def stringify(base: Any, offset: Long): String =
-    s"b2[${mapify(base, offset).map(_.productIterator.mkString("=")).mkString(",")}]"
+    s"b2[${toStringPairs(base, offset).map(_.productIterator.mkString("=")).mkString(",")}]"
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
   def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
@@ -164,21 +166,22 @@ final class RecordSchema(val colNames: Seq[String],
   /**
     * EXPENSIVE to do at server side. Creates a stringified map with contents of this BinaryRecord.
     */
-  def mapify(base: Any, offset: Long): Map[String, String] = {
+  def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
     import Column.ColumnType._
-    val resultMap = collection.mutable.Map[String, String]()
+    val resultMap = new collection.mutable.ArrayBuffer[(String, String)]()
     columnTypes.zipWithIndex.map {
-      case (IntColumn, i)    => resultMap.put(colNames(i), getInt(base, offset, i).toString)
-      case (LongColumn, i)   => resultMap.put(colNames(i), getLong(base, offset, i).toString)
-      case (DoubleColumn, i) => resultMap.put(colNames(i), getDouble(base, offset, i).toString)
-      case (StringColumn, i) => resultMap.put(colNames(i), asJavaString(base, offset, i).toString)
-      case (TimestampColumn, i) => resultMap.put(colNames(i), getLong(base, offset, i).toString)
-      case (BitmapColumn, i) => resultMap.put(colNames(i), (getInt(base, offset, i) != 0).toString)
-      case (MapColumn, i)    => consumeMapItems(base, offset, i, new MapifyMapItemConsumer(resultMap))
-      case (BinaryRecordColumn, i)  => brSchema(i).mapify(base, offset)
-                                                  .foreach { case (k,v) => resultMap.put(k,v)}
+      case (IntColumn, i)    => resultMap += ((colNames(i), getInt(base, offset, i).toString))
+      case (LongColumn, i)   => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (DoubleColumn, i) => resultMap += ((colNames(i), getDouble(base, offset, i).toString))
+      case (StringColumn, i) => resultMap += ((colNames(i), asJavaString(base, offset, i).toString))
+      case (TimestampColumn, i) => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (BitmapColumn, i) => resultMap += ((colNames(i), (getInt(base, offset, i) != 0).toString))
+      case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
+                                consumeMapItems(base, offset, i, consumer)
+                                resultMap ++= consumer.stringPairs
+      case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
     }
-    resultMap.toMap
+    resultMap
   }
 
   /**
@@ -299,12 +302,6 @@ class StringifyMapItemConsumer extends MapItemConsumer {
   }
 }
 
-class MapifyMapItemConsumer(toAdd: collection.mutable.Map[String, String]) extends MapItemConsumer {
-  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    toAdd.put(UTF8StringMedium.toString(keyBase, keyOffset), UTF8StringMedium.toString(valueBase, valueOffset))
-  }
-}
-
 object RecordSchema {
   import Column.ColumnType._
 
@@ -338,14 +335,15 @@ object RecordSchema {
    * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
    */
   def ingestion(dataset: Dataset, predefinedKeys: Seq[String] = Nil): RecordSchema = {
-    val colNames = dataset.dataColumns.map(_.name) ++ dataset.partitionColumns.map(_.name)
-    val colTypes = dataset.dataColumns.map(_.columnType) ++ dataset.partitionColumns.map(_.columnType)
-    new RecordSchema(colNames, colTypes, Some(dataset.dataColumns.length), predefinedKeys)
+    val columns = dataset.dataColumns ++ dataset.partitionColumns
+    new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)),
+                     Some(dataset.dataColumns.length),
+                     predefinedKeys)
   }
 
-  def fromSerializableTuple(tuple: (Seq[String], Seq[Column.ColumnType],
+  def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
-    new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4, tuple._5)
+    new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4)
 }
 
 // Used with PartitionTimeRangeReader, when a user queries for a partition column

@@ -28,7 +28,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
-  val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
+  val partKeyLabelValues = Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService")
   val jobQueryResult1 = "myCoolService"
 
   val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
@@ -107,10 +107,10 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         response.size shouldEqual 1
         val record = response(0).rows.next()
         val schema = response(0).schema
-        schema.mapify(record.getBlobBase(0), record.getBlobOffset(0))
+        schema.toStringPairs(record.getBlobBase(0), record.getBlobOffset(0))
       }
     }
-    result shouldEqual partKeyLabelValues
+    result shouldEqual partKeyLabelValues.toSeq
   }
 
 }

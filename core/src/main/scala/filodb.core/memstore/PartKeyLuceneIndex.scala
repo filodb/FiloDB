@@ -276,10 +276,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
                            partKeyNumBytes: Int,
                            partId: Int, startTime: Long, endTime: Long): Document = {
     val document = new Document()
-    // TODO We can use RecordSchema.mapify to get the name/value pairs from partKey.
+    // TODO We can use RecordSchema.toStringPairs to get the name/value pairs from partKey.
     // That is far more simpler with much of the logic abstracted out.
     // Currently there is a bit of leak in abstraction of Binary Record processing in this class.
-    
+
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
     for { i <- 0 until numPartColumns optimized } {
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
