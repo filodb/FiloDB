@@ -1,5 +1,7 @@
 package filodb.core.binaryrecord2
 
+import scala.collection.mutable.ArrayBuffer
+
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
@@ -158,8 +160,23 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    * EXPENSIVE to do at server side. Creates a easy-to-read string
    * representation of the contents of this BinaryRecord.
    */
-  def stringify(base: Any, offset: Long): String =
-    s"b2[${toStringPairs(base, offset).map(_.productIterator.mkString("=")).mkString(",")}]"
+  def stringify(base: Any, offset: Long): String = {
+    import Column.ColumnType._
+    val result = new ArrayBuffer[String]()
+    columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => result += s"${colNames(i)}= ${getInt(base, offset, i)}"
+      case (LongColumn, i)   => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
+      case (DoubleColumn, i) => result += s"${colNames(i)}= ${getDouble(base, offset, i)}"
+      case (StringColumn, i) => result += s"${colNames(i)}= ${asJavaString(base, offset, i)}"
+      case (TimestampColumn, i) => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
+      case (BitmapColumn, i) => result += s"${colNames(i)}= ${getInt(base, offset, i) != 0}"
+      case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
+                                consumeMapItems(base, offset, i, consumer)
+                                result += s"${colNames(i)}= ${consumer.prettyPrint}"
+      case (BinaryRecordColumn, i)  => result += s"${colNames(i)}= ${brSchema(i).stringify(base, offset)}"
+    }
+    s"b2[${result.mkString(",")}]"
+  }
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
   def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
@@ -295,7 +312,7 @@ trait MapItemConsumer {
  */
 class StringifyMapItemConsumer extends MapItemConsumer {
   val stringPairs = new collection.mutable.ArrayBuffer[(String, String)]
-  def prettyPrint: String = "[" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "]"
+  def prettyPrint: String = "{" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "}"
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     stringPairs += (UTF8StringMedium.toString(keyBase, keyOffset) ->
                     UTF8StringMedium.toString(valueBase, valueOffset))
