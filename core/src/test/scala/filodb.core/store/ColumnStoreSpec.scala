@@ -34,6 +34,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
+    metaStore.initialize().futureValue
     colStore.initialize(dataset.ref).futureValue
     colStore.initialize(GdeltTestData.dataset2.ref).futureValue
     colStore.initialize(datasetDb2.ref).futureValue
