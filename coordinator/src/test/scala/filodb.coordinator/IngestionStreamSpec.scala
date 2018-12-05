@@ -57,14 +57,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.newDataset(dataset6).futureValue shouldEqual Success
     metaStore.newDataset(dataset33).futureValue shouldEqual Success
     coordinatorActor ! NodeProtocol.ResetState
+    expectMsg(NodeProtocol.StateReset)
     clusterActor ! NodeProtocol.ResetState
     expectMsg(NodeProtocol.StateReset)
     Thread sleep 2000
-  }
-
-  override def afterAll(): Unit = {
-    super.afterAll()
-    cluster.shutdown()
   }
 
   def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {

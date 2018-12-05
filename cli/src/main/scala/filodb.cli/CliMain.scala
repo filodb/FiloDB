@@ -233,7 +233,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         e.printStackTrace()
         exitCode = 2
     } finally {
-      shutdown()
+      // No need to shutdown, just exit.  This ensures things like C* client are not started by accident and
+      // ensures a much quicker exit, which is important for CLI.
       sys.exit(exitCode)
     }
   }
