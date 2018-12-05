@@ -64,10 +64,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     Thread sleep 2000
   }
 
-  override def afterAll(): Unit = {
-    super.afterAll()
-  }
-
   def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
