@@ -133,40 +133,14 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
                     1538416644000L->210170299d,
                     1538416649000L->210172635d)
 
-  it ("should ignore out of order samples for RateFunction") {
+  // Out of order samples are now handled by ingestion
+  ignore("should ignore out of order samples for RateFunction") {
     val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1538416154000L, 20000, 1538416649000L,20000,
       RangeFunction(Some(RangeFunctionId.Rate)), queryConfig)
     slidingWinIterator.foreach{ v =>
       // if out of order samples are not removed, counter correction causes rate to spike up to very high value
       v.value should be < 10000d
-    }
-  }
-
-  it ("should drop out of order samples with LastSampleFunction") {
-
-    val samples = Seq(
-      100L->645926d,
-      153L->696377d,
-      270L->759389d,
-      250L->698713d, // out of order, should be dropped
-      280L->762375d,
-      360L->764711d,
-      690L->798373d,
-      430L->765387d, // out of order, should be dropped
-      700L->830709d
-    )
-    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
-    val start = 50L
-    val end = 1000L
-    val step = 5
-    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
-      end,0, RangeFunction(None), queryConfig)
-    val result = slidingWinIterator.map(v => (v.timestamp, v.value)).toSeq
-    result.map(_._1) shouldEqual (start to end).by(step)
-    result.foreach{ v =>
-      v._2 should not equal 698713d
-      v._2 should not equal 765387d
     }
   }
 
