@@ -1008,6 +1008,18 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   def shutdown(): Unit = {
+    // Don't release memory if the VM is actually shutting down. This can cause a segv if
+    // other threads are still accessing the memory. Everything gets freed when the process
+    // has completely exited anyhow. Note that this check isn't elegant or perfect.
+    val t = new Thread()
+    try {
+      Runtime.getRuntime().addShutdownHook(t);
+    } catch {
+      // Assume VM shutdown is in progress, so bail.
+      case e: Throwable => return
+    }
+    Runtime.getRuntime().removeShutdownHook(t);
+
     reset()   // Not really needed, but clear everything just to be consistent
     logger.info(s"Shutting down and releasing offheap memory for shard $shardNum")
     bufferMemoryManager.shutdown()
