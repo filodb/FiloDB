@@ -349,8 +349,6 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   it("should drop out of time order ingested samples") {
     part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(12)
-    val initTS = data(0).getLong(0)
-    val lastTS = data.last.getLong(0)
     val minData = data.map(_.getDouble(1))
 
     // Ingest first 5, then: 8th, 6th, 7th, 9th, 10th
@@ -382,6 +380,9 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.appendingChunkLen shouldEqual 2
     val readData1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0))
     readData1.toBuffer shouldEqual (minData take 5) ++ (minData drop 7)
+    val timestamps = data.map(_.getLong(0))
+    val readData2 = part.timeRangeRows(AllChunkScan, Array(0)).map(_.getLong(0))
+    readData2.toBuffer shouldEqual (timestamps take 5) ++ (timestamps drop 7)
   }
 
 }
