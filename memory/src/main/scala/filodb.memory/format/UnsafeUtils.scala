@@ -23,22 +23,22 @@ object UnsafeUtils {
   //scalastyle:off method.name
   def BOLfromBuffer(buf: ByteBuffer): (Any, Long, Int) = {
     if (buf.hasArray) {
-      (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
+      (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position(), buf.limit() - buf.position())
     } else if (buf.isDirect) {
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
-      (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
+      (UnsafeUtils.ZeroPointer, address + buf.position(), buf.limit() - buf.position())
     } else {
       assert(buf.isReadOnly)
       (unsafe.getObject(buf, byteBufArrayField).asInstanceOf[Array[Byte]],
        unsafe.getInt(buf, byteBufOffsetField) + arayOffset,
-       buf.limit - buf.position)
+       buf.limit() - buf.position())
     }
   }
   //scalastyle:on method.name
 
   def addressFromDirectBuffer(buf: ByteBuffer): Long = {
     assert(buf.isDirect)
-    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf) + buf.position
+    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf) + buf.position()
   }
 
   def asDirectBuffer(address: Long, size: Int): ByteBuffer = {

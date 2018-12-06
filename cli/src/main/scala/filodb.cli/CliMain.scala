@@ -2,9 +2,7 @@ package filodb.cli
 
 import java.io.OutputStream
 import java.sql.Timestamp
-import javax.activation.UnsupportedDataTypeException
 
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 import scala.util.{Failure, Success => SSuccess, Try}
 
@@ -17,7 +15,6 @@ import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
@@ -48,7 +45,7 @@ class Arguments extends FieldArgs {
   var promql: Option[String] = None
   var matcher: Option[String] = None
   var labelName: Option[String] = None
-  var labelFilter: Option[String] = None
+  var labelFilter: Map[String, String] = Map.empty
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var minutes: Option[String] = None
@@ -348,17 +345,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
-  def parseLabelValuesQuery(client: LocalClient, labelName: String, filters: Option[String], dataset: String,
+  def parseLabelValuesQuery(client: LocalClient, labelName: String, constraints: Map[String, String], dataset: String,
                             timeParams: TimeRangeParams,
                             options: QOptions): Unit = {
-    val columnFilter = new ArrayBuffer[ColumnFilter]()
-    filters.map(colFilters => {
-      colFilters.split(",").map(colFilter => {
-        val keyVal = colFilter.split("=")
-        columnFilter += new ColumnFilter(keyVal(0), query.Filter.Equals((keyVal(1))))
-      })
-    })
-    val logicalPlan = LabelValues(labelName, columnFilter.toSeq, 8640000)
+    val logicalPlan = LabelValues(labelName, constraints, 3.days.toMillis)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
@@ -391,14 +381,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result) => {
-              println(s"Number of Range Vectors: ${result.size}")
-              result.foreach(rv => println(rv.prettyPrint(schema)))
-            }
-            case QueryError(_,ex)               => println(s"ERROR: ${ex.getMessage}")
+            case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
+                                                   result.foreach(rv => println(rv.prettyPrint(schema)))
+            case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }
         } catch {
-          case e: ClientException =>  println(s"ERROR: ${e.getMessage}")
+          case e: ClientException =>  println(s"ClientException: ${e.getMessage}")
                                       exitCode = 2
         }
     }
@@ -419,7 +407,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case StringColumn => rowReader.filoUTF8String(position).toString
         case BitmapColumn => rowReader.getBoolean(position).toString
         case TimestampColumn => rowReader.as[Timestamp](position).toString
-        case _ => throw new UnsupportedDataTypeException
+        case _ => throw new UnsupportedOperationException("Unsupported type: " + columns(position).columnType)
       }
       content.update(position,value)
       position += 1

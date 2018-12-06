@@ -143,12 +143,12 @@ final case class  LabelValuesExec(id: String,
                           timeout: FiniteDuration): Observable[RangeVector] = {
 
     if (source.isInstanceOf[MemStore]) {
-      var memStore = source.asInstanceOf[MemStore]
+      val memStore = source.asInstanceOf[MemStore]
       val curr = System.currentTimeMillis()
       val end = curr - curr % 1000 // round to the floor second
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
-        case true => memStore.indexValues(dataset, shard, column).map(_.term).toIterator
+        case true => memStore.indexValues(dataset, shard, column, limit).map(_.term).toIterator
         case false => memStore.indexValuesWithFilters(dataset, shard, filters, column, end, start, limit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),

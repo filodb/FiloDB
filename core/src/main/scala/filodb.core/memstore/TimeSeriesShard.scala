@@ -474,13 +474,18 @@ class TimeSeriesShard(val dataset: Dataset,
     val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
     val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
     while(partIterator.hasNext && result.size < limit) {
-      val nextPart = getPartitionFromPartId(partIterator.next())
-      val consumer = new SeqIndexValueConsumer(indexName)
-      // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
-      // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
-      // have a centralized service/store for serving metadata
-      dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
-      result ++= consumer.labelValues
+      val partId = partIterator.next()
+      val nextPart = getPartitionFromPartId(partId)
+      if (nextPart != UnsafeUtils.ZeroPointer) {
+        val consumer = new SeqIndexValueConsumer(indexName)
+        // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+        // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+        // have a centralized service/store for serving metadata
+        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
+        result ++= consumer.labelValues
+      } else {
+        // FIXME partKey is evicted. Get partition key from lucene index
+      }
     }
     result.toIterator
   }
@@ -492,7 +497,9 @@ class TimeSeriesShard(val dataset: Dataset,
                              endTime: Long,
                              startTime: Long,
                              limit: Int): Iterator[TimeSeriesPartition] = {
-    partKeyIndex.partIdsFromFilters(filter, startTime, endTime).map(getPartitionFromPartId, limit)
+    partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      .map(getPartitionFromPartId, limit)
+      .filter(_ != UnsafeUtils.ZeroPointer) // Needed since we have not addressed evicted partitions yet
   }
 
   implicit class IntIteratorMapper[T](intIterator: IntIterator) {
@@ -505,8 +512,13 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
+  /**
+    * WARNING, returns null for evicted partitions
+    */
   private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
-    var nextPart = partitions.get(partId)
+    val nextPart = partitions.get(partId)
+    if (nextPart == UnsafeUtils.ZeroPointer)
+      logger.warn(s"PartId $partId was not found in memory and was not included in metadata query result. ")
     // TODO Revisit this code for evicted partitions
     /*if (nextPart == UnsafeUtils.ZeroPointer) {
       val partKey = partKeyIndex.partKeyFromPartId(partId)
