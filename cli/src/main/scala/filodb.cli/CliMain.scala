@@ -2,7 +2,6 @@ package filodb.cli
 
 import java.io.OutputStream
 import java.sql.Timestamp
-import javax.activation.UnsupportedDataTypeException
 
 import scala.concurrent.duration._
 import scala.util.{Failure, Success => SSuccess, Try}
@@ -409,7 +408,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case StringColumn => rowReader.filoUTF8String(position).toString
         case BitmapColumn => rowReader.getBoolean(position).toString
         case TimestampColumn => rowReader.as[Timestamp](position).toString
-        case _ => throw new UnsupportedDataTypeException
+        case _ => throw new UnsupportedOperationException("Unsupported type: " + columns(position).columnType)
       }
       content.update(position,value)
       position += 1
