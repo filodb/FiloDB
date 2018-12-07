@@ -29,10 +29,5 @@ class FilodbClusterSpec extends AkkaSpec {
       cluster.clusterActor.isDefined shouldEqual true
       pathElementsExist(clusterActor) should be (true)
     }
-    "shutdown cleanly" in {
-      cluster.shutdown()
-      cluster.isInitialized shouldEqual false
-      awaitCond(cluster.isTerminated, cluster.settings.GracefulStopTimeout)
-    }
   }
 }
