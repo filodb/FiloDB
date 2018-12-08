@@ -2,6 +2,7 @@ package filodb.query.exec.rangefn
 
 import java.util
 
+import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector}
 import filodb.query.QueryConfig
 import filodb.query.exec.TransientRow
@@ -44,9 +45,7 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
 }
 
 class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedDoubleRangeFunction {
-  override final def reset(): Unit = {
-    sum = 0d
-  }
+  override final def reset(): Unit = { sum = 0d }
 
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
@@ -76,6 +75,29 @@ class CountOverTimeFunction(var count: Int = 0) extends RangeFunction {
   }
 }
 
+class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction {
+  override final def reset(): Unit = { count = 0 }
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, count.toDouble)
+  }
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit = {
+    val timestampVector = info.vectorPtr(tsCol)
+    val tsReader = bv.LongBinaryVector(timestampVector)
+
+    // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
+    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
+      // if endTime does not match, we want last row such that timestamp < endTime
+      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
+      case row if row < 0 => (row & 0x7fffffff) - 1
+      // otherwise if timestamp == endTime, just use that row number
+      case row            => row
+    }
+    val numRows = endRowNum - startRowNum + 1
+    count += numRows
+  }
+}
+
 class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
@@ -91,6 +113,22 @@ class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends Rang
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     sampleToEmit.setValues(endTimestamp, sum/count)
+  }
+}
+
+class AvgOverTimeChunkedFunctionD(var sum: Double = 0d, var count: Int = 0) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { sum = 0d; count = 0 }
+
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
+    count += (endRowNum - startRowNum + 1)
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
   }
 }
 
@@ -137,6 +175,46 @@ class StdVarOverTimeFunction(var sum: Double = 0d,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count
+    val stdVar = squaredSum/count - avg*avg
+    sampleToEmit.setValues(endTimestamp, stdVar)
+  }
+}
+
+abstract class VarOverTimeChunkedFunctionD(var sum: Double = 0d,
+                                           var count: Int = 0,
+                                           var squaredSum: Double = 0d) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { sum = 0d; count = 0; squaredSum = 0d }
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    var _sum = 0d
+    var _sqSum = 0d
+    var elemNo = startRowNum
+    while (elemNo <= endRowNum) {
+      val nextValue = it.next
+      _sum += nextValue
+      _sqSum += nextValue * nextValue
+      elemNo += 1
+    }
+    count += (endRowNum - startRowNum + 1)
+    sum += _sum
+    squaredSum += _sqSum
+  }
+}
+
+class StdDevOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val avg = if (count > 0) sum/count else 0d
+    val stdDev = Math.sqrt(squaredSum/count - avg*avg)
+    sampleToEmit.setValues(endTimestamp, stdDev)
+  }
+}
+
+class StdVarOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val avg = if (count > 0) sum/count else 0d
     val stdVar = squaredSum/count - avg*avg
     sampleToEmit.setValues(endTimestamp, stdVar)
   }

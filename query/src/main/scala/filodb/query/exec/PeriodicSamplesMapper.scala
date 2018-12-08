@@ -39,7 +39,7 @@ final case class PeriodicSamplesMapper(start: Long,
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
       // TODO: move this out of the inner loop somehow
-      RangeFunction(functionId, funcParams) match {
+      RangeFunction(functionId, funcParams, useChunked = true) match {
         case c: ChunkedRangeFunction if rv.isInstanceOf[RawDataRangeVector] =>
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,

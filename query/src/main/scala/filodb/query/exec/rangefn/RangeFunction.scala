@@ -141,26 +141,33 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil,
-            useChunked: Boolean = true): RangeFunction = {
-    func match {
-      case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
-      case Some(Rate)             => RateFunction
-      case Some(Increase)         => IncreaseFunction
-      case Some(Delta)            => DeltaFunction
-      case Some(Resets)           => ResetsFunction
-      case Some(Irate)            => IRateFunction
-      case Some(Idelta)           => IDeltaFunction
-      case Some(Deriv)            => DerivFunction
-      case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
-      case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
-      case Some(CountOverTime)    => new CountOverTimeFunction()
-      case Some(SumOverTime) if useChunked => new SumOverTimeChunkedFunction()
-      case Some(SumOverTime)      => new SumOverTimeFunction()
-      case Some(AvgOverTime)      => new AvgOverTimeFunction()
-      case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
-      case Some(StdVarOverTime)   => new StdVarOverTimeFunction()
-      case _                      => ???
-    }
+            useChunked: Boolean = true): RangeFunction = if (useChunked) func match {
+    case Some(CountOverTime)  => new CountOverTimeChunkedFunction()
+    case Some(SumOverTime)    => new SumOverTimeChunkedFunction()
+    case Some(AvgOverTime)    => new AvgOverTimeChunkedFunctionD()
+    case Some(StdDevOverTime) => new StdDevOverTimeChunkedFunctionD()
+    case Some(StdVarOverTime) => new StdVarOverTimeChunkedFunctionD()
+    case _                    => iterator(func, funcParams)
+  } else iterator(func, funcParams)
+
+  def iterator(func: Option[RangeFunctionId],
+               funcParams: Seq[Any] = Nil): RangeFunction = func match {
+    case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
+    case Some(Rate)             => RateFunction
+    case Some(Increase)         => IncreaseFunction
+    case Some(Delta)            => DeltaFunction
+    case Some(Resets)           => ResetsFunction
+    case Some(Irate)            => IRateFunction
+    case Some(Idelta)           => IDeltaFunction
+    case Some(Deriv)            => DerivFunction
+    case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
+    case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+    case Some(CountOverTime)    => new CountOverTimeFunction()
+    case Some(SumOverTime)      => new SumOverTimeFunction()
+    case Some(AvgOverTime)      => new AvgOverTimeFunction()
+    case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
+    case Some(StdVarOverTime)   => new StdVarOverTimeFunction()
+    case _                      => ???
   }
 }
 

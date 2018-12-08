@@ -80,7 +80,7 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
   /**
    * Raw data used for the Chunked window iterator tests
    * timestamp    value
-   * 100000L        1.0  // Start of first window: 80001 -> 110000
+   * 100000L        1.0  // Start of first window: 80001 -> 110000.  11 values present
    * 101000         2.0
    * 102000         3.0
    * 103000         4.0
@@ -92,7 +92,7 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
    * 109000        10.0
    * 110000        11.0
    *
-   * 111000        12.0  // Second window: 110001 -> 1400000
+   * 111000        12.0  // Second window: 110001 -> 1400000  30 values
    * 112000        13.0
    * ....
    * 140000        41.0
@@ -102,6 +102,10 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 1)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize, true)
+
+  def sumSquares(nn: Seq[Int]): Double = nn.map(n => n*n).sum.toDouble
+  def avg(nn: Seq[Int]): Double = nn.sum.toDouble / nn.length
+  def stdVar(nn: Seq[Int]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
 
   it("should aggregate using ChunkedRangeFunction / ChunkedWindowIterator") {
     val part = TimeSeriesPartitionSpec.makePart(0, dataset1)
@@ -118,6 +122,26 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
     val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, queryConfig)()
     val aggregated = windowIt.map(_.getDouble(1)).toBuffer
     aggregated shouldEqual Seq((1 to 11).sum, (12 to 41).sum)
+
+    val countFunc = new CountOverTimeChunkedFunction()
+    val windowIt2 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, countFunc, queryConfig)()
+    val aggregated2 = windowIt2.map(_.getDouble(1)).toBuffer
+    aggregated2 shouldEqual Seq(11d, 30d)
+
+    val avgFunc = new AvgOverTimeChunkedFunctionD()
+    val windowIt3 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, avgFunc, queryConfig)()
+    val aggregated3 = windowIt3.map(_.getDouble(1)).toBuffer
+    aggregated3 shouldEqual Seq(avg(1 to 11), avg(12 to 41))
+
+    val varFunc = new StdVarOverTimeChunkedFunctionD()
+    val windowIt4 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, varFunc, queryConfig)()
+    val aggregated4 = windowIt4.map(_.getDouble(1)).toBuffer
+    aggregated4 shouldEqual Seq(stdVar(1 to 11), stdVar(12 to 41))
+
+    val devFunc = new StdDevOverTimeChunkedFunctionD()
+    val windowIt5 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, devFunc, queryConfig)()
+    val aggregated5 = windowIt5.map(_.getDouble(1)).toBuffer
+    aggregated5 shouldEqual Seq(Math.sqrt(stdVar(1 to 11)), Math.sqrt(stdVar(12 to 41)))
   }
 
 }
