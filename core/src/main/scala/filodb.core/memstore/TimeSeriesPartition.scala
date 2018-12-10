@@ -62,6 +62,7 @@ class TimeSeriesPartition(val partID: Int,
                           offheapInfoMap: OffheapLFSortedIDMapMutator,
                           // Lock state used by OffheapLFSortedIDMap.
                           var lockState: Int = 0,
+                          // NOTE: this is a var because much faster to access this than lastInfo.endTime
                           var lastTime: Long = -1L)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
@@ -109,6 +110,7 @@ extends ReadablePartition with MapHolder {
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
     if (ts < lastTime) {
       shardStats.outOfOrderDropped.increment

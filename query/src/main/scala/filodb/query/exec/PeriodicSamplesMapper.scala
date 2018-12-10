@@ -94,7 +94,9 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   // this is the object that will be exposed to the RangeFunction
   private val windowSamples = new QueueBasedWindow(windowQueue)
 
-  // TODO This can be removed once we fix order during ingestion. Or is it required to validate anyway?
+  // NOTE: Ingestion now has a facility to drop out of order samples.  HOWEVER, there is one edge case that may happen
+  // which is that the first sample ingested after recovery may not be in order w.r.t. previous persisted timestamp.
+  // So this is retained for now while we consider a more permanent out of order solution.
   private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
 
   // we need buffered iterator so we can use to peek at next element.
