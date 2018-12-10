@@ -94,12 +94,15 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   // this is the object that will be exposed to the RangeFunction
   private val windowSamples = new QueueBasedWindow(windowQueue)
 
+  // TODO This can be removed once we fix order during ingestion. Or is it required to validate anyway?
+  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
+
   // we need buffered iterator so we can use to peek at next element.
   // At same time, do counter correction if necessary
   private val rows = if (rangeFunction.needsCounterCorrection) {
-    new BufferableCounterCorrectionIterator(raw).buffered
+    new BufferableCounterCorrectionIterator(rawInOrder).buffered
   } else {
-    new BufferableIterator(raw).buffered
+    new BufferableIterator(rawInOrder).buffered
   }
 
   // to avoid creation of object per sample, we use a pool
@@ -243,8 +246,6 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
   }
 }
 
-// NOTE: This is deprecated, but left here just in case.  Out of order samples are now dropped at ingestion.
-// TODO: remove this
 class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
   // Initial -1 time since it will be less than any valid timestamp and will allow first sample to go through
   private val cur = new TransientRow(-1, -1)
