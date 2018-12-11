@@ -4,7 +4,7 @@ import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
-import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
@@ -30,7 +30,7 @@ class IngestionBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   // # of records in a container to test ingestion speed
-  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags) take 100
+  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags) take 1000
 
   val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
                                                     Seq("job", "instance"))
@@ -52,7 +52,8 @@ class IngestionBenchmark {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val policy = new FixedMaxPartitionsEvictionPolicy(100)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
-  memStore.setup(dataset1, 0, TestData.storeConf)
+  val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)
+  memStore.setup(dataset1, 0, ingestConf)
 
   val shard = memStore.getShardE(dataset1.ref, 0)
 
@@ -67,28 +68,39 @@ class IngestionBenchmark {
     comparator.partitionMatch(ingBr2Base, ingBr2Off, partBr2Base, partBr2Off)
   }
 
+  // Setup per iteration to clean shard state and make sure ingestion is repeatable.
+  // NOTE: need to use per-iteration, not invocation, or else the setup costs affect the benchmark results
+  @Setup(JMHLevel.Iteration)
+  def cleanIngest(): Unit = {
+    shard.reset()
+  }
+
   /**
-   * Ingest a single RecordContainer with 100 records in it.  Note that the throughput reported is x100 so
+   * Ingest 1000 records, or 100 per TSPartition, every invocation.  Note that the throughput reported is x100 so
    * it is not the containers throughput but the actual records throughput.
+   * 100 per partition is just enough that each invocation should result in releasing/obtaining
+   * fresh write buffers, and every other invocation results in encoding.
+   * resetLastTimes() is called to enable the same records to be appended and "bypass" the out of order mechanism.
+   * Note that adding partitions is only done at the start of each iteration, not invocation, since the setup
+   * to clean the shard state is only done at the beginning of each iteration.
    *
-   * NOTE: based on -prof stack profiling, this benchmark does invoke the flushing logic plus
-   * WriteBufferPool buffer recycling logic.  The time is thus heavily influenced by the chunking/encoding
-   * logic, OffheapSortedIDMap stuff, and native memory allocation cost.
+   * Note2: one chunk every 200 samples.
    */
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(100)
-  def ingest100records(): Unit = {
-    shard.ingest(ingestBuilder.allContainers.head, 0)
+  @OperationsPerInvocation(1000)
+  def ingestEncodeRecords(): Unit = {
+    shard.resetLastTimes()
+    ingestBuilder.allContainers.foreach(shard.ingest(_, 0))
   }
 
-  @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
-  @OutputTimeUnit(TimeUnit.SECONDS)
-  def nativeMemAlloc(): Unit = {
-    val ptr = TestData.nativeMem.allocateOffheap(16)
-    TestData.nativeMem.freeMemory(ptr)
-  }
-
+  // This benchmark doesn't really measure anything significant
+  // @Benchmark
+  // @BenchmarkMode(Array(Mode.Throughput))
+  // @OutputTimeUnit(TimeUnit.SECONDS)
+  // def nativeMemAlloc(): Unit = {
+  //   val ptr = TestData.nativeMem.allocateOffheap(16)
+  //   TestData.nativeMem.freeMemory(ptr)
+  // }
 }
