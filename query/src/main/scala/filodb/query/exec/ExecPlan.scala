@@ -104,7 +104,7 @@ trait ExecPlan extends QueryCommand {
         qLogger.debug(s"queryId: ${id} Started Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
-      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns)
+      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
       finalRes._1
         .map {

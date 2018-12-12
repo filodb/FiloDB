@@ -173,9 +173,8 @@ object FiloSettings extends Build {
   }
 
   // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
+  // Also note: CLI-specific config overrides are set in FilodbCluster.scala
   lazy val shellScript = """#!/bin/bash
-  # ClusterActorRefProvider by default. Enable this line if needed for some of the commands
-  # allprops="-Dakka.actor.provider=akka.remote.RemoteActorRefProvider"
   while [ "${1:0:2}" = "-D" ]
   do
     allprops="$allprops $1"
@@ -275,6 +274,7 @@ object FiloSettings extends Build {
       "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
       "spray repo" at "http://repo.spray.io"
     ),
+    resolvers += Resolver.bintrayRepo("tanukkii007", "maven"),
 
     cancelable in Global := true,
 

@@ -6,6 +6,7 @@ import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
@@ -15,7 +16,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   val schema1 = RecordSchema.ingestion(dataset1)
   val schema2 = RecordSchema.ingestion(dataset2)
-  val longStrSchema = new RecordSchema(Seq(ColumnType.LongColumn, ColumnType.StringColumn))
+  val longStrSchema = new RecordSchema(Seq(ColumnInfo("lc", ColumnType.LongColumn),
+                                           ColumnInfo("sc", ColumnType.StringColumn)))
 
   val records = new collection.mutable.ArrayBuffer[(Any, Long)]
 
@@ -284,7 +286,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
     it("should hash correctly with different ways of adding UTF8 fields") {
       // schema for part key with only a string
-      val stringSchema = new RecordSchema(Seq(ColumnType.StringColumn), Some(0))
+      val stringSchema = new RecordSchema(Seq(ColumnInfo("sc", ColumnType.StringColumn)), Some(0))
       val builder = new RecordBuilder(nativeMem, stringSchema)
 
       val str = "Serie zero"
