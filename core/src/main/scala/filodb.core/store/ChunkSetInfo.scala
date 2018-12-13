@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
@@ -297,6 +298,65 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
   def nextInfo: ChunkSetInfo = {
     gotNext = false   // reset so we can look for the next item where filter == true
     nextnext
+  }
+}
+
+/**
+ * A sliding window based iterator over the chunks needed to be read from for each window.
+ * Assumes the ChunkInfos are in increasing time order.
+ * The sliding window goes from (start-window, start) -> (end-window, end) in step increments, and for
+ * each window, this class may be used as a ChunkInfoIterator.
+ *
+ * @param infos the base ChunkInfoIterator to perform windowing over
+ * @param start the starting window end timestamp, must have same units as the ChunkSetInfo start/end times
+ * @param step the increment the window goes forward by
+ * @param end the ending window end timestamp.  If it does not line up on multiple of start + n * step, then
+ *            the windows will slide until the window end is beyond end.
+ * @param window the # of millis/time units that define the length of each window
+ */
+class WindowedChunkIterator(infos: ChunkInfoIterator, start: Long, step: Long, end: Long, window: Long,
+                            // internal vars, put it here for better performance
+                            var curWindowEnd: Long = -1L,
+                            var curWindowStart: Long = -1L,
+                            private var readIndex: Int = 0,
+                            windowInfos: Buffer[NativePointer] = Buffer.empty[NativePointer])
+extends ChunkInfoIterator {
+  final def close(): Unit = infos.close()
+  final def hasMoreWindows: Boolean = curWindowEnd < end
+  final def nextWindow(): Unit = {
+    // advance window pointers and reset read index
+    if (curWindowStart == -1L) {
+      curWindowEnd = start
+      curWindowStart = start - window
+    } else {
+      curWindowStart += step
+      curWindowEnd += step
+    }
+    readIndex = 0
+
+    // drop initial chunksets of window that are no longer part of the window
+    while (windowInfos.nonEmpty && ChunkSetInfo(windowInfos(0)).endTime < curWindowStart) {
+      windowInfos.remove(0)
+    }
+
+    var lastEndTime = if (windowInfos.isEmpty) -1L else ChunkSetInfo(windowInfos(windowInfos.length - 1)).endTime
+
+    // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
+    while (curWindowEnd > lastEndTime && infos.hasNext) {
+      val next = infos.nextInfo
+      // Add if next chunkset is within window.  Otherwise keep going
+      if (curWindowStart <= next.endTime) {
+        windowInfos += next.infoAddr
+        lastEndTime = Math.max(next.endTime, lastEndTime)
+      }
+    }
+  }
+
+  def hasNext: Boolean = readIndex < windowInfos.length
+  def nextInfo: ChunkSetInfo = {
+    val next = windowInfos(readIndex)
+    readIndex += 1
+    ChunkSetInfo(next)
   }
 }
 

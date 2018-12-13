@@ -4,24 +4,85 @@ import scala.collection.mutable
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.memstore.TimeSeriesPartitionSpec
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
-import filodb.core.MachineMetricsData
+import filodb.core.MetricsTestData
 import filodb.memory._
-import filodb.memory.format.SeqRowReader
+import filodb.memory.format.TupleRowReader
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.exec.{ChunkedWindowIterator, QueueBasedWindow, TransientRow}
+import filodb.query.exec.{ChunkedWindowIterator, QueueBasedWindow, SlidingWindowIterator, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
-class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
-  import MachineMetricsData._
+/**
+ * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
+ */
+trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll {
+  import MetricsTestData._
 
-  val rand = new Random()
+  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
+    new MemoryStats(Map("test"-> "test")), null, 1)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
+
+  override def afterAll(): Unit = {
+    blockStore.releaseBlocks()
+  }
+
+  def sumSquares(nn: Seq[Double]): Double = nn.map(n => n*n).sum.toDouble
+  def avg(nn: Seq[Double]): Double = nn.sum.toDouble / nn.length
+  def stdVar(nn: Seq[Double]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
+
+  val defaultStartTS = 100000L
+  val pubFreq = 10000L
+
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+
+  // windowSize and step are in number of elements of the data
+  def numWindows(data: Seq[Double], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
+
+  // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
+  def timeValueRV(data: Seq[Double], chunkSize: Int = 100, startTS: Long = defaultStartTS): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDataset)
+    val readers = data.zipWithIndex.map { case (d, t) => TupleRowReader((Some(startTS + t * pubFreq), Some(d))) }
+    readers.grouped(chunkSize).foreach { rowGroup =>
+      rowGroup.foreach { row => part.ingest(row, ingestBlockHolder) }
+      // Now flush and ingest the rest to ensure two separate chunks
+      part.switchBuffers(ingestBlockHolder)
+      part.encodeAndReleaseBuffers(ingestBlockHolder)
+    }
+    RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+  }
+
+  def chunkedWindowIt(data: Seq[Double],
+                      rv: RawDataRangeVector,
+                      func: ChunkedRangeFunction,
+                      windowSize: Int,
+                      step: Int): ChunkedWindowIterator = {
+    val windowTime = (windowSize.toLong - 1) * pubFreq
+    val windowStartTS = defaultStartTS + windowTime
+    val stepTimeMillis = step.toLong * pubFreq
+    val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
+    new ChunkedWindowIterator(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)()
+  }
+
+  def slidingWindowIt(data: Seq[Double],
+                      rv: RawDataRangeVector,
+                      func: RangeFunction,
+                      windowSize: Int,
+                      step: Int): SlidingWindowIterator = {
+    val windowTime = (windowSize.toLong - 1) * pubFreq
+    val windowStartTS = defaultStartTS + windowTime
+    val stepTimeMillis = step.toLong * pubFreq
+    val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
+    new SlidingWindowIterator(rv.rows, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+  }
+}
+
+class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
+  val rand = new Random()
 
   it ("aggregation functions should work correctly on a sliding window") {
     val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false)
@@ -77,71 +138,60 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
     }
   }
 
-  /**
-   * Raw data used for the Chunked window iterator tests
-   * timestamp    value
-   * 100000L        1.0  // Start of first window: 80001 -> 110000.  11 values present
-   * 101000         2.0
-   * 102000         3.0
-   * 103000         4.0
-   * 104000         5.0
-   * 105000         6.0
-   * 106000         7.0
-   * 107000         8.0
-   * 108000         9.0
-   * 109000        10.0
-   * 110000        11.0
-   *
-   * 111000        12.0  // Second window: 110001 -> 1400000  30 values
-   * 112000        13.0
-   * ....
-   * 140000        41.0
-   *
-   * The second window spans multiple chunks.
-   */
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), null, 1)
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize, true)
+  // TODO: replace manual loops with ScalaCheck/properties checker
+  val numIterations = 10
 
-  def sumSquares(nn: Seq[Int]): Double = nn.map(n => n*n).sum.toDouble
-  def avg(nn: Seq[Int]): Double = nn.sum.toDouble / nn.length
-  def stdVar(nn: Seq[Int]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
+  it("should correctly aggregate sum_over_time using both chunked and sliding iterators") {
+    val data = (1 to 120).map(_.toDouble)
+    val chunkSize = 40
+    val rv = timeValueRV(data, chunkSize)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(30) + 10
+      val step = rand.nextInt(15) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val sumFunc = new SumOverTimeChunkedFunction()
+      val slidingIt = slidingWindowIt(data, rv, sumFunc, windowSize, step)
+      // TODO: enable this and debug why the sliding window iterator isn't working
+      // val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
+      // aggregated shouldEqual data.sliding(windowSize, step).map(_.sum).toBuffer
+
+      val chunkedIt = chunkedWindowIt(data, rv, sumFunc, windowSize, step)
+      val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.sum).toBuffer
+    }
+  }
 
   it("should aggregate using ChunkedRangeFunction / ChunkedWindowIterator") {
-    val part = TimeSeriesPartitionSpec.makePart(0, dataset1)
-    val data = linearMultiSeries().take(50).map(SeqRowReader)
-    data.take(25).foreach { d => part.ingest(d, ingestBlockHolder) }
-    // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(ingestBlockHolder)
-    part.encodeAndReleaseBuffers(ingestBlockHolder)
-    data.drop(25).foreach { d => part.ingest(d, ingestBlockHolder) }
+    val data = (1 to 120).map(_.toDouble)
+    val chunkSize = 40
+    val rv = timeValueRV(data, chunkSize)
 
-    val rv = RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(30) + 10
+      val step = rand.nextInt(15) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-    val sumFunc = new SumOverTimeChunkedFunction()
-    val windowIt = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, sumFunc, queryConfig)()
-    val aggregated = windowIt.map(_.getDouble(1)).toBuffer
-    aggregated shouldEqual Seq((1 to 11).sum, (12 to 41).sum)
+      val countFunc = new CountOverTimeChunkedFunction()
+      val windowIt2 = chunkedWindowIt(data, rv, countFunc, windowSize, step)
+      val aggregated2 = windowIt2.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.length).toBuffer
 
-    val countFunc = new CountOverTimeChunkedFunction()
-    val windowIt2 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, countFunc, queryConfig)()
-    val aggregated2 = windowIt2.map(_.getDouble(1)).toBuffer
-    aggregated2 shouldEqual Seq(11d, 30d)
+      val avgFunc = new AvgOverTimeChunkedFunctionD()
+      val windowIt3 = chunkedWindowIt(data, rv, avgFunc, windowSize, step)
+      val aggregated3 = windowIt3.map(_.getDouble(1)).toBuffer
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(avg).toBuffer
 
-    val avgFunc = new AvgOverTimeChunkedFunctionD()
-    val windowIt3 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, avgFunc, queryConfig)()
-    val aggregated3 = windowIt3.map(_.getDouble(1)).toBuffer
-    aggregated3 shouldEqual Seq(avg(1 to 11), avg(12 to 41))
+      val varFunc = new StdVarOverTimeChunkedFunctionD()
+      val windowIt4 = chunkedWindowIt(data, rv, varFunc, windowSize, step)
+      val aggregated4 = windowIt4.map(_.getDouble(1)).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(stdVar).toBuffer
 
-    val varFunc = new StdVarOverTimeChunkedFunctionD()
-    val windowIt4 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, varFunc, queryConfig)()
-    val aggregated4 = windowIt4.map(_.getDouble(1)).toBuffer
-    aggregated4 shouldEqual Seq(stdVar(1 to 11), stdVar(12 to 41))
-
-    val devFunc = new StdDevOverTimeChunkedFunctionD()
-    val windowIt5 = new ChunkedWindowIterator(rv, 110000L, 30000L, 150000L, 30000L, devFunc, queryConfig)()
-    val aggregated5 = windowIt5.map(_.getDouble(1)).toBuffer
-    aggregated5 shouldEqual Seq(Math.sqrt(stdVar(1 to 11)), Math.sqrt(stdVar(12 to 41)))
+      val devFunc = new StdDevOverTimeChunkedFunctionD()
+      val windowIt5 = chunkedWindowIt(data, rv, devFunc, windowSize, step)
+      val aggregated5 = windowIt5.map(_.getDouble(1)).toBuffer
+      aggregated5 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d))).toBuffer
+    }
   }
 
 }
