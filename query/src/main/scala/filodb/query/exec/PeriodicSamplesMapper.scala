@@ -3,11 +3,19 @@ package filodb.query.exec
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
-import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnInfo, IteratorBackedRangeVector, RangeVector, ResultSchema}
 import filodb.memory.format.RowReader
 import filodb.query.{Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
+
+object PeriodicSamplesMapper {
+  // A PeriodicSamplesMapper always outputs timestamp:Long/value:Double right now
+  val periodicSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+                                        ColumnInfo("value", ColumnType.DoubleColumn)), 0)
+}
 
 /**
   * Transforms raw reported samples to samples with
@@ -35,13 +43,25 @@ final case class PeriodicSamplesMapper(start: Long,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorTransformer.requireTimeSeries(sourceSchema)
-    source.map { rv =>
-      IteratorBackedRangeVector(rv.key,
-        new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
-          RangeFunction(functionId, funcParams), queryConfig))
+    RangeVectorTransformer.valueColumnType(sourceSchema) match {
+      case ColumnType.DoubleColumn =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
+              RangeFunction(functionId, funcParams), queryConfig))
+        }
+      case ColumnType.LongColumn =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
+              RangeFunction(functionId, funcParams), queryConfig))
+        }
+      case t: ColumnType => throw new IllegalArgumentException(s"Column type $t is not supported for queries")
     }
   }
+
+  // Transform source double or long to double schema
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = PeriodicSamplesMapper.periodicSchema
 }
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
@@ -150,6 +170,20 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
         // 2. if needs last sample, then ok to remove window's head only if there is more than one item in window
         (rangeFunction.needsLastSample && windowQueue.size > 1 && windowQueue.head.timestamp <= curWindowStart)
     )
+  }
+}
+
+/**
+  * Converts the long value column to double.
+  */
+class LongToDoubleIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+  val sampleToEmit = new TransientRow()
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): TransientRow = {
+    val next = iter.next()
+    sampleToEmit.setLong(0, next.getLong(0))
+    sampleToEmit.setDouble(1, next.getLong(1).toDouble)
+    sampleToEmit
   }
 }
 

@@ -40,11 +40,10 @@ trait RangeVectorTransformer extends java.io.Serializable {
 }
 
 object RangeVectorTransformer {
-  def requireTimeSeries(schema: ResultSchema): Unit = {
+  def valueColumnType(schema: ResultSchema): ColumnType = {
     require(schema.isTimeSeries, "Cannot return periodic data from a dataset that is not time series based")
     require(schema.columns.size == 2, "Cannot return periodic data from a dataset that is not time series based")
-    require(schema.columns(1).colType == ColumnType.DoubleColumn,
-      "Cannot query a non Doubles based value column right now, sorry")
+    schema.columns(1).colType
   }
 }
 
