@@ -1008,17 +1008,16 @@ class TimeSeriesShard(val dataset: Dataset,
    * For testing only. Resets the lastTime of each partition so that the same data can be ingested again and again.
    */
   private[filodb] def resetLastTimes(): Unit = {
-    partSet.foreach { tsPart => tsPart.asInstanceOf[TimeSeriesPartition].lastTime = -1L }
+    partitions.values.asScala.foreach { tsPart => tsPart.asInstanceOf[TimeSeriesPartition].lastTime = -1L }
   }
 
   /**
     * Reset all state in this shard.  Memory is not released as once released, then this class
-    * cannot be used anymore.
+    * cannot be used anymore (except partition key/chunkmap state is removed.)
     */
   def reset(): Unit = {
     logger.info(s"Clearing all MemStore state for shard $shardNum")
-    partitions.clear()
-    partSet.clear()
+    partitions.values.asScala.foreach(removePartition)
     partKeyIndex.reset()
     ingested = 0L
     for { group <- 0 until numGroups } {
