@@ -6,30 +6,37 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.QueryConfig
 
+object HistogramQuantileMapper {
+  import ZeroCopyUTF8String._
+  val le = "le".utf8
+}
+
 case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTransformer {
 
+  import HistogramQuantileMapper._
   require(funcParams.size == 1,
     "histogram_quantile function needs a single quantile argument")
 
-  val quantile = funcParams.head.asInstanceOf[Number].doubleValue()
+  private val quantile = funcParams.head.asInstanceOf[Number].doubleValue()
 
   override def apply(source: Observable[RangeVector],
                      queryConfig: QueryConfig, limit: Int,
                      sourceSchema: ResultSchema): Observable[RangeVector] = {
-    import ZeroCopyUTF8String._
     val res = source.toListL.map { rvs =>
       val resultKey = validateRangeVectorKeys(rvs.map(_.key))
-      val sortedRvs = rvs.sortBy(_.key.labelValues("le".utf8).toString)
-      val samples = sortedRvs.map(_.rows)
-      val buckets = Array.tabulate(sortedRvs.length) { i =>
-        val le = sortedRvs(i).key.labelValues("le".utf8).toString.toDouble
-        Array(le, 0d)
-      }
+      val sortedRvs = rvs.toArray.map { rv =>
+        val leStr = rv.key.labelValues(le).toString
+        val leDouble = if (leStr == "+Inf") Double.PositiveInfinity else leStr.toDouble
+        leDouble -> rv
+      }.sortBy(_._1)
+
+      val samples = sortedRvs.map(_._2.rows)
+      val buckets = sortedRvs.map{ b => Array(b._1, 0d)}
       val result = new Iterator[RowReader] {
         val row = new TransientRow()
         override def hasNext: Boolean = samples.forall(_.hasNext)
         override def next(): RowReader = {
-          for { i <- 0 to samples.length } {
+          for { i <- 0 until samples.length } {
             val nxt = samples(i).next()
             buckets(i)(1) = nxt.getDouble(1)
             row.timestamp = nxt.getLong(0)
@@ -43,19 +50,22 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     Observable.fromTask(res)
   }
 
-  def validateRangeVectorKeys(rvKeys: Seq[RangeVectorKey]): CustomRangeVectorKey = {
-    // TODO assert all RV are same except for "le" tag
-
+  private def validateRangeVectorKeys(rvKeys: Seq[RangeVectorKey]): CustomRangeVectorKey = {
+    // assert all RV Keys are same except for "le" tag
+    val resultKey = rvKeys.head.labelValues - le
+    require(rvKeys.forall(k => (k.labelValues - le) == resultKey),
+      "Source vectors for histogram should be the same except for le tag")
+    CustomRangeVectorKey(resultKey)
   }
 
-  def histogramQuantile(q: Double, buckets: Array[Array[Double]]): Double = {
+  private def histogramQuantile(q: Double, buckets: Array[Array[Double]]): Double = {
     if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (buckets.length < 2) Double.NaN
     else {
-      if (buckets.last(0).isPosInfinity) return Double.NaN
+      if (!buckets.last(0).isPosInfinity) return Double.NaN
       else {
-        // TODO ensureMonotonic
+        ensureMonotonic(buckets)
         var rank = q * buckets.last(1)
         val b = buckets.indexWhere(_(1) >= rank)
         if (b == buckets.length-1) return buckets(buckets.length-2)(0)
@@ -70,6 +80,19 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
           bucketStart + (bucketEnd-bucketStart)*(rank/count)
         }
       }
+    }
+  }
+
+  /**
+    * Fixes any issue with monotonicity of supplied bucket counts.
+    * This could happen if the bucket count values are not atomically obtained,
+    * or if bucket le values change over time.
+    */
+  private def ensureMonotonic(buckets: Array[Array[Double]]): Unit = {
+    var max = buckets(0)(1)
+    buckets.foreach{ b =>
+      if (b(1) > max) max = b(1)
+      else if (b(1) < max) b(1) = max
     }
   }
 
