@@ -30,7 +30,8 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
         leDouble -> rv
       }.sortBy(_._1)
 
-      val samples = sortedRvs.map(_._2.rows)
+      // apply counter correction on the buckets
+      val samples = sortedRvs.map(rv => new BufferableCounterCorrectionIterator(rv._2.rows))
       val buckets = sortedRvs.map{ b => Array(b._1, 0d)}
       val result = new Iterator[RowReader] {
         val row = new TransientRow()
@@ -89,9 +90,10 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * or if bucket le values change over time.
     */
   private def ensureMonotonic(buckets: Array[Array[Double]]): Unit = {
-    var max = buckets(0)(1)
+    var max = 0d
     buckets.foreach{ b =>
-      if (b(1) > max) max = b(1)
+      if (b(1).isNaN) b(1) = max
+      else if (b(1) > max) max = b(1)
       else if (b(1) < max) b(1) = max
     }
   }

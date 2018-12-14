@@ -160,7 +160,7 @@ class QueryEngine(dataset: Dataset,
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
     lp.function match {
       case HistogramQuantile =>
-        require(vectors.size == 1, "Data for histogram_quantile cannot come from multiple shards")
+        require(vectors.size == 1, "Metric is on multiple shards and is likely that it is not a histogram")
         vectors.foreach(_.addRangeVectorTransformer(HistogramQuantileMapper(lp.functionArgs)))
       case _ =>
         vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
