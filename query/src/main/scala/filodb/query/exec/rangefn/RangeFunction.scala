@@ -96,7 +96,8 @@ trait ChunkedRangeFunction extends RangeFunction {
    * @param info ChunkSetInfo with information for specific chunks
    * @param startTime starting timestamp in millis since Epoch for time window
    */
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit
 
   /**
    * Return the computed result in the sampleToEmit
@@ -109,7 +110,8 @@ trait ChunkedRangeFunction extends RangeFunction {
  * and returning the double value vector and reader with the row numbers
  */
 trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit = {
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
     val doubleVector = info.vectorPtr(valueCol)
@@ -117,6 +119,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
 
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
+    // TODO: refactor this by moving it into LongVectorReader, and testing it there.  Get rid of all the duplicates
     val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
       // if endTime does not match, we want last row such that timestamp < endTime
       // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
@@ -142,6 +145,7 @@ object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil,
             useChunked: Boolean = true): RangeFunction = if (useChunked) func match {
+    case None                 => new LastSampleChunkedFunction()
     case Some(CountOverTime)  => new CountOverTimeChunkedFunction()
     case Some(SumOverTime)    => new SumOverTimeChunkedFunction()
     case Some(AvgOverTime)    => new AvgOverTimeChunkedFunctionD()
@@ -172,7 +176,6 @@ object RangeFunction {
 }
 
 object LastSampleFunction extends RangeFunction {
-
   override def needsLastSample: Boolean = true
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
@@ -187,6 +190,45 @@ object LastSampleFunction extends RangeFunction {
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     } else {
       sampleToEmit.setValues(endTimestamp, window.head.getDouble(1))
+    }
+  }
+}
+
+/**
+ * Directly obtain the last sample from chunks for much much faster performance compared to above
+ */
+class LastSampleChunkedFunction(var timestamp: Long = -1L,
+                                var value: Double = Double.NaN) extends ChunkedRangeFunction {
+  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+  // Add each chunk and update timestamp and value such that latest sample wins
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
+    val timestampVector = info.vectorPtr(tsCol)
+    val tsReader = bv.LongBinaryVector(timestampVector)
+
+    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
+      // if endTime does not match, we want last row such that timestamp < endTime
+      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
+      case row if row < 0 => (row & 0x7fffffff) - 1
+      // otherwise if timestamp == endTime, just use that row number
+      case row            => row
+    }
+
+    // update timestamp only if
+    //   1) endRowNum >= 0 (timestamp within chunk)
+    //   2) timestamp is within stale window; AND
+    //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
+    if (endRowNum >= 0) {
+      val ts = tsReader(timestampVector, endRowNum)
+      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
+        timestamp = ts
+        val dblVector = info.vectorPtr(valueCol)
+        val dblReader = bv.DoubleVector(dblVector)
+        value = dblReader(dblVector, endRowNum)
+      }
     }
   }
 }

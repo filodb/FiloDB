@@ -304,9 +304,9 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
  * Assumes the ChunkInfos are in increasing time order.
- * The sliding window goes from (start-window, start) -> (end-window, end) in step increments, and for
- * each window, this class may be used as a ChunkInfoIterator.
- *
+ * The sliding window goes from (start-window, start] -> (end-window, end] in step increments, and for
+ * each window, this class may be used as a ChunkInfoIterator. Excludes start, includes end.
+
  * @param infos the base ChunkInfoIterator to perform windowing over
  * @param start the starting window end timestamp, must have same units as the ChunkSetInfo start/end times
  * @param step the increment the window goes forward by
@@ -322,15 +322,15 @@ class WindowedChunkIterator(infos: ChunkInfoIterator, start: Long, step: Long, e
                             windowInfos: Buffer[NativePointer] = Buffer.empty[NativePointer])
 extends ChunkInfoIterator {
   final def close(): Unit = infos.close()
-  final def hasMoreWindows: Boolean = curWindowEnd < end
+  final def hasMoreWindows: Boolean = (curWindowEnd < 0) || (curWindowEnd + step <= end)
   final def nextWindow(): Unit = {
     // advance window pointers and reset read index
-    if (curWindowStart == -1L) {
+    if (curWindowEnd == -1L) {
       curWindowEnd = start
-      curWindowStart = start - window
+      curWindowStart = start - Math.max(window - 1, 0)  // window cannot be below 0, ie start should never be > end
     } else {
-      curWindowStart += step
       curWindowEnd += step
+      curWindowStart += step
     }
     readIndex = 0
 

@@ -32,18 +32,21 @@ final case class PeriodicSamplesMapper(start: Long,
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
+    // Really, use the stale lookback window size, not 0 which doesn't make sense
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
       // TODO: move this out of the inner loop somehow
       RangeFunction(functionId, funcParams, useChunked = true) match {
         case c: ChunkedRangeFunction if rv.isInstanceOf[RawDataRangeVector] =>
+          val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                      window.getOrElse(0L), c, queryConfig)())
+                                      windowLength, c, queryConfig)())
         case f: RangeFunction =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L), f, queryConfig))
@@ -84,9 +87,9 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
     windowIt.nextWindow()
     while (windowIt.hasNext) {
       rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
-                              windowIt.curWindowStart, windowIt.curWindowEnd)
+                              windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
     }
-    rangeFunction.apply(end, sampleToEmit)
+    rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
     if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively
     sampleToEmit
   }

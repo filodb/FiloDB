@@ -115,8 +115,7 @@ trait ReadablePartition extends FiloPartition {
    * @param columnIDs the column IDs to query
    */
   final def timeRangeRows(startTime: Long, endTime: Long, columnIDs: Array[ColumnId]): Iterator[RowReader] =
-    new PartitionTimeRangeReader(this, startTime, endTime,
-                                 infos(RowKeyChunkScan(startTime, endTime)), columnIDs)
+    new PartitionTimeRangeReader(this, startTime, endTime, infos(startTime, endTime), columnIDs)
 
   final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): Iterator[RowReader] =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, infos(method), columnIDs)

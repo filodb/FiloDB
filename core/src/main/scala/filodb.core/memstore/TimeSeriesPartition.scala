@@ -65,6 +65,8 @@ class TimeSeriesPartition(val partID: Int,
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 
+  require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
+
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 

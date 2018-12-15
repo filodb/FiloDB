@@ -161,7 +161,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
     val end = 1000L
     val step = 5
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
-      end,0, RangeFunction(None), queryConfig)
+      end, 0, RangeFunction(None, useChunked = false), queryConfig)
     val result = slidingWinIterator.map(v => (v.timestamp, v.value)).toSeq
     result.map(_._1) shouldEqual (start to end).by(step)
     result.foreach{ v =>
@@ -216,7 +216,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1540845090000L,
                                                        15000, 1540855905000L, 0,
-                                                       RangeFunction(None), queryConfig)
+                                                       RangeFunction(None, useChunked = false), queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual Seq(
       1540846755000L->237,
       1540846770000L->237,

@@ -106,7 +106,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     """sum(rate(heap_usage{app="App-2"}[5m]))""",
                     """quantile(0.75, heap_usage{app="App-2"})""",
                     """sum_over_time(heap_usage{app="App-2"}[5m])""")
-  // val queries = Seq("""sum_over_time(heap_usage{app="App-2"}[5m])""")
+  // val queries = Seq("heap_usage{app=\"App-2\"}")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
@@ -124,7 +124,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
-  def fiftyPctOverlapQueries(): Unit = {
+  def someOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
       f.onSuccess {
@@ -137,7 +137,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   }
 
   // Now, simulate where step is larger than the window size.
-  val qParams2 = TimeStepParams(queryTime/1000, queryStep * 3, (queryTime/1000) + queryIntervalMin*60)
+  val noOverlapStep = 300
+  val qParams2 = TimeStepParams(queryTime/1000, noOverlapStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
   val queryCommands2 = logicalPlans2.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))

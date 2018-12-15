@@ -80,7 +80,8 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
   def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit = {
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
 

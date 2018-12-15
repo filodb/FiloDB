@@ -28,7 +28,7 @@ object TimeSeriesPartitionSpec {
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
     val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset1.ref, 0), infoMapAddr, offheapInfoMapKlass)
+          new TimeSeriesShardStats(dataset.ref, 0), infoMapAddr, offheapInfoMapKlass)
   }
 }
 
