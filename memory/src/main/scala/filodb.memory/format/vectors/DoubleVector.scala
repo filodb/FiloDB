@@ -170,14 +170,6 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = 0d
-    // Fetch and add multiple points at once for efficiency
-    while ((addr + 64) <= untilAddr) {
-      sum += UnsafeUtils.getDouble(addr) + UnsafeUtils.getDouble(addr + 8) +
-             UnsafeUtils.getDouble(addr + 16) + UnsafeUtils.getDouble(addr + 24) +
-             UnsafeUtils.getDouble(addr + 32) + UnsafeUtils.getDouble(addr + 40) +
-             UnsafeUtils.getDouble(addr + 48) + UnsafeUtils.getDouble(addr + 56)
-      addr += 64
-    }
     while (addr < untilAddr) {
       sum += UnsafeUtils.getDouble(addr)
       addr += 8

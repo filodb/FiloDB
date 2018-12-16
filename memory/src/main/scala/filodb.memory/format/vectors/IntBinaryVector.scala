@@ -300,14 +300,6 @@ object OffheapSignedIntVector32 extends IntVectorDataReader {
     var addr = vector + 8 + start * 4
     val untilAddr = vector + 8 + end * 4 + 4   // one past the end
     var sum: Long = 0L
-    // Fetch and add multiple points at once for efficiency
-    while ((addr + 32) <= untilAddr) {
-      sum += UnsafeUtils.getInt(addr) + UnsafeUtils.getInt(addr + 4) +
-             UnsafeUtils.getInt(addr + 8).toLong + UnsafeUtils.getInt(addr + 12).toLong +
-             UnsafeUtils.getInt(addr + 16).toLong + UnsafeUtils.getInt(addr + 20).toLong +
-             UnsafeUtils.getInt(addr + 24).toLong + UnsafeUtils.getInt(addr + 28).toLong
-      addr += 32
-    }
     while (addr < untilAddr) {
       sum += UnsafeUtils.getInt(addr)
       addr += 4
@@ -322,14 +314,6 @@ object OffheapSignedIntVector16 extends IntVectorDataReader {
     var addr = vector + 8 + start * 2
     val untilAddr = vector + 8 + end * 2 + 2   // one past the end
     var sum = 0L
-    // Fetch and add multiple points at once for efficiency
-    while ((addr + 16) <= untilAddr) {
-      sum += UnsafeUtils.getShort(addr) + UnsafeUtils.getShort(addr + 2) +
-             UnsafeUtils.getShort(addr + 4) + UnsafeUtils.getShort(addr + 6) +
-             UnsafeUtils.getShort(addr + 8) + UnsafeUtils.getShort(addr + 10) +
-             UnsafeUtils.getShort(addr + 12) + UnsafeUtils.getShort(addr + 14)
-      addr += 16
-    }
     while (addr < untilAddr) {
       sum += UnsafeUtils.getShort(addr)
       addr += 2
@@ -344,14 +328,6 @@ object OffheapSignedIntVector8 extends IntVectorDataReader {
     var addr = vector + 8 + start
     val untilAddr = vector + 8 + end + 1     // one past the end
     var sum = 0L
-    // Fetch and add multiple points at once for efficiency
-    while ((addr + 8) <= untilAddr) {
-      sum += UnsafeUtils.getByte(addr) + UnsafeUtils.getByte(addr + 1) +
-             UnsafeUtils.getByte(addr + 2) + UnsafeUtils.getByte(addr + 3) +
-             UnsafeUtils.getByte(addr + 4) + UnsafeUtils.getByte(addr + 5) +
-             UnsafeUtils.getByte(addr + 6) + UnsafeUtils.getByte(addr + 7)
-      addr += 8
-    }
     while (addr < untilAddr) {
       sum += UnsafeUtils.getByte(addr)
       addr += 1
