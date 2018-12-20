@@ -183,7 +183,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
-  def singleThreadedQuery(): Int = {
+  def singleThreadedQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
       execPlan.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
