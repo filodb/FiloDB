@@ -54,7 +54,7 @@ class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedDoubleRang
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
   }
 
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
 }
@@ -77,10 +77,10 @@ class CountOverTimeFunction(var count: Int = 0) extends RangeFunction {
 
 class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction {
   override final def reset(): Unit = { count = 0 }
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+  final def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
@@ -128,7 +128,7 @@ class AvgOverTimeChunkedFunctionD(var sum: Double = 0d, var count: Int = 0) exte
     count += (endRowNum - startRowNum + 1)
   }
 
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
   }
 }
@@ -206,7 +206,7 @@ abstract class VarOverTimeChunkedFunctionD(var sum: Double = 0d,
 }
 
 class StdDevOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val avg = if (count > 0) sum/count else 0d
     val stdDev = Math.sqrt(squaredSum/count - avg*avg)
     sampleToEmit.setValues(endTimestamp, stdDev)
@@ -214,7 +214,7 @@ class StdDevOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
 }
 
 class StdVarOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val avg = if (count > 0) sum/count else 0d
     val stdVar = squaredSum/count - avg*avg
     sampleToEmit.setValues(endTimestamp, stdVar)

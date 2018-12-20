@@ -270,8 +270,8 @@ object ChunkInfoIterator {
 
 class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator {
   def close(): Unit = elIt.close()
-  def hasNext: Boolean = elIt.hasNext
-  def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
+  final def hasNext: Boolean = elIt.hasNext
+  final def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
 }
 
 class FilteredChunkInfoIterator(base: ChunkInfoIterator,
@@ -283,7 +283,7 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
     base.close()
   }
 
-  def hasNext: Boolean = {
+  final def hasNext: Boolean = {
     try {
       while (base.hasNext && !gotNext) {
         nextnext = base.nextInfo
@@ -295,7 +295,7 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
     }
   }
 
-  def nextInfo: ChunkSetInfo = {
+  final def nextInfo: ChunkSetInfo = {
     gotNext = false   // reset so we can look for the next item where filter == true
     nextnext
   }
@@ -352,8 +352,8 @@ extends ChunkInfoIterator {
     }
   }
 
-  def hasNext: Boolean = readIndex < windowInfos.length
-  def nextInfo: ChunkSetInfo = {
+  final def hasNext: Boolean = readIndex < windowInfos.length
+  final def nextInfo: ChunkSetInfo = {
     val next = windowInfos(readIndex)
     readIndex += 1
     ChunkSetInfo(next)

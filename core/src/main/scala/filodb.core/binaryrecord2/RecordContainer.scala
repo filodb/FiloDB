@@ -102,7 +102,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
   final def allOffsets: Buffer[Long] = map { case (b, o) => o }
 
   class CountingConsumer(var count: Int = 0) extends BinaryRegionConsumer {
-    def onNext(base: Any, offset: Long): Unit = count += 1
+    final def onNext(base: Any, offset: Long): Unit = count += 1
   }
 
   /**

@@ -200,11 +200,11 @@ object LastSampleFunction extends RangeFunction {
 class LastSampleChunkedFunction(var timestamp: Long = -1L,
                                 var value: Double = Double.NaN) extends ChunkedRangeFunction {
   override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
   }
   // Add each chunk and update timestamp and value such that latest sample wins
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+  final def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
