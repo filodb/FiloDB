@@ -170,14 +170,15 @@ object SerializableRangeVector extends StrictLogging {
             limit: Int): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
-    val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
+    val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       OffheapLFSortedIDMap.validateNoSharedLocks()
-      rv.rows.take(limit).foreach { row =>
+      val rows = rv.rows
+      while (rows.hasNext && numRows < limit) {
         numRows += 1
-        builder.addFromReader(row)
+        builder.addFromReader(rows.next)
       }
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.

@@ -22,7 +22,8 @@ import filodb.memory.format.{RowReader, UnsafeUtils}
  * @param offset 64-bit native pointer or offset into Array[Byte] object memory
  * @param maxLength the maximum allocated size the container can grow to, including the initial length bytes
  */
-final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
+final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
+                            var numRecords: Int = 0) {
   import RecordBuilder._
 
   @inline final def numBytes: Int =  UnsafeUtils.getInt(base, offset)
