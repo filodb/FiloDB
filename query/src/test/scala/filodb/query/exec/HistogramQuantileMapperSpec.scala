@@ -1,5 +1,7 @@
 package filodb.query.exec
 
+import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
@@ -29,6 +31,20 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
     }
   }
 
+  private def calculateAndVerify(q: Double,
+                                 histRvs: Array[IteratorBackedRangeVector],
+                                 expectedResult: Seq[(Int, Double)]): Unit = {
+    val hqMapper = HistogramQuantileMapper(Seq(q))
+
+    val result = hqMapper.apply(Observable.fromIterable(histRvs),
+      queryConfig, 10, new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)), 1))
+      .toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result.head.key.labelValues shouldEqual histKey
+    val resultSamples = result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
+    resultSamples shouldEqual expectedResult
+  }
 
   it ("should calculate histogram_quantile correctly") {
     val histRvs = Array(
@@ -66,19 +82,24 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
     calculateAndVerify(0.5, histRvs, expectedResult)
   }
 
-  private def calculateAndVerify(q: Double,
-                                 histRvs: Array[IteratorBackedRangeVector],
-                                 expectedResult: Seq[(Int, Double)]): Unit = {
-    val hqMapper = HistogramQuantileMapper(Seq(q))
+  it ("should sort the buckets to calculate histogram_quantile correctly ") {
+    val histRvs = Array(
+      Array( (10, 10), (20, 11), (30, 11), (40, 40) ),
+      Array( (10, 15), (20, 16), (30, 16), (40, 45) ),
+      Array( (10, 17), (20, 26), (30, 26), (40, 47) ),
+      Array( (10, 20), (20, 28), (30, 33), (40, 49) ),
+      Array( (10, 25), (20, 30), (30,  3), (40, 27) ), // changed from previous test to simulate counter correction
+      Array( (10, 34), (20, 38), (30, 38), (40, 67) ),
+      Array( (10, 34), (20, 42), (30, 46), (40, 89) ),
+      Array( (10, 35), (20, 45), (30, 46), (40, 89) )
+    ).zipWithIndex.map { case (rv, i) =>
+      IteratorBackedRangeVector(histKeys(i), rv.map(s => new TransientRow(s._1, s._2.toDouble)).toIterator)
+    }
 
-    val result = hqMapper.apply(Observable.fromIterable(histRvs),
-      queryConfig, 10, new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)), 1))
-      .toListL.runAsync.futureValue
-    result.size shouldEqual 1
-    result.head.key.labelValues shouldEqual histKey
-    val resultSamples = result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList
-    resultSamples shouldEqual expectedResult
+    val shuffledHistRvs = Random.shuffle(histRvs.toSeq).toArray
+
+    val expectedResult = Seq((10, 4.666666666666667), (20, 3.3), (30, 3.4), (40, 1.9))
+    calculateAndVerify(0.5, shuffledHistRvs, expectedResult)
   }
 
   it ("should calculate histogram_quantile correctly when buckets change over time") {
