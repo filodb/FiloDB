@@ -37,6 +37,7 @@ class IngestionBenchmark {
   // sized just big enough for a 1000 entries per container
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys, 176064)
   val comparator = new RecordComparator(schemaWithPredefKeys)
+  //scalastyle:off
   println("Be patient, generating lots of containers of raw data....")
   dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data) }
 
