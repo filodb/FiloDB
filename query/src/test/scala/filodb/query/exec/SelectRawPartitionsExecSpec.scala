@@ -43,6 +43,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
+  // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
   tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
   val container = builder.allContainers.head
@@ -60,6 +61,10 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.commitIndexForTesting(timeseriesDataset.ref)
     memStore.commitIndexForTesting(MMD.dataset1.ref)
+  }
+
+  override def afterAll(): Unit = {
+    memStore.shutdown()
   }
 
   val dummyDispatcher = new PlanDispatcher {
@@ -81,7 +86,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
-    dataRead.sorted shouldEqual tuples.sorted // TODO see why rows are not in order
+    dataRead shouldEqual tuples
   }
 
   it ("should read raw samples from Memstore using IntervalSelector") {
