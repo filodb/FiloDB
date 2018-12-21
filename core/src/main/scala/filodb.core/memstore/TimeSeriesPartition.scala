@@ -61,9 +61,7 @@ class TimeSeriesPartition(val partID: Int,
                           // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
                           offheapInfoMap: OffheapLFSortedIDMapMutator,
                           // Lock state used by OffheapLFSortedIDMap.
-                          var lockState: Int = 0,
-                          // NOTE: this is a var because much faster to access this than lastInfo.endTime
-                          var lastTime: Long = -1L)
+                          var lockState: Int = 0)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 
@@ -112,7 +110,7 @@ extends ReadablePartition with MapHolder {
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
-    if (ts < lastTime) {
+    if (ts < timestampOfLatestSample) {
       shardStats.outOfOrderDropped.increment
       return
     }
@@ -130,7 +128,6 @@ extends ReadablePartition with MapHolder {
         case other: AddResponse =>
       }
     }
-    lastTime = ts
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
     // Update the end time as well.  For now assume everything arrives in increasing order
     ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
@@ -310,11 +307,13 @@ extends ReadablePartition with MapHolder {
     * not been paged into memory
     */
   final def timestampOfLatestSample: Long = {
-    if (numChunks == 0) {
-      -1
-    } else {
+    if (currentInfo != nullInfo) {   // fastest: get the endtime from current chunk
+      currentInfo.endTime
+    } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
       offheapInfoMap.withShared(this, infoLast.endTime)
+    } else {
+      -1
     }
   }
 

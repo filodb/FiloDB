@@ -279,6 +279,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Ingest data into 10 TSPartitions and switch and encode all of them.  Now WriteBuffers poolsize should be
     // down 10 and then back up.
     val data = singleSeriesReaders().take(10).toBuffer
+    val moreData = singleSeriesReaders().drop(10).take(50).toBuffer
     val origPoolSize = myBufferPool.poolSize
     val partitions = (0 to 9).map { partNo =>
       makePart(partNo, dataset1)
@@ -295,9 +296,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Do this 4 more times so that we get old recycled metadata back
     (0 until 4).foreach { n =>
       (0 to 9).foreach { i =>
-        // Cheat here. Manually reset the lastTime of a partition so it will ingest old data.
-        partitions(i).lastTime = -1L
-        data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+        moreData.drop(n*10).take(10).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
         partitions(i).appendingChunkLen shouldEqual 10
         partitions(i).switchBuffers(ingestBlockHolder, true)
       }
@@ -305,8 +304,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     // Now ingest again but don't switch buffers.  Ensure appendingChunkLen is appropriate.
     (0 to 9).foreach { i =>
-      partitions(i).lastTime = -1L
-      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+      moreData.drop(40).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).appendingChunkLen shouldEqual 10
     }
   }

@@ -30,13 +30,16 @@ class IngestionBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   // # of records in a container to test ingestion speed
-  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags) take 1000
+  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags)
 
   val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
                                                     Seq("job", "instance"))
-  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys)
+  // sized just big enough for a 1000 entries per container
+  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys, 176064)
   val comparator = new RecordComparator(schemaWithPredefKeys)
-  addToBuilder(ingestBuilder, dataStream)
+  println("Be patient, generating lots of containers of raw data....")
+  dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data) }
+
   val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, comparator.partitionKeySchema)
 
   val consumer = new BinaryRegionConsumer {
@@ -46,6 +49,8 @@ class IngestionBenchmark {
 
   val (ingBr2Base, ingBr2Off) = (ingestBuilder.allContainers.head.base, ingestBuilder.allContainers.head.offset + 4)
   val (partBr2Base, partBr2Off) = (partKeyBuilder.allContainers.head.base, partKeyBuilder.allContainers.head.offset + 4)
+
+  val containers = ingestBuilder.allContainers.toArray
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -68,12 +73,16 @@ class IngestionBenchmark {
     comparator.partitionMatch(ingBr2Base, ingBr2Off, partBr2Base, partBr2Off)
   }
 
+  var containerNo = 0
+
   // Setup per iteration to clean shard state and make sure ingestion is repeatable.
   // NOTE: need to use per-iteration, not invocation, or else the setup costs affect the benchmark results
   @Setup(JMHLevel.Iteration)
   def cleanIngest(): Unit = {
     shard.reset()
+    containerNo = 0
   }
+
 
   /**
    * Ingest 1000 records, or 100 per TSPartition, every invocation.  Note that the throughput reported is x100 so
@@ -85,14 +94,18 @@ class IngestionBenchmark {
    * to clean the shard state is only done at the beginning of each iteration.
    *
    * Note2: one chunk every 200 samples.
+   *
+   * Time reported is time to ingest 100k samples.  To get throughput, divide 100k by the time in seconds
    */
   @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
+  @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(1000)
+  @Warmup(batchSize=50)
+  @Measurement(batchSize=100)
   def ingestEncodeRecords(): Unit = {
-    shard.resetLastTimes()
-    ingestBuilder.allContainers.foreach(shard.ingest(_, 0))
+    shard.ingest(containers(containerNo), 0)
+    containerNo += 1
   }
 
   // This benchmark doesn't really measure anything significant

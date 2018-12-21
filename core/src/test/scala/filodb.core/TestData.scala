@@ -256,7 +256,7 @@ object MachineMetricsData {
     }
   }
 
-  def addToBuilder(builder: RecordBuilder, data: Stream[Seq[Any]]): Unit = {
+  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]]): Unit = {
     data.foreach { values =>
       builder.startNewRecord()
       builder.addLong(values(0).asInstanceOf[Long])     // timestamp
