@@ -87,13 +87,7 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
 
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
-      // if endTime does not match, we want last row such that timestamp < endTime
-      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
-      case row if row < 0 => (row & 0x7fffffff) - 1
-      // otherwise if timestamp == endTime, just use that row number
-      case row            => row
-    }
+    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
     val numRows = endRowNum - startRowNum + 1
     count += numRows
   }

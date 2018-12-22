@@ -139,6 +139,21 @@ trait LongVectorDataReader extends VectorDataReader {
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int
 
   /**
+   * Searches for the last element # whose element is <= the item, assuming all elements are increasing.
+   * Typically used to find the last timestamp <= item.
+   * Uses binarySearch.  TODO: maybe optimize by comparing item to first item.
+   * @return integer row or element #.  -1 means item is less than the first item in vector.
+   */
+  final def ceilingIndex(vector: BinaryVectorPtr, item: Long): Int =
+    binarySearch(vector, item) match {
+      // if endTime does not match, we want last row such that timestamp < endTime
+      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
+      case row if row < 0 => (row & 0x7fffffff) - 1
+      // otherwise if timestamp == endTime, just use that row number
+      case row            => row
+    }
+
+  /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
@@ -194,10 +209,11 @@ object LongVectorDataReader64 extends LongVectorDataReader {
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
     var len = length(vector)
     var first = 0
+    var element = 0L
     while (len > 0) {
       val half = len >>> 1
       val middle = first + half
-      val element = UnsafeUtils.getLong(vector + OffsetData + middle * 8)
+      element = UnsafeUtils.getLong(vector + OffsetData + middle * 8)
       if (element == item) {
         return middle
       } else if (element < item) {
@@ -207,7 +223,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
         len = half
       }
     }
-    if (first == item) first else first | 0x80000000
+    if (element == item) first else first | 0x80000000
   }
 }
 

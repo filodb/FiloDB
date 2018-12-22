@@ -119,14 +119,8 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
 
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    // TODO: refactor this by moving it into LongVectorReader, and testing it there.  Get rid of all the duplicates
-    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
-      // if endTime does not match, we want last row such that timestamp < endTime
-      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
-      case row if row < 0 => (row & 0x7fffffff) - 1
-      // otherwise if timestamp == endTime, just use that row number
-      case row            => row
-    }
+    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+
     addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
   }
 
@@ -208,14 +202,7 @@ class LastSampleChunkedFunction(var timestamp: Long = -1L,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
-
-    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
-      // if endTime does not match, we want last row such that timestamp < endTime
-      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
-      case row if row < 0 => (row & 0x7fffffff) - 1
-      // otherwise if timestamp == endTime, just use that row number
-      case row            => row
-    }
+    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
