@@ -322,7 +322,15 @@ class WindowedChunkIterator(infos: ChunkInfoIterator, start: Long, step: Long, e
                             windowInfos: Buffer[NativePointer] = Buffer.empty[NativePointer])
 extends ChunkInfoIterator {
   final def close(): Unit = infos.close()
+
+  /**
+   * Returns true if there are more windows to process
+   */
   final def hasMoreWindows: Boolean = (curWindowEnd < 0) || (curWindowEnd + step <= end)
+
+  /**
+   * Advances to the next window.
+   */
   final def nextWindow(): Unit = {
     // advance window pointers and reset read index
     if (curWindowEnd == -1L) {
@@ -352,7 +360,14 @@ extends ChunkInfoIterator {
     }
   }
 
+  /**
+   * hasNext of ChunkInfoIterator.  Returns true if for current window there is another relevant chunk.
+   */
   final def hasNext: Boolean = readIndex < windowInfos.length
+
+  /**
+   * Returns the next ChunkSetInfo for the current window
+   */
   final def nextInfo: ChunkSetInfo = {
     val next = windowInfos(readIndex)
     readIndex += 1

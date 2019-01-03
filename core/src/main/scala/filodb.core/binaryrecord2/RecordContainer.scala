@@ -23,6 +23,7 @@ import filodb.memory.format.{RowReader, UnsafeUtils}
  * @param maxLength the maximum allocated size the container can grow to, including the initial length bytes
  */
 final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
+                            // INTERNAL variable placed here to avoid Scalac using a bitfield and slowing things down
                             var numRecords: Int = 0) {
   import RecordBuilder._
 

@@ -117,6 +117,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
     val doubleVector = info.vectorPtr(valueCol)
     val dblReader = bv.DoubleVector(doubleVector)
 
+    // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
@@ -145,11 +146,11 @@ object RangeFunction {
     case Some(AvgOverTime)    => new AvgOverTimeChunkedFunctionD()
     case Some(StdDevOverTime) => new StdDevOverTimeChunkedFunctionD()
     case Some(StdVarOverTime) => new StdVarOverTimeChunkedFunctionD()
-    case _                    => iterator(func, funcParams)
-  } else iterator(func, funcParams)
+    case _                    => iteratingFunction(func, funcParams)
+  } else iteratingFunction(func, funcParams)
 
-  def iterator(func: Option[RangeFunctionId],
-               funcParams: Seq[Any] = Nil): RangeFunction = func match {
+  def iteratingFunction(func: Option[RangeFunctionId],
+                        funcParams: Seq[Any] = Nil): RangeFunction = func match {
     case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
     case Some(Rate)             => RateFunction
     case Some(Increase)         => IncreaseFunction

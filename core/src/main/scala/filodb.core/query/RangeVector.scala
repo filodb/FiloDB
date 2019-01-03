@@ -110,6 +110,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
 
   def timestampColID: Int = partition.dataset.timestampColID
+  // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
 }
 

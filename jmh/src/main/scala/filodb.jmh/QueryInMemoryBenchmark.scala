@@ -143,7 +143,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
     Await.result(Future.sequence(futures), 60.seconds)
   }
 
-  // Now, simulate where step is larger than the window size.
   val noOverlapStep = 300
   val qParams2 = TimeStepParams(queryTime/1000, noOverlapStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
