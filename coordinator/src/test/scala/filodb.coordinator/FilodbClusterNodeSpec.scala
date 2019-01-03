@@ -1,7 +1,7 @@
 package filodb.coordinator
 
 import akka.testkit.TestProbe
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -9,6 +9,11 @@ import filodb.coordinator.client.MiscCommands
 import filodb.core.{AbstractSpec, Success}
 
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
+  // Ensure that CoordinatedShutdown does not shutdown the whole test JVM, otherwise Travis CI/CD fails
+  override protected lazy val roleConfig = ConfigFactory.parseString(
+        """akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+          |akka.coordinated-shutdown.exit-jvm = off
+        """.stripMargin)
 
   implicit abstract override val patienceConfig: PatienceConfig =
     PatienceConfig(
@@ -35,23 +40,8 @@ trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with Sca
 
   def assertShutdown(): Unit = {
     shutdown()
-    eventually(cluster.isTerminated) shouldEqual true
-  }
-}
-
-class ClusterNodeCliSpec extends FilodbClusterNodeSpec {
-
-  override val role = ClusterRole.Cli
-
-  "Cli" must {
-    "have the expected config for ClusterRole.Cli" in {
-      val roles = akka.japi.Util.immutableSeq(cluster.settings.allConfig.getStringList("akka.cluster.roles"))
-      roles.size shouldEqual 1
-      roles.forall(_ == ClusterRole.Cli.roleName) shouldEqual true
-    }
-    "become initialized after the coordinator is created" in {
-      assertInitialized()
-    }
+    val probe = TestProbe()(system)
+    probe.awaitCond(cluster.isTerminated, cluster.settings.GracefulStopTimeout)
   }
 }
 

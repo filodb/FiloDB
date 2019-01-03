@@ -13,7 +13,6 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
-import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
@@ -44,7 +43,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val numShards = 2
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
-  val startTime = System.currentTimeMillis - (3600*1000)
+  var startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 60         // # of seconds between each query sample "step"
@@ -94,8 +93,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
                         Observable.fromIterable(data)
                       }
                       Task.fromFuture(
-                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global) {
-                          case e: Exception => throw e })
+                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
                     }.countL.runAsync
 
   val memstore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
@@ -106,6 +104,8 @@ class QueryAndIngestBenchmark extends StrictLogging {
       .take(noSamples * numSeries)
       .foreach { sample =>
         val rec = PrometheusInputRecord(sample.tags, sample.metric, dataset, sample.timestamp, sample.value)
+        // we shouldn't ingest samples for same timestamps repeatedly. This will also result in out-of-order samples.
+        startTime = Math.max(startTime, sample.timestamp + 10000)
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
       }

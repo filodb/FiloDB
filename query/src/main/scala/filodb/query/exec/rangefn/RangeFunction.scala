@@ -21,7 +21,7 @@ trait Window {
   * All Range Vector Functions are implementation of this trait.
   * There are multiple choices for function implementation:
   * 1. Use the `addToWindow` and `removeFromWindow` events to evaluate the next value to emit.
-  *    This may result in O(n) complexity for emiting the entire range vector.
+  *    This may result in O(n) complexity for emitting the entire range vector.
   * 2. Use the entire window content in `apply` to emit the next value. Depending on whether the
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
   * 3. Use the addChunks() API of the ChunkedRangeFunction subtrait for more efficient proessing of windows

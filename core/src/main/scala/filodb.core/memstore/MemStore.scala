@@ -9,6 +9,7 @@ import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
+import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
@@ -85,7 +86,6 @@ trait MemStore extends ChunkSource {
    * @param flushSched the Scheduler to use to schedule flush tasks
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
-   * @param errHandler this is called when an ingestion error occurs
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
    */
@@ -94,8 +94,7 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit]
+                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit]
 
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
@@ -140,6 +139,23 @@ trait MemStore extends ChunkSource {
    * @param topK the number of top items to return
    */
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
+
+  /**
+    * Returns the values of a given index name for the matching Column Filters
+    * that are indexed at the partition level, on the given
+    * shard on this node.
+    * @return an Iterator for the index values
+    */
+  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
+
+  /**
+    * Returns the indexed TimeSeriesPartitions matching the column filters,
+    * on the given shard on this node.
+    * @return an Iterator for the TimeSeriesPartition
+    */
+  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                          end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

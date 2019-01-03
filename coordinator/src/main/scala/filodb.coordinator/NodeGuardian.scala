@@ -14,7 +14,7 @@ final class NodeGuardian(val settings: FilodbSettings,
                          metaStore: MetaStore,
                          memStore: MemStore,
                          assignmentStrategy: ShardAssignmentStrategy
-                        ) extends GracefulStopAwareSupervisor {
+                        ) extends BaseActor {
 
   import ActorName._
   import NodeProtocol._
@@ -45,7 +45,7 @@ final class NodeGuardian(val settings: FilodbSettings,
     case e: ListenerRef            => failureAware ! e
   }
 
-  override def receive: Actor.Receive = guardianReceive orElse super.receive
+  override def receive: Actor.Receive = guardianReceive
 
   /** Sends the current state of local `ShardMapper`
     * and `ShardSubscription` collections to the `requestor`.
@@ -164,7 +164,6 @@ object NodeProtocol {
                                                               ) extends LifecycleCommand
 
   private[coordinator] case object CreateCoordinator extends LifecycleCommand
-  private[coordinator] case object GracefulShutdown extends LifecycleCommand
 
   private[coordinator] final case class ShutdownComplete(ref: ActorRef) extends LifecycleAck
 

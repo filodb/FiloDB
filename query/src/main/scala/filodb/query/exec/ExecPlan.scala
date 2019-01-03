@@ -12,6 +12,7 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
+import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
 
@@ -44,8 +45,8 @@ trait ExecPlan extends QueryCommand {
   def submitTime: Long
 
   /**
-   * Limit on number of samples returned per RangeVector
-   */
+    * Limit on number of samples returned per RangeVector
+    */
   def limit: Int
 
   def dataset: DatasetRef
@@ -103,7 +104,7 @@ trait ExecPlan extends QueryCommand {
         qLogger.debug(s"queryId: ${id} Started Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
-      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns)
+      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
       finalRes._1
         .map {
@@ -174,6 +175,20 @@ trait ExecPlan extends QueryCommand {
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr = children.map(_.printTree(nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString("\n")
+  }
+
+  protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
+
+    new Iterator[RowReader] {
+      val listSize = srvsList.size
+      val rowIteratorList = srvsList.map(srvs => srvs(0).rows)
+      private var curIterIndex = 0
+      override def hasNext: Boolean = rowIteratorList(curIterIndex).hasNext ||
+        (curIterIndex < listSize - 1
+          && (rowIteratorList({curIterIndex += 1; curIterIndex}).hasNext || this.hasNext)) // find non empty iterator
+
+      override def next(): RowReader = rowIteratorList(curIterIndex).next()
+    }
   }
 }
 

@@ -6,7 +6,7 @@ import scalaxy.loops._
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BlockMemFactory}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory}
 import filodb.memory.data.{MapHolder, OffheapLFSortedIDMapMutator}
 import filodb.memory.format._
 
@@ -110,7 +110,12 @@ extends ReadablePartition with MapHolder {
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
+    if (ts < timestampOfLatestSample) {
+      shardStats.outOfOrderDropped.increment
+      return
+    }
     if (currentChunks == nullChunks) {
       // First row of a chunk, set the start time to it
       initNewChunk(ts)
@@ -308,11 +313,13 @@ extends ReadablePartition with MapHolder {
     * not been paged into memory
     */
   final def timestampOfLatestSample: Long = {
-    if (numChunks == 0) {
-      -1
-    } else {
+    if (currentInfo != nullInfo) {   // fastest: get the endtime from current chunk
+      currentInfo.endTime
+    } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
       offheapInfoMap.withShared(this, infoLast.endTime)
+    } else {
+      -1
     }
   }
 
@@ -360,9 +367,36 @@ extends ReadablePartition with MapHolder {
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
 
   // Caller must hold lock on offheapInfoMap.
-  private def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+  }
+}
+
+final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
+  var currVal: TimeSeriesPartition = _
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = ???
+    def getAny(columnNo: Int): Any = ???
+
+    def getBlobBase(columnNo: Int): Any = currVal.partKeyBase
+    def getBlobOffset(columnNo: Int): Long = currVal.partKeyOffset
+    def getBlobNumBytes(columnNo: Int): Int =
+      BinaryRegionLarge.numBytes(currVal.partKeyBase, currVal.partKeyOffset) + BinaryRegionLarge.lenBytes
+  }
+
+  override def hasNext: Boolean = records.hasNext
+
+  override def next(): RowReader = {
+    currVal = records.next()
+    rowReader
   }
 }

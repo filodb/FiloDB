@@ -159,8 +159,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
-    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)(ex => throw ex)
-    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)(ex => throw ex)
+    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)
+    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)
     // Allow both futures to run first before waiting for completion
     fut1.futureValue
     fut2.futureValue
@@ -180,14 +180,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should handle errors from ingestStream") {
     memStore.setup(dataset1, 0, TestData.storeConf)
-    var err: Throwable = null
-
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                               .endWithError(new NumberFormatException)
-    val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s) { ex => err = ex }
-    fut.futureValue
-
-    err shouldBe a[NumberFormatException]
+    val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s)
+    whenReady(fut.failed) { e =>
+      e shouldBe a[NumberFormatException]
+    }
   }
 
   it("should ingestStream and flush on interval") {
@@ -200,7 +198,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                            .executeWithModel(BatchedExecution(5))
     val flushStream = FlushStream.everyN(4, 50, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream).futureValue
 
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
@@ -223,7 +221,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
     val flushStream = FlushStream.everyN(2, 10, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream).futureValue
 
     // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
     timebucketsWritten shouldEqual initTimeBuckets + 25
@@ -337,7 +335,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
-    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     val endTime = markPartitionsForEviction(0 to 1)
 
@@ -371,7 +369,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
-    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     val endTime = markPartitionsForEviction(0 to 1)
 

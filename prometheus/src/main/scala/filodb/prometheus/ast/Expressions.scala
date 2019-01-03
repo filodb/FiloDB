@@ -19,7 +19,7 @@ trait Expressions extends Aggregates with Functions {
         if (lhs.isInstanceOf[ScalarExpression] || rhs.isInstanceOf[ScalarExpression])
           throw new IllegalArgumentException("set operators not allowed in binary scalar expression")
 
-      case comparision: Comparision if !comparision.isBool =>
+      case comparison: Comparision if !comparison.isBool =>
         if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression])
           throw new IllegalArgumentException("comparisons between scalars must use BOOL modifier")
       case _ =>

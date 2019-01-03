@@ -107,7 +107,7 @@ trait ReusableMemory extends StrictLogging {
 }
 
 /**
-  * A block is a resuable piece of memory beginning at the address and has a capacity.
+  * A block is a reusable piece of memory beginning at the address and has a capacity.
   * It is capable of holding metadata also for reclaims.
   * Normally usage of a block starts at position 0 and grows upward.  Metadata usage starts at the top and grows
   * downward.  Each piece of metadata must be < 64KB as two bytes are used to denote size at the start of each piece of
@@ -168,7 +168,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
 
   /**
     * @param forSize the size for which to check the capacity for
-    * @return Whether this block has capacity remaining to accomodate passed size of bytes.
+    * @return Whether this block has capacity remaining to accommodate passed size of bytes.
     */
   def hasCapacity(forSize: Long): Boolean = {
     forSize <= remaining()

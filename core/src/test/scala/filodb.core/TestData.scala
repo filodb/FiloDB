@@ -189,7 +189,7 @@ object GdeltTestData {
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
-  val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "p90:double")
+  val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
                        incr: Long = 1000): Stream[Product] = {
@@ -198,7 +198,7 @@ object MachineMetricsData {
        Some((45 + nextInt(10)).toDouble),
        Some((60 + nextInt(25)).toDouble),
        Some((100 + nextInt(15)).toDouble),
-       Some((85 + nextInt(12)).toDouble))
+       Some((85 + nextInt(12)).toLong))
     }
   }
 
@@ -239,7 +239,7 @@ object MachineMetricsData {
          (45 + nextInt(10)).toDouble,
          (60 + nextInt(25)).toDouble,
          (99.9 + nextInt(15)).toDouble,
-         (85 + nextInt(12)).toDouble,
+         (85 + nextInt(12)).toLong,
          "Series " + (n % 10))
     }
   }
@@ -251,19 +251,19 @@ object MachineMetricsData {
          (1 + n).toDouble,
          (20 + n).toDouble,
          (99.9 + n).toDouble,
-         (85 + n).toDouble,
+         (85 + n).toLong,
          "Series " + (n % numSeries))
     }
   }
 
-  def addToBuilder(builder: RecordBuilder, data: Stream[Seq[Any]]): Unit = {
+  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]]): Unit = {
     data.foreach { values =>
       builder.startNewRecord()
       builder.addLong(values(0).asInstanceOf[Long])     // timestamp
       builder.addDouble(values(1).asInstanceOf[Double])  // min
       builder.addDouble(values(2).asInstanceOf[Double])  // avg
       builder.addDouble(values(3).asInstanceOf[Double]) // max
-      builder.addDouble(values(4).asInstanceOf[Double])  // p90
+      builder.addLong(values(4).asInstanceOf[Long])  // count
       builder.addString(values(5).asInstanceOf[String])  // series (partition key)
 
       if (values.length > 6) {

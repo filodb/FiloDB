@@ -5,7 +5,6 @@ import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexPar
 import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
 
-
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
   lazy val identifier: PackratParser[Identifier] = {
@@ -204,7 +203,6 @@ trait Selector extends Operator with Unit with BaseParser {
       InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
 
-
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     labelIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
       case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
@@ -315,6 +313,14 @@ object Parser extends Expression {
       case s: Success[_] => s.get.asInstanceOf[Expression]
       case e: Error => handleError(e, query)
       case f: Failure => handleFailure(f, query)
+    }
+  }
+
+  def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
+    val expression = parseQuery(query)
+    expression match {
+      case p: InstantExpression => MetadataExpression(p).toMetadataQueryPlan(timeParams)
+      case _ => throw new UnsupportedOperationException()
     }
   }
 

@@ -191,7 +191,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val roleToCoords = new MutableHashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
   val datasets = new MutableHashMap[DatasetRef, Dataset]
   val sources = new MutableHashMap[DatasetRef, IngestionSource]
-  val shardManager = new ShardManager(assignmentStrategy)
+  val shardManager = new ShardManager(settings, assignmentStrategy)
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
   val shardUpdates = new MutableHashSet[DatasetRef]
@@ -216,6 +216,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
              }.recover {
                case e: Exception =>
                  logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
+                 // Continue the protocol, so that the singleton can come up
+                 initiateShardStateRecovery()
              }
   }
 
@@ -355,7 +357,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   private def handleShardEvent(e: ShardEvent) = {
     logger.debug(s"Received ShardEvent $e from $sender")
     shardUpdates += e.ref
-    shardManager.updateFromShardEvent(e)
+    shardManager.updateFromExternalShardEvent(sender(), e)
   }
 
   // TODO: Save acks for when snapshots are published?

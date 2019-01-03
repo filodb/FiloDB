@@ -1,5 +1,7 @@
 package filodb.core.query
 
+import scala.collection.mutable
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -31,8 +33,19 @@ class SeqMapConsumer extends MapItemConsumer {
   }
 }
 
+class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
+  var labelValues = mutable.HashSet[UTF8Str]() //to gather unique label values
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    if (column.equals(keyUtf8.toString)) {
+      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+      labelValues += valUtf8
+    }
+  }
+}
+
 /**
-  * Range Vector Key backed by a BinaryRecord v2 partition key, whic is basically a pointer to memory on or offheap.
+  * Range Vector Key backed by a BinaryRecord v2 partition key, which is basically a pointer to memory on or offheap.
   */
 final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partOffset: Long,
@@ -83,25 +96,6 @@ object CustomRangeVectorKey {
 trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
-
-  /**
-    * Pretty prints all the elements into strings.
-    */
-  def prettyPrint(schema: ResultSchema, formatTime: Boolean = true): String = {
-    val curTime = System.currentTimeMillis
-    key.toString + "\n\t" +
-      rows.map {
-        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
-        case reader =>
-          val firstCol = if (formatTime && schema.isTimeSeries) {
-            val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
-          } else {
-            reader.getAny(0).toString
-          }
-          (firstCol +: (1 until schema.length).map(reader.getAny(_).toString)).mkString("\t")
-      }.mkString("\n\t") + "\n"
-  }
 }
 
 // First column of columnIDs should be the timestamp column
@@ -151,6 +145,28 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
+
+  /**
+    * Pretty prints all the elements into strings using record schema
+    */
+  def prettyPrint(formatTime: Boolean = true): String = {
+    val curTime = System.currentTimeMillis
+    key.toString + "\n\t" +
+      rows.map {
+        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
+        case reader =>
+          val firstCol = if (formatTime && schema.isTimeSeries) {
+            val timeStamp = reader.getLong(0)
+            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
+          } else {
+            schema.columnTypes(0) match {
+              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case _ => reader.getAny(0).toString
+            }
+          }
+          (firstCol +: (1 until schema.numColumns).map(reader.getAny(_).toString)).mkString("\t")
+      }.mkString("\n\t") + "\n"
+  }
 }
 
 object SerializableRangeVector extends StrictLogging {
@@ -209,8 +225,10 @@ object SerializableRangeVector extends StrictLogging {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo]): RecordSchema =
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols.map(_.colType)) })
+  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
+    val brSchemas = brColInfos.mapValues(toSchema(_))
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(columns = cols, brSchema = brSchemas) })
+  }
 
   def toBuilder(schema: RecordSchema): RecordBuilder =
     new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)

@@ -76,6 +76,7 @@ object Column extends StrictLogging {
     case object BitmapColumn extends RichColumnType[Boolean]("bitmap")
     case object TimestampColumn extends RichColumnType[Long]("ts")
     case object MapColumn extends RichColumnType[UTF8Map]("map")
+    case object BinaryRecordColumn extends RichColumnType[ZeroCopyUTF8String]("br")
   }
 
   val typeNameToColType = ColumnType.values.map { colType => colType.typeName -> colType }.toMap

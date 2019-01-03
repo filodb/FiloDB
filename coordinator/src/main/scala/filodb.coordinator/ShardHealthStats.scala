@@ -26,6 +26,8 @@ class ShardHealthStats(ref: DatasetRef,
   val numError = Kamon.gauge(s"num-error-shards-$ref")
   val numStopped = Kamon.gauge(s"num-stopped-shards-$ref")
   val numDown = Kamon.gauge(s"num-down-shards-$ref")
+  val numErrorReassignmentsDone = Kamon.counter(s"num-error-reassignments-done-$ref")
+  val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped-$ref")
 
   def update(mapper: ShardMapper): Unit = {
     numActive.set(shardMapFunc.statuses.count(_ == ShardStatusActive))

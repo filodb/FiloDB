@@ -26,7 +26,7 @@ trait RowReader {
 
   def getBlobBase(columnNo: Int): Any
   def getBlobOffset(columnNo: Int): Long
-  def getBlobNumBytes(columnNo: Int): Int
+  def getBlobNumBytes(columnNo: Int): Int // Total number of bytes for the blob
 
   final def getBuffer(columnNo: Int): ByteBuffer = {
     val length = getBlobNumBytes(columnNo)
@@ -230,6 +230,32 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getBlobBase(columnNo: Int): Any = ???
   def getBlobOffset(columnNo: Int): Long = ???
   def getBlobNumBytes(columnNo: Int): Int = ???
+}
+
+final case class ZCUTF8IteratorRowReader(records: Iterator[ZeroCopyUTF8String]) extends Iterator[RowReader] {
+  var currVal: ZeroCopyUTF8String = _
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = currVal.toString
+    def getAny(columnNo: Int): Any = currVal
+
+    def getBlobBase(columnNo: Int): Any = currVal.base
+    def getBlobOffset(columnNo: Int): Long = currVal.offset
+    def getBlobNumBytes(columnNo: Int): Int = currVal.numBytes
+  }
+
+  override def hasNext: Boolean = records.hasNext
+
+  override def next(): RowReader = {
+    currVal = records.next()
+    rowReader
+  }
 }
 
 final case class SchemaSeqRowReader(sequence: Seq[Any],
