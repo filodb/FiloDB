@@ -137,7 +137,7 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
   case object CountValues extends AggregationOperator("count_values")
 
-  case object Quantile extends AggregationOperator("quantile")
+  case object Quantile extends AggregationOperator("le")
 
 }
 
