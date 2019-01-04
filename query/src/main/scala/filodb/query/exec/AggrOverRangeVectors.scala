@@ -572,13 +572,13 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 }
 
 /**
-  * We use the t-Digest data structure to map/reduce le calculation.
+  * We use the t-Digest data structure to map/reduce quantile calculation.
   * See https://github.com/tdunning/t-digest for more details.
   *
   * Map: We map each row to itself
   * ReduceMappedRow: The mapped row is added to the t-digest
   * ReduceAggregate: We merge t-tigest by adding the t-digests to reduce into a single t-digest
-  * Present: The le is calculated from the t-digest.
+  * Present: The quantile is calculated from the t-digest.
   */
 class QuantileRowAggregator(q: Double) extends RowAggregator {
 

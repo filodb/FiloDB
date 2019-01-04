@@ -40,11 +40,11 @@ trait Aggregates extends Vectors with TimeUnits with Base {
       aggOp.equals(AggregationOperator.Quantile)
 
     if (secondParamNeeded && allParams.size < 2)
-      throw new IllegalArgumentException("2 parameters required for count_values, le, topk and bottomk")
+      throw new IllegalArgumentException("2 parameters required for count_values, quantile, topk and bottomk")
 
     if (allParams.size == 2) {
       if (!secondParamNeeded) {
-        throw new IllegalArgumentException("parameter is only required for count_values, le, topk and bottomk")
+        throw new IllegalArgumentException("parameter is only required for count_values, quantile, topk and bottomk")
       }
       allParams.head match {
         case num: ScalarExpression =>
