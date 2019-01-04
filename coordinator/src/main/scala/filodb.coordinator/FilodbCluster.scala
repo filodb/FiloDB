@@ -251,7 +251,7 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
     val allConfig = roleConfig.withFallback(role match {
       // For CLI: leave off Cluster extension as cluster is not needed.  Turn off normal shutdown for quicker exit.
       case ClusterRole.Cli => ConfigFactory.parseString(
-        """akka.actor.provider=akka.remote.RemoteActorRefProvider
+        """# akka.actor.provider=akka.remote.RemoteActorRefProvider
           |akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
           |akka.extensions = ["com.romix.akka.serialization.kryo.KryoSerializationExtension$"]
         """.stripMargin)

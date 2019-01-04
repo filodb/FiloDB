@@ -108,13 +108,16 @@ extends ReadablePartition with MapHolder {
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
+    val ts = dataset.timestamp(row)
+    if (ts < timestampOfLatestSample) {
+      shardStats.outOfOrderDropped.increment
+      return
+    }
     if (currentChunks == nullChunks) {
       // First row of a chunk, set the start time to it
-      initNewChunk(dataset.timestamp(row))
+      initNewChunk(ts)
     }
-
-    // Update the end time as well.  For now assume everything arrives in increasing order
-    ChunkSetInfo.setEndTime(currentInfo.infoAddr, dataset.timestamp(row))
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -126,6 +129,8 @@ extends ReadablePartition with MapHolder {
       }
     }
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+    // Update the end time as well.  For now assume everything arrives in increasing order
+    ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -302,11 +307,13 @@ extends ReadablePartition with MapHolder {
     * not been paged into memory
     */
   final def timestampOfLatestSample: Long = {
-    if (numChunks == 0) {
-      -1
-    } else {
+    if (currentInfo != nullInfo) {   // fastest: get the endtime from current chunk
+      currentInfo.endTime
+    } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
       offheapInfoMap.withShared(this, infoLast.endTime)
+    } else {
+      -1
     }
   }
 
@@ -354,7 +361,7 @@ extends ReadablePartition with MapHolder {
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
 
   // Caller must hold lock on offheapInfoMap.
-  private def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))

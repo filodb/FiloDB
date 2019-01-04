@@ -141,7 +141,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     val initTS = data(0).getLong(0)
     val appendingTS = data.last.getLong(0)
     val minData = data.map(_.getDouble(1))
-    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
+    data.take(10).foreach { r => part.ingest(r, ingestBlockHolder) }
 
     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
     part.switchBuffers(ingestBlockHolder)
@@ -279,6 +279,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Ingest data into 10 TSPartitions and switch and encode all of them.  Now WriteBuffers poolsize should be
     // down 10 and then back up.
     val data = singleSeriesReaders().take(10).toBuffer
+    val moreData = singleSeriesReaders().drop(10).take(50).toBuffer
     val origPoolSize = myBufferPool.poolSize
     val partitions = (0 to 9).map { partNo =>
       makePart(partNo, dataset1)
@@ -295,7 +296,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Do this 4 more times so that we get old recycled metadata back
     (0 until 4).foreach { n =>
       (0 to 9).foreach { i =>
-      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+        moreData.drop(n*10).take(10).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
         partitions(i).appendingChunkLen shouldEqual 10
         partitions(i).switchBuffers(ingestBlockHolder, true)
       }
@@ -303,7 +304,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     // Now ingest again but don't switch buffers.  Ensure appendingChunkLen is appropriate.
     (0 to 9).foreach { i =>
-      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+      moreData.drop(40).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).appendingChunkLen shouldEqual 10
     }
   }
@@ -342,4 +343,44 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.appendingChunkLen shouldEqual 0
     chunkSets.map(_.info.numRows) shouldEqual Seq(100, 10)
   }
+
+  it("should drop out of time order ingested samples") {
+    part = makePart(0, dataset1)
+    val data = singleSeriesReaders().take(12)
+    val minData = data.map(_.getDouble(1))
+
+    // Ingest first 5, then: 8th, 6th, 7th, 9th, 10th
+    data.take(5).foreach { r => part.ingest(r, ingestBlockHolder) }
+    part.ingest(data(7), ingestBlockHolder)
+    part.ingest(data(5), ingestBlockHolder)
+    part.ingest(data(6), ingestBlockHolder)
+    part.ingest(data(8), ingestBlockHolder)
+    part.ingest(data(9), ingestBlockHolder)
+
+    // Try ingesting old sample now at the end.  Verify that end time of chunkInfo is not incorrectly changed.
+    part.ingest(data(2), ingestBlockHolder)
+    // 8 of first 10 ingested, 2 should be dropped.  Switch buffers, and try ingesting out of order again.
+    part.appendingChunkLen shouldEqual 8
+    part.infoLast.numRows shouldEqual 8
+    part.infoLast.endTime shouldEqual data(9).getLong(0)
+
+    part.switchBuffers(ingestBlockHolder)
+    part.appendingChunkLen shouldEqual 0
+
+    // Now try ingesting an old smaple again at first element of next chunk.
+    part.ingest(data(8), ingestBlockHolder)   // This one should be dropped
+    part.appendingChunkLen shouldEqual 0
+    part.ingest(data(10), ingestBlockHolder)
+    part.ingest(data(11), ingestBlockHolder)
+
+    // there should be a frozen chunk of 10 records plus 2 records in currently appending chunks
+    part.numChunks shouldEqual 2
+    part.appendingChunkLen shouldEqual 2
+    val readData1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0))
+    readData1.toBuffer shouldEqual (minData take 5) ++ (minData drop 7)
+    val timestamps = data.map(_.getLong(0))
+    val readData2 = part.timeRangeRows(AllChunkScan, Array(0)).map(_.getLong(0))
+    readData2.toBuffer shouldEqual (timestamps take 5) ++ (timestamps drop 7)
+  }
+
 }

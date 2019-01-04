@@ -611,15 +611,14 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
       // All of these should be using registers for super fast calculations
       val _head = initState.head
       val _maxElem = initState.maxElem
-      // trouble in paradise/bad state; reset
-      if (initState == MapState.empty || initState.copyFlag || _maxElem == 0) return false
+      // Below should never happen with exclusive locking during writes
+      require(initState != MapState.empty && !initState.copyFlag)
       val _len = initState.length
       // If empty, add to head
       if (_len == 0) { atomicHeadAdd(_mapPtr, initState, newElem) }
       else {
         // Problem with checking head is that new element might not have been written just after CAS succeeds
         val headElem = getElem(_mapPtr, _head)
-        if (!check(_mapPtr, initState)) return false
         val headKey = keyFunc(headElem)
         // If key == head element key, directly replace w/o binary search
         if (key == headKey) { atomicReplace(_mapPtr, _head, headElem, newElem) }

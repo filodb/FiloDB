@@ -123,6 +123,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   }
 
   val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
+  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("count", DoubleColumn)), 1)
   val qOpt = QueryOptions(shardOverrides = Some(Seq(0)))
 
   describe("QueryActor commands and responses") {
@@ -173,21 +174,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       }
     }
 
-    // This is not really possible with Prom parser because function names are not passed in, they are parsed
-    // it("should return BadQuery if aggregation function not defined") {
-    //   val ref = setupTimeSeries()
-    //   val q1 = LogicalPlanQuery(ref, simpleAgg("not-a-func", childPlan=
-    //              PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("foo"))))
-    //   probe.send(coordinatorActor, q1)
-    //   probe.expectMsg(BadQuery("No such aggregation function not-a-func"))
-
-    //   // Need time-group-min (eg dashes)
-    //   val q2 = LogicalPlanQuery(ref, simpleAgg("TimeGroupMin", childPlan=
-    //              PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min"))))
-    //   probe.send(coordinatorActor, q2)
-    //   probe.expectMsg(BadQuery("No such aggregation function TimeGroupMin"))
-    // }
-
     // This actually returns a QueryError, but it should be validation done instead
     ignore("should return BadArgument if arguments could not be parsed successfully") {
       val ref = setupTimeSeries()
@@ -214,9 +200,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
-                 // PeriodicSeriesWithWindowing(
-                 //   RawSeries(AllChunksSelector, multiFilter, Seq("min")),
-                 //   120000L, 10000L, 130000L, window=10000L, function=RangeFunctionId.AvgOverTime))
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -225,13 +208,26 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
 
-      // What if filter returns no results?
+      // Query the "count" long column, validate schema.  Should be able to translate everything
       val q3 = LogicalPlan2Query(ref,
+                 Aggregate(AggregationOperator.Avg,
+                   PeriodicSeries(
+                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)), qOpt)
+      probe.send(coordinatorActor, q3)
+      probe.expectMsgPF() {
+        case QueryResult(_, schema, vectors) =>
+          schema shouldEqual countSchema
+          vectors should have length (1)
+          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
+      }
+
+      // What if filter returns no results?
+      val q4 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, filters("series" -> "foobar"), Seq("min")),
                      120000L, 10000L, 130000L)), qOpt)
-      probe.send(coordinatorActor, q3)
+      probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
           schema shouldEqual timeMinSchema
@@ -262,7 +258,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors) =>
           schema shouldEqual timeMinSchema
           vectors should have length (1)
-          // TODO: for some reason the average computed is actually 14.0, 24.0, 14.0, when it should be 4.0
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 4.0)
       }
     }

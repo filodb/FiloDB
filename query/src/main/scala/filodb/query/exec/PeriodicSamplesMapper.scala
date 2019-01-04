@@ -3,7 +3,9 @@ package filodb.query.exec
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
-import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnInfo, IteratorBackedRangeVector, RangeVector, ResultSchema}
 import filodb.memory.format.RowReader
 import filodb.query.{Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{RangeFunction, Window}
@@ -35,13 +37,33 @@ final case class PeriodicSamplesMapper(start: Long,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorTransformer.requireTimeSeries(sourceSchema)
-    source.map { rv =>
-      IteratorBackedRangeVector(rv.key,
-        new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
-          RangeFunction(functionId, funcParams), queryConfig))
+    RangeVectorTransformer.valueColumnType(sourceSchema) match {
+      case ColumnType.DoubleColumn =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
+              RangeFunction(functionId, funcParams), queryConfig))
+        }
+      case ColumnType.LongColumn =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
+              RangeFunction(functionId, funcParams), queryConfig))
+        }
+      case t: ColumnType => throw new IllegalArgumentException(s"Column type $t is not supported for queries")
     }
   }
+
+  // Transform source double or long to double schema
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema =
+    source.copy(columns = source.columns.zipWithIndex.map {
+      // Transform if its not a row key column
+      case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
+        ColumnInfo(name, ColumnType.DoubleColumn)
+      case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
+        ColumnInfo(name, ColumnType.DoubleColumn)
+      case (c: ColumnInfo, _) => c
+    })
 }
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
@@ -72,7 +94,9 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   // this is the object that will be exposed to the RangeFunction
   private val windowSamples = new QueueBasedWindow(windowQueue)
 
-  // TODO This can be removed once we fix order during ingestion. Or is it required to validate anyway?
+  // NOTE: Ingestion now has a facility to drop out of order samples.  HOWEVER, there is one edge case that may happen
+  // which is that the first sample ingested after recovery may not be in order w.r.t. previous persisted timestamp.
+  // So this is retained for now while we consider a more permanent out of order solution.
   private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
 
   // we need buffered iterator so we can use to peek at next element.
@@ -150,6 +174,20 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
         // 2. if needs last sample, then ok to remove window's head only if there is more than one item in window
         (rangeFunction.needsLastSample && windowQueue.size > 1 && windowQueue.head.timestamp <= curWindowStart)
     )
+  }
+}
+
+/**
+  * Converts the long value column to double.
+  */
+class LongToDoubleIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+  val sampleToEmit = new TransientRow()
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): TransientRow = {
+    val next = iter.next()
+    sampleToEmit.setLong(0, next.getLong(0))
+    sampleToEmit.setDouble(1, next.getLong(1).toDouble)
+    sampleToEmit
   }
 }
 
