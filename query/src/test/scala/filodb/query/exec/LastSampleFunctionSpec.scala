@@ -5,7 +5,7 @@ import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration._
 import scala.util.Random
 
-import filodb.query.exec.rangefn.{LastSampleChunkedFunction, LastSampleFunction, RawDataWindowingSpec}
+import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
 class LastSampleFunctionSpec extends RawDataWindowingSpec {
 
@@ -16,7 +16,7 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
   val rv = timeValueRV(samples)
   val w = 5.minutes.toMillis     // window size = lookback time
 
-  val chunkedLSFunc = new LastSampleChunkedFunction()
+  val chunkedLSFunc = new LastSampleChunkedFunctionD
 
   it ("should work for various start times") {
     val step = 2000

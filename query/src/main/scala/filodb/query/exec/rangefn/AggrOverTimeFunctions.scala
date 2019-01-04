@@ -44,18 +44,28 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   }
 }
 
-class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedDoubleRangeFunction {
+abstract class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedRangeFunction {
   override final def reset(): Unit = { sum = 0d }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, sum)
+  }
+}
 
+class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with ChunkedDoubleRangeFunction {
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
   }
+}
 
-  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, sum)
+class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with ChunkedLongRangeFunction {
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    sum += longReader.sum(longVect, startRowNum, endRowNum)
   }
 }
 
@@ -111,9 +121,14 @@ class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends Rang
   }
 }
 
-class AvgOverTimeChunkedFunctionD(var sum: Double = 0d, var count: Int = 0) extends ChunkedDoubleRangeFunction {
+abstract class AvgOverTimeChunkedFunction(var sum: Double = 0d, var count: Int = 0) extends ChunkedRangeFunction {
   override final def reset(): Unit = { sum = 0d; count = 0 }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
+  }
+}
 
+class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with ChunkedDoubleRangeFunction {
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
@@ -121,9 +136,15 @@ class AvgOverTimeChunkedFunctionD(var sum: Double = 0d, var count: Int = 0) exte
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
     count += (endRowNum - startRowNum + 1)
   }
+}
 
-  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
+class AvgOverTimeChunkedFunctionL extends AvgOverTimeChunkedFunction() with ChunkedLongRangeFunction {
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    sum += longReader.sum(longVect, startRowNum, endRowNum)
+    count += (endRowNum - startRowNum + 1)
   }
 }
 
@@ -208,6 +229,46 @@ class StdDevOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
 }
 
 class StdVarOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val avg = if (count > 0) sum/count else 0d
+    val stdVar = squaredSum/count - avg*avg
+    sampleToEmit.setValues(endTimestamp, stdVar)
+  }
+}
+
+abstract class VarOverTimeChunkedFunctionL(var sum: Double = 0d,
+                                           var count: Int = 0,
+                                           var squaredSum: Double = 0d) extends ChunkedLongRangeFunction {
+  override final def reset(): Unit = { sum = 0d; count = 0; squaredSum = 0d }
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    val it = longReader.iterate(longVect, startRowNum)
+    var _sum = 0d
+    var _sqSum = 0d
+    var elemNo = startRowNum
+    while (elemNo <= endRowNum) {
+      val nextValue = it.next.toDouble
+      _sum += nextValue
+      _sqSum += nextValue * nextValue
+      elemNo += 1
+    }
+    count += (endRowNum - startRowNum + 1)
+    sum += _sum
+    squaredSum += _sqSum
+  }
+}
+
+class StdDevOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val avg = if (count > 0) sum/count else 0d
+    val stdDev = Math.sqrt(squaredSum/count - avg*avg)
+    sampleToEmit.setValues(endTimestamp, stdDev)
+  }
+}
+
+class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val avg = if (count > 0) sum/count else 0d
     val stdVar = squaredSum/count - avg*avg

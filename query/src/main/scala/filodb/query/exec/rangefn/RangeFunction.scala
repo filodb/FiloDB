@@ -1,5 +1,6 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector}
 import filodb.query.{QueryConfig, RangeFunctionId}
@@ -136,36 +137,111 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
                           endRowNum: Int): Unit
 }
 
-object RangeFunction {
-  def apply(func: Option[RangeFunctionId],
-            funcParams: Seq[Any] = Nil,
-            useChunked: Boolean = true): RangeFunction = if (useChunked) func match {
-    case None                 => new LastSampleChunkedFunction()
-    case Some(CountOverTime)  => new CountOverTimeChunkedFunction()
-    case Some(SumOverTime)    => new SumOverTimeChunkedFunction()
-    case Some(AvgOverTime)    => new AvgOverTimeChunkedFunctionD()
-    case Some(StdDevOverTime) => new StdDevOverTimeChunkedFunctionD()
-    case Some(StdVarOverTime) => new StdVarOverTimeChunkedFunctionD()
-    case _                    => iteratingFunction(func, funcParams)
-  } else iteratingFunction(func, funcParams)
+trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
+    val timestampVector = info.vectorPtr(tsCol)
+    val tsReader = bv.LongBinaryVector(timestampVector)
+    val longVector = info.vectorPtr(valueCol)
+    val longReader = bv.LongBinaryVector(longVector)
 
+    // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
+    // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
+    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+
+    addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+  }
+
+  /**
+   * Add a Long BinaryVector in the range (startRowNum, endRowNum) to the range computation
+   * @param startRowNum the row number for timestamp greater than or equal to startTime
+   * @param endRowNum the row number with the timestamp <= endTime
+   */
+  def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                        longReader: bv.LongVectorDataReader,
+                        startRowNum: Int,
+                        endRowNum: Int): Unit
+}
+
+object RangeFunction {
+  type RangeFunctionGenerator = () => RangeFunction
+
+  /**
+   * Returns a (probably new) instance of RangeFunction given the func ID and column type
+   */
+  def apply(func: Option[RangeFunctionId],
+            columnType: ColumnType,
+            funcParams: Seq[Any] = Nil,
+            useChunked: Boolean): RangeFunction =
+    generatorFor(func, columnType, funcParams, useChunked)()
+
+  /**
+   * Given a function type and column type, returns a RangeFunctionGenerator
+   */
+  def generatorFor(func: Option[RangeFunctionId],
+                   columnType: ColumnType,
+                   funcParams: Seq[Any] = Nil,
+                   useChunked: Boolean = true): RangeFunctionGenerator =
+    if (useChunked) columnType match {
+      case ColumnType.DoubleColumn => doubleChunkedFunction(func, funcParams)
+      case ColumnType.LongColumn   => longChunkedFunction(func, funcParams)
+      case ColumnType.TimestampColumn => longChunkedFunction(func, funcParams)
+      case other: ColumnType       => throw new IllegalArgumentException(s"Column type $other not supported")
+    } else {
+      iteratingFunction(func, funcParams)
+    }
+
+  /**
+   * Returns a function to generate a ChunkedRangeFunction for Long columns
+   */
+  def longChunkedFunction(func: Option[RangeFunctionId],
+                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    case None                 => () => new LastSampleChunkedFunctionL
+    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
+    case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
+    case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionL
+    case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
+    case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionL
+    case _                    => iteratingFunction(func, funcParams)
+  }
+
+  /**
+   * Returns a function to generate a ChunkedRangeFunction for Double columns
+   */
+  def doubleChunkedFunction(func: Option[RangeFunctionId],
+                            funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    case None                 => () => new LastSampleChunkedFunctionD
+    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
+    case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
+    case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
+    case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
+    case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
+    case _                    => iteratingFunction(func, funcParams)
+  }
+
+  /**
+   * Returns a function to generate the RangeFunction for SlidingWindowIterator.
+   * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
+   */
   def iteratingFunction(func: Option[RangeFunctionId],
-                        funcParams: Seq[Any] = Nil): RangeFunction = func match {
-    case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
-    case Some(Rate)             => RateFunction
-    case Some(Increase)         => IncreaseFunction
-    case Some(Delta)            => DeltaFunction
-    case Some(Resets)           => ResetsFunction
-    case Some(Irate)            => IRateFunction
-    case Some(Idelta)           => IDeltaFunction
-    case Some(Deriv)            => DerivFunction
-    case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
-    case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
-    case Some(CountOverTime)    => new CountOverTimeFunction()
-    case Some(SumOverTime)      => new SumOverTimeFunction()
-    case Some(AvgOverTime)      => new AvgOverTimeFunction()
-    case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
-    case Some(StdVarOverTime)   => new StdVarOverTimeFunction()
+                        funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    // when no window function is asked, use last sample for instant
+    case None                   => () => LastSampleFunction
+    case Some(Rate)             => () => RateFunction
+    case Some(Increase)         => () => IncreaseFunction
+    case Some(Delta)            => () => DeltaFunction
+    case Some(Resets)           => () => ResetsFunction
+    case Some(Irate)            => () => IRateFunction
+    case Some(Idelta)           => () => IDeltaFunction
+    case Some(Deriv)            => () => DerivFunction
+    case Some(MaxOverTime)      => () => new MinMaxOverTimeFunction(Ordering[Double])
+    case Some(MinOverTime)      => () => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+    case Some(CountOverTime)    => () => new CountOverTimeFunction()
+    case Some(SumOverTime)      => () => new SumOverTimeFunction()
+    case Some(AvgOverTime)      => () => new AvgOverTimeFunction()
+    case Some(StdDevOverTime)   => () => new StdDevOverTimeFunction()
+    case Some(StdVarOverTime)   => () => new StdVarOverTimeFunction()
     case _                      => ???
   }
 }
@@ -191,9 +267,10 @@ object LastSampleFunction extends RangeFunction {
 
 /**
  * Directly obtain the last sample from chunks for much much faster performance compared to above
+ * TODO: one day we should expose higher level means of returning the actual Long value instead of converting to Double
  */
-class LastSampleChunkedFunction(var timestamp: Long = -1L,
-                                var value: Double = Double.NaN) extends ChunkedRangeFunction {
+abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
+                                         var value: Double = Double.NaN) extends ChunkedRangeFunction {
   override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
@@ -213,10 +290,26 @@ class LastSampleChunkedFunction(var timestamp: Long = -1L,
       val ts = tsReader(timestampVector, endRowNum)
       if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
         timestamp = ts
-        val dblVector = info.vectorPtr(valueCol)
-        val dblReader = bv.DoubleVector(dblVector)
-        value = dblReader(dblVector, endRowNum)
+        updateValue(info, valueCol, endRowNum)
       }
     }
+  }
+
+  def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit
+}
+
+class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
+  final def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit = {
+    val dblVector = info.vectorPtr(valueCol)
+    val dblReader = bv.DoubleVector(dblVector)
+    value = dblReader(dblVector, endRowNum)
+  }
+}
+
+class LastSampleChunkedFunctionL extends LastSampleChunkedFunction() {
+  final def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit = {
+    val longVector = info.vectorPtr(valueCol)
+    val longReader = bv.LongBinaryVector(longVector)
+    value = longReader(longVector, endRowNum).toDouble
   }
 }

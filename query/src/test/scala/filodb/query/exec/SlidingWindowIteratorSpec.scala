@@ -3,6 +3,7 @@ package filodb.query.exec
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
+import filodb.core.metadata.Column.ColumnType
 import filodb.query.{QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.RangeFunction
 
@@ -136,7 +137,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
   it ("should ignore out of order samples for RateFunction") {
     val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1538416154000L, 20000, 1538416649000L,20000,
-      RangeFunction(Some(RangeFunctionId.Rate)), queryConfig)
+      RangeFunction(Some(RangeFunctionId.Rate), ColumnType.DoubleColumn, useChunked = false), queryConfig)
     slidingWinIterator.foreach{ v =>
       // if out of order samples are not removed, counter correction causes rate to spike up to very high value
       v.value should be < 10000d
@@ -161,7 +162,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
     val end = 1000L
     val step = 5
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, start, step,
-      end, 0, RangeFunction(None, useChunked = false), queryConfig)
+      end, 0, RangeFunction(None, ColumnType.DoubleColumn, useChunked = false), queryConfig)
     val result = slidingWinIterator.map(v => (v.timestamp, v.value)).toSeq
     result.map(_._1) shouldEqual (start to end).by(step)
     result.foreach{ v =>
@@ -187,7 +188,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
 
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 50000L, 100000, 1100000L, 100000,
-      RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false), queryConfig)
+      RangeFunction(Some(RangeFunctionId.SumOverTime), ColumnType.DoubleColumn, useChunked = false), queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual Seq(
       50000->0.0,
       150000->1.0,
@@ -216,7 +217,8 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1540845090000L,
                                                        15000, 1540855905000L, 0,
-                                                       RangeFunction(None, useChunked = false), queryConfig)
+                                                       RangeFunction(None, ColumnType.DoubleColumn, useChunked = false),
+                                                       queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual Seq(
       1540846755000L->237,
       1540846770000L->237,

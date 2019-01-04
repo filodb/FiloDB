@@ -39,31 +39,36 @@ final case class PeriodicSamplesMapper(start: Long,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    // Really, use the stale lookback window size, not 0 which doesn't make sense
-    val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
+    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams)
 
-    RangeVectorTransformer.valueColumnType(sourceSchema) match {
-      case ColumnType.DoubleColumn =>
+    // Generate one range function to check if it is chunked
+    val sampleRangeFunc = rangeFuncGen()
+    sampleRangeFunc match {
+      // Chunked: use it and trust it has the right type
+      case c: ChunkedRangeFunction =>
+        // Really, use the stale lookback window size, not 0 which doesn't make sense
+        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
         source.map { rv =>
-          // TODO: move this out of the inner loop somehow
-          RangeFunction(functionId, funcParams, useChunked = true) match {
-            case c: ChunkedRangeFunction if rv.isInstanceOf[RawDataRangeVector] =>
-              IteratorBackedRangeVector(rv.key,
-                new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                          windowLength, c, queryConfig)())
-            case f: RangeFunction =>
-              IteratorBackedRangeVector(rv.key,
-                new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L), f, queryConfig))
-          }
+          IteratorBackedRangeVector(rv.key,
+            new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+                                      windowLength, rangeFuncGen().asInstanceOf[ChunkedRangeFunction],
+                                      queryConfig)())
         }
-      case ColumnType.LongColumn =>
-        // TODO: add support for chunked Long-typed range functions
+      // Iterator-based: Wrap long columns to yield a double value
+      case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
-              RangeFunction(functionId, funcParams, useChunked = false), queryConfig))
+              rangeFuncGen(), queryConfig))
         }
-      case t: ColumnType => throw new IllegalArgumentException(s"Column type $t is not supported for queries")
+      // Otherwise just feed in the double column
+      case f: RangeFunction =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
+              rangeFuncGen(), queryConfig))
+        }
     }
   }
 

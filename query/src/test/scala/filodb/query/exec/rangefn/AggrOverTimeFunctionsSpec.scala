@@ -7,6 +7,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.memstore.{TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.core.{MetricsTestData, TestData}
@@ -90,11 +91,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   val rand = new Random()
 
   it ("aggregation functions should work correctly on a sliding window") {
-    val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), useChunked = false)
-    val count = RangeFunction(Some(RangeFunctionId.CountOverTime), useChunked = false)
-    val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime), useChunked = false)
-    val min = RangeFunction(Some(RangeFunctionId.MinOverTime), useChunked = false)
-    val max = RangeFunction(Some(RangeFunctionId.MaxOverTime), useChunked = false)
+    val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), ColumnType.DoubleColumn, useChunked = false)
+    val count = RangeFunction(Some(RangeFunctionId.CountOverTime), ColumnType.DoubleColumn, useChunked = false)
+    val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime), ColumnType.DoubleColumn, useChunked = false)
+    val min = RangeFunction(Some(RangeFunctionId.MinOverTime), ColumnType.DoubleColumn, useChunked = false)
+    val max = RangeFunction(Some(RangeFunctionId.MaxOverTime), ColumnType.DoubleColumn, useChunked = false)
 
     val fns = Array(sum, count, avg, min, max)
 
@@ -160,7 +161,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       // drop first sample because of exclusive start
       aggregated shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
 
-      val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunction(), windowSize, step)
+      val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
     }

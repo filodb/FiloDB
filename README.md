@@ -706,7 +706,7 @@ You can get the huge variety of JMH options by running `jmh:run -help`.  For goo
 
 This should last a good 15 minutes at least.  While it is running, fire up JMC (java Mission Control) and flight record the "jmh.ForkMain" process for 15 minutes.  This gives you excellent CPU as well as memory allocation analysis.
 
-You can also run a stack profiler with an option like ` -prof stack:lines=4;detailLine=true`, but the analysis is not as good as JMC/JVisualVM/YourKit etc., or even the flamegraph options.
+Another good option is generating a FlameGraph:  `-prof jmh.extras.Async:dir=/tmp/filodbprofile`. Be sure to read the instructions for setting up FlameGraph profiling.  You can also run a stack profiler with an option like ` -prof stack:lines=4;detailLine=true`, but the analysis is not as good as JMC or Async Profiler/FlameGraph/
 
 There is also a script, `run_benchmarks.sh`
 
