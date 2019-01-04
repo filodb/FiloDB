@@ -106,9 +106,11 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     expectMsgPF(10.seconds.dilated) {
       case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
     }
+    info(s"Initial shardmapper snapshot = $mapper")
 
     // wait for all ingestion to be stopped, keep receiving status messages
     while(!hasAllShardsStopped(mapper)) {
+      println(s"Not all shards stopped, waiting for shard updates...  mapper is now $mapper")
       expectMsgPF(10.seconds.dilated) {
         case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
       }
