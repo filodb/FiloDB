@@ -28,40 +28,48 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
   /**
     * Represents a prometheus histogram bucket for quantile calculation purposes.
     * @param le the less-than boundary for histogram bucket
-    * @param count number of occurrences
+    * @param rate rate of occurrence for the bucket
     */
-  case class Bucket(val le: Double, var count: Double)
+  case class Bucket(val le: Double, var rate: Double)
 
   /**
-    * Groups incoming range vectors by histogram, calculates le for each histogram
-    * using the buckets supplied for it.
+    * Groups incoming bucket range vectors by histogram name. It then calculates quantile for each histogram
+    * using the buckets supplied for it. It is assumed that each bucket value contains rate of increase for that
+    * bucket.
     *
-    * Important note: The source range vectors for each bucket should NOT be the counter values,
-    * but should be the rate of increase. The histogram_quantile function should always
+    * Important Note: The source range vectors for each bucket should NOT be the counter values themselves,
+    * but should be the rate of increase for that bucket counter. The histogram_quantile function should always
     * be preceded by a rate function or a sum-of-rate function.
     */
   override def apply(source: Observable[RangeVector],
                      queryConfig: QueryConfig, limit: Int,
                      sourceSchema: ResultSchema): Observable[RangeVector] = {
     val res = source.toListL.map { rvs =>
+
+      // first group the buckets by histogram
       val histograms = groupRangeVectorsByHistogram(rvs)
+
+      // calculate quantile for each bucket
       val quantileResults = histograms.map { histBuckets =>
+
+        // sort the bucket range vectors by increasing le tag value
         val sortedBucketRvs = histBuckets._2.toArray.map { bucket =>
           val leStr = bucket.key.labelValues(le).toString
           val leDouble = if (leStr == "+Inf") Double.PositiveInfinity else leStr.toDouble
           leDouble -> bucket
         }.sortBy(_._1)
 
-        // apply counter correction on the buckets
-        val samples = sortedBucketRvs.map(rv => new BufferableCounterCorrectionIterator(rv._2.rows))
-        val buckets = sortedBucketRvs.map {b => Bucket(b._1, 0d)}
+        val samples = sortedBucketRvs.map(_._2.rows)
+        val buckets = sortedBucketRvs.map { b => Bucket(b._1, 0d) }
+
+        // create the result iterator that lazily produces quantile for each timestamp
         val quantileResult = new Iterator[RowReader] {
           val row = new TransientRow()
           override def hasNext: Boolean = samples.forall(_.hasNext)
           override def next(): RowReader = {
             for { i <- 0 until samples.length } {
               val nxt = samples(i).next()
-              buckets(i).count = nxt.getDouble(1)
+              buckets(i).rate = nxt.getDouble(1)
               row.timestamp = nxt.getLong(0)
             }
             row.value = histogramQuantile(quantile, buckets)
@@ -100,20 +108,20 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
       else {
         ensureMonotonic(buckets)
         // find rank for the quantile using total number of occurrences
-        var rank = q * buckets.last.count
+        var rank = q * buckets.last.rate
         // using rank, find the le bucket which would have the requested quantile
-        val b = buckets.indexWhere(_.count >= rank)
+        val b = buckets.indexWhere(_.rate >= rank)
 
         // calculate quantile
         if (b == buckets.length-1) return buckets(buckets.length-2).le
         else if (b == 0 && buckets.head.le <= 0) return buckets.head.le
         else {
           // interpolate quantile within le bucket
-          var (bucketStart, bucketEnd, count) = (0d, buckets(b).le, buckets(b).count)
+          var (bucketStart, bucketEnd, count) = (0d, buckets(b).le, buckets(b).rate)
           if (b > 0) {
             bucketStart = buckets(b-1).le
-            count -= buckets(b-1).count
-            rank -= buckets(b-1).count
+            count -= buckets(b-1).rate
+            rank -= buckets(b-1).rate
           }
           bucketStart + (bucketEnd-bucketStart)*(rank/count)
         }
@@ -122,16 +130,17 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
   }
 
   /**
-    * Fixes any issue with monotonicity of supplied bucket counts.
-    * This could happen if the bucket count values are not atomically obtained,
-    * or if bucket le values change over time.
+    * Fixes any issue with monotonicity of supplied bucket rates.
+    * Rates on increasing le buckets should monotonically increase. It may not be the case
+    * if the bucket values are not atomically obtained from the same scrape,
+    * or if bucket le values change over time causing NaN on missing buckets.
     */
   private def ensureMonotonic(buckets: Seq[Bucket]): Unit = {
     var max = 0d
     buckets.foreach{ b =>
-      if (b.count.isNaN) b.count = max
-      else if (b.count > max) max = b.count
-      else if (b.count < max) b.count = max
+      if (b.rate.isNaN) b.rate = max
+      else if (b.rate > max) max = b.rate
+      else if (b.rate < max) b.rate = max
     }
   }
 
