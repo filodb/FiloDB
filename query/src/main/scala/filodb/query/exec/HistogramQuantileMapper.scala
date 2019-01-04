@@ -4,7 +4,7 @@ import monix.reactive.Observable
 
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.QueryConfig
+import filodb.query.{Query, QueryConfig}
 
 object HistogramQuantileMapper {
   import ZeroCopyUTF8String._
@@ -12,25 +12,26 @@ object HistogramQuantileMapper {
 }
 
 /**
-  * Calculates histogram le for one or more histograms whose bucket range vectors are passed
+  * Calculates histogram quantile for one or more histograms whose bucket range vectors are passed
   * into the apply function.
   *
-  * @param funcParams
+  * @param funcParams Needs one double quantile argument
   */
 case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTransformer {
 
   import HistogramQuantileMapper._
-  require(funcParams.size == 1,
-    "histogram_quantile function needs a single le argument")
+  require(funcParams.size == 1, "histogram_quantile function needs a single quantile argument")
 
   private val quantile = funcParams.head.asInstanceOf[Number].doubleValue()
 
   /**
     * Represents a prometheus histogram bucket for quantile calculation purposes.
-    * @param le the less-than boundary for histogram bucket
-    * @param rate rate of occurrence for the bucket
+    * @param le the less-than-equals boundary for histogram bucket
+    * @param rate number of occurrences for the bucket per second
     */
-  case class Bucket(val le: Double, var rate: Double)
+  case class Bucket(val le: Double, var rate: Double) {
+    override def toString: String = s"$le->$rate"
+  }
 
   /**
     * Groups incoming bucket range vectors by histogram name. It then calculates quantile for each histogram
@@ -60,6 +61,8 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
         }.sortBy(_._1)
 
         val samples = sortedBucketRvs.map(_._2.rows)
+
+        // The buckets here will be populated for each instant for quantile calculation
         val buckets = sortedBucketRvs.map { b => Bucket(b._1, 0d) }
 
         // create the result iterator that lazily produces quantile for each timestamp
@@ -90,29 +93,29 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     */
   private def groupRangeVectorsByHistogram(rvs: Seq[RangeVector]): Map[CustomRangeVectorKey, Seq[RangeVector]] = {
     rvs.groupBy { rv =>
-      val resultKey = rv.key.labelValues - le
+      val resultKey = rv.key.labelValues - le // remove the le tag from the labels
       CustomRangeVectorKey(resultKey)
     }
   }
 
   /**
-    * Calculates histogram le using the bucket values.
+    * Calculates histogram quantile using the bucket values.
     * Similar to prometheus implementation for consistent results.
     */
-  private def histogramQuantile(q: Double, buckets: Seq[Bucket]): Double = {
-    if (q < 0) Double.NegativeInfinity
+  private def histogramQuantile(q: Double, buckets: Array[Bucket]): Double = {
+    val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (buckets.length < 2) Double.NaN
     else {
       if (!buckets.last.le.isPosInfinity) return Double.NaN
       else {
-        ensureMonotonic(buckets)
+        makeMonotonic(buckets)
         // find rank for the quantile using total number of occurrences
         var rank = q * buckets.last.rate
-        // using rank, find the le bucket which would have the requested quantile
+        // using rank, find the le bucket which would have the identified rank
         val b = buckets.indexWhere(_.rate >= rank)
 
-        // calculate quantile
+        // now calculate quantile
         if (b == buckets.length-1) return buckets(buckets.length-2).le
         else if (b == 0 && buckets.head.le <= 0) return buckets.head.le
         else {
@@ -127,6 +130,8 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
         }
       }
     }
+    Query.qLogger.debug(s"Quantile $q for buckets $buckets was $result")
+    result
   }
 
   /**
@@ -135,14 +140,15 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * if the bucket values are not atomically obtained from the same scrape,
     * or if bucket le values change over time causing NaN on missing buckets.
     */
-  private def ensureMonotonic(buckets: Seq[Bucket]): Unit = {
+  private def makeMonotonic(buckets: Array[Bucket]): Unit = {
     var max = 0d
-    buckets.foreach{ b =>
-      if (b.rate.isNaN) b.rate = max
-      else if (b.rate > max) max = b.rate
-      else if (b.rate < max) b.rate = max
+    buckets.foreach { b =>
+      // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
+      // newer buckets are introduced and not all instances are updated with that bucket.
+      if (b.rate < max || b.rate.isNaN) b.rate = max // assign previous max
+      else if (b.rate > max) max = b.rate // update max
     }
   }
 
-  override protected[exec] def args: String = s"le=$quantile"
+  override protected[exec] def args: String = s"quantile=$quantile"
 }
