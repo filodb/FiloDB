@@ -99,7 +99,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
         r
       }
     }
-    awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
+    // awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
     enterBarrier("cluster-actor-recovery-started")
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)
