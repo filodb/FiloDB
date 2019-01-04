@@ -1,21 +1,18 @@
 package filodb.query.exec.rangefn
 
-import scala.collection.mutable
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.memstore.{TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.core.{MetricsTestData, TestData}
 import filodb.memory._
 import filodb.memory.format.TupleRowReader
-import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.exec.{ChunkedWindowIterator, QueueBasedWindow, SlidingWindowIterator, TransientRow}
-import filodb.query.util.IndexedArrayQueue
+import filodb.query.QueryConfig
+import filodb.query.exec.{ChunkedWindowIterator, SlidingWindowIterator}
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
@@ -90,60 +87,6 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   val rand = new Random()
 
-  it ("aggregation functions should work correctly on a sliding window") {
-    val sum = RangeFunction(Some(RangeFunctionId.SumOverTime), ColumnType.DoubleColumn, useChunked = false)
-    val count = RangeFunction(Some(RangeFunctionId.CountOverTime), ColumnType.DoubleColumn, useChunked = false)
-    val avg = RangeFunction(Some(RangeFunctionId.AvgOverTime), ColumnType.DoubleColumn, useChunked = false)
-    val min = RangeFunction(Some(RangeFunctionId.MinOverTime), ColumnType.DoubleColumn, useChunked = false)
-    val max = RangeFunction(Some(RangeFunctionId.MaxOverTime), ColumnType.DoubleColumn, useChunked = false)
-
-    val fns = Array(sum, count, avg, min, max)
-
-    val samples = Array.fill(1000) { rand.nextInt(1000).toDouble }
-    val validationQueue = new mutable.Queue[Double]()
-    var added = 0
-    var removed = 0
-    val dummyWindow = new QueueBasedWindow(new IndexedArrayQueue[TransientRow]())
-    val toEmit = new TransientRow()
-
-    while (removed < samples.size) {
-      val addTimes = rand.nextInt(10)
-      for { i <- 0 until addTimes } {
-        if (added < samples.size) {
-          validationQueue.enqueue(samples(added))
-          fns.foreach(_.addedToWindow(new TransientRow(added.toLong, samples(added)), dummyWindow))
-          added += 1
-        }
-      }
-
-      if (validationQueue.nonEmpty) {
-        sum.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual validationQueue.sum
-
-        min.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual validationQueue.min
-
-        max.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual validationQueue.max
-
-        count.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual validationQueue.size.toDouble
-
-        avg.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual (validationQueue.sum / validationQueue.size)
-      }
-
-      val removeTimes = rand.nextInt(validationQueue.size + 1)
-      for { i <- 0 until removeTimes } {
-        if (removed < samples.size) {
-          validationQueue.dequeue()
-          fns.foreach(_.removedFromWindow(new TransientRow(removed.toLong, samples(removed)), dummyWindow))
-          removed += 1
-        }
-      }
-    }
-  }
-
   // TODO: replace manual loops with ScalaCheck/properties checker
   val numIterations = 10
 
@@ -167,7 +110,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
-  it("should aggregate using ChunkedRangeFunction / ChunkedWindowIterator") {
+  it("should aggregate count_over_time and avg_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
     val chunkSize = 40
     val rv = timeValueRV(data)
@@ -177,15 +120,41 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(50) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-      val countFunc = new CountOverTimeChunkedFunction()
-      val windowIt2 = chunkedWindowIt(data, rv, countFunc, windowSize, step)
-      val aggregated2 = windowIt2.map(_.getDouble(1)).toBuffer
+      val countSliding = slidingWindowIt(data, rv, new CountOverTimeFunction(), windowSize, step)
+      val aggregated1 = countSliding.map(_.getDouble(1)).toBuffer
+      aggregated1 shouldEqual data.sliding(windowSize, step).map(_.length - 1).toBuffer
+
+      val countChunked = chunkedWindowIt(data, rv, new CountOverTimeChunkedFunction(), windowSize, step)
+      val aggregated2 = countChunked.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.length - 1).toBuffer
 
-      val avgFunc = new AvgOverTimeChunkedFunctionD()
-      val windowIt3 = chunkedWindowIt(data, rv, avgFunc, windowSize, step)
-      val aggregated3 = windowIt3.map(_.getDouble(1)).toBuffer
+      val avgSliding = slidingWindowIt(data, rv, new AvgOverTimeFunction(), windowSize, step)
+      val aggregated3 = avgSliding.map(_.getDouble(1)).toBuffer
       aggregated3 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+
+      val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+    }
+  }
+
+  it("should aggregate var_over_time and stddev_over_time using both chunked and sliding iterators") {
+    val data = (1 to 500).map(_.toDouble)
+    val chunkSize = 40
+    val rv = timeValueRV(data)
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val varSlidingIt = slidingWindowIt(data, rv, new StdVarOverTimeFunction(), windowSize, step)
+      val aggregated2 = varSlidingIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(a => stdVar(a drop 1)).toBuffer
+
+      val stdDevSlidingIt = slidingWindowIt(data, rv, new StdDevOverTimeFunction(), windowSize, step)
+      val aggregated3 = stdDevSlidingIt.map(_.getDouble(1)).toBuffer
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d drop 1))).toBuffer
 
       val varFunc = new StdVarOverTimeChunkedFunctionD()
       val windowIt4 = chunkedWindowIt(data, rv, varFunc, windowSize, step)
