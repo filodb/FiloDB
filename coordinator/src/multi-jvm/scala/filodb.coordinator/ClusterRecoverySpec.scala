@@ -83,14 +83,22 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     coordinatorActor
     cluster join address1
     awaitCond(cluster.isJoined)
+    clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     enterBarrier("both-nodes-joined-cluster")
 
-    clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
+    import scala.concurrent.ExecutionContext.Implicits.global
+
     // wait for dataset to get registered automatically
     // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
     Thread sleep 3000
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout * 2
-    def func: Future[Seq[DatasetRef]] = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
+    def func: Future[Seq[DatasetRef]] = {
+      val refs = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
+      refs.map { r =>
+        println(s"Queried $clusterActor and got back [$refs]")
+        r
+      }
+    }
     awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
     enterBarrier("cluster-actor-recovery-started")
 
