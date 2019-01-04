@@ -118,6 +118,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
       MemoryIO.getCheckedInstance().freeMemory(addr)
     }
     sizeMapping.clear()
+    usedSoFar.set(0)
   }
 
   def shutdown(): Unit = {

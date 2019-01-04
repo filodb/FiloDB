@@ -362,7 +362,6 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     intercept[IndexOutOfBoundsException] { map.last }
     map.iterate.toBuffer shouldEqual Buffer.empty[Long]
     map.sliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
-    map.put(elems(0))
     map.length shouldEqual 0
     map.remove(6L)
   }

@@ -52,7 +52,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
       builder.addString("Series 1")   // series (partition key)
 
       intercept[IllegalArgumentException] {
@@ -68,7 +68,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
 
       intercept[IllegalArgumentException] {
         builder.addString("ABCDEfghij" * 7000)
@@ -264,7 +264,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
       builder.addString("Series 1")   // series (partition key)
       val offset1 = builder.endRecord()
 
@@ -280,7 +280,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       schema1.getDouble(recordAddr, 1) shouldEqual 1.0
       schema1.getDouble(recordAddr, 2) shouldEqual 2.5
       schema1.getDouble(recordAddr, 3) shouldEqual 10.1
-      schema1.getDouble(recordAddr, 4) shouldEqual 9.4
+      schema1.getLong(recordAddr, 4) shouldEqual 123456L
       schema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
     }
 
@@ -388,7 +388,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
         builder.addDouble(1.0)  // min
         builder.addDouble(2.5)  // avg
         builder.addDouble(10.1) // max
-        builder.addDouble(9.4)  // p90
+        builder.addLong(123456L)  // count
         builder.addString(s"Series $n")   // series (partition key)
         builder.addSortedPairsAsMap(pairs, hashes)
         builder.endRecord()

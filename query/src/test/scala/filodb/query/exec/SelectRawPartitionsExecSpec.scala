@@ -13,15 +13,18 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
 class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
+  import filodb.core.{MachineMetricsData => MMD}
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
@@ -40,15 +43,28 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
+  // Be sure to reset the builder; it is in an Object so static and shared amongst tests
+  builder.reset()
   tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
   val container = builder.allContainers.head
+
+  val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory, MMD.dataset1.ingestionSchema)
+  val mmdTuples = MMD.linearMultiSeries().take(100)
+  val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
 
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(timeseriesDataset, 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
+    memStore.setup(MMD.dataset1, 0, TestData.storeConf)
+    memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.commitIndexForTesting(timeseriesDataset.ref)
+    memStore.commitIndexForTesting(MMD.dataset1.ref)
+  }
+
+  override def afterAll(): Unit = {
+    memStore.shutdown()
   }
 
   val dummyDispatcher = new PlanDispatcher {
@@ -70,7 +86,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
-    dataRead.sorted shouldEqual tuples.sorted // TODO see why rows are not in order
+    dataRead shouldEqual tuples
   }
 
   it ("should read raw samples from Memstore using IntervalSelector") {
@@ -91,6 +107,23 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     dataRead shouldEqual tuples.take(11)
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
+  }
+
+  it ("should read raw Long samples from Memstore using IntervalSelector") {
+    import ZeroCopyUTF8String._
+    val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
+    // read from an interval of 100000ms, resulting in 11 samples
+    val start: BinaryRecord = BinaryRecord(MMD.dataset1, Seq(100000L))
+    val end: BinaryRecord = BinaryRecord(MMD.dataset1, Seq(150000L))
+
+    val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
+      filters, RowKeyInterval(start, end), Seq(0, 4))
+
+    val resp = execPlan.execute(memStore, MMD.dataset1, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getLong(1))).toList
+    dataRead shouldEqual mmdTuples.filter(_(5) == "Series 1").map(r => (r(0), r(4))).take(5)
   }
 
   it ("should read periodic samples from Memstore") {
@@ -123,6 +156,27 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
         observed shouldEqual expected.getValue
       }
     }
+  }
+
+  it("should read periodic samples from Long column") {
+    import ZeroCopyUTF8String._
+    val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
+    val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
+      filters, AllChunks, Seq(0, 4))
+
+    // Raw data like 101000, 111000, ....
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+
+    val resp = execPlan.execute(memStore, MMD.dataset1, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    dataRead.map(_._1) shouldEqual (start to end by step)
+    dataRead.map(_._2) shouldEqual (86 to 166).by(20)
+
   }
 
   it ("should return correct result schema") {

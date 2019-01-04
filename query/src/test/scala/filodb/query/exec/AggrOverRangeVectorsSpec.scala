@@ -266,6 +266,51 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
   }
 
+  it("should return NaN when all values are NaN for a timestamp ") {
+
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, Double.NaN), (2L, 4.4d))),
+      toRv(Seq((1L, Double.NaN), (2L, 5.4d)))
+    )
+
+    // Sum
+    val resultObs = RangeVectorAggregator.mapReduce(AggregationOperator.Sum,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    compareIter(result(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 15.4d).iterator)
+
+    // Min
+    val resultObs2 = RangeVectorAggregator.mapReduce(AggregationOperator.Min,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val result2 = resultObs2.toListL.runAsync.futureValue
+    result2.size shouldEqual 1
+    result2(0).key shouldEqual noKey
+    compareIter(result2(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
+
+    // Count
+    val resultObs3a = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs3 = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
+      Nil, true, resultObs3a, rv => rv.key)
+    val result3 = resultObs3.toListL.runAsync.futureValue
+    result3.size shouldEqual 1
+    result3(0).key shouldEqual noKey
+    compareIter(result3(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 3d).iterator)
+
+    // Avg
+    val resultObs4a = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, true, resultObs4a, rv => rv.key)
+    val result4 = resultObs4.toListL.runAsync.futureValue
+    result4.size shouldEqual 1
+    result4(0).key shouldEqual noKey
+    compareIter(result4(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.133333333333333d).iterator)
+
+  }
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {

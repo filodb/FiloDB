@@ -40,6 +40,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   }
 
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
+  // Be sure to reset the builder; it is in an Object so static and shared amongst tests
+  builder.reset()
   tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
   val container = builder.allContainers.head
 
@@ -49,6 +51,10 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     memStore.setup(timeseriesDataset, 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.commitIndexForTesting(timeseriesDataset.ref)
+  }
+
+  override def afterAll(): Unit = {
+    memStore.shutdown()
   }
 
   val dummyDispatcher = new PlanDispatcher {
