@@ -477,12 +477,11 @@ class TimeSeriesShard(val dataset: Dataset,
       val partId = partIterator.next()
       val nextPart = getPartitionFromPartId(partId)
       if (nextPart != UnsafeUtils.ZeroPointer) {
-        val consumer = new SeqIndexValueConsumer(indexName)
         // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
         // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
         // have a centralized service/store for serving metadata
-        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
-        result ++= consumer.labelValues
+        result ++= dataset.partKeySchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
+          .find(_._1 equals indexName).map(pair => ZeroCopyUTF8String(pair._2))
       } else {
         // FIXME partKey is evicted. Get partition key from lucene index
       }

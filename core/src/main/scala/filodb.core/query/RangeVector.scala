@@ -1,7 +1,5 @@
 package filodb.core.query
 
-import scala.collection.mutable
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -30,17 +28,6 @@ class SeqMapConsumer extends MapItemConsumer {
     val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
-  }
-}
-
-class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
-  var labelValues = mutable.HashSet[UTF8Str]() //to gather unique label values
-  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-    if (column.equals(keyUtf8.toString)) {
-      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
-      labelValues += valUtf8
-    }
   }
 }
 
