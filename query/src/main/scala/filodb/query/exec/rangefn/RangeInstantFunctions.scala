@@ -25,8 +25,8 @@ object RangeInstantFunctions {
     var sumXY = 0.0
     var sumX2 = 0.0
     for (i <- 0 until window.size) {
-      var sample = window(i)
-      var x = (sample.timestamp-interceptTime).toDouble / 1000.0
+      val sample = window(i)
+      val x = (sample.timestamp-interceptTime).toDouble / 1000.0
       n += 1.0
       sumY += sample.value
       sumX += x
