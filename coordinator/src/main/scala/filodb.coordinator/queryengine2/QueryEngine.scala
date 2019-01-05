@@ -18,6 +18,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
+import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.exec._
 
 /**
@@ -157,14 +158,19 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction): Seq[ExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
+    lp.function match {
+      case HistogramQuantile =>
+        vectors.foreach(_.addRangeVectorTransformer(HistogramQuantileMapper(lp.functionArgs)))
+      case _ =>
+        vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
+    }
     vectors
   }
 
   private def materializePeriodicSeriesWithWindowing(queryId: String,
                                                      submitTime: Long,
-                                                    options: QueryOptions,
-                                                    lp: PeriodicSeriesWithWindowing): Seq[ExecPlan] = {
+                                                     options: QueryOptions,
+                                                     lp: PeriodicSeriesWithWindowing): Seq[ExecPlan] = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
     rawSeries.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))

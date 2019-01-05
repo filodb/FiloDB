@@ -1,51 +1,9 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
-
-import akka.actor.{ActorRef, PoisonPill, Terminated}
 import akka.actor.{Actor, DeadLetter}
 import akka.cluster.{Cluster, MemberStatus}
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
-
-/** For Deathwatch actors, handles `akka.actor.Terminated` events,
-  * and Supervisors wanting graceful shutdown of supervised children
-  * for no data loss or clean behavior on shutdown, sends a
-  * `filodb.coordinator.NodeProtocol.ShutdownComplete` to the
-  * `filodb.coordinator.NodeProtocol.GracefulShutdown` sender.
-  */
-trait GracefulStopStrategy extends BaseActor {
-
-  import NodeProtocol.{GracefulShutdown, ShutdownComplete}
-
-  protected var gracefulShutdownStarted = false
-
-  def settings: FilodbSettings
-
-  override def receive: Actor.Receive = LoggingReceive {
-    case Terminated(actor) => terminated(actor)
-    case GracefulShutdown  => gracefulShutdown(sender())
-  }
-
-  protected def terminated(actor: ActorRef): Unit = {
-    val message = s"$actor terminated."
-    if (gracefulShutdownStarted) logger.info(message) else logger.warn(message)
-  }
-
-  protected def gracefulShutdown(requester: ActorRef): Unit = {
-    import akka.pattern.{gracefulStop, pipe}
-    import context.dispatcher
-
-    logger.info("Starting graceful shutdown.")
-
-    gracefulShutdownStarted = true
-
-    Future
-      .sequence(context.children.map(gracefulStop(_, settings.GracefulStopTimeout, PoisonPill)))
-      .map(f => ShutdownComplete(self))
-      .pipeTo(requester)
-  }
-}
 
 /** TODO handle when singleton is in handover. */
 private[coordinator] final class NodeLifecycleStrategy(settings: FilodbSettings) extends BaseActor {

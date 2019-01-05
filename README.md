@@ -338,7 +338,7 @@ Let's say that one had a metrics client, such as CodaHale metrics, which pre-agg
 
 ### Data Modelling and Performance Considerations
 
-For more information on memory configuration, please have a look at the [ingestion guide](docs/ingestion.md).
+For more information on memory configuration, please have a look at the [ingestion guide](doc/ingestion.md).
 
 **Choosing Partition Keys**.
 
@@ -352,7 +352,7 @@ FiloDB is designed to efficiently ingest a huge number of individual time series
 
 All data for a single time series, which belong to the same partition key, are routed to the same shard, or Kafka partition, and one shard must fit completely into the memory of a single node.
 
-The number of shards in each dataset is preconfigured in the source config.  Please see the [ingestion doc](docs/ingestion.md) for more information on configuration.  
+The number of shards in each dataset is preconfigured in the source config.  Please see the [ingestion doc](doc/ingestion.md) for more information on configuration.  
 
 Metrics are routed to shards based on factors:
 
@@ -613,10 +613,10 @@ FiloDB PromQL Support: currently FiloDB supports about 60% of PromQL.  We are wo
 - `sbt cli/assembly`
 - `sbt gateway/assembly`
 - Copy and modify `conf/timeseries-filodb-server.conf`, deploy it
-- Create a source config.  See [ingestion docs](docs/ingestion.md) as well as `conf/timeseries-128shards-source.conf` as examples.
+- Create a source config.  See [ingestion docs](doc/ingestion.md) as well as `conf/timeseries-128shards-source.conf` as examples.
 - Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
 - Create datasets
-- See [Akka Bootstrapper](docs/akka-bootstrapper.md) for different methods of bootstrapping FiloDB clusters
+- See [Akka Bootstrapper](doc/akka-bootstrapper.md) for different methods of bootstrapping FiloDB clusters
 - Start the gateway server(s)
 - Run the CLI setup command to set up the standalone nodes to start ingesting a dataset from Kafka
 
@@ -705,6 +705,8 @@ You can get the huge variety of JMH options by running `jmh:run -help`.  For goo
     jmh:run -i 1000 -wi 10 -f1 -jvmArgsAppend -XX:MaxInlineLevel=20 -jvmArgsAppend -Xmx4g -jvmArgsAppend -XX:MaxInlineSize=99 filodb.jmh.QueryInMemoryBenchmark
 
 This should last a good 15 minutes at least.  While it is running, fire up JMC (java Mission Control) and flight record the "jmh.ForkMain" process for 15 minutes.  This gives you excellent CPU as well as memory allocation analysis.
+
+You can also run a stack profiler with an option like ` -prof stack:lines=4;detailLine=true`, but the analysis is not as good as JMC/JVisualVM/YourKit etc., or even the flamegraph options.
 
 There is also a script, `run_benchmarks.sh`
 

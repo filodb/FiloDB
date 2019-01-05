@@ -48,20 +48,5 @@ class SupervisorSpec extends AkkaSpec {
       }
       system stop guardian
     }
-    "stop gracefully" in {
-      val guardian = system.actorOf(guardianProps)
-      guardian ! CreateCoordinator
-      expectMsgClass(classOf[CoordinatorIdentity])
-      guardian ! CreateClusterSingleton("worker", None)
-      expectMsgClass(classOf[ClusterSingletonIdentity])
-
-      guardian ! GracefulShutdown
-      expectMsgPF() {
-        case ShutdownComplete(ref) =>
-          ref should equal (guardian)
-      }
-      // TODO handle deadletter CurrentClusterState on start
-      // while shutting test down during startup
-    }
   }
 }

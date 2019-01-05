@@ -105,7 +105,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
     chunksets.foreach { chunkset =>
-      val totalBytes = chunkset.chunks.map(_.limit).sum
+      val totalBytes = chunkset.chunks.map(_.limit()).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
       sinkStats.chunksetWrite()
       logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +

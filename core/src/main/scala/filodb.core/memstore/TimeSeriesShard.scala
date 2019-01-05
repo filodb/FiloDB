@@ -35,6 +35,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
@@ -1004,12 +1005,11 @@ class TimeSeriesShard(val dataset: Dataset,
 
   /**
     * Reset all state in this shard.  Memory is not released as once released, then this class
-    * cannot be used anymore.
+    * cannot be used anymore (except partition key/chunkmap state is removed.)
     */
   def reset(): Unit = {
     logger.info(s"Clearing all MemStore state for shard $shardNum")
-    partitions.clear()
-    partSet.clear()
+    partitions.values.asScala.foreach(removePartition)
     partKeyIndex.reset()
     ingested = 0L
     for { group <- 0 until numGroups } {

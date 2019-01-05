@@ -33,7 +33,11 @@ package object kafka {
   implicit final class MapOps(immutable: Map[String, AnyRef]) {
     def asProps: JProperties = {
       val props = new JProperties()
-      props.putAll(immutable.filter(_._2 != null).asJava)
+      for ((k,v) <- immutable) {
+        if (k != null && v != null) {
+          props.put(k, v)
+        }
+      }
       props
     }
   }
