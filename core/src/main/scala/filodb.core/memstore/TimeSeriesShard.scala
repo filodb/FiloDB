@@ -489,9 +489,11 @@ class TimeSeriesShard(val dataset: Dataset,
           // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
           // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
           // have a centralized service/store for serving metadata
-          currVal = dataset.partKeySchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
-            .find(_._1 equals labelName).map(pair => ZeroCopyUTF8String(pair._2)).head
-          foundValue = true
+          dataset.partKeySchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
+            .find(_._1 equals labelName).map(pair => {
+            currVal = ZeroCopyUTF8String(pair._2)
+            foundValue = true
+          })
         } else {
           // FIXME partKey is evicted. Get partition key from lucene index
         }
