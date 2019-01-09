@@ -190,8 +190,7 @@ class CountOverTimeChunkedFunctionD(var count: Int = 0) extends ChunkedDoubleRan
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    count += (endRowNum - startRowNum +
-              { if (JLDouble.isNaN(doubleReader(doubleVect, endRowNum))) 0 else 1 })
+    count += doubleReader.count(doubleVect, startRowNum, endRowNum)
   }
 }
 
@@ -226,8 +225,7 @@ class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with Chun
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
-    count += (endRowNum - startRowNum +
-              { if (JLDouble.isNaN(doubleReader(doubleVect, endRowNum))) 0 else 1 })
+    count += doubleReader.count(doubleVect, startRowNum, endRowNum)
   }
 }
 
