@@ -129,7 +129,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   val ignoreKey = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("ign ore") -> ZeroCopyUTF8String("ignore")))
+    Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
   val noKey = CustomRangeVectorKey(Map.empty)
   def noGrouping(rv: RangeVector): RangeVectorKey = noKey
