@@ -537,11 +537,13 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         var i = 1
         while(row.notNull(i)) {
           val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-          val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-          builder.startNewRecord()
-          builder.addLong(row.getLong(0))
-          builder.addDouble(row.getDouble(i + 1))
-          builder.endRecord()
+          if (rvk.labelValues.size > 0) {
+            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
+            builder.startNewRecord()
+            builder.addLong(row.getLong(0))
+            builder.addDouble(row.getDouble(i + 1))
+            builder.endRecord()
+          }
           i += 2
         }
       }

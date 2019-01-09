@@ -129,7 +129,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   val ignoreKey = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+    Map(ZeroCopyUTF8String("ign ore") -> ZeroCopyUTF8String("ignore")))
 
   val noKey = CustomRangeVectorKey(Map.empty)
   def noGrouping(rv: RangeVector): RangeVectorKey = noKey
@@ -183,22 +183,32 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
       Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
     val resultObs5 = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
       Seq(2.0), true, resultObs5a, rv=>rv.key)
+    val resultObs5b = RangeVectorAggregator.present(AggregationOperator.BottomK, Seq(2.0), resultObs5, 1000)
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
     compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(2.1d, 4.6d), Set(4.4, 5.4d)).iterator)
+    val result5b = resultObs5b.toListL.runAsync.futureValue
+    result5b.size shouldEqual 1
+    result5b(0).key shouldEqual ignoreKey
+    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(4.6d,2.1d,5.4d,4.4d).iterator)
 
     // TopK
     val resultObs6a = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
       Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
     val resultObs6 = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
       Seq(2.0), true, resultObs6a, rv=>rv.key)
+    val resultObs6b = RangeVectorAggregator.present(AggregationOperator.TopK, Seq(2.0), resultObs6, 1000)
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
     compareIter2(result6(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(4.6d, 2.1d), Set(5.6, 5.4d)).iterator)
+    val result6b = resultObs6b.toListL.runAsync.futureValue
+    result6b.size shouldEqual 1
+    result6b(0).key shouldEqual ignoreKey
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(2.1d,4.6d,5.4d,5.6d).iterator)
 
     // Quantile
     val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
@@ -309,6 +319,38 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
     compareIter(result4(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.133333333333333d).iterator)
+
+    // BottomK
+    val resultObs5a = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
+      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
+    val resultObs5 = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
+      Seq(2.0), true, resultObs5a, rv=>rv.key)
+    val resultObs5b = RangeVectorAggregator.present(AggregationOperator.BottomK, Seq(2.0), resultObs5, 1000)
+    val result5 = resultObs5.toListL.runAsync.futureValue
+    result5.size shouldEqual 1
+    result5(0).key shouldEqual noKey
+    compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
+      Seq(Set(1.7976931348623157E308d, 1.7976931348623157E308d), Set(4.4d, 5.4d)).iterator)
+    val result5b = resultObs5b.toListL.runAsync.futureValue
+    result5b.size shouldEqual 1
+    result5b(0).key shouldEqual ignoreKey
+    compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(5.4d, 4.4d).iterator)
+
+    // TopK
+    val resultObs6a = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
+      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
+      Seq(2.0), true, resultObs6a, rv=>rv.key)
+    val resultObs6b = RangeVectorAggregator.present(AggregationOperator.TopK, Seq(2.0), resultObs6, 1000)
+    val result6 = resultObs6.toListL.runAsync.futureValue
+    result6.size shouldEqual 1
+    result6(0).key shouldEqual noKey
+    compareIter2(result6(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
+      Seq(Set(-1.7976931348623157E308d, -1.7976931348623157E308d), Set(5.6, 5.4d)).iterator)
+    val result6b = resultObs6b.toListL.runAsync.futureValue
+    result6b.size shouldEqual 1
+    result6b(0).key shouldEqual ignoreKey
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
 
   }
 
