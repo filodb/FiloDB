@@ -110,8 +110,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
    */
   val rawQuery = "heap_usage{app=\"App-2\"}"
   val sumQuery = """sum_over_time(heap_usage{app="App-2"}[5m])"""
+  val sumRateQuery = """sum(rate(heap_usage{app="App-2"}[5m]))"""
   val queries = Seq(rawQuery,  // raw time series
-                    """sum(rate(heap_usage{app="App-2"}[5m]))""",
+                    sumRateQuery,
                     """quantile(0.75, heap_usage{app="App-2"})""",
                     sumQuery)
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
@@ -180,9 +181,41 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
-  def singleThreadedQuery(): Long = {
+  def singleThreadedRawQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
       execPlan.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
+    }.executeOn(querySched)
+     .countL.runAsync
+    Await.result(f, 60.seconds)
+  }
+
+  val minQuery = """min_over_time(heap_usage{app="App-2"}[5m])"""
+  val minLP = Parser.queryRangeToLogicalPlan(minQuery, qParams)
+  val minEP = engine.materialize(minLP, qOptions).children.head
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(500)
+  def singleThreadedMinOverTimeQuery(): Long = {
+    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+      minEP.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
+    }.executeOn(querySched)
+     .countL.runAsync
+    Await.result(f, 60.seconds)
+  }
+
+  // sum(rate) query and rate involves counter correction, very important case
+  val sumRateLP = Parser.queryRangeToLogicalPlan(sumRateQuery, qParams)
+  val sumRateEP = engine.materialize(sumRateLP, qOptions).children.head
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(500)
+  def singleThreadedSumRateCCQuery(): Long = {
+    val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
+      sumRateEP.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
