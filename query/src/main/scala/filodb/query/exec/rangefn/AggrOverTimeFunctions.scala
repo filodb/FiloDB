@@ -9,7 +9,6 @@ import filodb.query.QueryConfig
 import filodb.query.exec.TransientRow
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
-
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
@@ -26,6 +25,80 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
                      queryConfig: QueryConfig): Unit = {
     if (minMaxDeque.isEmpty) sampleToEmit.setValues(endTimestamp, Double.NaN)
     else sampleToEmit.setValues(endTimestamp, minMaxDeque.peekFirst().value)
+  }
+}
+
+class MinOverTimeChunkedFunctionD(var min: Double = Double.MaxValue) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { min = Double.MaxValue }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, min)
+  }
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    var rowNum = startRowNum
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    while (rowNum <= endRowNum) {
+      val nextVal = it.next
+      if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)  // cannot compare NaN, always < anything else
+      rowNum += 1
+    }
+  }
+}
+
+class MinOverTimeChunkedFunctionL(var min: Long = Long.MaxValue) extends ChunkedLongRangeFunction {
+  override final def reset(): Unit = { min = Long.MaxValue }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, min.toDouble)
+  }
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    var rowNum = startRowNum
+    val it = longReader.iterate(longVect, startRowNum)
+    while (rowNum <= endRowNum) {
+      min = Math.min(min, it.next)
+      rowNum += 1
+    }
+  }
+}
+
+class MaxOverTimeChunkedFunctionD(var max: Double = Double.MinValue) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { max = Double.MinValue }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, max)
+  }
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    var rowNum = startRowNum
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    while (rowNum <= endRowNum) {
+      val nextVal = it.next
+      if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)  // cannot compare NaN, always < anything else
+      rowNum += 1
+    }
+  }
+}
+
+class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends ChunkedLongRangeFunction {
+  override final def reset(): Unit = { max = Long.MinValue }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, max.toDouble)
+  }
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    var rowNum = startRowNum
+    val it = longReader.iterate(longVect, startRowNum)
+    while (rowNum <= endRowNum) {
+      max = Math.max(max, it.next)
+      rowNum += 1
+    }
   }
 }
 

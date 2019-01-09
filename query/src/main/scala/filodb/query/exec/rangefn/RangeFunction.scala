@@ -201,6 +201,8 @@ object RangeFunction {
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionL
+    case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionL
+    case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
     case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionL
     case _                    => iteratingFunction(func, funcParams)
@@ -215,6 +217,8 @@ object RangeFunction {
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
+    case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionD
+    case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
     case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
     case _                    => iteratingFunction(func, funcParams)

@@ -110,6 +110,35 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly aggregate min_over_time / max_over_time using both chunked and sliding iterators") {
+    val data = (1 to 240).map(_.toDouble)
+    val chunkSize = 40
+    val rv = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(75) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val minSlidingIt = slidingWindowIt(data, rv, new MinMaxOverTimeFunction(Ordering[Double].reverse), windowSize, step)
+      val aggregated = minSlidingIt.map(_.getDouble(1)).toBuffer
+      // drop first sample because of exclusive start
+      aggregated shouldEqual data.sliding(windowSize, step).map(_.drop(1).min).toBuffer
+
+      val minChunkedIt = chunkedWindowIt(data, rv, new MinOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).min).toBuffer
+
+      val maxSlidingIt = slidingWindowIt(data, rv, new MinMaxOverTimeFunction(Ordering[Double]), windowSize, step)
+      val aggregated3 = maxSlidingIt.map(_.getDouble(1)).toBuffer
+      // drop first sample because of exclusive start
+      aggregated3 shouldEqual data.sliding(windowSize, step).map(_.drop(1).max).toBuffer
+
+      val maxChunkedIt = chunkedWindowIt(data, rv, new MaxOverTimeChunkedFunctionD(), windowSize, step)
+      val aggregated4 = maxChunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated4 shouldEqual data.sliding(windowSize, step).map(_.drop(1).max).toBuffer
+    }
+  }
+
   it("should aggregate count_over_time and avg_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
     val chunkSize = 40
