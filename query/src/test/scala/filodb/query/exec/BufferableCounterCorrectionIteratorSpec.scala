@@ -5,23 +5,25 @@ import org.scalatest.{FunSpec, Matchers}
 class BufferableCounterCorrectionIteratorSpec extends FunSpec with Matchers {
 
   it("should correct dips in counter") {
-    val input = Seq(3,5,7,13,2,34).map(d => new TransientRow(0, d))
-    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d,5d,7d,13d,15d,47d)
+    val input = Seq(3, 5, 7, 13, 2, 34).map(d => new TransientRow(0, d))
+    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 15d,
+      47d)
   }
 
   it("should correct multiple dips in counter") {
-    val input = Seq(3,5,7,13,2,34,4,6).map(d => new TransientRow(0, d))
+    val input = Seq(3, 5, 7, 13, 2, 34, 4, 6).map(d => new TransientRow(0, d))
     new BufferableCounterCorrectionIterator(input.iterator)
-      .map(_.value).toList shouldEqual Seq(3d,5d,7d,13d,15d,47d,51d,53d)
+      .map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 15d, 47d, 51d, 53d)
   }
 
   it("should not correct when no dips in counter") {
-    val input = Seq(3,5,7,13,22,34).map(d => new TransientRow(0, d))
-    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d,5d,7d,13d,22d,34d)
+    val input = Seq(3, 5, 7, 13, 22, 34).map(d => new TransientRow(0, d))
+    new BufferableCounterCorrectionIterator(input.iterator).map(_.value).toList shouldEqual Seq(3d, 5d, 7d, 13d, 22d,
+      34d)
   }
 
-  it ("should be bufferable") {
-    val input = Seq(3,5,7,13,2,34,4,6).map(d => new TransientRow(0, d))
+  it("should be bufferable") {
+    val input = Seq(3, 5, 7, 13, 2, 34, 4, 6).map(d => new TransientRow(0, d))
 
     val iter = new BufferableCounterCorrectionIterator(input.iterator).buffered
 
@@ -48,6 +50,11 @@ class BufferableCounterCorrectionIteratorSpec extends FunSpec with Matchers {
 
     iter.head.value shouldEqual 53d
     iter.next().value shouldEqual 53d
+  }
+
+  it("should handle empty set properly") {
+    val input = Seq.empty[Double].map(d => new TransientRow(0, d))
+    new BufferableCounterCorrectionIterator(input.iterator).hasNext shouldEqual false
   }
 }
 
