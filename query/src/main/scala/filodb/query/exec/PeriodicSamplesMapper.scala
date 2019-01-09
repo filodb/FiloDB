@@ -225,17 +225,16 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
   * Is bufferable - caller can do iterator.buffered safely since it buffers ONE value
   */
 class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  private var lastVal: Double = 0
+  private var correction = 0d
+  private var prevVal = 0d
   private var prev = new TransientRow()
   private var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
     val next = iter.next()
     val nextVal = next.getDouble(1)
-    if (nextVal < lastVal) {
-      lastVal = nextVal + lastVal
-    } else {
-      lastVal = nextVal
+    if (nextVal < prevVal) {
+      correction += prevVal
     }
     // swap prev an cur
     val temp = prev
@@ -243,7 +242,8 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
     cur = temp
     // place value in cur and return
     cur.setLong(0, next.getLong(0))
-    cur.setDouble(1, lastVal)
+    cur.setDouble(1, nextVal + correction)
+    prevVal = nextVal
     cur
   }
 }
