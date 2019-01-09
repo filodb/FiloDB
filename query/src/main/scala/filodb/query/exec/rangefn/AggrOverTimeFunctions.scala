@@ -1,5 +1,6 @@
 package filodb.query.exec.rangefn
 
+import java.lang.{Double => JLDouble}
 import java.util
 
 import filodb.core.store.ChunkSetInfo
@@ -56,6 +57,7 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    // NaN values are ignored by default in the sum method
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
   }
 }
@@ -103,6 +105,23 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
   }
 }
 
+// Special count_over_time chunked function for doubles needed to not count NaNs whih are used by
+// Prometheus to mark end of a time series.
+// TODO: handle end of time series a different, better way.  This function shouldn't be needed.
+class CountOverTimeChunkedFunctionD(var count: Int = 0) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { count = 0 }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, count.toDouble)
+  }
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    count += (endRowNum - startRowNum +
+              { if (JLDouble.isNaN(doubleReader(doubleVect, endRowNum))) 0 else 1 })
+  }
+}
+
 class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
@@ -134,7 +153,8 @@ class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with Chun
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
-    count += (endRowNum - startRowNum + 1)
+    count += (endRowNum - startRowNum +
+              { if (JLDouble.isNaN(doubleReader(doubleVect, endRowNum))) 0 else 1 })
   }
 }
 
@@ -210,9 +230,11 @@ abstract class VarOverTimeChunkedFunctionD(var sum: Double = 0d,
     var elemNo = startRowNum
     while (elemNo <= endRowNum) {
       val nextValue = it.next
-      _sum += nextValue
-      _sqSum += nextValue * nextValue
-      elemNo += 1
+      if (!JLDouble.isNaN(nextValue)) {
+        _sum += nextValue
+        _sqSum += nextValue * nextValue
+        elemNo += 1
+      }
     }
     count += (endRowNum - startRowNum + 1)
     sum += _sum

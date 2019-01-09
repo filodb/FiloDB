@@ -126,8 +126,9 @@ trait DoubleVectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param start the starting element # in the vector to sum, 0 == first element
    * @param end the ending element # in the vector to sum, inclusive
+   * @param ignoreNan if true, ignore samples which have NaN value (sometimes used for special purposes)
    */
-  def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double
+  def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
@@ -166,13 +167,22 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     new Double64Iterator(vector + OffsetData + startElement * 8)
 
   // end is inclusive
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = 0d
-    while (addr < untilAddr) {
-      sum += UnsafeUtils.getDouble(addr)
-      addr += 8
+    if (ignoreNaN) {
+      while (addr < untilAddr) {
+        val nextDbl = UnsafeUtils.getDouble(addr)
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!java.lang.Double.isNaN(nextDbl)) sum += nextDbl
+        addr += 8
+      }
+    } else {
+      while (addr < untilAddr) {
+        sum += UnsafeUtils.getDouble(addr)
+        addr += 8
+      }
     }
     sum
   }
@@ -189,8 +199,8 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
 
   override def length(vector: BinaryVectorPtr): Int = super.length(subvectAddr(vector))
 
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
-    DoubleVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end)
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+    DoubleVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end, ignoreNaN)
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
@@ -304,8 +314,8 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   override def length(vector: BinaryVectorPtr): Int = LongBinaryVector(vector).length(vector)
   final def apply(vector: BinaryVectorPtr, n: Int): Double =
     LongBinaryVector(vector)(vector, n).toDouble
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
-    LongBinaryVector(vector).sum(vector, start, end)
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+    LongBinaryVector(vector).sum(vector, start, end)   // Long vectors cannot contain NaN, ignore it
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
 }

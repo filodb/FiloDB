@@ -212,7 +212,7 @@ object RangeFunction {
   def doubleChunkedFunction(func: Option[RangeFunctionId],
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
-    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
+    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
@@ -288,28 +288,38 @@ abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(timestampVector, endRowNum)
-      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
-        timestamp = ts
-        updateValue(info, valueCol, endRowNum)
-      }
+      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
+        updateValue(ts, info.vectorPtr(valueCol), endRowNum)
     }
   }
 
-  def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit
+  def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit
 }
 
 class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
-  final def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit = {
-    val dblVector = info.vectorPtr(valueCol)
-    val dblReader = bv.DoubleVector(dblVector)
-    value = dblReader(dblVector, endRowNum)
+  final def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit = {
+    val dblReader = bv.DoubleVector(dataVector)
+    val doubleVal = dblReader(dataVector, endRowNum)
+    // If the last value is NaN, that may be Prometheus end of time series marker.
+    // In that case try to get the sample before last.
+    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
+    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
+    if (java.lang.Double.isNaN(doubleVal)) {
+      if (endRowNum > 0) {
+        timestamp = ts
+        value = dblReader(dataVector, endRowNum - 1)
+      }
+    } else {
+      timestamp = ts
+      value = doubleVal
+    }
   }
 }
 
 class LastSampleChunkedFunctionL extends LastSampleChunkedFunction() {
-  final def updateValue(info: ChunkSetInfo, valueCol: Int, endRowNum: Int): Unit = {
-    val longVector = info.vectorPtr(valueCol)
-    val longReader = bv.LongBinaryVector(longVector)
-    value = longReader(longVector, endRowNum).toDouble
+  final def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit = {
+    val longReader = bv.LongBinaryVector(dataVector)
+    timestamp = ts
+    value = longReader(dataVector, endRowNum).toDouble
   }
 }
