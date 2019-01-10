@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import scala.collection.mutable
-import scala.collection.mutable.Set
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -24,7 +22,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, ColumnInfo, SeqIndexValueConsumer}
+import filodb.core.query.{ColumnFilter, ColumnInfo}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
@@ -490,30 +488,48 @@ class TimeSeriesShard(val dataset: Dataset,
 
   /**
     * This method is to apply column filters and fetch matching time series partitions.
-    * From the the partitions then index values for the indexName will be extracted/accumulated.
     */
   def indexValuesWithFilters(filter: Seq[ColumnFilter],
                              indexName: String,
                              endTime: Long,
                              startTime: Long,
                              limit: Int): Iterator[ZeroCopyUTF8String] = {
-    val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
-    val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    while(partIterator.hasNext && result.size < limit) {
-      val partId = partIterator.next()
-      val nextPart = getPartitionFromPartId(partId)
-      if (nextPart != UnsafeUtils.ZeroPointer) {
-        val consumer = new SeqIndexValueConsumer(indexName)
-        // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
-        // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
-        // have a centralized service/store for serving metadata
-        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
-        result ++= consumer.labelValues
-      } else {
-        // FIXME partKey is evicted. Get partition key from lucene index
+    IndexValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), indexName, limit)
+  }
+
+  /**
+    * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
+    */
+  case class IndexValueResultIterator(partIterator: IntIterator, labelName: String, limit: Int)
+      extends Iterator[ZeroCopyUTF8String] {
+    var currVal: ZeroCopyUTF8String = _
+    var index = 0
+
+    override def hasNext: Boolean = {
+      var foundValue = false
+      while(partIterator.hasNext && index < limit && !foundValue) {
+        val partId = partIterator.next()
+        val nextPart = getPartitionFromPartId(partId)
+        if (nextPart != UnsafeUtils.ZeroPointer) {
+          // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+          // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+          // have a centralized service/store for serving metadata
+          dataset.partKeySchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
+            .find(_._1 equals labelName).foreach(pair => {
+              currVal = ZeroCopyUTF8String(pair._2)
+              foundValue = true
+          })
+        } else {
+          // FIXME partKey is evicted. Get partition key from lucene index
+        }
       }
+      foundValue
     }
-    result.toIterator
+
+    override def next(): ZeroCopyUTF8String = {
+      index += 1
+      currVal
+    }
   }
 
   /**

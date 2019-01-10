@@ -65,6 +65,8 @@ class TimeSeriesPartition(val partID: Int,
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 
+  require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
+
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 
@@ -129,6 +131,7 @@ extends ReadablePartition with MapHolder {
       }
     }
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+
     // Update the end time as well.  For now assume everything arrives in increasing order
     ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
   }
@@ -253,6 +256,9 @@ extends ReadablePartition with MapHolder {
                                   }
                                 }
   }
+
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator =
+    allInfos.filter(_.intersection(startTime, endTime).isDefined)
 
   def hasChunks(method: ChunkScanMethod): Boolean = {
     val chunkIter = infos(method)

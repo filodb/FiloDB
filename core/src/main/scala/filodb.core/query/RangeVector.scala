@@ -1,7 +1,5 @@
 package filodb.core.query
 
-import scala.collection.mutable
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -10,7 +8,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
+import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
@@ -30,17 +28,6 @@ class SeqMapConsumer extends MapItemConsumer {
     val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
-  }
-}
-
-class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
-  var labelValues = mutable.HashSet[UTF8Str]() //to gather unique label values
-  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-    if (column.equals(keyUtf8.toString)) {
-      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
-      labelValues += valUtf8
-    }
   }
 }
 
@@ -98,12 +85,20 @@ trait RangeVector {
   def rows: Iterator[RowReader]
 }
 
+// First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+
+  // Obtain ChunkSetInfos from specific window of time from partition
+  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
+
+  def timestampColID: Int = partition.dataset.timestampColID
+  // the query engine is based around one main data column to query, so it will always be the second column passed in
+  def valueColID: Int = columnIDs(1)
 }
 
 /**
@@ -179,16 +174,15 @@ object SerializableRangeVector extends StrictLogging {
             limit: Int): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
-    val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
+    val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       OffheapLFSortedIDMap.validateNoSharedLocks()
-      rv.rows.take(limit).foreach { row =>
+      val rows = rv.rows
+      while (rows.hasNext && numRows < limit) {
         numRows += 1
-        builder.addFromReader(row)
-        // Do not remove Unit below. Scala compiler tries to box the long for addFromReader return value otherwise (!!)
-        Unit
+        builder.addFromReader(rows.next)
       }
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.

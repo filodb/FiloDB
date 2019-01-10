@@ -5,29 +5,30 @@ import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration._
 import scala.util.Random
 
-import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
+import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
-import filodb.query.QueryConfig
-import filodb.query.exec.rangefn.LastSampleFunction
+class LastSampleFunctionSpec extends RawDataWindowingSpec {
 
-class LastSampleFunctionSpec extends FunSpec with Matchers {
-
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
   val rand = new Random()
   val now = System.currentTimeMillis()
   // stddev higher than mean to simulate skipped samples
   val samples = generateRandomRawCounterSeries(2000, 20000, 25000, now)
+  val rv = timeValueRV(samples)
+  val w = 5.minutes.toMillis     // window size = lookback time
+
+  val chunkedLSFunc = new LastSampleChunkedFunctionD
 
   it ("should work for various start times") {
     val step = 2000
     (-20000 to 20000).by(2500).foreach{ diff =>
       val start = now + diff
       val end = start + 100000L
-      val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samples), start, step, end, 0,
-        LastSampleFunction, queryConfig)
+
+      val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
+
+      val chunkedIter = new ChunkedWindowIterator(rv, start, step, end, w, chunkedLSFunc, queryConfig)()
+      validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
 
@@ -35,9 +36,11 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
     val start = now
     val end = start + 100000L
     (5000 to 100000).by(5000).foreach { step =>
-      val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samples), start, step, end, 0,
-        LastSampleFunction, queryConfig)
+      val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
+
+      val chunkedIter = new ChunkedWindowIterator(rv, start, step, end, w, chunkedLSFunc, queryConfig)()
+      validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
 
@@ -46,9 +49,11 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
       val start = now + ThreadLocalRandom.current().nextLong(80000)
       val end = start
       val step = 1
-      val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samples), start, step, end, 0,
-        LastSampleFunction, queryConfig)
+      val lastSamplesIter = new SlidingWindowIterator(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
       validateLastSamples(samples, lastSamplesIter, start, end, step)
+
+      val chunkedIter = new ChunkedWindowIterator(rv, start, step, end, w, chunkedLSFunc, queryConfig)()
+      validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
 
@@ -56,34 +61,46 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = Seq((59725569L,1.524759725569E12), (60038121L,1.524760038121E12),
                 (60370409L,1.524760370409E12), (60679268L,1.524760679268E12), (60988895L,1.524760988895E12))
+    val rvWithLongGap = timeValueRV(samplesWithLongGap)
     val start = 60330762L
     val end = 63030762L
     val step = 60000
-    val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samplesWithLongGap),
+    val lastSamplesIter = new SlidingWindowIterator(rvWithLongGap.rows,
                                                     start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
+
+    val chunkedIter = new ChunkedWindowIterator(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)()
+    validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 
   it ("should return NaN when no reported samples for more than 5 minutes - test case 2 dynamic samples ") {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = generateRandomRawCounterSeries(5, 300.seconds.toMillis, 50000, now)
+    val rvWithLongGap = timeValueRV(samplesWithLongGap)
     val start = now + 300.seconds.toMillis
     val end = now + 300.seconds.toMillis * 10
     val step = 60000
-    val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samplesWithLongGap),
+    val lastSamplesIter = new SlidingWindowIterator(rvWithLongGap.rows,
       start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
+
+    val chunkedIter = new ChunkedWindowIterator(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)()
+    validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 
   it ("should return NaN when no reported samples for more than 5 minutes - test case 3 with more samples") {
     // note std dev for interval between reported samples is 5 mins
     val samplesWithLongGap = generateRandomRawCounterSeries(5000, 300.seconds.toMillis, 50000, now)
+    val rvWithLongGap = timeValueRV(samplesWithLongGap)
     val start = now + 300.seconds.toMillis
     val end = now + 300.seconds.toMillis * 10
     val step = 60000
-    val lastSamplesIter = new SlidingWindowIterator(iteratorOfMutableRowReaders(samplesWithLongGap),
+    val lastSamplesIter = new SlidingWindowIterator(rvWithLongGap.rows,
       start, step, end, 0, LastSampleFunction, queryConfig)
     validateLastSamples(samplesWithLongGap, lastSamplesIter, start, end, step)
+
+    val chunkedIter = new ChunkedWindowIterator(rvWithLongGap, start, step, end, w, chunkedLSFunc, queryConfig)()
+    validateLastSamples(samplesWithLongGap, chunkedIter, start, end, step)
   }
 
   def generateRandomRawCounterSeries(numSamples: Int,
