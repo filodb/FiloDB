@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
