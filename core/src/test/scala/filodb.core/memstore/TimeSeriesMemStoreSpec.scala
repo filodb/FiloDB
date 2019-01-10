@@ -4,6 +4,7 @@ import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
+import kamon.metric.LongAdderCounter
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
@@ -347,6 +348,18 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
+
+    val counter = memStore.shardMetrics(dataset1.ref, 0).partitionsFreed.asInstanceOf[LongAdderCounter]
+
+    var limit = 100
+    while (counter.snapshot(false).value != 2 && limit >= 0) {
+      System.gc()
+      // Ingest nothing to force phantom references to be cleaned up.
+      memStore.ingest(dataset1.ref, 0, SomeData(RecordContainer.apply(new Array[Byte](0)), 0))
+      limit += -1
+    }
+
+    counter.snapshot(false).value shouldEqual 2
 
     // Check partitions are now 2 to 21, 0 and 1 got evicted
     val split = memStore.getScanSplits(dataset1.ref, 1).head

@@ -9,6 +9,8 @@ import scala.util.{Random, Try}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
+import java.lang.ref.PhantomReference
+import java.lang.ref.ReferenceQueue
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
@@ -74,6 +76,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").refine(tags)
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
+  val partitionsFreed = Kamon.counter("memstore-partitions-freed").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
@@ -298,6 +301,28 @@ class TimeSeriesShard(val dataset: Dataset,
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
+
+  /**
+    * ReferenceQueue which must be polled to free up native memory which was used by
+    * partitions which were removed.
+    */
+  private final val partitionRefQueue = new ReferenceQueue[Any]()
+
+  /**
+    * Set of References which were registered with the ReferenceQueue. Without
+    * strong references to the References themselves, they'd get GC'd before they'd
+    * ever get enqueued.
+    */
+  private final val partitionRefSet = new mutable.HashSet[Any]()
+
+  class PartitionRef(partitionObj: TimeSeriesPartition, mapPtr: Long, partitionKey: Long)
+      extends PhantomReference[Any](partitionObj, partitionRefQueue)
+  {
+    def freeMemory(): Unit = {
+      bufferMemoryManager.freeMemory(mapPtr)
+      bufferMemoryManager.freeMemory(partitionKey)
+    }
+  }
 
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -579,11 +604,11 @@ class TimeSeriesShard(val dataset: Dataset,
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     InMemPartitionIterator(deletedParts).foreach { p =>
-      logger.debug(s"Purging partition with partId ${p.partID} from memory")
+      logger.debug(s"Purging partition with partId ${p.partID}")
       removePartition(p)
       numDeleted += 1
     }
-    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and index")
+    if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from index")
     shardStats.purgedPartitions.increment(numDeleted)
   }
 
@@ -817,6 +842,9 @@ class TimeSeriesShard(val dataset: Dataset,
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
   private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
+    // Free memory for removed partitions which are no longer referenced.
+    pollPartitionRefQueue()
+
     val part = partSet.getOrAddWithIngestBR(recordBase, recordOff, {
       val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
       val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
@@ -950,21 +978,43 @@ class TimeSeriesShard(val dataset: Dataset,
       // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
       // we would be processing same partIds again and again without moving watermark forward.
       // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
-      // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
+      // trade-off for performance and simplicity. The skipped partitions, will be removed during purge.
       logger.info(s"Shard $shardNum: evicted $partsRemoved partitions, skipped $partsSkipped, h20=$evictionWatermark")
       shardStats.partitionsEvicted.increment(partsRemoved)
     }
     true
   }
 
-  // Permanently removes the given partition ID from our in-memory data structures
-  // Also frees partition key if necessary
+  // Permanently removes the given partition ID from our in-memory data structures.
+  // Registers a PhantomReference to free the memory later.
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
-    offheapInfoMap.free(partitionObj)
-    bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     partitions.remove(partitionObj.partID)
+    val mapPtr = offheapInfoMap.close(partitionObj)
+    if (mapPtr != 0) {
+      partitionRefSet.add(new PartitionRef(partitionObj, mapPtr, partitionObj.partKeyOffset))
+    }
   }
+
+  // Frees the memory of fully unreferenced partition objects.
+  // scalastyle:off
+  private def pollPartitionRefQueue(): Unit = {
+    var numFreed = 0
+    while (true) {
+      val ref = partitionRefQueue.poll()
+      if (ref == null) {
+        if (numFreed > 0) {
+          logger.info(s"Freed $numFreed partitions from memory")
+          shardStats.partitionsFreed.increment(numFreed)
+        }
+        return
+      }
+      partitionRefSet.remove(ref)
+      ref.asInstanceOf[PartitionRef].freeMemory()
+      numFreed += 1
+    }
+  }
+  // scalastyle:on
 
   private def partitionsToEvict(): EWAHCompressedBitmap = {
     // Iterate and add eligible partitions to delete to our list

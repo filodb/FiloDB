@@ -725,22 +725,30 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
   }
 
   /**
-   * Frees the memory used by the map pointed to by inst.mapPtr, using CAS such that it will wait for concurrent
-   * modifications occurring to finish first.
-   * First the state is reset to 0, then the mapPtr itself is reset to 0, then the memory is finally freed.
-   * After this is called, concurrent modifications and reads of the map in inst will fail gracefully.
+   * Closes the map such that it appears empty and elements cannot be added to it anymore. The native
+   * memory cannot be freed until the holder object is completely unreferenced. This is because the
+   * lock state which guards access into the map is stored in the native memory itself. If the map has
+   * already been closed, 0 is returned.
+   */
+  final def close(inst: MapHolder): NativePointer = {
+    withExclusive(inst, {
+      while (true) {
+        val mapPtr = inst.mapPtr
+        if (mapPtr == 0 || UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, mapPtr, 0)) {
+          UnsafeUtils.setIntVolatile(inst, lockStateOffset, 0)
+          return mapPtr
+        }
+      }
+      0 // not reached
+    })
+  }
+
+  /**
+   * Closes the map and immediately frees the native memory, under the assumption that the map isn't being
+   * accessed by any other threads.
    */
   final def free(inst: MapHolder): Unit = {
-    withExclusive(inst, {
-      var curState = state(inst)
-      while (curState != MapState.empty) {
-        val mapPtr = inst.mapPtr
-        if (casState(mapPtr, curState, MapState.empty))
-          if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, mapPtr, 0))
-            memFactory.freeMemory(mapPtr)
-        curState = state(inst)
-      }
-    })
+    memFactory.freeMemory(close(inst))
   }
 
   private def casLong(mapPtr: NativePointer, mapOffset: Int, oldLong: Long, newLong: Long): Boolean =
