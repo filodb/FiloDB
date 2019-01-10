@@ -18,6 +18,7 @@ import scalaxy.loops._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
+import filodb.core.downsample.ChunkDownsampler
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo}
@@ -185,7 +186,10 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
 
+  // TODO get from store config
+  private final val downsampleResolutions = Array(1.minute.toMillis, 15.minutes.toMillis, 1.hour.toMillis)
 
+  private final val downsampleIngestSchema = ChunkDownsampler.downsampleIngestSchema(dataset)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -576,6 +580,8 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * Prepare to flush current index records, switch current currentIndexTimeBucketPartIds with new one.
     * Return Some if part keys need to be flushed (happens for last flush group). Otherwise, None.
+    *
+    * NEEDS TO RUN ON INGESTION THREAD since it removes entries from the partition data structures.
     */
   def prepareIndexTimeBucketForFlush(group: Int): Option[FlushIndexTimeBuckets] = {
     if (group == indexTimeBucketFlushGroup) {
@@ -635,6 +641,9 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
+  val downsamplers = ChunkDownsampler.makeDownsamplers(dataset, downsampleResolutions)
+
+  // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries")
@@ -642,15 +651,23 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
+
+    val downsampleBuilders =
+      Array.fill(downsampleResolutions.size)(new RecordBuilder(MemFactory.onHeapFactory, downsampleIngestSchema))
+
     val chunkSetIt = partitionIt.flatMap { p =>
       /* Step 1: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
+      ChunkDownsampler.downsample(dataset, p, p.infosToBeFlushed, downsamplers, downsampleResolutions,
+                      downsampleBuilders)
 
       /* Step 2: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
       updateIndexWithEndTime(p, chunks, flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket))
       chunks
     }
+
+    val publishDownsampleDataFuture: Future[Response] = publishDownsampleData(downsampleBuilders)
 
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
@@ -662,7 +679,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val writeChunksFut = writeChunks(flushGroup, chunkSetIt, partitionIt, blockHolder)
 
     /* Step 5: Checkpoint after time buckets and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture)).map {
+    val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, publishDownsampleDataFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
@@ -695,6 +712,9 @@ class TimeSeriesShard(val dataset: Dataset,
     checkEnableAddPartitions()
     updateGauges()
   }
+
+  // TODO implement method
+  private def publishDownsampleData(builders: Seq[RecordBuilder]): Future[Response] = ???
 
   // scalastyle:off method.length
   private def writeTimeBuckets(flushGroup: FlushGroup): Future[Response] = {

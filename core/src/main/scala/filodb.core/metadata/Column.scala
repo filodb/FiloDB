@@ -9,6 +9,7 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.SingleKeyTypes._
 import filodb.core.Types._
+import filodb.core.metadata.Column.DownsampleType
 import filodb.memory.format.{VectorInfo, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader.TypedFieldExtractor
 
@@ -31,12 +32,13 @@ trait Column {
  */
 case class DataColumn(id: Int,
                       name: String,
-                      columnType: Column.ColumnType) extends Column {
+                      columnType: Column.ColumnType,
+                      downsamplerTypes: Seq[DownsampleType] = Seq.empty) extends Column {
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.
   // NOTE: this is one reason why column names cannot have commas
   override def toString: String =
-    s"[$id,$name,$columnType]"
+    s"[$id,$name,$columnType,${downsamplerTypes.mkString(":")}]"
 
   def extractor: TypedFieldExtractor[_] = columnType.keyType.extractor
 }
@@ -47,11 +49,29 @@ object DataColumn {
    */
   def fromString(str: String): DataColumn = {
     val parts = str.drop(1).dropRight(1).split(',')
-    DataColumn(parts(0).toInt, parts(1), Column.ColumnType.withName(parts(2)))
+    DataColumn(parts(0).toInt, parts(1), Column.ColumnType.withName(parts(2)),
+      parts(3).split(":").map(d => DownsampleType.withName(d)))
   }
 }
 
 object Column extends StrictLogging {
+
+  sealed abstract class DownsampleType(override val entryName: String, val isRowKey: Boolean = false) extends EnumEntry{
+    def downsampleColName(colName: String): String = {
+      if (isRowKey) entryName else s"$colName-$entryName"
+    }
+  }
+
+  object DownsampleType extends Enum[DownsampleType] {
+    val values = findValues
+    case object MinDownsample extends DownsampleType("min")
+    case object MaxDownsample extends DownsampleType("max")
+    case object SumDownsample extends DownsampleType("sum")
+    case object CountDownsample extends DownsampleType("count")
+    case object IncreaseDownsample extends DownsampleType("increase")
+    case object LastValueDownsample extends DownsampleType("last")
+  }
+
   sealed trait ColumnType extends EnumEntry {
     def typeName: String
     // NOTE: due to a Spark serialization bug, this cannot be a val
@@ -89,7 +109,7 @@ object Column extends StrictLogging {
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
-    case Seq(DataColumn(_, _, columnType))  => columnType.keyType
+    case Seq(DataColumn(_, _, columnType, _))  => columnType.keyType
     case Seq(ComputedColumn(_, _, _, columnType, _, _)) => columnType.keyType
     case cols: Seq[Column] =>
       val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
@@ -100,7 +120,7 @@ object Column extends StrictLogging {
    * Converts a list of data columns to Filo VectorInfos for building Filo vectors
    */
   def toFiloSchema(columns: Seq[Column]): Seq[VectorInfo] = columns.collect {
-    case DataColumn(_, name, colType) => VectorInfo(name, colType.clazz)
+    case DataColumn(_, name, colType, _) => VectorInfo(name, colType.clazz)
   }
 
   import OptionSugar._
@@ -126,7 +146,7 @@ object Column extends StrictLogging {
   def validateColumn(name: String, typeName: String, nextId: Int): DataColumn Or One[BadSchema] =
     for { nothing <- validateColumnName(name)
           colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName))) }
-    yield { DataColumn(nextId, name, colType) }
+    yield { DataColumn(nextId, name, colType, Seq.empty) }
 
   import Accumulation._
 

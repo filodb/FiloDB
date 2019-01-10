@@ -100,6 +100,7 @@ extends MemStore with StrictLogging {
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
+                                                // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
                                                                 diskTimeToLiveSeconds, flushTimeBucket))

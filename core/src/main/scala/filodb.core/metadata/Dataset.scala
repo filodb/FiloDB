@@ -61,6 +61,7 @@ final case class Dataset(name: String,
   val blockMetaSize    = chunkSetInfoSize + 4
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
+
   /**
    * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
    */
@@ -203,7 +204,8 @@ object Dataset {
    * Re-creates a Dataset from the output of `asCompactString`
    */
   def fromCompactString(compactStr: String): Dataset = {
-    val Array(database, name, partColStr, dataColStr, rowKeyIndices, optStr) = compactStr.split('\u0001')
+    val Array(database, name, partColStr, dataColStr, dwnSampleColStr, rowKeyIndices, optStr) =
+      compactStr.split('\u0001')
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val rowKeyIDs = rowKeyIndices.split(':').toSeq.map(_.toInt)
@@ -315,13 +317,17 @@ object Dataset {
            partitionColNameTypes: Seq[String],
            dataColNameTypes: Seq[String],
            keyColumnNames: Seq[String],
-           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema =
-    for { partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
-          dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
-          _           <- validateMapColumn(partColumns, dataColumns)
-          rowKeyIDs   <- getRowKeyIDs(dataColumns, keyColumnNames)
-          _           <- validateTimeSeries(dataColumns, rowKeyIDs) }
-    yield {
-      Dataset(name, partColumns, dataColumns, rowKeyIDs, None, options)
-    }
+           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema = {
+
+    for {partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
+         dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
+         _ <- validateMapColumn(partColumns, dataColumns)
+         rowKeyIDs <- getRowKeyIDs(dataColumns, keyColumnNames)
+         _ <- validateTimeSeries(dataColumns, rowKeyIDs)}
+      yield {
+        Dataset(name, partColumns, dataColumns, rowKeyIDs, None, options)
+      }
+  }
+
+
 }
