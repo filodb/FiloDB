@@ -28,7 +28,7 @@ object TimeSeriesPartitionSpec {
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
     val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset1.ref, 0), infoMapAddr, offheapInfoMapKlass)
+          new TimeSeriesShardStats(dataset.ref, 0), infoMapAddr, offheapInfoMapKlass)
   }
 }
 
@@ -160,6 +160,12 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Read from flushed chunk only
     val readIt = part.timeRangeRows(RowKeyChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
     readIt.toBuffer shouldEqual minData.take(10)
+
+    val infos1 = part.infos(initTS, initTS + 9000)
+    infos1.hasNext shouldEqual true
+    val info1 = infos1.nextInfo
+    info1.numRows shouldEqual 10
+    info1.startTime shouldEqual initTS
 
     val readIt2 = part.timeRangeRows(RowKeyChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
     readIt2.toBuffer shouldEqual minData.drop(1).take(7)
