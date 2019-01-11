@@ -199,6 +199,7 @@ object ChunkDownsampler {
     */
   def downsampleIngestSchema(dataset: Dataset): RecordSchema = {
     val downsampleCols = dataset.dataColumns.flatMap(c => c.asInstanceOf[DataColumn].downsamplerTypes.map {dt =>
+      // TODO should the names exactly match the column names in the destination dataset?
       ColumnInfo(dt.downsampleColName(c.name), c.columnType)
     })
     new RecordSchema(dataset.partKeySchema.columns ++ downsampleCols, Some(0), dataset.ingestionSchema.predefinedKeys)
@@ -235,8 +236,8 @@ object ChunkDownsampler {
       val endTime = chunkset.endTime
       // for each downsample resolution
       dsStates.foreach { case DownsamplingState(res, downsamplers, builder) =>
-        var pStart = ( (startTime - 1) / res) * res // inclusive startTime for downsample period
-        var pEnd = pStart + res - 1 // end is inclusive
+        var pStart = ( (startTime - 1) / res) * res + 1 // inclusive startTime for downsample period
+        var pEnd = pStart + res // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
           var startRowNum = 0
