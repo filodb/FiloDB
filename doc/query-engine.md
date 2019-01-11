@@ -81,11 +81,10 @@ into samples with regular interval.
 
 Before delving into the `ExecPlan` constructs and how the query is orchestrated, it is important to understand
 the result data structure. The query result `QueryResult` is like a mini dataset in itself. It can have several
-partitions, each represented by `RangeVector`. All the `RangeVector`s share same schema which is included
+time series, each represented by `RangeVector`. All the `RangeVector`s share the same schema which is included
 in the result object. Each `RangeVector` has an associated key called the `RangeVectorKey` and could be
-seen as the partition key for the result. The `RangeVector` exposes an iterator of rows. Each row within
-the `RangeVector` starts wih the row-key column(s), followed by the data columns. For the time series
-dataset, the row-key is a timestamp. 
+seen as the time series key for the result. The `RangeVector` exposes an iterator of rows. Each row within
+the `RangeVector` starts wih the timestamp, followed by the data value, usually a double.
 
 ## Execution Plan Constructs
 
@@ -109,7 +108,8 @@ fetching of data.
 
 Here are the various `ExecPlan` implementations we have. The convention is for concrete ExecPlan names
 to end with 'Exec'. 
-* `SelectRawPartitionsExec`: This is the only lead node execution plan to extract raw data from the MemStore
+* `SelectRawPartitionsExec`: This is the only leaf node execution plan to extract raw data from the MemStore
+* `SelectChunkInfosExec`: Debugging exec plan used to extract chunk metadata from the MemStore
 * `ReduceAggregateExec`: This node takes intermediate aggregates and reduces them 
 * `BinaryJoinExec`: This node performs binary operations using results returned from child plans
 * `DistConcatExec`: This node simply concatenates data from child plans. Typically used to accumulate data from multiple nodes. 
@@ -206,8 +206,7 @@ test code on this example.
 
 Following are some over-arching principles in query execution
 
-* Fetch rows from chunks by using "lazily materialized" iterators. Iterators are lazy and use much
-  less memory than fully materialized collections.
+* Materialize as lazily as possible
 * For data transformations, wrap iterators using the decorator pattern and return a new iterator. This
   keeps the transformation lazy too and creates a synchronous data pipeline that uses much less memory than
   if the entire collection was instantiated.
@@ -235,24 +234,14 @@ FiloDB supports Range Functions that can operate on time windows of raw data. Fo
 increasing counter, one can calculate rate of increase of counter over, say 1 minute windows. Aggregation over
 time operations are also performed as Range Functions.
 
-Range Functions are implemented as operations over a sliding window of fixed time over raw samples.
-
 ![](QueryEngine-RangeFunctions.png)
 
-A `SlidingWindowIterator` buffers elements within a fixed time window of raw time series data samples. 
-The RangeFunction uses the data in the sliding window to compute the value for the current period 
-which is the end time of the sliding window. 
+There are two categories of `RangeFunction`s.  The chunked range functions have been shown to be significantly faster even when the windows overlap significantly.
 
-RangeFunctions are implementations of the `RangeFunction` trait based contract that the `SlidingWindowIterator`
-relies on. Via the trait implementation, the Range Function can request the SlidingWindowIterator to optionally
+1. `ChunkedRangeFunction` which is based on calculating each window from data in the raw chunks directly.  This lets each function take advantage of the ability to access the raw data in any order as well as take advantage of the columnar data layout for faster calculation speed.
+2. RangeFunctions which calculate based on a `SlidingWindowIterator`.  It adds and subtracts elements within a fixed time window of raw time series data samples. These implement the `RangeFunction` trait, either modifying the calculation when one row is added or subtracted from the window, or calculating it all at once. Via the trait implementation, the Range Function can request the SlidingWindowIterator to optionally
 * Correct monotonically increasing counters
 * Include one last sample outside the fixed time window when necessary
-
-`RangeFunction` implementation can be done either by 
-* Using addSampleToWindow or removeSampleFromWindow events to calculate the aggregate quickly. Typically, aggregation
-  over time functions can use these events to calculate aggregations over sliding windows of time. Prefer
-  this if possible since the complexity of the algorithm will be O(n) where n is the number of samples.
-* Or, by iterating all the buffered samples in the sliding window each time. 
 
 Look here for examples of [RangeFunctions](../query/exec/rangefn/RangeFunction.scala) 
 

@@ -100,6 +100,20 @@ class DoubleVectorTest extends NativeVectorTest {
       }
     }
 
+    it("should sum uncompressed double vectors and ignore NaN values") {
+      val orig = Seq(1000, 2001.1, 2999.99, 5123.4, 5250, 6004, 7678)
+      val builder = DoubleVector.appendingVectorNoNA(memFactory, orig.length + 2)
+      orig.foreach(builder.addData)
+
+      val reader = builder.reader.asDoubleReader
+      reader.sum(builder.addr, 2, orig.length - 1) shouldEqual (orig.drop(2).sum)
+
+      // Now add a NaN
+      builder.addData(Double.NaN)
+      builder.length shouldEqual (orig.length + 1)
+      reader.sum(builder.addr, 2, orig.length) shouldEqual (orig.drop(2).sum)
+    }
+
     it("should support resetting and optimizing AppendableVector multiple times") {
       val cb = DoubleVector.appendingVector(memFactory, 5)
       // Use large numbers on purpose so cannot optimize to Doubles or const

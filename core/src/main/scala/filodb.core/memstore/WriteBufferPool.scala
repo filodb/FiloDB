@@ -32,7 +32,7 @@ object WriteBufferPool {
  * TODO: Use MemoryManager etc. and allocate memory from a fixed block instead of specifying max # partitions
  */
 class WriteBufferPool(memFactory: MemFactory,
-                      dataset: Dataset,
+                      val dataset: Dataset,
                       maxChunkSize: Int,
                       allocationStepSize: Int = WriteBufferPool.DefaultAllocStepSize) extends StrictLogging {
   import TimeSeriesPartition._

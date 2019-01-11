@@ -7,7 +7,7 @@ import scala.language.postfixOps
 import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
-import filodb.memory.format.vectors.LongBinaryVector
+import filodb.memory.format.vectors._
 import filodb.memory.NativeMemoryManager
 
 /**
@@ -32,6 +32,14 @@ class BasicFiloBenchmark {
   randomLongs.foreach(ivbuilder.addData)
   val iv = ivbuilder.optimize(memFactory)
   val ivReader = LongBinaryVector(iv)
+
+  val dblBuilder = DoubleVector.appendingVectorNoNA(memFactory, numValues)
+  randomLongs.map(_.toDouble).foreach(dblBuilder.addData)
+  val dblReader= dblBuilder.reader.asDoubleReader
+
+  val intBuilder = IntBinaryVector.appendingVectorNoNA(memFactory, numValues)
+  randomLongs.map(n => (n / 256).toInt).foreach(intBuilder.addData)
+  val intReader = intBuilder.reader.asIntReader
 
   val byteIVBuilder = LongBinaryVector.appendingVectorNoNA(memFactory, numValues)
   randomLongs.zipWithIndex.map { case (rl, i) => i * 10000 + (rl % 128) }.foreach(byteIVBuilder.addData)
@@ -72,6 +80,27 @@ class BasicFiloBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumAllLongsSumMethod(): Double = {
+    ivReader.sum(iv, 0, numValues - 1)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumDoublesSumMethod(): Double = {
+    dblReader.sum(dblBuilder.addr, 0, numValues - 1)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumAllIntsSumMethod(): Long = {
+    intReader.sum(intBuilder.addr, 0, numValues - 1)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesApply(): Long = {
     var total = 0L
     for { i <- 0 until numValues optimized } {
@@ -90,5 +119,12 @@ class BasicFiloBenchmark {
       total += it.next
     }
     total
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def sumTimeSeriesBytesSum(): Double = {
+    byteReader.sum(byteVect, 0, numValues - 1)
   }
 }
