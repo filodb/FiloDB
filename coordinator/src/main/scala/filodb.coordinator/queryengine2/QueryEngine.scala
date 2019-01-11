@@ -207,6 +207,11 @@ class QueryEngine(dataset: Dataset,
     val filters = lp.labelConstraints.map { case (k, v) =>
       new ColumnFilter(k, Filter.Equals(v))
     }.toSeq
+    // If the label is PromMetricLabel and is different than dataset's metric name,
+    // replace it with dataset's metric name. (needed for prometheus plugins)
+    val labelName = if (PromMetricLabel == lp.labelName && dataset.options.metricColumn != PromMetricLabel)
+      dataset.options.metricColumn else lp.labelName
+
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
                         shardsFromFilters(filters, options)
                       } else {
@@ -215,7 +220,7 @@ class QueryEngine(dataset: Dataset,
     shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        filters, lp.labelName, lp.lookbackTimeInMillis)
+        filters, labelName, lp.lookbackTimeInMillis)
     }
   }
 
@@ -223,10 +228,11 @@ class QueryEngine(dataset: Dataset,
                                      submitTime: Long,
                                      options: QueryOptions,
                                      lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
-    shardsFromFilters(lp.filters, options).map { shard =>
+    val renamedFilters = renameMetricFilter(lp.filters)
+    shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, lp.start, lp.end)
+        renamedFilters, lp.start, lp.end)
     }
   }
 
