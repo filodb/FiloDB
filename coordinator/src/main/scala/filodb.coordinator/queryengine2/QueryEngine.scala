@@ -209,11 +209,9 @@ class QueryEngine(dataset: Dataset,
     }.toSeq
     // If the label is PromMetricLabel and is different than dataset's metric name,
     // replace it with dataset's metric name. (needed for prometheus plugins)
-    var labelName = lp.labelName
-    if (PromMetricLabel == lp.labelName && dataset.options.metricColumn != PromMetricLabel) {
-      labelName = dataset.options.metricColumn
-      logger.info(s"asdf ${labelName}")
-    }
+    val labelName = if (PromMetricLabel == lp.labelName && dataset.options.metricColumn != PromMetricLabel)
+      dataset.options.metricColumn else lp.labelName
+
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
                         shardsFromFilters(filters, options)
                       } else {
