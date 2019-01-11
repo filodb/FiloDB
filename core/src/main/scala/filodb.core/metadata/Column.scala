@@ -64,6 +64,7 @@ object Column extends StrictLogging {
 
   object DownsampleType extends Enum[DownsampleType] {
     val values = findValues
+    case object AverageDownsample extends DownsampleType("avg")
     case object MinDownsample extends DownsampleType("min")
     case object MaxDownsample extends DownsampleType("max")
     case object SumDownsample extends DownsampleType("sum")

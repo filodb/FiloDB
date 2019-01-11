@@ -1,5 +1,7 @@
 package filodb.core.downsample
 
+import java.lang.{Double => JLDouble}
+
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.{ErrorResponse, Response, Success}
@@ -10,34 +12,156 @@ import filodb.core.metadata.Column.{ColumnType, DownsampleType}
 import filodb.core.metadata.Column.DownsampleType._
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkInfoIterator
+import filodb.memory.format.BinaryVector
 import filodb.memory.format.vectors.{DoubleVectorDataReader, LongVectorDataReader}
 
 trait ChunkDownsampler {
-  def downsampleChunk(reader: DoubleVectorDataReader, startRow: Int, endRow: Int): Double = ???
-  def downsampleChunk(reader: LongVectorDataReader, startRow: Int, endRow: Int): Long = ???
+  def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                      reader: DoubleVectorDataReader,
+                      startRow: Int,
+                      endRow: Int): Double
+
+  def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                      longReader: LongVectorDataReader,
+                      startRow: Int,
+                      endRow: Int): Long
 }
 
 object MinDownsampler extends ChunkDownsampler {
-  override def downsampleChunk(reader: DoubleVectorDataReader, startRow: Int, endRow: Int): Double = ???
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    var min = Double.MaxValue
+    var rowNum = startRow
+    val it = doubleReader.iterate(doubleVect, startRow)
+    while (rowNum <= endRow) {
+      val nextVal = it.next
+      if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)
+      rowNum += 1
+    }
+    min
+  }
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                               longReader: LongVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Long = {
+    var min = Long.MinValue
+    var rowNum = startRow
+    val it = longReader.iterate(longVect, startRow)
+    while (rowNum <= endRow) {
+      val nextVal = it.next
+      min = Math.max(min, nextVal)
+      rowNum += 1
+    }
+    min
+  }
 }
 
 object MaxDownsampler extends ChunkDownsampler {
-  override def downsampleChunk(reader: DoubleVectorDataReader, startRow: Int, endRow: Int): Double = ???
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    var max = Double.MaxValue
+    var rowNum = startRow
+    val it = doubleReader.iterate(doubleVect, startRow)
+    while (rowNum <= endRow) {
+      val nextVal = it.next
+      if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)
+      rowNum += 1
+    }
+    max
+  }
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                               longReader: LongVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Long = {
+    var max = Long.MaxValue
+    var rowNum = startRow
+    val it = longReader.iterate(longVect, startRow)
+    while (rowNum <= endRow) {
+      val nextVal = it.next
+      max = Math.max(max, nextVal)
+      rowNum += 1
+    }
+    max
+  }
 }
 
 object SumDownsampler extends ChunkDownsampler {
-  override def downsampleChunk(reader: DoubleVectorDataReader, startRow: Int, endRow: Int): Double = ???
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    doubleReader.sum(doubleVect, startRow, endRow)
+  }
+
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                      longReader: LongVectorDataReader,
+                      startRow: Int,
+                      endRow: Int): Long = {
+    longReader.sum(longVect, startRow, endRow).toLong // FIXME why is sum call returning Double ?
+  }
 }
 
 object CountDownsampler extends ChunkDownsampler {
-  override def downsampleChunk(reader: DoubleVectorDataReader, startRow: Int, endRow: Int): Double = ???
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    doubleReader.count(doubleVect, startRow, endRow)
+  }
+
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                               reader: LongVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Long = {
+    endRow - startRow + 1
+  }
+
+}
+
+object AverageDownsampler extends ChunkDownsampler {
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    val sum = doubleReader.sum(doubleVect, startRow, endRow)
+    val count = doubleReader.count(doubleVect, startRow, endRow)
+    // TODO We should use a special representation of NaN here instead of 0.
+    // NaN is used for End-Of-Time-Series-Marker currently
+    if (count == 0) 0 else sum / count
+  }
+
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                               reader: LongVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Long = {
+    throw new UnsupportedOperationException("AverageDownsampler on a Long column " +
+      "is not supported since Long result cannot represent correct average. " +
+      "Fix downsampling configuration on dataset")
+  }
 }
 
 /**
   * Emits the last value within the row range requested. Typically used for timestamp column.
   */
 object LastValueDownsampler extends ChunkDownsampler {
-  override def downsampleChunk(reader: LongVectorDataReader, startRow: Int, endRow: Int): Long = ???
+  override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
+                               reader: LongVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Long = {
+    reader.apply(longVect, endRow)
+  }
+
+  override def downsampleChunk(doubleVect: BinaryVector.BinaryVectorPtr,
+                               doubleReader: DoubleVectorDataReader,
+                               startRow: Int,
+                               endRow: Int): Double = {
+    doubleReader.apply(doubleVect, endRow)
+  }
+
 }
 
 object ChunkDownsampler {
@@ -49,6 +173,7 @@ object ChunkDownsampler {
     */
   def apply(typ: DownsampleType): ChunkDownsampler = {
     typ match {
+      case AverageDownsample   => AverageDownsampler
       case MinDownsample       => MinDownsampler
       case MaxDownsample       => MaxDownsampler
       case SumDownsample       => SumDownsampler
@@ -88,6 +213,7 @@ object ChunkDownsampler {
     * Populates the builders in the DownsamplingState with downsample data for the
     * chunkset passed in.
     */
+  // scalastyle:off method.length
   def downsample(dataset: Dataset,
                  part: TimeSeriesPartition,
                  chunksets: ChunkInfoIterator,
@@ -98,12 +224,12 @@ object ChunkDownsampler {
       val endTime = chunkset.endTime
       // for each downsample resolution
       dsStates.foreach { case DownsamplingState(res, downsamplers, builder) =>
-        var pStart = (startTime / res) * res
-        var pEnd = pStart + res
+        var pStart = ( (startTime - 1) / res) * res // inclusive startTime for downsample period
+        var pEnd = pStart + res - 1 // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
-          val startRowNum = 0  // TODO calculate with binary search for pStart
-          val endRowNum = 0 // TODO calculate with binary search for pEnd
+          var startRowNum = 0
+          var endRowNum = 0
           builder.startNewRecord()
           // add partKey
           builder.addFieldsFromBinRecord(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
@@ -113,14 +239,24 @@ object ChunkDownsampler {
             val colReader = part.chunkReader(1, vecPtr)
             col.columnType match {
               case ColumnType.DoubleColumn =>
-                // for each downsampler for the column
+                // for each downsampler for the double column
                 downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(colReader.asDoubleReader, startRowNum, endRowNum)
+                  val downsampled = d.downsampleChunk(vecPtr, colReader.asDoubleReader, startRowNum, endRowNum)
                   builder.addDouble(downsampled)
                 }
-              case ColumnType.TimestampColumn | ColumnType.LongColumn =>
+              case ColumnType.TimestampColumn =>
+                // timestamp column is the row key, fix the row numbers for each column for the downsample period
+                startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart)
+                endRowNum = colReader.asLongReader.ceilingIndex(vecPtr, pEnd)
+                // for each downsampler for the long column
                 downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(colReader.asLongReader, startRowNum, endRowNum)
+                  val downsampled = d.downsampleChunk(vecPtr, colReader.asLongReader, startRowNum, endRowNum)
+                  builder.addLong(downsampled)
+                }
+              case ColumnType.LongColumn =>
+                // for each downsampler for the long column
+                downsamplers(col.id).foreach { d =>
+                  val downsampled = d.downsampleChunk(vecPtr, colReader.asLongReader, startRowNum, endRowNum)
                   builder.addLong(downsampled)
                 }
               case _ => ???
