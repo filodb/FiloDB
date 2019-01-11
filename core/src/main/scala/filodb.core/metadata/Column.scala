@@ -69,8 +69,7 @@ object Column extends StrictLogging {
     case object MaxDownsample extends DownsampleType("max")
     case object SumDownsample extends DownsampleType("sum")
     case object CountDownsample extends DownsampleType("count")
-    case object IncreaseDownsample extends DownsampleType("increase")
-    case object LastValueDownsample extends DownsampleType("last")
+    case object TimeDownsample extends DownsampleType("timestamp", true)
   }
 
   sealed trait ColumnType extends EnumEntry {
@@ -142,12 +141,29 @@ object Column extends StrictLogging {
    * @param name the column name
    * @param typeName the column type string, see ColumnType for valid values
    * @param nextId the next column ID to use
+   * @param downsamplers downsampler types for the column
    * @return Good(DataColumn) or Bad(BadSchema)
    */
-  def validateColumn(name: String, typeName: String, nextId: Int): DataColumn Or One[BadSchema] =
-    for { nothing <- validateColumnName(name)
-          colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName))) }
-    yield { DataColumn(nextId, name, colType, Seq.empty) }
+  def validateColumn(name: String,
+                     typeName: String,
+                     nextId: Int,
+                     downsamplers: Array[String]): DataColumn Or One[BadSchema]= {
+
+    for { _ <- validateColumnName(name)
+          colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName)))
+          downsamplerTypes <- validateDownsamplers(downsamplers)
+    } yield {
+      DataColumn(nextId, name, colType, downsamplerTypes)
+    }
+  }
+
+  def validateDownsamplers(downsamplers: Array[String]): Seq[DownsampleType] Or One[BadSchema] = {
+    val downsamplerTypes = downsamplers.map(d => d->DownsampleType.withNameOption(d))
+    downsamplerTypes.find(_._2.isEmpty) match {
+      case Some(d) => Bad(One(BadDownsamplerType(d._1)))
+      case None => Good(downsamplerTypes.map(_._2.get))
+    }
+  }
 
   import Accumulation._
 
@@ -156,12 +172,13 @@ object Column extends StrictLogging {
    * @param nameTypeList a Seq of "columnName:columnType" strings. Valid types are in ColumnType
    * @param startingId   column IDs are assigned starting with startingId incrementally
    */
+  // scalastyle:off
   def makeColumnsFromNameTypeList(nameTypeList: Seq[String], startingId: Int = 0): Seq[Column] Or BadSchema =
     nameTypeList.zipWithIndex.map { case (nameType, idx) =>
       val parts = nameType.split(':')
-      for { nameAndType <- if (parts.size == 2) Good((parts(0), parts(1))) else Bad(One(NotNameColonType(nameType)))
-            (name, colType) = nameAndType
-            col         <- validateColumn(name, colType, startingId + idx) }
+      for { nameAndType <- if (parts.size == 2) Good((parts(0), parts(1), new Array[String](0))) else if (parts.size == 3) Good((parts(0), parts(1), parts(2).split(','))) else Bad(One(NotNameColonType(nameType)))
+            (name, colType, downsamplers) = nameAndType
+            col         <- validateColumn(name, colType, startingId + idx, downsamplers) }
       yield { col }
     }.combined.badMap { errs => ColumnErrors(errs.toSeq) }
 }

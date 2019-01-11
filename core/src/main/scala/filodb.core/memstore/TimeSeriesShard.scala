@@ -639,14 +639,9 @@ class TimeSeriesShard(val dataset: Dataset,
   import ChunkDownsampler._
   // TODO get from store config
   private final val downsampleResolutions = Seq(1.minutes.toMillis.toInt)
-  private final val downsampleIngestSchema = ChunkDownsampler.downsampleIngestSchema(dataset)
   private final val downsamplePublisher = DownsamplePublisher()
-
   private final val downsamplingStates =
-    downsampleResolutions.map { res =>
-      val downsamplers = ChunkDownsampler.makeDownsamplers(dataset)
-      DownsamplingState(res, downsamplers, new RecordBuilder(MemFactory.onHeapFactory, downsampleIngestSchema))
-    }
+    initializeDownsamplerStates(dataset, downsampleResolutions, MemFactory.onHeapFactory)
 
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,

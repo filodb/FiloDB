@@ -12,6 +12,7 @@ import filodb.core.metadata.Column.{ColumnType, DownsampleType}
 import filodb.core.metadata.Column.DownsampleType._
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkInfoIterator
+import filodb.memory.MemFactory
 import filodb.memory.format.BinaryVector
 import filodb.memory.format.vectors.{DoubleVectorDataReader, LongVectorDataReader}
 
@@ -147,7 +148,7 @@ object AverageDownsampler extends ChunkDownsampler {
 /**
   * Emits the last value within the row range requested. Typically used for timestamp column.
   */
-object LastValueDownsampler extends ChunkDownsampler {
+object TimeDownsampler extends ChunkDownsampler {
   override def downsampleChunk(longVect: BinaryVector.BinaryVectorPtr,
                                reader: LongVectorDataReader,
                                startRow: Int,
@@ -159,7 +160,7 @@ object LastValueDownsampler extends ChunkDownsampler {
                                doubleReader: DoubleVectorDataReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    doubleReader.apply(doubleVect, endRow)
+    throw new UnsupportedOperationException("TimeDownsampler should not be configured on double column")
   }
 
 }
@@ -178,8 +179,18 @@ object ChunkDownsampler {
       case MaxDownsample       => MaxDownsampler
       case SumDownsample       => SumDownsampler
       case CountDownsample     => CountDownsampler
-      case LastValueDownsample => LastValueDownsampler
+      case TimeDownsample      => TimeDownsampler
       case a => throw new UnsupportedOperationException(s"Invalid downsample type $a")
+    }
+  }
+
+  def initializeDownsamplerStates(dataset: Dataset,
+                                  resolutions: Seq[Int],
+                                  memFactory: MemFactory): Seq[DownsamplingState] = {
+    val downsampleIngestSchema = ChunkDownsampler.downsampleIngestSchema(dataset)
+    resolutions.map { res =>
+      val downsamplers = ChunkDownsampler.makeDownsamplers(dataset)
+      DownsamplingState(res, downsamplers, new RecordBuilder(memFactory, downsampleIngestSchema))
     }
   }
 

@@ -204,7 +204,7 @@ object Dataset {
    * Re-creates a Dataset from the output of `asCompactString`
    */
   def fromCompactString(compactStr: String): Dataset = {
-    val Array(database, name, partColStr, dataColStr, dwnSampleColStr, rowKeyIndices, optStr) =
+    val Array(database, name, partColStr, dataColStr, rowKeyIndices, optStr) =
       compactStr.split('\u0001')
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
@@ -241,6 +241,7 @@ object Dataset {
     apply(name, partitionColumns, dataColumns, "timestamp")
 
   sealed trait BadSchema
+  case class BadDownsamplerType(dsType: String) extends BadSchema
   case class BadColumnType(colType: String) extends BadSchema
   case class BadColumnName(colName: String, reason: String) extends BadSchema
   case class NotNameColonType(nameTypeString: String) extends BadSchema
