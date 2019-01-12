@@ -67,7 +67,7 @@ class ChunkDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
         LongColumn, DoubleColumn, DoubleColumn, DoubleColumn)
   }
 
-  ignore ("should downsample prom dataset for multiple resolutions properly") {
+  it ("should downsample prom dataset for multiple resolutions properly") {
     val data = (100000L until 200000L by 1000).map(i => (i, i*5d))
     val rv = timeValueRV(data)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)

@@ -209,14 +209,9 @@ object ChunkDownsampler {
     * Returns 2D collection. First dimension is columnId, second is downsampler-number.
     */
   def makeDownsamplers(dataset: Dataset): Seq[Seq[ChunkDownsampler]] = {
-    val downsamplers = dataset.dataColumns.map { dc =>
-      dc.columnType match {
-        case ColumnType.DoubleColumn =>
-          dc.asInstanceOf[DataColumn].downsamplerTypes.map(ChunkDownsampler(_))
-        case _ => ??? // TODO not supported yet
-      }
+    dataset.dataColumns.map { dc =>
+      dc.asInstanceOf[DataColumn].downsamplerTypes.map(ChunkDownsampler(_))
     }
-    downsamplers
   }
 
   case class DownsamplingState(resolution: Int, downsampler: Seq[Seq[ChunkDownsampler]], builder: RecordBuilder)
