@@ -47,12 +47,12 @@ object MinDownsampler extends ChunkDownsampler {
                                longReader: LongVectorDataReader,
                                startRow: Int,
                                endRow: Int): Long = {
-    var min = Long.MinValue
+    var min = Long.MaxValue
     var rowNum = startRow
     val it = longReader.iterate(longVect, startRow)
     while (rowNum <= endRow) {
       val nextVal = it.next
-      min = Math.max(min, nextVal)
+      min = Math.min(min, nextVal)
       rowNum += 1
     }
     min
@@ -64,7 +64,7 @@ object MaxDownsampler extends ChunkDownsampler {
                                doubleReader: DoubleVectorDataReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    var max = Double.MaxValue
+    var max = Double.MinValue
     var rowNum = startRow
     val it = doubleReader.iterate(doubleVect, startRow)
     while (rowNum <= endRow) {
@@ -78,7 +78,7 @@ object MaxDownsampler extends ChunkDownsampler {
                                longReader: LongVectorDataReader,
                                startRow: Int,
                                endRow: Int): Long = {
-    var max = Long.MaxValue
+    var max = Long.MinValue
     var rowNum = startRow
     val it = longReader.iterate(longVect, startRow)
     while (rowNum <= endRow) {
@@ -162,7 +162,6 @@ object TimeDownsampler extends ChunkDownsampler {
                                endRow: Int): Double = {
     throw new UnsupportedOperationException("TimeDownsampler should not be configured on double column")
   }
-
 }
 
 object ChunkDownsampler {
@@ -202,7 +201,8 @@ object ChunkDownsampler {
       // TODO should the names exactly match the column names in the destination dataset?
       ColumnInfo(dt.downsampleColName(c.name), c.columnType)
     })
-    new RecordSchema(dataset.partKeySchema.columns ++ downsampleCols, Some(0), dataset.ingestionSchema.predefinedKeys)
+    new RecordSchema(/* TODO dataset.partKeySchema.columns ++ */
+      downsampleCols, Some(0), dataset.ingestionSchema.predefinedKeys)
   }
 
   /**
@@ -239,26 +239,26 @@ object ChunkDownsampler {
           var endRowNum = 0
           builder.startNewRecord()
           // add partKey
-          builder.addFieldsFromBinRecord(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
+// TODO         builder.addFieldsFromBinRecord(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
           // for each column
           dataset.dataColumns.foreach { col =>
             val vecPtr = chunkset.vectorPtr(col.id)
-            val colReader = part.chunkReader(1, vecPtr)
+            val colReader = part.chunkReader(col.id, vecPtr)
             col.columnType match {
-              case ColumnType.DoubleColumn =>
-                // for each downsampler for the double column
-                downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(vecPtr, colReader.asDoubleReader, startRowNum, endRowNum)
-                  builder.addDouble(downsampled)
-                }
               case ColumnType.TimestampColumn =>
-                // timestamp column is the row key, fix the row numbers for each column for the downsample period
-                startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart)
+                // timestamp column is the row key, so fix the row numbers for the downsample period
+                startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart) & 0x7fffffff
                 endRowNum = colReader.asLongReader.ceilingIndex(vecPtr, pEnd)
                 // for each downsampler for the long column
                 downsamplers(col.id).foreach { d =>
                   val downsampled = d.downsampleChunk(vecPtr, colReader.asLongReader, startRowNum, endRowNum)
                   builder.addLong(downsampled)
+                }
+              case ColumnType.DoubleColumn =>
+                // for each downsampler for the double column
+                downsamplers(col.id).foreach { d =>
+                  val downsampled = d.downsampleChunk(vecPtr, colReader.asDoubleReader, startRowNum, endRowNum)
+                  builder.addDouble(downsampled)
                 }
               case ColumnType.LongColumn =>
                 // for each downsampler for the long column
