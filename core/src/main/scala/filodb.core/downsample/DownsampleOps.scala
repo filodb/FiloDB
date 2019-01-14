@@ -30,11 +30,12 @@ object DownsampleOps {
     */
   def downsampleIngestSchema(dataset: Dataset): RecordSchema = {
     val downsampleCols = dataset.dataColumns.flatMap(c => c.asInstanceOf[DataColumn].downsamplerTypes.map {dt =>
-      // TODO should the names exactly match the column names in the destination dataset?
+      // The column names here would not exactly match the column names in the destination dataset, but it is ok.
+      // The ordering and data types is what really matters.
       ColumnInfo(dt.downsampleColName(c.name), c.columnType)
     })
-    new RecordSchema(/* TODO dataset.partKeySchema.columns ++ */
-      downsampleCols, Some(0), dataset.ingestionSchema.predefinedKeys)
+    new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
+      Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
   }
 
   /**
@@ -59,8 +60,6 @@ object DownsampleOps {
           var startRowNum = 0
           var endRowNum = 0
           builder.startNewRecord()
-          // add partKey
-          // TODO         builder.addFieldsFromBinRecord(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
           // for each column
           dataset.dataColumns.foreach { col =>
             val vecPtr = chunkset.vectorPtr(col.id)
@@ -90,6 +89,8 @@ object DownsampleOps {
               case _ => ???
             }
           }
+          // add partKey finally
+          builder.addPartKeyFromBr(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
           builder.endRecord(true)
           pStart += res
           pEnd += res

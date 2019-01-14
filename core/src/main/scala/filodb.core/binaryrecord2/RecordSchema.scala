@@ -84,6 +84,10 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def isTimeSeries: Boolean = columnTypes.length >= 1 &&
     (columnTypes.head == LongColumn || columnTypes.head == TimestampColumn)
 
+  /**
+    * Offset to the fixed field primitive or pointer which are at the beginning of the BR
+    * @param index column number (and not column id)
+    */
   def fieldOffset(index: Int): Int = offsets(index)
 
   def numBytes(base: Any, offset: Long): Int = BinaryRegionLarge.numBytes(base, offset)
@@ -141,6 +145,10 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     */
   def utf8StringOffset(base: Any, offset: Long, index: Int): Long =
     offset + UnsafeUtils.getInt(base, offset + offsets(index))
+
+  def utf8StringNumBytes(base: Any, offset: Long, index: Int): Long =
+    UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
+
 
   /**
    * COPIES the BinaryRecord field # index out as a new Java String on the heap.  Allocation + copying cost.

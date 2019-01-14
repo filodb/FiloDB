@@ -1,15 +1,19 @@
 package filodb.core.downsample
 
+import scala.collection.mutable
+
+import java.util
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.TestData
+import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
-import filodb.memory.{BlockMemFactory, MemFactory, MemoryStats, PageAlignedBlockManager}
-import filodb.memory.format.TupleRowReader
+import filodb.memory._
+import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
 
 // scalastyle:off null
 class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
@@ -39,9 +43,20 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
     blockStore.releaseBlocks()
   }
 
+  val partKeyTags = new util.ArrayList[(String, String)]()
+  partKeyTags.add("dc"->"dc1")
+  partKeyTags.add("instance"->"instance1")
+
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, promDataset.partKeySchema, 4096)
+  partKeyBuilder.startNewRecord()
+  partKeyBuilder.addSortedPairsAsMap(partKeyTags, RecordBuilder.sortAndComputeHashes(partKeyTags))
+  partKeyBuilder.endRecord(true)
+  val partKeyBase = partKeyBuilder.allContainers.head.base
+  val partKeyOffset = partKeyBuilder.allContainers.head.allOffsets(0)
+
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
   def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
-    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, bufferPool = tsBufferPool)
+    val part = TimeSeriesPartitionSpec.makePart(0, promDataset, partKeyOffset, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
     readers.foreach { row => part.ingest(row, ingestBlockHolder) }
     // Now flush and ingest the rest to ensure two separate chunks
@@ -53,18 +68,18 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
   it ("should formulate downsample ingest schema correctly for prom schema") {
     val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq(/*TODO "tags", */ "timestamp", "value-min", "value-max", "value-sum", "value-count","value-avg")
+      Seq("timestamp", "value-min", "value-max", "value-sum", "value-count","value-avg", "tags")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(/* TODO MapColumn, */ TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn)
+      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, MapColumn)
   }
 
   it ("should formulate downsample ingest schema correctly for non prom schema") {
     val dsSchema = DownsampleOps.downsampleIngestSchema(customDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq(/*TODO "name", "namespace", "instance",*/ "timestamp", "count-sum", "min-min", "max-max", "total-sum")
+      Seq("timestamp", "count-sum", "min-min", "max-max", "total-sum", "name", "namespace", "instance")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(/* TODO StringColumn, StringColumn, StringColumn, */ TimestampColumn,
-        LongColumn, DoubleColumn, DoubleColumn, DoubleColumn)
+      Seq(TimestampColumn, LongColumn, DoubleColumn, DoubleColumn, DoubleColumn,
+        StringColumn, StringColumn, StringColumn)
   }
 
   it ("should downsample sum,count,avg,min,max of prom dataset for multiple resolutions properly") {
@@ -80,6 +95,27 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
     // with resolution 5000
     val downsampledData1 = dsStates(0).builder.allContainers.flatMap { c =>
+
+      c.allOffsets.foreach { off =>
+
+        // validate tags on the partition key
+        val partKeyInRecord = new mutable.HashMap[String, String]()
+        val consumer = new MapItemConsumer {
+          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
+                               UTF8StringMedium.numBytes(valueBase, valueOffset))
+            partKeyInRecord.put(key.toString, value.toString)
+          }
+        }
+        dsSchema.consumeMapItems(c.base, off, 6, consumer)
+        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+
+        // validate partition hash on the record
+        promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual
+          dsSchema.partitionHash(c.base, off)
+      }
+
       c.iterate(dsSchema).map {r =>
         val timestamp = r.getLong(0)
         val min = r.getDouble(1)
@@ -112,6 +148,27 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
     // with resolution 10000
     val downsampledData2 = dsStates(1).builder.allContainers.flatMap { c =>
+
+      c.allOffsets.foreach { off =>
+
+        // validate tags on the partition key
+        val partKeyInRecord = new mutable.HashMap[String, String]()
+        val consumer = new MapItemConsumer {
+          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
+              UTF8StringMedium.numBytes(valueBase, valueOffset))
+            partKeyInRecord.put(key.toString, value.toString)
+          }
+        }
+        dsSchema.consumeMapItems(c.base, off, 6, consumer)
+        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+
+        // validate partition hash on the record
+        promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual
+          dsSchema.partitionHash(c.base, off)
+      }
+
       c.iterate(dsSchema).map {r =>
         val timestamp = r.getLong(0)
         val min = r.getDouble(1)

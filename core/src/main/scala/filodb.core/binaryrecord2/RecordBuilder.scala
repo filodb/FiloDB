@@ -4,7 +4,9 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Dataset}
-import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
+import filodb.core.query.ColumnInfo
+import filodb.memory.{BinaryRegion, BinaryRegionMedium, MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 
@@ -130,6 +132,58 @@ final class RecordBuilder(memFactory: MemFactory,
     updateFieldPointerAndLens(numBytes + 2)
     if (fieldNo >= firstPartField) recHash = combineHash(recHash, BinaryRegion.hash32(base, offset, numBytes))
     fieldNo += 1
+  }
+
+  /**
+    * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
+    * If this method is used, then caller needs to also update the partitionHash manually.
+    */
+  private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
+    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
+    checkFieldAndMemory(numBytes + 4)
+    UnsafeUtils.setInt(curBase, curRecEndOffset, numBytes) // length of blob
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 4, numBytes)
+    updateFieldPointerAndLens(numBytes + 4)
+    fieldNo += 1
+  }
+
+  private def addStringFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    val strDataOffset = schema.utf8StringOffset(base, offset, col)
+    addBlob(base, strDataOffset + 2, schema.blobNumBytes(base, strDataOffset, col))
+  }
+
+  /**
+    * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
+    * If this method is used, then caller needs to also update the partitionHash manually.
+    */
+  private def addMapFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    val strDataOffset = schema.utf8StringOffset(base, offset, col)
+    addMap(base, strDataOffset + 4, BinaryRegionMedium.numBytes(base, strDataOffset))
+  }
+
+  private def addLongFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    addLong(schema.getLong(base, offset, col))
+  }
+
+  private def addDoubleFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    addDouble(schema.getDouble(base, offset, col))
+  }
+
+  /**
+    * This also updates the hash for this record. OK since partKeys are added at the very end
+    * of the record.
+    */
+  final def addPartKeyFromBr(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
+    var id = 0
+    partKeySchema.columns.foreach {
+      case ColumnInfo(_, MapColumn) => addMapFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, StringColumn) => addStringFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
+      case _ => ???
+    }
+    // finally copy the partition hash over
+    recHash = partKeySchema.partitionHash(base, offset)
   }
 
   final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
