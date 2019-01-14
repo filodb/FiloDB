@@ -1021,7 +1021,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val ref = partitionRefQueue.poll()
       if (ref == null) {
         if (numFreed > 0) {
-          logger.info(s"Freed $numFreed partitions from memory")
+          logger.info(s"Freed $numFreed partition(s) from memory")
           shardStats.partitionsFreed.increment(numFreed)
         }
         return
@@ -1032,6 +1032,17 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
   // scalastyle:on
+
+  // Frees the memory of all fully unreferenced partition objects, blocking as necessary.
+  private def drainPartitionRefQueue(): Unit = {
+    while (!partitionRefSet.isEmpty) {
+      val ref = partitionRefQueue.remove()
+      partitionRefSet.remove(ref)
+      ref.asInstanceOf[PartitionRef].freeMemory()
+      logger.info(s"Freed 1 partition from memory")
+      shardStats.partitionsFreed.increment(1)
+    }
+  }
 
   private def partitionsToEvict(): EWAHCompressedBitmap = {
     // Iterate and add eligible partitions to delete to our list
@@ -1087,9 +1098,23 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   def shutdown(): Unit = {
+    logger.info(s"Shutting down shard $shardNum")
+
     reset()   // Not really needed, but clear everything just to be consistent
-    logger.info(s"Shutting down and releasing offheap memory for shard $shardNum")
+
+    if (!partitionRefSet.isEmpty) {
+      // Need a background thread to continue freeing memory.
+      val t = new Thread(new Runnable {
+        override def run(): Unit = drainPartitionRefQueue()
+      })
+      t.setDaemon(true)
+      t.start()
+    }
+
+    /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
+       method to ensure that no threads are accessing the memory before it's freed.
     bufferMemoryManager.shutdown()
     blockStore.releaseBlocks()
+    */
   }
 }
