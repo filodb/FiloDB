@@ -12,10 +12,10 @@ class InfluxRecordSpec extends FunSpec with Matchers {
   // Second one does not
   // Third one is a histogram
   val rawInfluxLPs = Seq(
-    "recovery_row_skipped_total,dataset=timeseries,host=MacBook-Pro-229.local,app=filodb counter=0 1536790212000000000",
+    "recovery_row_skipped_total,dataset=timeseries,host=MacBook-Pro-229.local,_ns=filodb counter=0 1536790212000000000",
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1 counter=0 1536790212000000000",
-    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,app=filodb counter=0 1536790212000000000",
-    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,app=filodb counter=0 1536790212000000000",
+    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ns=filodb counter=0 1536790212000000000",
+    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,_ns=filodb counter=0 1536790212000000000",
     "memstore_flushes_success_total,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,url=http://localhost:9095 counter=0 1536628260000000000",
     "span_processing_time_seconds,error=false,host=MacBook-Pro-229.local,operation=memstore-recover-index-latency +Inf=2,0.005=0,0.01=0,0.025=0,0.05=0,0.075=0,0.1=1,0.25=2,0.5=2,0.75=2,1=2,10=2,2.5=2,5=2,7.5=2,count=2,sum=0.230162432 1536790212000000000"
   )
@@ -84,7 +84,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
         dataset.ingestionSchema.consumeMapItems(base, offset, 2, consumer)
         consumer.stringPairs.toMap shouldEqual Map("dataset" -> "timeseries",
                                                    "host" -> "MacBook-Pro-229.local",
-                                                   "app" -> "filodb",
+                                                   "_ns" -> "filodb",
                                                    "__name__" -> "recovery_row_skipped_total")
       }
     }
