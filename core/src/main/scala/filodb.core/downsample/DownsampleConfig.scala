@@ -4,7 +4,7 @@ import scala.collection.JavaConverters._
 
 import com.typesafe.config.{Config, ConfigFactory}
 
-final case class DownsampleConfig(downsampleConfig: Config = ConfigFactory.empty) {
+final case class DownsampleConfig(downsampleConfig: Config) {
   val enabled = downsampleConfig.hasPath("enabled") && downsampleConfig.getBoolean("enabled")
   val resolutions = if (enabled) downsampleConfig.getIntList("resolutions-ms").asScala.map(_.intValue()) else Seq.empty
 
@@ -18,5 +18,9 @@ final case class DownsampleConfig(downsampleConfig: Config = ConfigFactory.empty
       pub
     }
   }
+}
+
+object DownsampleConfig {
+  val disabled = DownsampleConfig(ConfigFactory.empty)
 }
 

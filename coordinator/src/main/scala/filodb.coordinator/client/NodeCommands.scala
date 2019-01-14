@@ -58,7 +58,8 @@ object IngestionCommands {
   private[coordinator] final case class DatasetSetup(compactDatasetStr: String,
                                                      storeConfig: StoreConfig,
                                                      source: IngestionSource = noOpSource,
-                                                     downsampleConfig: DownsampleConfig) extends NodeCommand
+                                                     downsampleConfig: DownsampleConfig = DownsampleConfig.disabled)
+              extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.

@@ -12,7 +12,7 @@ import filodb.memory.{BlockMemFactory, MemFactory, MemoryStats, PageAlignedBlock
 import filodb.memory.format.TupleRowReader
 
 // scalastyle:off null
-class ChunkDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
+class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
   val maxChunkSize = 200
 
@@ -51,31 +51,31 @@ class ChunkDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   }
 
   it ("should formulate downsample ingest schema correctly for prom schema") {
-    val dsSchema = ChunkDownsampler.downsampleIngestSchema(promDataset)
+    val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("tags", "timestamp", "value-min", "value-max", "value-sum", "value-count","value-avg")
+      Seq(/*TODO "tags", */ "timestamp", "value-min", "value-max", "value-sum", "value-count","value-avg")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(MapColumn, TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn)
+      Seq(/* TODO MapColumn, */ TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn)
   }
 
   it ("should formulate downsample ingest schema correctly for non prom schema") {
-    val dsSchema = ChunkDownsampler.downsampleIngestSchema(customDataset)
+    val dsSchema = DownsampleOps.downsampleIngestSchema(customDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("name", "namespace", "instance", "timestamp", "count-sum", "min-min", "max-max", "total-sum")
+      Seq(/*TODO "name", "namespace", "instance",*/ "timestamp", "count-sum", "min-min", "max-max", "total-sum")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(StringColumn, StringColumn, StringColumn, TimestampColumn,
+      Seq(/* TODO StringColumn, StringColumn, StringColumn, */ TimestampColumn,
         LongColumn, DoubleColumn, DoubleColumn, DoubleColumn)
   }
 
-  it ("should downsample prom dataset for multiple resolutions properly") {
+  it ("should downsample sum,count,avg,min,max of prom dataset for multiple resolutions properly") {
     val data = (100000L until 200000L by 1000).map(i => (i, i*5d))
     val rv = timeValueRV(data)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
-    val dsSchema = ChunkDownsampler.downsampleIngestSchema(promDataset)
-    val dsStates = ChunkDownsampler.initializeDownsamplerStates(promDataset,
+    val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
+    val dsStates = DownsampleOps.initializeDownsamplerStates(promDataset,
                                                  Seq(5000, 10000), MemFactory.onHeapFactory)
 
-    ChunkDownsampler.downsample(promDataset, rv.partition.asInstanceOf[TimeSeriesPartition],
+    DownsampleOps.downsample(promDataset, rv.partition.asInstanceOf[TimeSeriesPartition],
                                 chunkInfos, dsStates)
 
     // with resolution 5000

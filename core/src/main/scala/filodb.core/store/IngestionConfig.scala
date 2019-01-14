@@ -106,7 +106,7 @@ final case class IngestionConfig(ref: DatasetRef,
                                  streamFactoryClass: String,
                                  streamConfig: Config,
                                  storeConfig: StoreConfig,
-                                 downsampleConfig: DownsampleConfig) {
+                                 downsampleConfig: DownsampleConfig = DownsampleConfig.disabled) {
 
   // called by NodeClusterActor, by this point, validation and failure if
   // config parse issue or not available are raised from Cli / HTTP
@@ -129,18 +129,19 @@ object IngestionConfig {
     * Allows the caller to decide what to do with configuration parsing errors and when.
     * Fails if no dataset is provided by the config submitter.
     */
-  private[core] def apply(sourceConfig: Config): Try[IngestionConfig] =
+  private[core] def apply(sourceConfig: Config): Try[IngestionConfig] = {
     for {
-      resolved  <- sourceConfig.resolveT
-      dataset   <- resolved.stringT(DatasetRefKey) // fail fast if missing
-      factory   <- resolved.stringT(SourceFactory) // fail fast if missing
-      numShards <- numShards(resolved)             // fail fast if missing
-      minNodes  <- minNumNodes(resolved)           // fail fast if missing
+      resolved <- sourceConfig.resolveT
+      downsampleConf = resolved.configT(Downsample).map(DownsampleConfig.apply).getOrElse(DownsampleConfig.disabled)
+      dataset <- resolved.stringT(DatasetRefKey) // fail fast if missing
+      factory <- resolved.stringT(SourceFactory) // fail fast if missing
+      numShards <- numShards(resolved) // fail fast if missing
+      minNodes <- minNumNodes(resolved) // fail fast if missing
       streamConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
-      ref          = DatasetRef.fromDotString(dataset)
+      ref = DatasetRef.fromDotString(dataset)
       storeConf <- streamConfig.configT("store").map(StoreConfig.apply)
-      downsampleConf <- streamConfig.configT("downsample").map(DownsampleConfig.apply)
     } yield IngestionConfig(ref, resolved, factory, streamConfig, storeConf, downsampleConf)
+  }
 
   def apply(sourceConfig: Config, backupSourceFactory: String): Try[IngestionConfig] = {
     val backup = ConfigFactory.parseString(s"$SourceFactory = $backupSourceFactory")
@@ -154,13 +155,14 @@ object IngestionConfig {
   /** Creates an IngestionConfig from `ingestionconfig` Cassandra table. */
   def apply(ref: DatasetRef, factoryclass: String, resources: String, sourceconfig: String): IngestionConfig = {
     val sourceConf = ConfigFactory.parseString(sourceconfig)
+    val downsampleConf = sourceConf.configT(Downsample).map(DownsampleConfig.apply).getOrElse(DownsampleConfig.disabled)
     IngestionConfig(
       ref,
       ConfigFactory.parseString(resources),
       factoryclass,
       sourceConf,
       StoreConfig(sourceConf.getConfig("store")),
-      DownsampleConfig(sourceConf.getConfig("downsample")))
+      downsampleConf)
   }
 }
 

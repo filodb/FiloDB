@@ -236,7 +236,7 @@ extends ReadablePartition with MapHolder {
   private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(offheapInfoMap.iterate(this))
 
   // NOT including currently flushing writeBuffer chunks if there are any
-  def infosToBeFlushed: ChunkInfoIterator =
+  private[memstore] def infosToBeFlushed: ChunkInfoIterator =
     new ElementChunkInfoIterator(offheapInfoMap.sliceToEnd(this, newestFlushedID + 1))
                .filter(_ != currentInfo)  // filter out the appending chunk
 

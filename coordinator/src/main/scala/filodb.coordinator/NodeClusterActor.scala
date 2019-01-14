@@ -58,7 +58,7 @@ object NodeClusterActor {
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource,
                                 storeConfig: StoreConfig,
-                                downsample: DownsampleConfig) {
+                                downsample: DownsampleConfig = DownsampleConfig.disabled) {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)

@@ -155,6 +155,8 @@ object PartitionIterator {
   * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
   *
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
+  * @param downsampleConfig configuration for downsample operations
+  * @param downsamplePublisher is shared among all shards of the dataset on the node
   */
 class TimeSeriesShard(val dataset: Dataset,
                       val storeConfig: StoreConfig,
@@ -638,8 +640,9 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
-  private final val downsamplingStates =
+  private final val downsamplingStates = if (downsampleConfig.enabled)
     DownsampleOps.initializeDownsamplerStates(dataset, downsampleConfig.resolutions, MemFactory.onHeapFactory)
+  else Seq.empty
 
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
@@ -649,7 +652,6 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
-
     val chunkSetIt = partitionIt.flatMap { p =>
       /* Step 1: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)

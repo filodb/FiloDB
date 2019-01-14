@@ -26,7 +26,7 @@ trait ClusterOps extends ClientBase with StrictLogging {
                    spec: DatasetResourceSpec,
                    source: IngestionSource,
                    storeConfig: StoreConfig,
-                   downsampleConfig: DownsampleConfig,
+                   downsampleConfig: DownsampleConfig = DownsampleConfig.disabled,
                    timeout: FiniteDuration = 30.seconds): Option[ErrorResponse] =
     clusterActor.map { ref =>
       Client.actorAsk(ref, SetupDataset(dataset, spec, source, storeConfig, downsampleConfig), timeout) {
