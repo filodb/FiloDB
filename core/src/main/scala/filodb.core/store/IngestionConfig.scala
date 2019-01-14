@@ -7,6 +7,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, IngestionKeys}
+import filodb.core.downsample.DownsampleConfig
 
 final case class StoreConfig(flushInterval: FiniteDuration,
                              diskTTLSeconds: Int,
@@ -104,7 +105,8 @@ final case class IngestionConfig(ref: DatasetRef,
                                  resources: Config,
                                  streamFactoryClass: String,
                                  streamConfig: Config,
-                                 storeConfig: StoreConfig) {
+                                 storeConfig: StoreConfig,
+                                 downsampleConfig: DownsampleConfig) {
 
   // called by NodeClusterActor, by this point, validation and failure if
   // config parse issue or not available are raised from Cli / HTTP
@@ -137,7 +139,8 @@ object IngestionConfig {
       streamConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
       ref          = DatasetRef.fromDotString(dataset)
       storeConf <- streamConfig.configT("store").map(StoreConfig.apply)
-    } yield IngestionConfig(ref, resolved, factory, streamConfig, storeConf)
+      downsampleConf <- streamConfig.configT("downsample").map(DownsampleConfig.apply)
+    } yield IngestionConfig(ref, resolved, factory, streamConfig, storeConf, downsampleConf)
 
   def apply(sourceConfig: Config, backupSourceFactory: String): Try[IngestionConfig] = {
     val backup = ConfigFactory.parseString(s"$SourceFactory = $backupSourceFactory")
@@ -156,7 +159,8 @@ object IngestionConfig {
       ConfigFactory.parseString(resources),
       factoryclass,
       sourceConf,
-      StoreConfig(sourceConf.getConfig("store")))
+      StoreConfig(sourceConf.getConfig("store")),
+      DownsampleConfig(sourceConf.getConfig("downsample")))
   }
 }
 

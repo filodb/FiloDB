@@ -10,6 +10,7 @@ import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -24,9 +25,12 @@ class OnDemandPagingShard(dataset: Dataset,
                           shardNum: Int,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
-                          evictionPolicy: PartitionEvictionPolicy)
+                          evictionPolicy: PartitionEvictionPolicy,
+                          downsampleConfig: DownsampleConfig,
+                          downsamplePublisher: DownsamplePublisher)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy)(ec) {
+TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy,
+                downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
   private val singleThreadPool = Scheduler.singleThread("make-partition")

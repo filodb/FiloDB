@@ -10,6 +10,7 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
+import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -23,6 +24,7 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
+  private val downsamplePublishers = new HashMap[DatasetRef, DownsamplePublisher]
 
   val stats = new ChunkSourceStats
 
@@ -32,13 +34,21 @@ extends MemStore with StrictLogging {
     new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
+  private def makeAndStartPublisher(downsample: DownsampleConfig): DownsamplePublisher = {
+    val pub = downsample.makePublisher()
+    pub.start()
+    pub
+  }
+
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit = synchronized {
+  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig, downsample: DownsampleConfig): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore, partEvictionPolicy)
+      val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
+      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore,
+                              partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
   }
@@ -181,6 +191,8 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
+    downsamplePublishers.valuesIterator.foreach { _.stop() }
+    downsamplePublishers.clear()
     store.reset()
   }
 

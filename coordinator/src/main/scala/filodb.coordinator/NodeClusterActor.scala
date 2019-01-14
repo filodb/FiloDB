@@ -1,8 +1,8 @@
 package filodb.coordinator
 
 import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import akka.actor._
 import akka.cluster.{Cluster, Member, MemberStatus}
@@ -12,6 +12,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
@@ -56,14 +57,16 @@ object NodeClusterActor {
   final case class SetupDataset(ref: DatasetRef,
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource,
-                                storeConfig: StoreConfig) {
+                                storeConfig: StoreConfig,
+                                downsample: DownsampleConfig) {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
     val config = IngestionConfig(ref, resourceConfig,
                                  source.streamFactoryClass,
                                  source.config,
-                                 storeConfig)
+                                 storeConfig,
+                                 downsample)
   }
 
   object SetupDataset {
@@ -71,7 +74,8 @@ object NodeClusterActor {
       SetupDataset(source.ref,
                    DatasetResourceSpec(source.numShards, source.minNumNodes),
                    IngestionSource(source.streamFactoryClass, source.streamConfig),
-                   source.storeConfig)
+                   source.storeConfig,
+                   source.downsampleConfig)
   }
 
   // A dummy source to use for tests and when you just want to push new records in
@@ -180,10 +184,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        actors: NodeClusterActor.ActorArgs
                                       ) extends NamingAwareBaseActor {
 
-  import ActorName._, NodeClusterActor._, ShardSubscriptions._
   import actors._
-  import settings._
   import context.dispatcher
+  import settings._
+
+  import ActorName._
+  import NodeClusterActor._
+  import ShardSubscriptions._
 
   val cluster = Cluster(context.system)
 

@@ -1,6 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
@@ -56,7 +57,8 @@ object IngestionCommands {
    */
   private[coordinator] final case class DatasetSetup(compactDatasetStr: String,
                                                      storeConfig: StoreConfig,
-                                                     source: IngestionSource = noOpSource) extends NodeCommand
+                                                     source: IngestionSource = noOpSource,
+                                                     downsampleConfig: DownsampleConfig) extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.

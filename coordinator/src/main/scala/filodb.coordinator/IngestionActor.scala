@@ -13,6 +13,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, GlobalScheduler, Iterators}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
@@ -27,9 +28,10 @@ object IngestionActor {
   def props(dataset: Dataset,
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
+            downsample: DownsampleConfig,
             storeConfig: StoreConfig,
             statusActor: ActorRef): Props =
-    Props(new IngestionActor(dataset, memStore, source, storeConfig, statusActor))
+    Props(new IngestionActor(dataset, memStore, source, downsample, storeConfig, statusActor))
 }
 
 /**
@@ -50,6 +52,7 @@ object IngestionActor {
 private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
                                            source: NodeClusterActor.IngestionSource,
+                                           downsample: DownsampleConfig,
                                            storeConfig: StoreConfig,
                                            statusActor: ActorRef) extends BaseActor {
 
@@ -98,7 +101,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     */
   private def start(e: StartShardIngestion, origin: ActorRef): Unit =
     if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
-      try memStore.setup(dataset, e.shard, storeConfig) catch {
+      try memStore.setup(dataset, e.shard, storeConfig, downsample) catch {
         case ShardAlreadySetup(ds, shard) =>
           logger.warn(s"Dataset $ds shard $shard already setup, skipping....")
           return

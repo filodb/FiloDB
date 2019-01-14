@@ -9,6 +9,7 @@ import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, StoreConfig}
 
@@ -366,7 +367,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
         val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, setup.storeConfig, dataset)
+        val state = DatasetInfo(resources, metrics, source, setup.downsample, setup.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
@@ -511,7 +512,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                                               shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
     logger.info(s"Sending setup message for ${state.dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.storeConfig, state.source)
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
+      state.storeConfig, state.source, state.downsample)
     coord ! setupMsg
 
     for { shard <- shards }  {
@@ -570,6 +572,7 @@ private[coordinator] object ShardManager {
   final case class DatasetInfo(resources: DatasetResourceSpec,
                                metrics: ShardHealthStats,
                                source: IngestionSource,
+                               downsample: DownsampleConfig,
                                storeConfig: StoreConfig,
                                dataset: Dataset)
 }

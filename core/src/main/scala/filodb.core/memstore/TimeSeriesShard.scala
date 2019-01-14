@@ -18,7 +18,7 @@ import scalaxy.loops._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.{ChunkDownsampler, DownsamplePublisher}
+import filodb.core.downsample.{DownsampleConfig, DownsampleOps, DownsamplePublisher}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo}
@@ -161,7 +161,9 @@ class TimeSeriesShard(val dataset: Dataset,
                       val shardNum: Int,
                       colStore: ColumnStore,
                       metastore: MetaStore,
-                      evictionPolicy: PartitionEvictionPolicy)
+                      evictionPolicy: PartitionEvictionPolicy,
+                      downsampleConfig: DownsampleConfig,
+                      downsamplePublisher: DownsamplePublisher)
                      (implicit val ec: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
@@ -636,12 +638,8 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
-  import ChunkDownsampler._
-  // TODO get from store config
-  private final val downsampleResolutions = Seq(1.minutes.toMillis.toInt)
-  private final val downsamplePublisher = DownsamplePublisher()
   private final val downsamplingStates =
-    initializeDownsamplerStates(dataset, downsampleResolutions, MemFactory.onHeapFactory)
+    DownsampleOps.initializeDownsamplerStates(dataset, downsampleConfig.resolutions, MemFactory.onHeapFactory)
 
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
@@ -655,7 +653,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val chunkSetIt = partitionIt.flatMap { p =>
       /* Step 1: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
-      ChunkDownsampler.downsample(dataset, p, p.infosToBeFlushed, downsamplingStates)
+      if (downsampleConfig.enabled) DownsampleOps.downsample(dataset, p, p.infosToBeFlushed, downsamplingStates)
 
       /* Step 2: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
@@ -663,8 +661,9 @@ class TimeSeriesShard(val dataset: Dataset,
       chunks
     }
 
-    val publishDownsampleFuture =
-      ChunkDownsampler.publishDownsampleBuilders(downsamplePublisher, shardNum, downsamplingStates)
+    val pubDownsampleFuture = if (downsampleConfig.enabled)
+          DownsampleOps.publishDownsampleBuilders(downsamplePublisher, shardNum, downsamplingStates)
+        else Future.successful(Success)
 
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
@@ -676,7 +675,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val writeChunksFut = writeChunks(flushGroup, chunkSetIt, partitionIt, blockHolder)
 
     /* Step 5: Checkpoint after time buckets and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, publishDownsampleFuture)).map {
+    val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()

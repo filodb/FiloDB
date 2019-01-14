@@ -7,6 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
@@ -55,7 +56,7 @@ trait MemStore extends ChunkSource {
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @throws ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit
+  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig, downsample: DownsampleConfig): Unit
 
   /**
    * Ingests new rows, making them immediately available for reads

@@ -1,15 +1,17 @@
 package filodb.cli
 
-import akka.actor.{ActorRef, ActorSystem}
-import com.typesafe.config.ConfigFactory
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
+import akka.actor.{ActorRef, ActorSystem}
+import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.StrictLogging
+
+import filodb.coordinator.NodeClusterActor
 import filodb.coordinator.client.LocalClient
 import filodb.coordinator.sources.CsvStreamFactory
-import filodb.coordinator.NodeClusterActor
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.store.{MetaStore, StoreConfig}
 
 // Turn off style rules for CLI classes
@@ -42,7 +44,8 @@ trait CsvImportExport extends StrictLogging {
     client.setupDataset(dataset,
                         DatasetResourceSpec(1, 1),
                         IngestionSource(classOf[CsvStreamFactory].getName, config),
-                        StoreConfig(storeConf)).foreach {
+                        StoreConfig(storeConf),
+                        DownsampleConfig()).foreach {
       case e: ErrorResponse =>
         println(s"Errors setting up ingestion: $e")
         exitCode = 2
