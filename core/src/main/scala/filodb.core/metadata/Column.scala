@@ -38,7 +38,7 @@ case class DataColumn(id: Int,
   // We leave out the dataset because that is almost always inferred from context.
   // NOTE: this is one reason why column names cannot have commas
   override def toString: String =
-    s"[$id,$name,$columnType,${downsamplerTypes.mkString("$")}]"
+    s"[$id,$name,$columnType,${downsamplerTypes.map(_.entryName).mkString("%")}]"
 
   def extractor: TypedFieldExtractor[_] = columnType.keyType.extractor
 }
@@ -50,7 +50,7 @@ object DataColumn {
   def fromString(str: String): DataColumn = {
     val parts = str.drop(1).dropRight(1).split(",", -1)
     DataColumn(parts(0).toInt, parts(1), Column.ColumnType.withName(parts(2)),
-      parts(3).split("$").filterNot(_.isEmpty).map(d => DownsampleType.withName(d)))
+      parts(3).split("%").filterNot(_.isEmpty).map(d => DownsampleType.withName(d)))
   }
 }
 
@@ -176,7 +176,7 @@ object Column extends StrictLogging {
   def makeColumnsFromNameTypeList(nameTypeList: Seq[String], startingId: Int = 0): Seq[Column] Or BadSchema =
     nameTypeList.zipWithIndex.map { case (nameType, idx) =>
       val parts = nameType.split(':')
-      for { nameAndType <- if (parts.size == 2) Good((parts(0), parts(1), new Array[String](0))) else if (parts.size == 3) Good((parts(0), parts(1), parts(2).split(','))) else Bad(One(NotNameColonType(nameType)))
+      for { nameAndType <- if (parts.size == 2) Good((parts(0), parts(1), new Array[String](0))) else if (parts.size == 3) Good((parts(0), parts(1), parts(2).split('%'))) else Bad(One(NotNameColonType(nameType)))
             (name, colType, downsamplers) = nameAndType
             col         <- validateColumn(name, colType, startingId + idx, downsamplers) }
       yield { col }

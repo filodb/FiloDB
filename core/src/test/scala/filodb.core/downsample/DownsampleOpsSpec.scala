@@ -1,8 +1,9 @@
 package filodb.core.downsample
 
+import java.util
+
 import scala.collection.mutable
 
-import java.util
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.TestData
@@ -22,7 +23,7 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
   val promDataset = Dataset.make("prom",
     Seq("tags:map"),
-    Seq("timestamp:ts:timestamp", "value:double:min,max,sum,count,avg"),
+    Seq("timestamp:ts:timestamp", "value:double:min%max%sum%count%avg"),
     Seq("timestamp"),
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 

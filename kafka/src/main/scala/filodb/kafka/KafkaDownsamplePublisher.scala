@@ -47,7 +47,7 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
 
   def start(): Unit = {
     logger.info(s"Starting Kafka Downsampling Publisher. Will be publishing to $topics ")
-    private val producer = KafkaProducerSink[JLong, Array[Byte]](kafkaConfig, sched)
+    val producer = KafkaProducerSink[JLong, Array[Byte]](kafkaConfig, sched)
     future = Observable.repeat(0).map { _: Int =>
       val records = new ArrayBuffer[ProducerRecord[JLong, Array[Byte]]](consumeSize)
       val consumer = new MessagePassingQueue.Consumer[ProducerRecord[JLong, Array[Byte]]] {

@@ -128,6 +128,7 @@ brew services start kafka
 Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
 ```
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
+kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
 Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
@@ -144,7 +145,8 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts:timestamp,value:double:min%max%sum%count --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double --partitionColumns tags:map --shardKeyColumns __name__,app
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
