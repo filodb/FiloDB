@@ -19,18 +19,22 @@ import filodb.core.downsample.DownsamplePublisher
 
 class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePublisher with StrictLogging {
 
-  val kafkaConfig = KafkaProducerConfig(downsampleConfig.getConfig("kafka"))
-  implicit  val sched = Scheduler.computation(name = "downsample")
+  private val kafkaConfig = KafkaProducerConfig(downsampleConfig.getConfig("kafka"))
+  private implicit val sched = Scheduler.computation(name = "downsample")
 
-  val topics: Map[Int, String] = downsampleConfig.getConfig("topics").entrySet().asScala.map { e =>
-                         e.getKey.toInt -> e.getValue.unwrapped().toString }.toMap
+  private val topics: Map[Int, String] = downsampleConfig.getConfig("publisher-config.topics")
+    .entrySet().asScala.map { e => e.getKey.toInt -> e.getValue.unwrapped().toString }.toMap
 
   private val producer = KafkaProducerSink[JLong, Array[Byte]](kafkaConfig, sched)
-  val consumeSize = downsampleConfig.getInt("consume-batch-size")
-  val queue = new MpscGrowableArrayQueue[ProducerRecord[JLong, Array[Byte]]](100, 1000) // TODO get sizes from config
-  var future: CancelableFuture[Unit] = _
+  private val consumeSize = downsampleConfig.getInt("publisher-config.consume-batch-size")
+  private val minQueueSize = downsampleConfig.getInt("publisher-config.min-queue-size")
+  private val maxQueueSize = downsampleConfig.getInt("publisher-config.max-queue-size")
+  private val queue = new MpscGrowableArrayQueue[ProducerRecord[JLong, Array[Byte]]](minQueueSize, maxQueueSize)
+  private var future: CancelableFuture[Unit] = _
 
   override def publish(shardNum: Int, resolution: Int, records: Seq[Array[Byte]]): Future[Response] = {
+    logger.debug(s"Got request to publish ${records.size} record containers " +
+      s"to shard $shardNum for resolution $resolution")
     topics.get(resolution) match {
       case Some(topic) =>
         records.foreach { bytes =>
@@ -43,6 +47,7 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
   }
 
   def start(): Unit = {
+    logger.info(s"Starting Kafka Downsampling Publisher. Will be publishing to $topics ")
     future = Observable.repeat(0).map { _: Int =>
       val records = new ArrayBuffer[ProducerRecord[JLong, Array[Byte]]](consumeSize)
       val consumer = new MessagePassingQueue.Consumer[ProducerRecord[JLong, Array[Byte]]] {
@@ -58,6 +63,7 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
   }
 
   def stop(): Unit = {
+    logger.info("Stopping Kafka Downsampling Publisher")
     future.cancel()
   }
 }

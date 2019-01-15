@@ -132,7 +132,7 @@ object IngestionConfig {
   private[core] def apply(sourceConfig: Config): Try[IngestionConfig] = {
     for {
       resolved <- sourceConfig.resolveT
-      downsampleConf = resolved.configT(Downsample).map(DownsampleConfig.apply).getOrElse(DownsampleConfig.disabled)
+      downsampleConf = DownsampleConfig.downsampleConfigFromSource(resolved)
       dataset <- resolved.stringT(DatasetRefKey) // fail fast if missing
       factory <- resolved.stringT(SourceFactory) // fail fast if missing
       numShards <- numShards(resolved) // fail fast if missing
@@ -155,7 +155,7 @@ object IngestionConfig {
   /** Creates an IngestionConfig from `ingestionconfig` Cassandra table. */
   def apply(ref: DatasetRef, factoryclass: String, resources: String, sourceconfig: String): IngestionConfig = {
     val sourceConf = ConfigFactory.parseString(sourceconfig)
-    val downsampleConf = sourceConf.configT(Downsample).map(DownsampleConfig.apply).getOrElse(DownsampleConfig.disabled)
+    val downsampleConf = DownsampleConfig.downsampleConfigFromSource(sourceConf)
     IngestionConfig(
       ref,
       ConfigFactory.parseString(resources),

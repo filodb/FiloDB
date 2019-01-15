@@ -10,7 +10,7 @@ final case class DownsampleConfig(downsampleConfig: Config) {
 
   def makePublisher(): DownsamplePublisher = {
     if (!enabled) {
-      NoOpPublisher
+      NoOpDownsamplePublisher
     } else {
       val publisherClass = downsampleConfig.getString("publisher-class")
       val pub = Class.forName(publisherClass).getDeclaredConstructor(classOf[Config])
@@ -22,5 +22,9 @@ final case class DownsampleConfig(downsampleConfig: Config) {
 
 object DownsampleConfig {
   val disabled = DownsampleConfig(ConfigFactory.empty)
+  def downsampleConfigFromSource(ingestConfig: Config): DownsampleConfig = {
+    if (ingestConfig.hasPath("downsample")) DownsampleConfig(ingestConfig.getConfig("downsample"))
+    else disabled
+  }
 }
 

@@ -39,7 +39,7 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
                     row.getString("factoryclass"),
                     sourceConf,
                     StoreConfig(sourceConf.getConfig("store")),
-                    DownsampleConfig(sourceConf.getConfig("downsample")))
+                    DownsampleConfig.downsampleConfigFromSource(sourceConf))
   }
 
   def initialize(): Future[Response] = execCql(createCql)

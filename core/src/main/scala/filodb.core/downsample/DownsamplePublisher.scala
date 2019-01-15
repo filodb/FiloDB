@@ -2,6 +2,8 @@ package filodb.core.downsample
 
 import scala.concurrent.Future
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.{Response, Success}
 
 /**
@@ -37,11 +39,15 @@ trait DownsamplePublisher {
 /**
   * Typically used when downsampling is disabled.
   */
-object NoOpPublisher extends DownsamplePublisher {
+object NoOpDownsamplePublisher extends DownsamplePublisher with StrictLogging {
   override def publish(shardNum: Int, resolution: Int,
                        records: Seq[Array[Byte]]): Future[Response] = Future.successful(Success)
 
-  override def start(): Unit = {}
+  override def start(): Unit = {
+    logger.info("Starting NoOpDownsamplePublisher since downsampling is disabled")
+  }
 
-  override def stop(): Unit = {}
+  override def stop(): Unit = {
+    logger.info("Stopping NoOpDownsamplePublisher since downsampling is disabled")
+  }
 }
