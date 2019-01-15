@@ -22,8 +22,6 @@ object IngestionKeys {
 
   val FactoryClass = "factoryclass"
 
-  val Downsample = "downsample"
-
   val NumShards = "num-shards"
 
   val MinNumNodes = "min-num-nodes"

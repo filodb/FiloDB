@@ -104,7 +104,7 @@ object StoreConfig {
 final case class IngestionConfig(ref: DatasetRef,
                                  resources: Config,
                                  streamFactoryClass: String,
-                                 streamConfig: Config,
+                                 sourceConfig: Config,
                                  storeConfig: StoreConfig,
                                  downsampleConfig: DownsampleConfig = DownsampleConfig.disabled) {
 
@@ -112,8 +112,7 @@ final case class IngestionConfig(ref: DatasetRef,
   // config parse issue or not available are raised from Cli / HTTP
   def numShards: Int = IngestionConfig.numShards(resources).get
   def minNumNodes: Int = IngestionConfig.minNumNodes(resources).get
-
-  def streamStoreConfig: Config = storeConfig.toConfig.atPath("store").withFallback(streamConfig)
+  def sourceStoreConfig: Config = storeConfig.toConfig.atPath("store").withFallback(sourceConfig)
 }
 
 object IngestionConfig {
@@ -129,18 +128,18 @@ object IngestionConfig {
     * Allows the caller to decide what to do with configuration parsing errors and when.
     * Fails if no dataset is provided by the config submitter.
     */
-  private[core] def apply(sourceConfig: Config): Try[IngestionConfig] = {
+  private[core] def apply(topLevelConfig: Config): Try[IngestionConfig] = {
     for {
-      resolved <- sourceConfig.resolveT
-      downsampleConf = DownsampleConfig.downsampleConfigFromSource(resolved)
+      resolved <- topLevelConfig.resolveT
       dataset <- resolved.stringT(DatasetRefKey) // fail fast if missing
       factory <- resolved.stringT(SourceFactory) // fail fast if missing
       numShards <- numShards(resolved) // fail fast if missing
       minNodes <- minNumNodes(resolved) // fail fast if missing
-      streamConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
+      sourceConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
+      downsampleConf = DownsampleConfig.downsampleConfigFromSource(sourceConfig)
       ref = DatasetRef.fromDotString(dataset)
-      storeConf <- streamConfig.configT("store").map(StoreConfig.apply)
-    } yield IngestionConfig(ref, resolved, factory, streamConfig, storeConf, downsampleConf)
+      storeConf <- sourceConfig.configT("store").map(StoreConfig.apply)
+    } yield IngestionConfig(ref, resolved, factory, sourceConfig, storeConf, downsampleConf)
   }
 
   def apply(sourceConfig: Config, backupSourceFactory: String): Try[IngestionConfig] = {

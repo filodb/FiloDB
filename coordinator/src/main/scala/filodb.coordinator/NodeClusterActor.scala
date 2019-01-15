@@ -73,7 +73,7 @@ object NodeClusterActor {
     def apply(source: IngestionConfig): SetupDataset =
       SetupDataset(source.ref,
                    DatasetResourceSpec(source.numShards, source.minNumNodes),
-                   IngestionSource(source.streamFactoryClass, source.streamConfig),
+                   IngestionSource(source.streamFactoryClass, source.sourceConfig),
                    source.storeConfig,
                    source.downsampleConfig)
   }

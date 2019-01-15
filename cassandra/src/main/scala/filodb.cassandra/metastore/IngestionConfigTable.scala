@@ -55,7 +55,7 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
     execStmt(insertCql.bind(state.ref.dataset, state.ref.database.getOrElse(""),
                             state.resources.root.render(ConfigRenderOptions.concise),
                             state.streamFactoryClass,
-                            state.streamStoreConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
+                            state.sourceStoreConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
 
   // SELECT * with consistency ONE to let it succeed more often.  This is a temporary workaround to rearranging
   // the schema so we don't need to do a full table scan.  It is justified because the ingestion config table

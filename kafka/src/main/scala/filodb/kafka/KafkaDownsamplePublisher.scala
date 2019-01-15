@@ -19,13 +19,12 @@ import filodb.core.downsample.DownsamplePublisher
 
 class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePublisher with StrictLogging {
 
-  private val kafkaConfig = KafkaProducerConfig(downsampleConfig.getConfig("kafka"))
+  private val kafkaConfig = KafkaProducerConfig(downsampleConfig.getConfig("publisher-config.kafka"))
   private implicit val sched = Scheduler.computation(name = "downsample")
 
   private val topics: Map[Int, String] = downsampleConfig.getConfig("publisher-config.topics")
     .entrySet().asScala.map { e => e.getKey.toInt -> e.getValue.unwrapped().toString }.toMap
 
-  private val producer = KafkaProducerSink[JLong, Array[Byte]](kafkaConfig, sched)
   private val consumeSize = downsampleConfig.getInt("publisher-config.consume-batch-size")
   private val minQueueSize = downsampleConfig.getInt("publisher-config.min-queue-size")
   private val maxQueueSize = downsampleConfig.getInt("publisher-config.max-queue-size")
@@ -48,6 +47,7 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
 
   def start(): Unit = {
     logger.info(s"Starting Kafka Downsampling Publisher. Will be publishing to $topics ")
+    private val producer = KafkaProducerSink[JLong, Array[Byte]](kafkaConfig, sched)
     future = Observable.repeat(0).map { _: Int =>
       val records = new ArrayBuffer[ProducerRecord[JLong, Array[Byte]]](consumeSize)
       val consumer = new MessagePassingQueue.Consumer[ProducerRecord[JLong, Array[Byte]]] {
