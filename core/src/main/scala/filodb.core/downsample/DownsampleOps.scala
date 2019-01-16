@@ -2,6 +2,8 @@ package filodb.core.downsample
 
 import scala.concurrent.{ExecutionContext, Future}
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.{ErrorResponse, Response, Success}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.memstore.TimeSeriesPartition
@@ -13,7 +15,7 @@ import filodb.memory.MemFactory
 
 final case class DownsamplingState(resolution: Int, downsampler: Seq[Seq[ChunkDownsampler]], builder: RecordBuilder)
 
-object DownsampleOps {
+object DownsampleOps extends StrictLogging {
 
   def initializeDownsamplerStates(dataset: Dataset,
                                   resolutions: Seq[Int],
@@ -107,6 +109,8 @@ object DownsampleOps {
                                 states: Seq[DownsamplingState])(implicit sched: ExecutionContext): Future[Response] = {
     val responses = states.map { h =>
       val records = h.builder.optimalContainerBytes(true)
+      logger.debug(s"Publishing ${records.size} downsample record containers " +
+        s"to shard $shardNum for resolution ${h.resolution}")
       publisher.publish(shardNum, h.resolution, records)
     }
     Future.sequence(responses).map(_.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success))

@@ -32,8 +32,6 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
   private var future: CancelableFuture[Unit] = _
 
   override def publish(shardNum: Int, resolution: Int, records: Seq[Array[Byte]]): Future[Response] = {
-    logger.debug(s"Got request to publish ${records.size} record containers " +
-      s"to shard $shardNum for resolution $resolution")
     topics.get(resolution) match {
       case Some(topic) =>
         records.foreach { bytes =>

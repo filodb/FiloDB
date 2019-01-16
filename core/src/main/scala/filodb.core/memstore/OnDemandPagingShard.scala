@@ -33,7 +33,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
-  private val singleThreadPool = Scheduler.singleThread("make-partition")
+  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
