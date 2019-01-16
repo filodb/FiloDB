@@ -951,6 +951,14 @@ class TimeSeriesShard(val dataset: Dataset,
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
   private[filodb] def ensureFreeSpace(): Boolean = {
+    doEnsureFreeSpace() || !partitionRefSet.isEmpty && {
+      System.gc()
+      pollPartitionRefQueue()
+      doEnsureFreeSpace()
+    }
+  }
+
+  private def doEnsureFreeSpace(): Boolean = {
     var lastPruned = EmptyBitmap
     while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
       // Eliminate partitions evicted from last cycle so we don't have an endless loop
