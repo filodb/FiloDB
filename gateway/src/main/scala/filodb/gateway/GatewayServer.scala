@@ -85,7 +85,7 @@ object GatewayServer extends StrictLogging {
         val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(record)) {
           // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
-          logger.warn(s"Queue for shard $shard is full.  Dropping data.")
+          logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
           numDroppedMessages.increment
           // Thread sleep queueFullWait
         }

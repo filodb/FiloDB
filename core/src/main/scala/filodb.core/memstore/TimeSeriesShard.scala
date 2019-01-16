@@ -248,7 +248,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
     * Note that this pool is also used to store partition keys.
     */
-  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for shard $shardNum")
+  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for " +
+    s"dataset=${dataset.ref} shard=$shardNum")
   protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
                                                  reuseOneContainer = true)

@@ -103,7 +103,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
       try memStore.setup(dataset, e.shard, storeConfig, downsample) catch {
         case ShardAlreadySetup(ds, shard) =>
-          logger.warn(s"Dataset $ds shard $shard already setup, skipping....")
+          logger.warn(s"dataset=$ds shard=$shard already setup, skipping....")
           return
       }
 
@@ -121,9 +121,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           val endRecoveryWatermark = checkpoints.values.max
           val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
           val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
-          logger.info(s"Starting recovery for shard ${e.shard}: from $startRecoveryWatermark to " +
-                      s"$endRecoveryWatermark; last flushed group $lastFlushedGroup")
-          logger.info(s"Checkpoints for shard ${e.shard}: $checkpoints")
+          logger.info(s"Starting recovery for dataset=${dataset.ref} " +
+            s"shard=${e.shard}: from $startRecoveryWatermark to $endRecoveryWatermark; " +
+            s"last flushed group $lastFlushedGroup")
+          logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${e.shard}: $checkpoints")
           for { lastOffset <- doRecovery(e.shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
                                          checkpoints) }
           yield {
@@ -135,7 +136,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       }
       ingestion.recover {
         case NonFatal(t) =>
-          logger.error(s"Error occurred during initialization/execution of ingestion for shard ${e.shard}", t)
+          logger.error(s"Error occurred during initialization/execution of ingestion for " +
+            s"dataset=${dataset.ref} shard=${e.shard}", t)
           handleError(dataset.ref, e.shard, t)
       }
     }
@@ -228,7 +230,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           recoveryTrace.finish()
         case Failure(ex) =>
           recoveryTrace.addError(s"Recovery failed for dataset=${dataset.ref} shard=$shard", ex)
-          logger.error(s"Recovery failed for shard $shard", ex)
+          logger.error(s"Recovery failed for dataset=${dataset.ref} shard=$shard", ex)
           handleError(dataset.ref, shard, ex)
           recoveryTrace.finish()
       }
@@ -297,7 +299,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       s" Stopping ingestion", err)
     removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
-    logger.error(s"Stopped shard $shard after error was thrown")
+    logger.error(s"Stopped dataset=${dataset.ref} shard=$shard after error was thrown")
   }
 
   private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {

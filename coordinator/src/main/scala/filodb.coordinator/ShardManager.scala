@@ -451,7 +451,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             val now = System.currentTimeMillis()
             val info = _datasetInfo(event.ref)
             if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
-              logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
+              logger.warn(s"Attempting to reassign shard=${event.shard} from dataset=${event.ref}. " +
                 s"It was last reassigned at ${lastReassignment}")
               val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
               if (assignments.valuesIterator.flatten.contains(event.shard)) {
@@ -459,12 +459,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                 info.metrics.numErrorReassignmentsDone.increment()
               } else {
                 info.metrics.numErrorReassignmentsSkipped.increment()
-                logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
+                logger.warn(s"Shard=${event.shard} from dataset=${event.ref} was NOT reassigned possibly " +
                   s"because no other node was available")
               }
             } else {
               info.metrics.numErrorReassignmentsSkipped.increment()
-              logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
+              logger.warn(s"Skipping reassignment of shard=${event.shard} from dataset=${event.ref} since " +
                 s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
             }
           case _ =>
@@ -472,7 +472,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         updateShardMetrics()
       } else {
         logger.warn(s"Ignoring event $event from $sender since it does not match current " +
-          s"owner of shard ${event.shard} which is ${mapper.coordForShard(event.shard)}")
+          s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")
       }
     }
   }

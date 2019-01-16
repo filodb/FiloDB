@@ -79,7 +79,7 @@ extends MemStore with StrictLogging {
   private[filodb] def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesShard = {
     datasets.get(dataset)
             .flatMap(shards => Option(shards.get(shard)))
-            .getOrElse(throw new IllegalArgumentException(s"Dataset $dataset and shard $shard have not been set up"))
+            .getOrElse(throw new IllegalArgumentException(s"dataset=$dataset shard=$shard have not been set up"))
   }
 
   def ingest(dataset: DatasetRef, shard: Int, data: SomeData): Unit =
