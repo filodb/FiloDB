@@ -166,6 +166,7 @@ sealed trait AddResponse
 case object Ack extends AddResponse
 final case class VectorTooSmall(bytesNeeded: Int, bytesHave: Int) extends AddResponse
 case object ItemTooLarge extends AddResponse
+case object BucketSchemaMismatch extends AddResponse
 
 /**
  * A BinaryVector that you can append to.  Has some notion of a maximum size (max # of items or bytes)
