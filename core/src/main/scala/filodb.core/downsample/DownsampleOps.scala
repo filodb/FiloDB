@@ -4,7 +4,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.core.{ErrorResponse, Response, Success}
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.memstore.TimeSeriesPartition
 import filodb.core.metadata.{DataColumn, Dataset}
@@ -104,13 +104,14 @@ object DownsampleOps extends StrictLogging {
   /**
     * Publishes the data in downsample builders to Kafka (or an alternate implementation)
     */
-  def publishDownsampleBuilders(publisher: DownsamplePublisher,
+  def publishDownsampleBuilders(dataset: DatasetRef,
+                                publisher: DownsamplePublisher,
                                 shardNum: Int,
                                 states: Seq[DownsamplingState])(implicit sched: ExecutionContext): Future[Response] = {
     val responses = states.map { h =>
       val records = h.builder.optimalContainerBytes(true)
       logger.debug(s"Publishing ${records.size} downsample record containers " +
-        s"to shard $shardNum for resolution ${h.resolution}")
+        s"of dataset=$dataset shard=$shardNum for resolution ${h.resolution}")
       publisher.publish(shardNum, h.resolution, records)
     }
     Future.sequence(responses).map(_.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success))

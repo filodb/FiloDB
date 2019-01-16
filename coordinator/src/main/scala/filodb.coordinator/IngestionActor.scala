@@ -161,7 +161,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                               diskTimeToLiveSeconds: Int): Unit = {
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
-      logger.info(s"Starting normal/active ingestion for shard $shard at offset $offset")
+      logger.info(s"Starting normal/active ingestion for dataset=${dataset.ref} shard=$shard at offset $offset")
       statusActor ! IngestionStarted(dataset.ref, shard, context.parent)
 
       streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
@@ -184,7 +184,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
       }
     } recover { case t: Throwable =>
-      logger.error(s"Error occurred when setting up ingestion pipeline for shard $shard ", t)
+      logger.error(s"Error occurred when setting up ingestion pipeline for dataset=${dataset.ref} shard=$shard ", t)
       handleError(dataset.ref, shard, t)
     }
   }
@@ -214,7 +214,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
-          logger.info(s"Shard $shard at $progressPct % - offset $off (target $endOffset)")
+          logger.info(s"Recovery of dataset=${dataset.ref} shard=$shard at " +
+            s"$progressPct % - offset $off (target $endOffset)")
           statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
           off }
         .until(_ >= endOffset)
@@ -226,7 +227,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
-          recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
+          recoveryTrace.addError(s"Recovery failed for dataset=${dataset.ref} shard=$shard", ex)
           logger.error(s"Recovery failed for shard $shard", ex)
           handleError(dataset.ref, shard, ex)
           recoveryTrace.finish()
@@ -250,7 +251,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     Try {
       val ingestStream = streamFactory.create(source.config, dataset, shard, offset)
       streams(shard) = ingestStream
-      logger.info(s"Ingestion stream $ingestStream set up for shard $shard")
+      logger.info(s"Ingestion stream $ingestStream set up for dataset=${dataset.ref} shard=$shard")
       ingestStream
     }.recoverWith {
       case e: Exception if retries > 0 =>
@@ -281,7 +282,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
             // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
             removeAndReleaseResources(ds, shard)
             // ingestion stopped event is already handled in the normalIngestion method
-            logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+            logger.info(s"Stopped streaming ingestion for dataset=${dataset.ref} shard=$shard and released resources")
           case Failure(_) =>
             // release of resources on failure is already handled in the normalIngestion method
         }
@@ -292,7 +293,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
-    logger.error(s"Exception thrown during ingestion stream for shard $shard. Stopping ingestion", err)
+    logger.error(s"Exception thrown during ingestion stream for dataset=${dataset.ref} shard=$shard." +
+      s" Stopping ingestion", err)
     removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
     logger.error(s"Stopped shard $shard after error was thrown")
