@@ -249,8 +249,6 @@ final class RecordBuilder(memFactory: MemFactory,
     recHash = combineHash(recHash, newHash)
   }
 
-  final def addFieldsFromBinRecord(base: Any, offset: Long, schema: RecordSchema): Unit = ???
-
   /**
    * Low-level function to start adding a map field.  Must be followed by addMapKeyValue() in sorted order of
    * keys (UTF8 byte sort).  Might want to use one of the higher level functions.

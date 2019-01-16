@@ -603,7 +603,7 @@ class TimeSeriesShard(val dataset: Dataset,
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     InMemPartitionIterator(deletedParts).foreach { p =>
-      logger.debug(s"Purging partition with partId ${p.partID} from memoryin dataset=${dataset.ref} shard=$shardNum")
+      logger.debug(s"Purging partition with partId ${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
       removePartition(p)
       numDeleted += 1
     }
