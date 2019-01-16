@@ -1,4 +1,4 @@
-# Downampling
+# Downsampling
 
 Downsampling is a process of reducing the number of samples stored for a time series. 
 This is necessary for the following reasons:
@@ -24,6 +24,8 @@ Each data column of the dataset can be configured with one or more downsamplers.
 * count
 * average
 * timestamp (used for the row-key timestamp column)
+
+Downsampling for prometheus counters will come soon.
 
 Downsampling is configured at the time of dataset creation. For example:
 
@@ -107,5 +109,5 @@ is not the correct average.
 
 ## Querying of Downsample Data
 
-Downsampled data can be queried from the downsampled dataset. The  PromQL tag filter needs to
-include the `__col__` tag with the value of the column name chosen in the downsample dataset. 
+Downsampled data can be queried from the downsampled dataset. The PromQL filters in the query needs to
+include the `__col__` tag with the value of the downsample column name chosen in the downsample dataset. 

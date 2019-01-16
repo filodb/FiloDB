@@ -33,7 +33,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
-  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}")
+  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}-$shardNum")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
@@ -151,7 +151,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     }.toVector.flatten
   }
 
-  def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
+  private def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
     AllChunkScan
   } else {
     var minTime = Long.MaxValue
@@ -163,7 +163,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     RowKeyChunkScan(minTime, maxTime)
   }
 
-  def chunksToFetch(partition: ReadablePartition,
+  private def chunksToFetch(partition: ReadablePartition,
                     method: ChunkScanMethod,
                     enabled: Boolean): Option[ChunkScanMethod] = {
     if (enabled) {
