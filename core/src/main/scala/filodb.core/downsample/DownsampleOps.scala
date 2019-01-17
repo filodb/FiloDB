@@ -29,9 +29,8 @@ object DownsampleOps extends StrictLogging {
     * Formulates downsample schema using the downsampler configuration for dataset
     */
   def downsampleIngestSchema(dataset: Dataset): RecordSchema = {
-    val downsampleCols = dataset.downsamplers.map { d =>
-      ColumnInfo(s"${d.name}", d.colType)
-    }
+    // The name of the column in downsample record does not matter at the ingestion side. Type does matter.
+    val downsampleCols = dataset.downsamplers.map { d => ColumnInfo(s"${d.name}", d.colType) }
     new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
       Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
   }
