@@ -1,9 +1,8 @@
 package filodb.core.downsample
 
-import java.util
-
 import scala.collection.mutable
 
+import java.util
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.TestData
@@ -23,14 +22,16 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
   val promDataset = Dataset.make("prom",
     Seq("tags:map"),
-    Seq("timestamp:ts:timestamp", "value:double:min%max%sum%count%avg"),
+    Seq("timestamp:ts", "value:double"),
     Seq("timestamp"),
+    Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val customDataset = Dataset.make("custom",
     Seq("name:string", "namespace:string","instance:string"),
-    Seq("timestamp:ts:timestamp", "count:long:sum", "min:double:min","max:double:max","total:double:sum"),
+    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double"),
     Seq("timestamp"),
+    Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)"),
     DatasetOptions(Seq("name", "namespace"), "name", "total")).get
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
@@ -69,7 +70,7 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
   it ("should formulate downsample ingest schema correctly for prom schema") {
     val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("timestamp", "value-min", "value-max", "value-sum", "value-count","value-avg", "tags")
+      Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "tags")
     dsSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, MapColumn)
   }
@@ -77,9 +78,9 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
   it ("should formulate downsample ingest schema correctly for non prom schema") {
     val dsSchema = DownsampleOps.downsampleIngestSchema(customDataset)
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("timestamp", "count-sum", "min-min", "max-max", "total-sum", "name", "namespace", "instance")
+      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "name", "namespace", "instance")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(TimestampColumn, LongColumn, DoubleColumn, DoubleColumn, DoubleColumn,
+      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
         StringColumn, StringColumn, StringColumn)
   }
 

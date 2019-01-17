@@ -145,7 +145,7 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts:timestamp,value:double:min%max%sum%count --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double --partitionColumns tags:map --shardKeyColumns __name__,app
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.

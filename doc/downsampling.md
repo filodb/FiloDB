@@ -16,25 +16,28 @@ Multiple downsampling algorithms can be configured.
 
 ## Configuration
 
-Each data column of the dataset can be configured with one or more downsamplers. Following downsamplers are supported:
+A dataset can be configured with one or more downsamplers. Following downsamplers are supported:
 
-* min
-* max
-* sum
-* count
-* average
-* timestamp (used for the row-key timestamp column)
+* __dMin(col):__ Calculates minimum of values in column id 'col' in the downsample period.
+* __dMax(col):__ Calculates maximum of values in column id 'col' in the downsample period.
+* __dSum(col):__ Calculates sum of values in column id 'col' in the downsample period.
+* __dCount(col):__ Calculates count of values in column id 'col' in the downsample period.
+* __dAvg(col):__ Calculates average of values in column id 'col' in the downsample period.
+* __dAvgAc(avgCol,countCol):__ Calculates average using averages and counts in column ids 'avgCol' and 'countCol' respectively in the downsample period.
+* __dAvgSc(sumCol,countCol):__ Calculates average using sums and counts in column ids 'sumCol' and 'countCol' respectively in the downsample period.
+* __tTime(col):__ Chooses last timestamp of ingested sample for the downsample period 
+
+Downsamplers beginning with 'd' emit a double value in the downsampled record. 
 
 Downsampling for prometheus counters will come soon.
 
 Downsampling is configured at the time of dataset creation. For example:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts:timestamp,value:double:min%max%sum%count --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
 ```
 
-The column `value` is configured with the min, max, sum and count downsamplers.
-The downsamplers are separated with the `%` character.
+The data column `value` with index 1 is configured with the dMin, dMax, sSum, dCount and dAvg downsamplers.
 
 Additional configuration is supplied via the ingestion config file for the dataset.
 
@@ -108,6 +111,9 @@ accept the delay in generation. Also remember to choose associative algorithms. 
 is not the correct average.   
 
 ## Querying of Downsample Data
+ 
+Downsampled data for individual time series can be queried from the downsampled dataset. The PromQL
+filters in the query needs to include the `__col__` tag with the value of the downsample column name
+chosen in the downsample dataset.
 
-Downsampled data can be queried from the downsampled dataset. The PromQL filters in the query needs to
-include the `__col__` tag with the value of the downsample column name chosen in the downsample dataset. 
+Coming soon in subsequent PR: Automatic selection of column based on the time window function applied in the query.

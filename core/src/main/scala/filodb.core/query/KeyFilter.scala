@@ -84,7 +84,7 @@ object KeyFilter {
   def mapColumns(columns: Seq[Column],
                  columnNames: Seq[String]): Map[String, (Int, Column)] = {
     columns.zipWithIndex.collect {
-      case d @ (DataColumn(_, name, _, _), idx)           => name -> (idx -> d._1)
+      case d @ (DataColumn(_, name, _), idx)           => name -> (idx -> d._1)
     }.toMap.filterKeys { name => columnNames.contains(name) }
   }
 

@@ -7,13 +7,12 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.memstore.TimeSeriesPartition
-import filodb.core.metadata.{DataColumn, Dataset}
-import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkInfoIterator
 import filodb.memory.MemFactory
 
-final case class DownsamplingState(resolution: Int, downsampler: Seq[Seq[ChunkDownsampler]], builder: RecordBuilder)
+final case class DownsamplingState(resolution: Int, builder: RecordBuilder)
 
 object DownsampleOps extends StrictLogging {
 
@@ -22,8 +21,7 @@ object DownsampleOps extends StrictLogging {
                                   memFactory: MemFactory): Seq[DownsamplingState] = {
     val schema = downsampleIngestSchema(dataset)
     resolutions.map { res =>
-      val downsamplers = ChunkDownsampler.makeDownsamplers(dataset)
-      DownsamplingState(res, downsamplers, new RecordBuilder(memFactory, schema))
+      DownsamplingState(res, new RecordBuilder(memFactory, schema))
     }
   }
 
@@ -31,11 +29,9 @@ object DownsampleOps extends StrictLogging {
     * Formulates downsample schema using the downsampler configuration for dataset
     */
   def downsampleIngestSchema(dataset: Dataset): RecordSchema = {
-    val downsampleCols = dataset.dataColumns.flatMap(c => c.asInstanceOf[DataColumn].downsamplerTypes.map {dt =>
-      // The column names here would not exactly match the column names in the destination dataset, but it is ok.
-      // The ordering and data types is what really matters.
-      ColumnInfo(dt.downsampleColName(c.name), c.columnType)
-    })
+    val downsampleCols = dataset.downsamplers.map { d =>
+      ColumnInfo(s"${d.name}", d.colType)
+    }
     new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
       Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
   }
@@ -44,7 +40,6 @@ object DownsampleOps extends StrictLogging {
     * Populates the builders in the DownsamplingState with downsample data for the
     * chunkset passed in.
     */
-  // scalastyle:off method.length
   def downsample(dataset: Dataset,
                  part: TimeSeriesPartition,
                  chunksets: ChunkInfoIterator,
@@ -54,7 +49,7 @@ object DownsampleOps extends StrictLogging {
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
       // for each downsample resolution
-      dsStates.foreach { case DownsamplingState(res, downsamplers, builder) =>
+      dsStates.foreach { case DownsamplingState(res, builder) =>
         var pStart = ( (startTime - 1) / res) * res + 1 // inclusive startTime for downsample period
       var pEnd = pStart + res // end is inclusive
         // for each downsample period
@@ -62,34 +57,18 @@ object DownsampleOps extends StrictLogging {
           var startRowNum = 0
           var endRowNum = 0
           builder.startNewRecord()
-          // for each column
-          dataset.dataColumns.foreach { col =>
-            val vecPtr = chunkset.vectorPtr(col.id)
-            val colReader = part.chunkReader(col.id, vecPtr)
-            col.columnType match {
-              case ColumnType.TimestampColumn =>
-                // timestamp column is the row key, so fix the row numbers for the downsample period
-                startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart) & 0x7fffffff
-                endRowNum = colReader.asLongReader.ceilingIndex(vecPtr, pEnd)
-                // for each downsampler for the long column
-                downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(vecPtr, colReader.asLongReader, startRowNum, endRowNum)
-                  builder.addLong(downsampled)
-                }
-              case ColumnType.DoubleColumn =>
-                // for each downsampler for the double column
-                downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(vecPtr, colReader.asDoubleReader, startRowNum, endRowNum)
-                  builder.addDouble(downsampled)
-                }
-              case ColumnType.LongColumn =>
-                // for each downsampler for the long column
-                downsamplers(col.id).foreach { d =>
-                  val downsampled = d.downsampleChunk(vecPtr, colReader.asLongReader, startRowNum, endRowNum)
-                  builder.addLong(downsampled)
-                }
-              case _ => ???
-            }
+          // assume that first row key column is timestamp column, fix the row numbers for the downsample period
+          val timestampCol = dataset.rowKeyColumns.head.id
+          val vecPtr = chunkset.vectorPtr(timestampCol)
+          val colReader = part.chunkReader(timestampCol, vecPtr)
+          startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart) & 0x7fffffff
+          endRowNum = colReader.asLongReader.ceilingIndex(vecPtr, pEnd)
+          // for each downsampler, add downsample column value
+          dataset.downsamplers.foreach {
+            case d: TimestampChunkDownsampler =>
+              builder.addLong(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
+            case d: DoubleChunkDownsampler =>
+              builder.addDouble(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
           }
           // add partKey finally
           builder.addPartKeyFromBr(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)

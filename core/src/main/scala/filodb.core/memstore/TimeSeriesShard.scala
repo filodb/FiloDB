@@ -644,9 +644,13 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
-  private final val downsamplingStates = if (downsampleConfig.enabled)
-    DownsampleOps.initializeDownsamplerStates(dataset, downsampleConfig.resolutions, MemFactory.onHeapFactory)
-  else Seq.empty
+  private final val downsamplingStates =
+    if (downsampleConfig.enabled) {
+      logger.info(s"Downsampling enabled for dataset=${dataset.ref} shard=$shardNum with " +
+        s"following downsamplers: ${dataset.downsamplers}")
+      DownsampleOps.initializeDownsamplerStates(dataset, downsampleConfig.resolutions, MemFactory.onHeapFactory)
+    } else
+      Seq.empty
 
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
