@@ -263,6 +263,72 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
   }
 
+  it("should fail while recovering index from time buckets - with two partition columns of type string") {
+    memStore.metastore.writeHighestIndexTimeBucket(CustomMetricsData.metricdataset.ref, 0, 0)
+    memStore.setup(CustomMetricsData.metricdataset, 0,
+      TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
+        flushInterval = 10.minutes))
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(CustomMetricsData.metricdataset.ref, 0).get
+    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+
+    val partKeys = Seq(CustomMetricsData.defaultPartKey)
+
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      timeBucketRb.startNewRecord()
+      timeBucketRb.addLong(i + 10)
+      timeBucketRb.addLong(i + 20)
+      val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
+      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
+      timeBucketRb.endRecord(false)
+    }
+    tsShard.initTimeBuckets()
+    intercept[ArrayIndexOutOfBoundsException] {
+      timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
+        tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
+      }
+      tsShard.commitPartKeyIndexBlocking()
+      partKeys.zipWithIndex.foreach { case (off, i) =>
+        val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
+        val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
+        readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
+        tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+      }
+    }
+  }
+
+  it("should recover index from time buckets - with single partition column of type map") {
+    memStore.metastore.writeHighestIndexTimeBucket(CustomMetricsData.metricdataset2.ref, 0, 0)
+    memStore.setup(CustomMetricsData.metricdataset2, 0,
+      TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
+        flushInterval = 10.minutes))
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(CustomMetricsData.metricdataset2.ref, 0).get
+    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+
+    val partKeys = Seq(CustomMetricsData.defaultPartKey2)
+
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      timeBucketRb.startNewRecord()
+      timeBucketRb.addLong(i + 10)
+      timeBucketRb.addLong(i + 20)
+      val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
+      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
+      timeBucketRb.endRecord(false)
+    }
+    tsShard.initTimeBuckets()
+    timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
+      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
+    }
+    tsShard.commitPartKeyIndexBlocking()
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
+      val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
+      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
+      tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
+      tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+    }
+  }
+
   import Iterators._
 
   it("should recoveryStream, skip some records, and receive a stream of offset updates") {
