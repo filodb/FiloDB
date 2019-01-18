@@ -137,7 +137,7 @@ final case class Dataset(name: String,
           partitionColumns.map(_.toString).mkString(":"),
           dataColumns.map(_.toString).mkString(":"),
           rowKeyIDs.mkString(":"),
-          downsamplers.map(_.toString).mkString(":"),
+          downsamplers.map(_.encoded).mkString(":"),
           options.toString).mkString("\u0001")
 }
 

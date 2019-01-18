@@ -30,7 +30,7 @@ object DownsampleOps extends StrictLogging {
     */
   def downsampleIngestSchema(dataset: Dataset): RecordSchema = {
     // The name of the column in downsample record does not matter at the ingestion side. Type does matter.
-    val downsampleCols = dataset.downsamplers.map { d => ColumnInfo(s"${d.name}", d.colType) }
+    val downsampleCols = dataset.downsamplers.map { d => ColumnInfo(s"${d.name.entryName}", d.colType) }
     new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
       Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
   }
@@ -43,34 +43,33 @@ object DownsampleOps extends StrictLogging {
                  part: TimeSeriesPartition,
                  chunksets: ChunkInfoIterator,
                  dsStates: Seq[DownsamplingState]): Unit = {
+    val timestampCol = dataset.timestampColID
     while (chunksets.hasNext) {
       val chunkset = chunksets.nextInfo
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
+      val vecPtr = chunkset.vectorPtr(timestampCol)
+      val tsReader = part.chunkReader(timestampCol, vecPtr).asLongReader
+
       // for each downsample resolution
       dsStates.foreach { case DownsamplingState(res, builder) =>
-        var pStart = ( (startTime - 1) / res) * res + 1 // inclusive startTime for downsample period
-      var pEnd = pStart + res // end is inclusive
+        var pStart = ((startTime - 1) / res) * res + 1 // inclusive startTime for downsample period
+        var pEnd = pStart + res // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
-          var startRowNum = 0
-          var endRowNum = 0
+          // fix the boundary row numbers for the downsample period by looking up the timestamp column
+          val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
+          val endRowNum = tsReader.ceilingIndex(vecPtr, pEnd)
           builder.startNewRecord()
-          // assume that first row key column is timestamp column, fix the row numbers for the downsample period
-          val timestampCol = dataset.rowKeyColumns.head.id
-          val vecPtr = chunkset.vectorPtr(timestampCol)
-          val colReader = part.chunkReader(timestampCol, vecPtr)
-          startRowNum = colReader.asLongReader.binarySearch(vecPtr, pStart) & 0x7fffffff
-          endRowNum = colReader.asLongReader.ceilingIndex(vecPtr, pEnd)
           // for each downsampler, add downsample column value
           dataset.downsamplers.foreach {
-            case d: TimestampChunkDownsampler =>
+            case d: TimeChunkDownsampler =>
               builder.addLong(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
             case d: DoubleChunkDownsampler =>
               builder.addDouble(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
           }
           // add partKey finally
-          builder.addPartKeyFromBr(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
+          builder.addPartKeyRecordFields(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
           builder.endRecord(true)
           pStart += res
           pEnd += res

@@ -146,10 +146,6 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def utf8StringOffset(base: Any, offset: Long, index: Int): Long =
     offset + UnsafeUtils.getInt(base, offset + offsets(index))
 
-  def utf8StringNumBytes(base: Any, offset: Long, index: Int): Long =
-    UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
-
-
   /**
    * COPIES the BinaryRecord field # index out as a new Java String on the heap.  Allocation + copying cost.
    */

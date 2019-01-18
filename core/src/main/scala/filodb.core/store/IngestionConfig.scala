@@ -130,15 +130,15 @@ object IngestionConfig {
     */
   private[core] def apply(topLevelConfig: Config): Try[IngestionConfig] = {
     for {
-      resolved <- topLevelConfig.resolveT
-      dataset <- resolved.stringT(DatasetRefKey) // fail fast if missing
-      factory <- resolved.stringT(SourceFactory) // fail fast if missing
-      numShards <- numShards(resolved) // fail fast if missing
-      minNodes <- minNumNodes(resolved) // fail fast if missing
-      sourceConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
+      resolved      <- topLevelConfig.resolveT
+      dataset       <- resolved.stringT(DatasetRefKey) // fail fast if missing
+      factory       <- resolved.stringT(SourceFactory) // fail fast if missing
+      numShards     <- numShards(resolved) // fail fast if missing
+      minNodes      <- minNumNodes(resolved) // fail fast if missing
+      sourceConfig   = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
       downsampleConf = DownsampleConfig.downsampleConfigFromSource(sourceConfig)
-      ref = DatasetRef.fromDotString(dataset)
-      storeConf <- sourceConfig.configT("store").map(StoreConfig.apply)
+      ref            = DatasetRef.fromDotString(dataset)
+      storeConf     <- sourceConfig.configT("store").map(StoreConfig.apply)
     } yield IngestionConfig(ref, resolved, factory, sourceConfig, storeConf, downsampleConf)
   }
 

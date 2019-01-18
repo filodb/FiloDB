@@ -671,6 +671,8 @@ class TimeSeriesShard(val dataset: Dataset,
       chunks
     }
 
+    /* Step 3: Publish the downsample record data collected into the downsampleState objects to the downsample
+    dataset */
     val pubDownsampleFuture =
       if (downsampleConfig.enabled)
         DownsampleOps.publishDownsampleBuilders(dataset.ref, downsamplePublisher, shardNum, downsamplingStates)
@@ -680,13 +682,13 @@ class TimeSeriesShard(val dataset: Dataset,
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
 
-    // Step 3: We flush index time buckets in the one designated group for each shard
+    // Step 4: We flush index time buckets in the one designated group for each shard
     val writeIndexTimeBucketsFuture = writeTimeBuckets(flushGroup)
 
-    /* Step 4: Persist chunks to column store */
+    /* Step 5: Persist chunks to column store */
     val writeChunksFut = writeChunks(flushGroup, chunkSetIt, partitionIt, blockHolder)
 
-    /* Step 5: Checkpoint after time buckets and chunks are flushed */
+    /* Step 6: Checkpoint after time buckets and chunks are flushed */
     val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {

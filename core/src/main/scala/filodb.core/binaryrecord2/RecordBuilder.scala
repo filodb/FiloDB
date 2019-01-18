@@ -6,7 +6,7 @@ import scalaxy.loops._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
-import filodb.memory.{BinaryRegion, BinaryRegionMedium, MemFactory, UTF8StringMedium}
+import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 
@@ -153,12 +153,12 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
-    * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
+    * IMPORTANT: Internal method, does not update hash values for the data.
     * If this method is used, then caller needs to also update the partitionHash manually.
     */
-  private def addMapFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+  private def addLargeBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
     val strDataOffset = schema.utf8StringOffset(base, offset, col)
-    addMap(base, strDataOffset + 4, BinaryRegionMedium.numBytes(base, strDataOffset))
+    addMap(base, strDataOffset + 4, BinaryRegionLarge.numBytes(base, strDataOffset))
   }
 
   private def addLongFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
@@ -170,13 +170,17 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
+    * Adds fields of a Partition Key Binary Record into the record builder as column values in
+    * the same order. Typically used for the downsampling use case where we cpoy partition key from
+    * the TimeSeriesPartition into the ingest record for the downsample data.
+    *
     * This also updates the hash for this record. OK since partKeys are added at the very end
     * of the record.
     */
-  final def addPartKeyFromBr(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
+  final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
     var id = 0
     partKeySchema.columns.foreach {
-      case ColumnInfo(_, MapColumn) => addMapFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, MapColumn) => addLargeBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, StringColumn) => addStringFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1

@@ -43,41 +43,10 @@ Downsampling is configured at the time of dataset creation. For example:
 
 In the above example, the data column `value` with index 1 is configured with the dMin, dMax, sSum, dCount and dAvg downsamplers.
 
-Additional configuration is supplied via the ingestion config file for the dataset.
+Additional configuration like downsample resolutions, how/where data is to be published etc.
+is supplied via the ingestion config file for the dataset. See 
+[timeseries-dev-source.conf](../conf/timeseries-dev-source.conf) for more details.
 
-```
-    dataset = "prometheus"
-    // other config ommitted
-    sourceconfig {
-      // other config ommitted
-      downsample {
-        # can be disabled by setting this flag to false
-        enabled = true
-        # array of integers representing one or more downsample intervals in millisecond
-        resolutions-ms = [ 60000 ]
-        # class implementing the dispatch of downsample metrics to another dataset
-        publisher-class = "filodb.kafka.KafkaDownsamplePublisher"
-        publisher-config {
-          # kafka properties that will be used for the producer
-          kafka {
-            bootstrap.servers = "localhost:9092"
-            group.id = "filo-db-timeseries-downsample"
-          }
-          # map of millisecond resolution to the kafka topic for publishing downsample data
-          # should have one topic per defined resolution above
-          topics {
-            60000 = "timeseries-dev-ds-1m"
-          }
-          # maximum size of in-memory queue of record containers to dispatch to kafka
-          max-queue-size = 5000
-          # minimum size of in-memory queue of record containers to dispatch to kafka
-          min-queue-size = 100
-          # maximum number of containers to consume from in-memory queue at a time
-          consume-batch-size = 100
-        }
-      }
-    }
-```
 
 The downsample dataset needs to be created as follows with the downsample columns in the same
 order as the downsample type configuration. For the above example, we would create the downsample
