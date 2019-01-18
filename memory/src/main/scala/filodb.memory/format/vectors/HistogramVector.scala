@@ -34,11 +34,8 @@ object BinaryHistogram {
     def valuesIndex: Int = 2 + 2 + bucketDefNumBytes + 2
     def valuesFormatCode: Byte = buf.getByte(valuesIndex)
     def intoValuesBuf(destBuf: UnsafeBuffer): Unit =
-      if (buf.byteArray != UnsafeUtils.ZeroPointer) {
-        destBuf.wrap(buf.byteArray, valuesIndex + 1, buf.getShort(valuesIndex - 2) - 1)
-      } else {
-        destBuf.wrap(buf.addressOffset + valuesIndex + 1, buf.getShort(valuesIndex - 2) - 1)
-      }
+      UnsafeUtils.wrapUnsafeBuf(buf.byteArray, buf.addressOffset + valuesIndex + 1,
+                                buf.getShort(valuesIndex - 2) - 1, destBuf)
     override def toString: String = s"<BinHistogram with $numBuckets buckets>"
   }
 
@@ -71,6 +68,8 @@ object BinaryHistogram {
 }
 
 object HistogramVector {
+  type HistIterator = Iterator[Histogram] with TypedIterator
+
   val OffsetNumHistograms = 6
   val OffsetBucketDefSize = 8  // # of bytes of bucket definition, including bucket def type
   val OffsetBucketDef  = 10    // Start of bucket definition
@@ -105,6 +104,9 @@ object HistogramVector {
     val addr = factory.allocateOffheap(neededBytes)
     new ColumnarAppendableHistogramVector(factory, addr, maxItems)
   }
+
+  def apply(p: BinaryVectorPtr): VectorDataReader =
+    new ColumnarHistogramReader(p)
 }
 
 /**
@@ -180,7 +182,7 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
 
   final def addNA(): AddResponse = Ack  // TODO: Add a 0 to every appender
 
-  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = ???
+  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.blobAsBuffer(col))
   def copyToBuffer: Buffer[UnsafeBuffer] = ???
   def apply(index: Int): UnsafeBuffer = ???
 
@@ -224,7 +226,21 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends VectorDataReade
   val buckets = HistogramBuckets(bucketDefAddr(histVect), bucketDefNumBytes(histVect))
   val returnHist = MutableHistogram.empty(buckets)
 
-  def iterate(vector: BinaryVectorPtr, startElement: Int): TypedIterator = ???
+  /**
+   * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
+   * every time.  Using higher level functions such as sum is going to be a much better bet usually.
+   */
+  def iterate(vector: BinaryVectorPtr, startElement: Int): TypedIterator =
+  new Iterator[Histogram] with TypedIterator {
+    var elem = startElement
+    def hasNext: Boolean = elem < getNumHistograms(histVect)
+    def next: Histogram = {
+      val h = apply(elem)
+      elem += 1
+      h
+    }
+  }
+
   def length(addr: BinaryVectorPtr): Int = length
 
   // WARNING: histogram returned is shared between calls, do not reuse!

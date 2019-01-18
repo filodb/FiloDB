@@ -5,6 +5,7 @@ import java.sql.Timestamp
 
 import scala.reflect.ClassTag
 
+import org.agrona.concurrent.UnsafeBuffer
 import org.joda.time.DateTime
 import scalaxy.loops._
 
@@ -27,6 +28,17 @@ trait RowReader {
   def getBlobBase(columnNo: Int): Any
   def getBlobOffset(columnNo: Int): Long
   def getBlobNumBytes(columnNo: Int): Int // Total number of bytes for the blob
+
+  /**
+   * Retrieves a view into the blob at column columnNo without duplicating contents.
+   * Smart implementations could reuse the same UnsafeBuffer to avoid allocations.
+   * This default implementation simply allocates a new one.
+   */
+  def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
+    val buf = new UnsafeBuffer(Array.empty[Byte])
+    UnsafeUtils.wrapUnsafeBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
+    buf
+  }
 
   final def getBuffer(columnNo: Int): ByteBuffer = {
     val length = getBlobNumBytes(columnNo)
@@ -367,4 +379,7 @@ object RowReader {
     final def compare(reader: RowReader, other: RowReader, columnNo: Int): Int =
       getFieldOrDefault(reader, columnNo).compareTo(getFieldOrDefault(other, columnNo))
   }
+
+  val defaultHist = vectors.MutableHistogram(vectors.HistogramBuckets.binaryBuckets64, Array.empty[Double])
+  implicit val histExtractor = ObjectFieldExtractor[vectors.Histogram](defaultHist)
 }

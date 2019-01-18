@@ -3,6 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
+import org.agrona.concurrent.UnsafeBuffer
 import scalaxy.loops._
 
 // scalastyle:off number.of.methods
@@ -43,6 +44,14 @@ object UnsafeUtils {
 
   def asDirectBuffer(address: Long, size: Int): ByteBuffer = {
     MemoryIO.getCheckedInstance.newDirectByteBuffer(address, size)
+  }
+
+  def wrapUnsafeBuf(base: Any, offset: Long, numBytes: Int, buf: UnsafeBuffer): Unit = {
+    if (base != UnsafeUtils.ZeroPointer) {
+      buf.wrap(base.asInstanceOf[Array[Byte]], offset.toInt - arayOffset, numBytes)
+    } else {
+      buf.wrap(offset, numBytes)
+    }
   }
 
   /**

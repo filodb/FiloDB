@@ -30,7 +30,7 @@ class HistogramVectorTest extends NativeVectorTest {
     }
   }
 
-  it("should accept BinaryHistograms of the same schema and be able to query them using apply") {
+  it("should accept BinaryHistograms of the same schema and be able to query them") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeBinHistogram(binScheme, rawBuckets, buffer)
@@ -46,6 +46,9 @@ class HistogramVectorTest extends NativeVectorTest {
       val h = reader(i)
       verifyHistogram(h, i)
     }
+
+    reader.iterate(0, 0).asInstanceOf[Iterator[Histogram]]
+          .zipWithIndex.foreach { case (h, i) => verifyHistogram(h, i) }
   }
 
   it("should reject BinaryHistograms of schema different from first schema ingested") {

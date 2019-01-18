@@ -2,6 +2,8 @@ package filodb.core.binaryrecord2
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.agrona.concurrent.UnsafeBuffer
+
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
@@ -140,6 +142,26 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
 
   /**
+   * Sets an existing UnsafeBuffer to wrap around the given blob/UTF8/Histogram bytes, including the
+   * 2-byte length prefix.  Since the UnsafeBuffer is already allocated, this results in no new allocations.
+   * Could be used to efficiently retrieve blobs or histograms again and again.
+   */
+  def blobAsBuffer(base: Any, offset: Long, index: Int, buf: UnsafeBuffer): Unit = base match {
+    case a: Array[Byte] =>
+      buf.wrap(a, utf8StringOffset(base, offset, index).toInt - UnsafeUtils.arayOffset,
+               blobNumBytes(base, offset, index) + 2)
+    case UnsafeUtils.ZeroPointer =>
+      buf.wrap(utf8StringOffset(base, offset, index), blobNumBytes(base, offset, index) + 2)
+  }
+
+  // Same as above but allocates a new UnsafeBuffer wrapping the blob as a reference
+  def blobAsBuffer(base: Any, offset: Long, index: Int): UnsafeBuffer = {
+    val newBuf = new UnsafeBuffer(Array.empty[Byte])
+    blobAsBuffer(base, offset, index, newBuf)
+    newBuf
+  }
+
+  /**
     * Used for extracting the offset for a UTF8StringMedium.
     * Note that blobOffset method is for the offset to the actual blob bytes, not including length header.
     */
@@ -173,11 +195,12 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (DoubleColumn, i) => result += s"${colNames(i)}= ${getDouble(base, offset, i)}"
       case (StringColumn, i) => result += s"${colNames(i)}= ${asJavaString(base, offset, i)}"
       case (TimestampColumn, i) => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
-      case (BitmapColumn, i) => result += s"${colNames(i)}= ${getInt(base, offset, i) != 0}"
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
                                 result += s"${colNames(i)}= ${consumer.prettyPrint}"
       case (BinaryRecordColumn, i)  => result += s"${colNames(i)}= ${brSchema(i).stringify(base, offset)}"
+      case (HistogramColumn, i) =>
+        result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }
     s"b2[${result.mkString(",")}]"
   }
@@ -197,11 +220,12 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (DoubleColumn, i) => resultMap += ((colNames(i), getDouble(base, offset, i).toString))
       case (StringColumn, i) => resultMap += ((colNames(i), asJavaString(base, offset, i).toString))
       case (TimestampColumn, i) => resultMap += ((colNames(i), getLong(base, offset, i).toString))
-      case (BitmapColumn, i) => resultMap += ((colNames(i), (getInt(base, offset, i) != 0).toString))
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
                                 resultMap ++= consumer.stringPairs
       case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
+      case (HistogramColumn, i) =>
+        resultMap += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
     resultMap
   }
@@ -332,7 +356,8 @@ object RecordSchema {
                                                        TimestampColumn -> 8,  // Just a long ms timestamp
                                                        StringColumn -> 4,
                                                        BinaryRecordColumn -> 4,
-                                                       MapColumn -> 4)
+                                                       MapColumn -> 4,
+                                                       HistogramColumn -> 4)
 
   /**
    * Creates a "unique" Long key for each incoming predefined key for quick lookup.  This will not be perfect
@@ -401,5 +426,12 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getBlobBase(columnNo: Int): Any = schema.blobBase(recordBase, recordOffset, columnNo)
   def getBlobOffset(columnNo: Int): Long = schema.blobOffset(recordBase, recordOffset, columnNo)
   def getBlobNumBytes(columnNo: Int): Int = schema.blobNumBytes(recordBase, recordOffset, columnNo)
-//  def getUtf8MediumOffset(columnNo: Int): Long = schema.utf8StringOffset(recordBase, recordOffset, columnNo)
+
+  val buf = new UnsafeBuffer(Array.empty[Byte])
+  // NOTE: this method reuses the same buffer to avoid allocations.
+  override def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
+    UnsafeUtils.wrapUnsafeBuf(recordBase, schema.utf8StringOffset(recordBase, recordOffset, columnNo),
+                              getBlobNumBytes(columnNo) + 2, buf)
+    buf
+  }
 }

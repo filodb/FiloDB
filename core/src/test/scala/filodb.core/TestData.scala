@@ -15,6 +15,7 @@ import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.{vectors => bv}
 import filodb.memory.{BinaryRegionLarge, MemFactory, NativeMemoryManager}
 
 object TestData {
@@ -292,6 +293,27 @@ object MachineMetricsData {
   val tagsDiffSameLen = extraTags ++ Map("region".utf8 -> "AWS-USEast".utf8)
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
+
+  val histDataset = Dataset("histogram", Seq("tags:map"),
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist"))
+  val histBucketScheme = bv.GeometricBuckets(2.0, 2.0, 8)
+
+  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000): Stream[Seq[Any]] = {
+    val buckets = new Array[Double](8)
+    def updateBuckets(bucketNo: Int): Unit = {
+      for { b <- bucketNo until 8 } {
+        buckets(b) += 1
+      }
+    }
+    Stream.from(0).map { n =>
+      updateBuckets(n % 8)
+      Seq(startTs + n * timeStep,
+          (1 + n).toLong,
+          buckets.sum.toLong,
+          bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          extraTags ++ Map("__name__".utf8 -> s"http_requests_total${n % numSeries}".utf8))
+    }
+  }
 }
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket
@@ -348,5 +370,4 @@ object MetricsTestData {
     final def getBlobOffset(columnNo: Int): PartitionKey = ???
     final def getBlobNumBytes(columnNo: Int): Int = ???
   }
-
 }

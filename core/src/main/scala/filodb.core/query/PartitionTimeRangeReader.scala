@@ -33,7 +33,8 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     def getDouble(columnNo: Int): Double = vectorIts(columnNo).asDoubleIt.next
     def getFloat(columnNo: Int): Float = ???
     def getString(columnNo: Int): String = ???
-    def getAny(columnNo: Int): Any = ???
+    // For now, Histograms are the only thing extracted via getAny.
+    def getAny(columnNo: Int): Any = vectorIts(columnNo).asHistIt.next
 
     override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = vectorIts(columnNo).asUTF8It.next
 
