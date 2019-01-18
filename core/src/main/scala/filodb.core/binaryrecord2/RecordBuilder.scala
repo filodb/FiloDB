@@ -369,7 +369,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * Used only internally by RecordComparator etc. to shortcut create a new BR by copying bytes from an existing BR.
    * You BETTER know what you are doing.
    */
-  private[binaryrecord2] def copyNewRecordFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
     requireBytes(numBytes + 4)
 
@@ -377,6 +377,15 @@ final class RecordBuilder(memFactory: MemFactory,
     setInt(curBase, curRecordOffset, numBytes)
     UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecordOffset + 4, numBytes)
     curRecEndOffset = curRecordOffset + numBytes + 4
+  }
+
+  // Extend current variable area with stuff from somewhere else
+  private[binaryrecord2] def copyVarAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+    requireBytes(numBytes)
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset, numBytes)
+    // Increase length of current BR.  Then bump curRecEndOffset so we are consistent
+    setInt(curBase, curRecordOffset, getInt(curBase, curRecordOffset) + numBytes)
+    curRecEndOffset += numBytes
   }
 
   private[binaryrecord2] def adjustFieldOffset(fieldNo: Int, adjustment: Int): Unit = {

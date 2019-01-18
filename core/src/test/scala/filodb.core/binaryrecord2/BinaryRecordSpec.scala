@@ -522,6 +522,32 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       partSchema2.consumeMapItems(recordBase, recordOff, 1, keyCheckConsumer)
       lastIndex shouldEqual 4   // 5 key-value pairs: 0, 1, 2, 3, 4
     }
+
+    it("should copy ingest BRs to partition key BRs correctly when data columns have a blob/histogram") {
+      val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema)
+      val data = linearHistSeries().take(3)
+      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row)) }
+
+      records.clear()
+      ingestBuilder.allContainers.head.consumeRecords(consumer)
+      val histRecords = records.toSeq.toBuffer   // make a copy
+
+      // Now create partition keys
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.partKeySchema)
+      histRecords.foreach { case (base, off) =>
+        histDataset.comparator.buildPartKeyFromIngest(base, off, partKeyBuilder)
+      }
+
+      records.clear()
+      partKeyBuilder.allContainers.head.consumeRecords(consumer)
+      records should have length (3)
+      (0 to 2).foreach { n =>
+        histDataset.comparator.partitionMatch(histRecords(n)._1, histRecords(n)._2,
+                                              records(n)._1, records(n)._2) shouldEqual true
+        histDataset.ingestionSchema.partitionHash(histRecords(n)._1, histRecords(n)._2) shouldEqual (
+          histDataset.partKeySchema.partitionHash(records(n)._1, records(n)._2))
+      }
+    }
   }
 
   describe("hashing functions") {
