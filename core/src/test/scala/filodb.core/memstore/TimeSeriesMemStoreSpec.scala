@@ -263,7 +263,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
   }
 
-  it("should fail while recovering index from time buckets - with two partition columns of type string") {
+  it("should recover index from time buckets - with two partition columns of type string") {
     memStore.metastore.writeHighestIndexTimeBucket(CustomMetricsData.metricdataset.ref, 0, 0)
     memStore.setup(CustomMetricsData.metricdataset, 0,
       TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
@@ -282,18 +282,17 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       timeBucketRb.endRecord(false)
     }
     tsShard.initTimeBuckets()
-    intercept[ArrayIndexOutOfBoundsException] {
-      timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
-        tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
-      }
-      tsShard.commitPartKeyIndexBlocking()
-      partKeys.zipWithIndex.foreach { case (off, i) =>
-        val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
-        val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
-        readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
-        tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
-      }
+
+    timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
+      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
+    }
+    tsShard.commitPartKeyIndexBlocking()
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
+      val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
+      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
+      tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
+      tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
     }
   }
 
