@@ -665,33 +665,42 @@ class TimeSeriesShard(val dataset: Dataset,
     // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
     val downsampleRecords = shardDownsampler.newEmptyDownsampleRecords
 
-    val chunkSetIt = partitionIt.flatMap { p =>
-      /* Step 1: Make chunks to be flushed for each partition */
+    val chunkSetIter = partitionIt.flatMap { p =>
+      /* Step 2: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
 
-      /* Step 2: Add downsample records for the chunks into the downsample record builders */
+      /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
+         in writeChunksFuture below */
+
+      /* Step 3: Add downsample records for the chunks into the downsample record builders */
       shardDownsampler.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
 
-      /* Step 3: Update endTime of all partKeys that stopped ingesting in this flush period.
+      /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
       updateIndexWithEndTime(p, chunks, flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket))
       chunks
     }
 
-    /* Step 4: Publish the downsample record data collected to the downsample dataset */
-    val pubDownsampleFuture = shardDownsampler.publishToDownsampleDataset(downsampleRecords)
-
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
 
-    // Step 5: We flush index time buckets in the one designated group for each shard
-    val writeIndexTimeBucketsFuture = writeTimeBuckets(flushGroup)
+    /* Step 1: Kick off partition iteration to persist chunks to column store */
+    val writeChunksFuture = writeChunks(flushGroup, chunkSetIter, partitionIt, blockHolder)
 
-    /* Step 6: Persist chunks to column store */
-    val writeChunksFut = writeChunks(flushGroup, chunkSetIt, partitionIt, blockHolder)
+    /* Step 5.1: Publish the downsample record data collected to the downsample dataset.
+     * We recover future since we want to proceed to publish downsample data even if chunk flush failed.
+     * This is done after writeChunksFuture because chunkSetIter is lazy. */
+    val pubDownsampleFuture = writeChunksFuture.recover {case _ => Success}
+                                     .flatMap(_=>shardDownsampler.publishToDownsampleDataset(downsampleRecords))
 
-    /* Step 7: Checkpoint after time buckets and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
+    /* Step 5.2: We flush index time buckets in the one designated group for each shard
+     * We recover future since we want to proceed to write time buckets even if chunk flush failed.
+     * This is done after writeChunksFuture because chunkSetIter is lazy. */
+    val writeIndexTimeBucketsFuture = writeChunksFuture.recover {case _ => Success}
+                                          .flatMap( _=> writeTimeBuckets(flushGroup))
+
+    /* Step 6: Checkpoint after time buckets and chunks are flushed */
+    val result = Future.sequence(Seq(writeChunksFuture, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
@@ -763,7 +772,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // we pad to C* ttl to ensure that data lives for longer than time bucket roll over time
       colStore.writePartKeyTimeBucket(dataset, shardNum, cmd.timeBucket, blobToPersist,
         flushGroup.diskTimeToLiveSeconds + indexTimeBucketTtlPaddingSeconds).flatMap {
-        case Success => /* Step 8: Persist the highest time bucket id in meta store */
+        case Success => /* Persist the highest time bucket id in meta store */
           writeHighestTimebucket(shardNum, cmd.timeBucket)
         case er: ErrorResponse =>
           logger.error(s"Failure for flush of timeBucket=${cmd.timeBucket} and rollover of " +

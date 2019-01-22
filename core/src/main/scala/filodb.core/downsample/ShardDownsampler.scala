@@ -86,7 +86,7 @@ class ShardDownsampler(dataset: Dataset,
         // for each downsample resolution
         records.foreach { case DownsampleRecords(resolution, builder) =>
           var pStart = ((startTime - 1) / resolution) * resolution + 1 // inclusive startTime for downsample period
-        var pEnd = pStart + resolution // end is inclusive
+          var pEnd = pStart + resolution // end is inclusive
           // for each downsample period
           while (pStart <= endTime) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
@@ -103,8 +103,6 @@ class ShardDownsampler(dataset: Dataset,
             // add partKey finally
             builder.addPartKeyRecordFields(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
             builder.endRecord(true)
-            logger.debug(s"Added downsample record for period/resolution $pEnd/$resolution for part key " +
-              s"${dataset.partKeySchema.stringify(part.partKeyBase, part.partKeyOffset)}")
             stats.downsampleRecordsCreated.increment()
             pStart += resolution
             pEnd += resolution
