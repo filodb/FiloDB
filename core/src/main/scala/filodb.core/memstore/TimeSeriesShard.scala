@@ -1084,8 +1084,11 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def shutdown(): Unit = {
     reset()   // Not really needed, but clear everything just to be consistent
-    logger.info(s"Shutting down and releasing offheap memory for shard $shardNum")
+    logger.info(s"Shutting down shard $shardNum")
+    /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
+       method to ensure that no threads are accessing the memory before it's freed.
     bufferMemoryManager.shutdown()
     blockStore.releaseBlocks()
+    */
   }
 }
