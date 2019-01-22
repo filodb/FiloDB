@@ -910,7 +910,8 @@ class TimeSeriesShard(val dataset: Dataset,
       if (part == OutOfMemPartition) { disableAddPartitions() }
       else { part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory) }
     } catch {
-      case e: OutOfOffheapMemoryException => disableAddPartitions()
+      case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
+                                             s"shard=$shardNum", e); disableAddPartitions()
       case e: Exception                   => logger.error(s"Unexpected ingestion err in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
     }
@@ -1028,7 +1029,7 @@ class TimeSeriesShard(val dataset: Dataset,
   // Also frees partition key if necessary
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
-    offheapInfoMap.free(partitionObj)
+    partitionObj.shutdown()
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     partitions.remove(partitionObj.partID)
   }

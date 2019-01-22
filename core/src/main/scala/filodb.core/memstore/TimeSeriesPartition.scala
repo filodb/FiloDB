@@ -124,8 +124,11 @@ extends ReadablePartition with MapHolder {
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
-          switchBuffers(blockHolder, encode=true)
-          ingest(row, blockHolder)   // re-ingest every element, allocating new WriteBuffers
+          // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
+          // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
+          // So we do not call ingest again unless switcing buffers succeeds.
+          // re-ingest every element, allocating new WriteBuffers
+          if (switchBuffers(blockHolder, encode=true)) ingest(row, blockHolder)
           return
         case other: AddResponse =>
       }
@@ -146,8 +149,8 @@ extends ReadablePartition with MapHolder {
    * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
    * called from a single thread / single synchronous stream.
    */
-  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Unit =
-    if (nonEmptyWriteBuffers) {
+  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean =
+    nonEmptyWriteBuffers && {
       val oldInfo = currentInfo
       val oldAppenders = currentChunks
 
@@ -158,6 +161,7 @@ extends ReadablePartition with MapHolder {
 
       if (encode) { encodeOneChunkset(oldInfo, oldAppenders, blockHolder) }
       else        { appenders = InfoAppenders(oldInfo, oldAppenders) :: appenders }
+      true
     }
 
   /**
@@ -371,6 +375,12 @@ extends ReadablePartition with MapHolder {
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+  }
+
+  // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
+  def shutdown(): Unit = {
+    offheapInfoMap.free(this)
+    if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }
 

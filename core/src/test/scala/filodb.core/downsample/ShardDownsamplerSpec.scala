@@ -1,7 +1,5 @@
 package filodb.core.downsample
 
-import java.util
-
 import scala.collection.mutable
 
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
@@ -46,14 +44,14 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     blockStore.releaseBlocks()
   }
 
-  val partKeyTags = new util.ArrayList[(String, String)]()
-  partKeyTags.add("dc"->"dc1")
-  partKeyTags.add("instance"->"instance1")
+  import ZeroCopyUTF8String._
+
+  val partKeyTags = Map("dc".utf8 -> "dc1".utf8, "instance".utf8 -> "instance1".utf8)
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, promDataset.partKeySchema, 4096)
   partKeyBuilder.startNewRecord()
   partKeyBuilder.addString("someStringValue")
-  partKeyBuilder.addSortedPairsAsMap(partKeyTags, RecordBuilder.sortAndComputeHashes(partKeyTags))
+  partKeyBuilder.addMap(partKeyTags)
   partKeyBuilder.endRecord(true)
   val partKeyBase = partKeyBuilder.allContainers.head.base
   val partKeyOffset = partKeyBuilder.allContainers.head.allOffsets(0)

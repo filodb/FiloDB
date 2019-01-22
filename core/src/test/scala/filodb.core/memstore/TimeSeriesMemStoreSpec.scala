@@ -268,10 +268,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset.ref, 0).get
     val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
 
-    // NOTE: gdeltLines3 are actually data samples, not part keys. Only take lines which give unique part keys!!
-    val readers = gdeltLines3.take(8).map { line => ArrayStringRowReader(line.split(",")) }
-    val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
-
     partKeys.zipWithIndex.foreach { case (off, i) =>
       timeBucketRb.startNewRecord()
       timeBucketRb.addLong(i + 10)
@@ -297,7 +293,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should recover index from time buckets") {
     import GdeltTestData._
-    val readers = gdeltLines3.map { line => ArrayStringRowReader(line.split(",")) }
+    // NOTE: gdeltLines3 are actually data samples, not part keys. Only take lines which give unique part keys!!
+    val readers = gdeltLines3.take(8).map { line => ArrayStringRowReader(line.split(",")) }
     val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
     indexRecoveryTest(dataset1, partKeys)
   }

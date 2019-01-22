@@ -136,6 +136,16 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
+  final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
+
+  // Adds a blob from another buffer which already has the length bytes as the first two bytes
+  // For example: buffers created by BinaryHistograms.  OR, a UTF8String medium.
+  final def addBlob(buf: UnsafeBuffer): Unit = {
+    val numBytes = buf.getShort(0).toInt
+    require(numBytes < buf.capacity)
+    addBlob(buf.byteArray, buf.addressOffset + 2, numBytes)
+  }
+
   /**
     * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
     * If this method is used, then caller needs to also update the partitionHash manually.
@@ -191,16 +201,6 @@ final class RecordBuilder(memFactory: MemFactory,
     }
     // finally copy the partition hash over
     recHash = partKeySchema.partitionHash(base, offset)
-  }
-
-  final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
-
-  // Adds a blob from another buffer which already has the length bytes as the first two bytes
-  // For example: buffers created by BinaryHistograms.  OR, a UTF8String medium.
-  final def addBlob(buf: UnsafeBuffer): Unit = {
-    val numBytes = buf.getShort(0).toInt
-    require(numBytes < buf.capacity)
-    addBlob(buf.byteArray, buf.addressOffset + 2, numBytes)
   }
 
   import Column.ColumnType._
