@@ -1,13 +1,14 @@
 package filodb.core.downsample
 
+import java.util
+
 import scala.collection.mutable
 
-import java.util
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.TestData
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder}
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
@@ -16,7 +17,7 @@ import filodb.memory._
 import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
 
 // scalastyle:off null
-class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
+class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
 
   val maxChunkSize = 200
 
@@ -67,8 +68,11 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
   }
 
+  val downsampleOps = new ShardDownsampler(promDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
+    new TimeSeriesShardStats(promDataset.ref, 0))
+
   it ("should formulate downsample ingest schema correctly for prom schema") {
-    val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
+    val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
       Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "tags")
     dsSchema.columns.map(_.colType) shouldEqual
@@ -76,7 +80,9 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
   }
 
   it ("should formulate downsample ingest schema correctly for non prom schema") {
-    val dsSchema = DownsampleOps.downsampleIngestSchema(customDataset)
+    val downsampleOps = new ShardDownsampler(customDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
+      new TimeSeriesShardStats(customDataset.ref, 0))
+    val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
       Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "name", "namespace", "instance")
     dsSchema.columns.map(_.colType) shouldEqual
@@ -88,18 +94,15 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
     val data = (100000L until 200000L by 1000).map(i => (i, i*5d))
     val rv = timeValueRV(data)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
-    val dsSchema = DownsampleOps.downsampleIngestSchema(promDataset)
-    val dsStates = DownsampleOps.initializeDownsamplerStates(promDataset,
-                                                 Seq(5000, 10000), MemFactory.onHeapFactory)
+    val dsSchema = downsampleOps.downsampleSchema
+    val dsRecords = downsampleOps.newEmptyDownsampleRecords
 
-    DownsampleOps.downsample(promDataset, rv.partition.asInstanceOf[TimeSeriesPartition],
-                                chunkInfos, dsStates)
+    downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition],chunkInfos, dsRecords)
 
     // with resolution 5000
-    val downsampledData1 = dsStates(0).builder.allContainers.flatMap { c =>
-
+    val downsampledData1 = dsRecords(0).builder.optimalContainerBytes().flatMap { con =>
+      val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
-
         // validate tags on the partition key
         val partKeyInRecord = new mutable.HashMap[String, String]()
         val consumer = new MapItemConsumer {
@@ -149,10 +152,9 @@ class DownsampleOpsSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
     downsampledData1.map(_._6) shouldEqual expectedAvgs
 
     // with resolution 10000
-    val downsampledData2 = dsStates(1).builder.allContainers.flatMap { c =>
-
+    val downsampledData2 = dsRecords(1).builder.optimalContainerBytes().flatMap { con =>
+      val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
-
         // validate tags on the partition key
         val partKeyInRecord = new mutable.HashMap[String, String]()
         val consumer = new MapItemConsumer {

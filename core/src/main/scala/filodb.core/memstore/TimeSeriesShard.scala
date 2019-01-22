@@ -18,7 +18,7 @@ import scalaxy.loops._
 
 import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.{DownsampleConfig, DownsampleOps, DownsamplePublisher}
+import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo}
@@ -49,6 +49,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-keys-total").refine(tags)
   val numRolledKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-rolled-keys-total").refine(tags)
   val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-records-processed").refine(tags)
+  val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").refine(tags)
 
   /**
    * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
@@ -300,6 +301,12 @@ class TimeSeriesShard(val dataset: Dataset,
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
+
+  /**
+    * Helper for downsampling ingested data for long term retention.
+    */
+  private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
+                                         downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -644,14 +651,6 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
-  private final val downsamplingStates =
-    if (downsampleConfig.enabled) {
-      logger.info(s"Downsampling enabled for dataset=${dataset.ref} shard=$shardNum with " +
-        s"following downsamplers: ${dataset.downsamplers}")
-      DownsampleOps.initializeDownsamplerStates(dataset, downsampleConfig.resolutions, MemFactory.onHeapFactory)
-    } else
-      Seq.empty
-
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
@@ -660,35 +659,38 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
+
+    // This initializes the containers for the downsample records. Yes, we create new containers
+    // and not reuse them at the moment and there is allocation for every call of this method
+    // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
+    val downsampleRecords = shardDownsampler.newEmptyDownsampleRecords
+
     val chunkSetIt = partitionIt.flatMap { p =>
       /* Step 1: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
-      if (downsampleConfig.enabled) DownsampleOps.downsample(dataset, p, p.infosToBeFlushed, downsamplingStates)
 
-      /* Step 2: Update endTime of all partKeys that stopped ingesting in this flush period.
+      /* Step 2: Add downsample records for the chunks into the downsample record builders */
+      shardDownsampler.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
+
+      /* Step 3: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
       updateIndexWithEndTime(p, chunks, flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket))
       chunks
     }
 
-    /* Step 3: Publish the downsample record data collected into the downsampleState objects to the downsample
-    dataset */
-    val pubDownsampleFuture =
-      if (downsampleConfig.enabled)
-        DownsampleOps.publishDownsampleBuilders(dataset.ref, downsamplePublisher, shardNum, downsamplingStates)
-      else
-        Future.successful(Success)
+    /* Step 4: Publish the downsample record data collected to the downsample dataset */
+    val pubDownsampleFuture = shardDownsampler.publishToDownsampleDataset(downsampleRecords)
 
     // Note that all cassandra writes below  will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
 
-    // Step 4: We flush index time buckets in the one designated group for each shard
+    // Step 5: We flush index time buckets in the one designated group for each shard
     val writeIndexTimeBucketsFuture = writeTimeBuckets(flushGroup)
 
-    /* Step 5: Persist chunks to column store */
+    /* Step 6: Persist chunks to column store */
     val writeChunksFut = writeChunks(flushGroup, chunkSetIt, partitionIt, blockHolder)
 
-    /* Step 6: Checkpoint after time buckets and chunks are flushed */
+    /* Step 7: Checkpoint after time buckets and chunks are flushed */
     val result = Future.sequence(Seq(writeChunksFut, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {

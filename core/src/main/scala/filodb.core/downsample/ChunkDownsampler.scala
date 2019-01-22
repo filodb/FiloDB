@@ -11,9 +11,9 @@ import filodb.core.store.ChunkSetInfo
 /**
   * Enum of supported downsampling function names
   * @param entryName name of the function
-  * @param downsamplerClazz its corresponding Downsampler class for instance construction
+  * @param downsamplerClass its corresponding ChunkDownsampler class used for instance construction
   */
-sealed abstract class DownsamplerName (override val entryName: String, val downsamplerClazz: Class[_])
+sealed abstract class DownsamplerName (override val entryName: String, val downsamplerClass: Class[_])
   extends EnumEntry
 
 object DownsamplerName extends Enum[DownsamplerName] {
@@ -27,7 +27,8 @@ object DownsamplerName extends Enum[DownsamplerName] {
   case object AvgScD extends DownsamplerName("dAvgSc", classOf[AvgScDownsampler])
   case object TimeT extends DownsamplerName("tTime", classOf[TimeDownsampler])
 }
-  /**
+
+/**
   * Common trait for implementations of a chunk downsampler
   */
 trait ChunkDownsampler {
@@ -119,7 +120,6 @@ case class CountDownsampler(override val colIds: Array[Int]) extends DoubleChunk
                                chunkset: ChunkSetInfo,
                                startRow: Int,
                                endRow: Int): Double = {
-
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     colReader.asDoubleReader.count(vecPtr, startRow, endRow)
@@ -136,7 +136,6 @@ case class MinDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
                                chunkset: ChunkSetInfo,
                                startRow: Int,
                                endRow: Int): Double = {
-
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     var min = Double.MaxValue
@@ -161,7 +160,6 @@ case class MaxDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
                                chunkset: ChunkSetInfo,
                                startRow: Int,
                                endRow: Int): Double = {
-
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     var max = Double.MinValue
@@ -268,7 +266,7 @@ object ChunkDownsampler {
 
   /**
     * Parses single downsampler from string notation such as
-    * "dMin(4@1)" where "dMin" is the downsampler name, 4 & 1 are the column IDs to be used by the function
+    * "dAvgAc(4@1)" where "dAvgAc" is the downsampler name, 4 & 1 are the column IDs to be used by the function
     */
   def downsampler(strNotation: String): ChunkDownsampler = {
     val parts = strNotation.split("[(@)]")
@@ -278,7 +276,7 @@ object ChunkDownsampler {
     val colIds = parts.drop(1).map(_.toInt)
     DownsamplerName.withNameOption(name) match {
       case None    => throw new IllegalArgumentException(s"Unsupported downsampling function $name")
-      case Some(d) => d.downsamplerClazz.getConstructor(classOf[Array[Int]])
+      case Some(d) => d.downsamplerClass.getConstructor(classOf[Array[Int]])
                             .newInstance(colIds).asInstanceOf[ChunkDownsampler]
     }
   }
