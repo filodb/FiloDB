@@ -27,7 +27,7 @@ class ShardDownsampler(dataset: Dataset,
                        stats: TimeSeriesShardStats) extends StrictLogging {
   if (enabled) {
     logger.info(s"Downsampling enabled for dataset=${dataset.ref} shard=$shardNum with " +
-      s"following downsamplers: ${dataset.downsamplers.map(_.encoded)}")
+      s"following downsamplers: ${dataset.downsamplers.map(_.encoded)} at resolutions: $resolutions")
   } else {
     logger.info(s"Downsampling disabled for dataset=${dataset.ref} shard=$shardNum")
   }

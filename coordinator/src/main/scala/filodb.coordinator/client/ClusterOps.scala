@@ -37,7 +37,7 @@ trait ClusterOps extends ClientBase with StrictLogging {
 
   def setupDataset(config: IngestionConfig, timeout: FiniteDuration): Option[ErrorResponse] = {
     val command = SetupDataset(config)
-    setupDataset(command.ref, command.resources, command.source, config.storeConfig, command.downsample, timeout)
+    setupDataset(command.ref, command.resources, command.source, config.storeConfig, command.downsampleConfig, timeout)
   }
 
   /**

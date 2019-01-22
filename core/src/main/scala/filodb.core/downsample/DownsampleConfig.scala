@@ -1,12 +1,11 @@
 package filodb.core.downsample
 
-import scala.collection.JavaConverters._
-
 import com.typesafe.config.{Config, ConfigFactory}
+import net.ceedubs.ficus.Ficus._
 
 final case class DownsampleConfig(config: Config) {
   val enabled = config.hasPath("enabled") && config.getBoolean("enabled")
-  val resolutions = if (enabled) config.getIntList("resolutions-ms").asScala.map(_.intValue()) else Seq.empty
+  val resolutions = if (enabled) config.as[Seq[Int]]("resolutions-ms") else Seq.empty
 
   def makePublisher(): DownsamplePublisher = {
     if (!enabled) {

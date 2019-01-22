@@ -147,7 +147,7 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
-  private def addStringFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+  private def addBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
     val strDataOffset = schema.utf8StringOffset(base, offset, col)
     addBlob(base, strDataOffset + 2, schema.blobNumBytes(base, strDataOffset, col))
   }
@@ -171,7 +171,7 @@ final class RecordBuilder(memFactory: MemFactory,
 
   /**
     * Adds fields of a Partition Key Binary Record into the record builder as column values in
-    * the same order. Typically used for the downsampling use case where we cpoy partition key from
+    * the same order. Typically used for the downsampling use case where we copy partition key from
     * the TimeSeriesPartition into the ingest record for the downsample data.
     *
     * This also updates the hash for this record. OK since partKeys are added at the very end
@@ -181,7 +181,7 @@ final class RecordBuilder(memFactory: MemFactory,
     var id = 0
     partKeySchema.columns.foreach {
       case ColumnInfo(_, MapColumn) => addLargeBlobFromBr(base, offset, id, partKeySchema); id += 1
-      case ColumnInfo(_, StringColumn) => addStringFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
       case _ => ???

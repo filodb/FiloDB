@@ -367,7 +367,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
         val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, setup.downsample, setup.storeConfig, dataset)
+        val state = DatasetInfo(resources, metrics, source, setup.downsampleConfig, setup.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet

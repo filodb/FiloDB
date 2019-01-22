@@ -36,7 +36,7 @@ trait ChunkDownsampler {
     * Ids of Data Columns the downsampler works on.
     * The column id values are fed in via downsampling configuration of the dataset
     */
-  def colIds: Array[Int]
+  def colIds: Seq[Int]
 
   /**
     * Downsampler name
@@ -97,7 +97,7 @@ trait TimeChunkDownsampler extends ChunkDownsampler {
 /**
   * Downsamples by calculating sum of values in one column
   */
-case class SumDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class SumDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Sum downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.SumD
   override def downsampleChunk(part: TimeSeriesPartition,
@@ -113,7 +113,7 @@ case class SumDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
 /**
   * Downsamples by calculating count of values in one column
   */
-case class CountDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class CountDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Count downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.CountD
   override def downsampleChunk(part: TimeSeriesPartition,
@@ -129,13 +129,14 @@ case class CountDownsampler(override val colIds: Array[Int]) extends DoubleChunk
 /**
   * Downsamples by calculating min of values in one column
   */
-case class MinDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class MinDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Min downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.MinD
   override def downsampleChunk(part: TimeSeriesPartition,
                                chunkset: ChunkSetInfo,
                                startRow: Int,
                                endRow: Int): Double = {
+    // TODO MinOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     var min = Double.MaxValue
@@ -153,13 +154,14 @@ case class MinDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
 /**
   * Downsamples by calculating max of values in one column
   */
-case class MaxDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class MaxDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Max downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.MaxD
   override def downsampleChunk(part: TimeSeriesPartition,
                                chunkset: ChunkSetInfo,
                                startRow: Int,
                                endRow: Int): Double = {
+    // TODO MaxOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     var max = Double.MinValue
@@ -177,7 +179,7 @@ case class MaxDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
 /**
   * Downsamples by calculating average from average and count columns
   */
-case class AvgAcDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class AvgAcDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 2, s"AvgAc downsample requires column ids of avg and count. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.AvgAcD
   val avgCol = colIds(0)
@@ -209,7 +211,7 @@ case class AvgAcDownsampler(override val colIds: Array[Int]) extends DoubleChunk
 /**
   * Downsamples by calculating average from sum and count columns
   */
-case class AvgScDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class AvgScDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 2, s"AvgSc downsample requires column ids of sum and count. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.AvgScD
   val sumCol = colIds(0)
@@ -231,7 +233,7 @@ case class AvgScDownsampler(override val colIds: Array[Int]) extends DoubleChunk
 /**
   * Downsamples by calculating average of values from one column
   */
-case class AvgDownsampler(override val colIds: Array[Int]) extends DoubleChunkDownsampler {
+case class AvgDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Avg downsample requires one column id with data to average. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.AvgD
   override def downsampleChunk(part: TimeSeriesPartition,
@@ -249,7 +251,7 @@ case class AvgDownsampler(override val colIds: Array[Int]) extends DoubleChunkDo
 /**
   * Downsamples by selecting the last timestamp in the downsample period.
   */
-case class TimeDownsampler(override val colIds: Array[Int]) extends TimeChunkDownsampler {
+case class TimeDownsampler(override val colIds: Seq[Int]) extends TimeChunkDownsampler {
   require(colIds.length == 1, s"Time downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.TimeT
   def downsampleChunk(part: TimeSeriesPartition,
@@ -276,8 +278,8 @@ object ChunkDownsampler {
     val colIds = parts.drop(1).map(_.toInt)
     DownsamplerName.withNameOption(name) match {
       case None    => throw new IllegalArgumentException(s"Unsupported downsampling function $name")
-      case Some(d) => d.downsamplerClass.getConstructor(classOf[Array[Int]])
-                            .newInstance(colIds).asInstanceOf[ChunkDownsampler]
+      case Some(d) => d.downsamplerClass.getConstructor(classOf[Seq[Int]])
+                            .newInstance(colIds.toSeq).asInstanceOf[ChunkDownsampler]
     }
   }
 
