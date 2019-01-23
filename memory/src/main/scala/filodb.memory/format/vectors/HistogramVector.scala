@@ -7,7 +7,7 @@ import scalaxy.loops._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-// import filodb.memory.format.Encodings._
+import filodb.memory.format.Encodings._
 
 /**
  * BinaryHistogram is the binary format for a histogram binary blob included in BinaryRecords and sent over the wire.
@@ -97,6 +97,16 @@ object HistogramVector {
                          hist.bucketDefNumBytes)
     }
 
+  // Columnar HistogramVectors composed of multiple vectors, this calculates total used size
+  def columnarTotalSize(addr: BinaryVectorPtr): Int = {
+    val bucketAddrPtr = afterBucketDefAddr(addr)
+    val headerBytes = UnsafeUtils.getInt(addr)
+    headerBytes + (0 until getNumBuckets(addr)).map { b =>
+                    val bucketVectorAddr = UnsafeUtils.getLong(bucketAddrPtr + 8*b)
+                    UnsafeUtils.getInt(bucketVectorAddr) + 4
+                  }.sum
+  }
+
   val ReservedBucketDefSize = 256
   def appendingColumnar(factory: MemFactory, numBuckets: Int, maxItems: Int): ColumnarAppendableHistogramVector = {
     // Really just an estimate.  TODO: if we really go with columnar, make it more accurate
@@ -172,7 +182,8 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
     val values = FlatBucketValues(valueBuf)
     bucketAppenders.foreach { appenders =>
       for { b <- 0 until numBuckets optimized } {
-        appenders(b).addData(values.bucket(b))
+        val resp = appenders(b).addData(values.bucket(b))
+        require(resp == Ack)
       }
     }
 
@@ -194,8 +205,36 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
   def reset(): Unit = {
     bucketAppenders.foreach(_.foreach(_.dispose()))
     bucketAppenders = None
+    resetNumHistograms(addr)
   }
 
+  // Optimize each bucket's appenders, then create a new region with the same headers but pointing at the
+  // optimized vectors.
+  // TODO: this is NOT safe for persistence and recovery, as pointers cannot be persisted or recovered.
+  // For us to really make persistence of this work, we would need to pursue one of these strategies:
+  //  1) Change code of each LongAppendingVector to tell us how much optimized bytes take up for each bucket,
+  //     then do a giant allocation including every bucket, and use relative pointers, not absolute, to point
+  //     to each one;  (or possibly a different kind of allocator)
+  //  2) Use BlockIDs and offsets instead of absolute pointers, and persist entire blocks.
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
+    val optimizedBuckets = bucketAppenders.map { appenders =>
+      appenders.map(_.optimize(memFactory, hint))
+    }.getOrElse(Array.empty[BinaryVectorPtr])
+
+    val newHeaderAddr = memFactory.allocateOffheap(numBytes)
+    // Copy headers including bucket def
+    val bucketPtrOffset = (afterBucketDefAddr(addr) - addr).toInt
+    UnsafeUtils.copy(addr, newHeaderAddr, bucketPtrOffset)
+
+    for { b <- 0 until optimizedBuckets.size optimized } {
+      UnsafeUtils.setLong(newHeaderAddr + bucketPtrOffset + 8*b, optimizedBuckets(b))
+    }
+
+    newHeaderAddr
+  }
+
+  // NOTE: allocating vectors during ingestion is a REALLY BAD idea.  For one if one runs out of memory then
+  //   it will fail but ingestion into other vectors might succeed, resulting in undefined switchBuffers behaviors.
   private def initBuckets(numBuckets: Int): Unit = {
     val bucketPointersAddr = afterBucketDefAddr(addr)
     val appenders = (0 until numBuckets).map { b =>

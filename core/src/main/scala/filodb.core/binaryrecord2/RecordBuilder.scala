@@ -483,7 +483,7 @@ final class RecordBuilder(memFactory: MemFactory,
       curRecEndOffset = curRecordOffset + recordNumBytes
     }
 
-  private def newContainer(): Unit = {
+  private[filodb] def newContainer(): Unit = {
     val (newBase, newOff, _) = memFactory.allocate(containerSize)
     val container = new RecordContainer(newBase, newOff, containerSize)
     containers += container

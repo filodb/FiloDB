@@ -51,6 +51,35 @@ class HistogramVectorTest extends NativeVectorTest {
           .zipWithIndex.foreach { case (h, i) => verifyHistogram(h, i) }
   }
 
+  it("should optimize histograms and be able to query optimized vectors") {
+    val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeBinHistogram(binScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual rawHistBuckets.length
+
+    val reader = appender.reader.asInstanceOf[ColumnarHistogramReader]
+    reader.length shouldEqual rawHistBuckets.length
+
+    (0 until rawHistBuckets.length).foreach { i =>
+      val h = reader(i)
+      verifyHistogram(h, i)
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = new ColumnarHistogramReader(optimized)
+    optReader.length shouldEqual rawHistBuckets.length
+    (0 until rawHistBuckets.length).foreach { i =>
+      val h = optReader(i)
+      verifyHistogram(h, i)
+    }
+
+    appender.reset()
+    appender.length shouldEqual 0
+  }
+
   it("should reject BinaryHistograms of schema different from first schema ingested") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
     rawLongBuckets.foreach { rawBuckets =>

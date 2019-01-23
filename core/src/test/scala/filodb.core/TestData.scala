@@ -296,17 +296,19 @@ object MachineMetricsData {
 
   val histDataset = Dataset("histogram", Seq("tags:map"),
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist"))
-  val histBucketScheme = bv.GeometricBuckets(2.0, 2.0, 8)
 
-  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000): Stream[Seq[Any]] = {
-    val buckets = new Array[Double](8)
+  var histBucketScheme: bv.HistogramBuckets = _
+  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] = {
+    histBucketScheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
+    val buckets = new Array[Double](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
-      for { b <- bucketNo until 8 } {
+      for { b <- bucketNo until numBuckets } {
         buckets(b) += 1
       }
     }
     Stream.from(0).map { n =>
-      updateBuckets(n % 8)
+      updateBuckets(n % numBuckets)
       Seq(startTs + n * timeStep,
           (1 + n).toLong,
           buckets.sum.toLong,
@@ -370,4 +372,26 @@ object MetricsTestData {
     final def getBlobOffset(columnNo: Int): PartitionKey = ???
     final def getBlobNumBytes(columnNo: Int): Int = ???
   }
+
+  // Takes the output of linearHistSeries and transforms them into Prometheus-schema histograms.
+  // Each bucket becomes its own time series with _bucket appended and an le value
+  def promHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] =
+    MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
+      .flatMap { record =>
+        val timestamp = record(0)
+        val tags = record(4).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metricName = tags("__name__".utf8).toString
+        val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_count").utf8))
+        val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_sum").utf8))
+        val hist = record(3).asInstanceOf[bv.MutableHistogram]
+        val bucketTags = tags + ("__name__".utf8 -> (metricName + "_bucket").utf8)
+        val bucketRecs = (0 until hist.numBuckets).map { b =>
+          Seq(timestamp, hist.bucketValue(b),
+              bucketTags + ("le".utf8 -> hist.bucketTop(b).toString.utf8))
+        }
+        Seq(countRec, sumRec) ++ bucketRecs
+      }
 }
