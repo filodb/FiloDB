@@ -535,9 +535,9 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1
-        while(row.notNull(i)) {
+        while (row.notNull(i)) {
           val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-          if (rvk.labelValues.size > 0) {
+          if (!(rvk == CustomRangeVectorKey(Map.empty))) {
             val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
             builder.startNewRecord()
             builder.addLong(row.getLong(0))

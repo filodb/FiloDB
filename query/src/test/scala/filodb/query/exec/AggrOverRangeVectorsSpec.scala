@@ -329,11 +329,13 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
+    // mapReduce returns range vector which has all values as Double.Max
     compareIter2(result5(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(1.7976931348623157E308d, 1.7976931348623157E308d), Set(4.4d, 5.4d)).iterator)
     val result5b = resultObs5b.toListL.runAsync.futureValue
     result5b.size shouldEqual 1
     result5b(0).key shouldEqual ignoreKey
+    // present removes the range vector which has all values as Double.Max
     compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(5.4d, 4.4d).iterator)
 
     // TopK
