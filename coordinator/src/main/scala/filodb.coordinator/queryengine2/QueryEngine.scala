@@ -229,7 +229,13 @@ class QueryEngine(dataset: Dataset,
                                      options: QueryOptions,
                                      lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
     val renamedFilters = renameMetricFilter(lp.filters)
-    shardsFromFilters(renamedFilters, options).map { shard =>
+    val filterCols = lp.filters.map(_.column).toSet
+    val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
+                        shardsFromFilters(lp.filters, options)
+                      } else {
+                        shardMapperFunc.assignedShards
+                      }
+    shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         renamedFilters, lp.start, lp.end)

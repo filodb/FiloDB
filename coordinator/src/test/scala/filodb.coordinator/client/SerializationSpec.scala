@@ -230,6 +230,32 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   }
 
+  it ("should serialize and deserialize ExecPlan2 involving metadata queries") {
+    val node0 = TestProbe().ref
+    val mapper = new ShardMapper(1)
+    def mapperRef: ShardMapper = mapper
+    mapper.registerNode(Seq(0), node0)
+    val to = System.currentTimeMillis() / 1000
+    val from = to - 50
+    val qParams = TimeStepParams(from, 10, to)
+    val dataset = MetricsTestData.timeseriesDataset
+    val engine = new QueryEngine(dataset, mapperRef)
+
+    // with column filters having shardcolumns
+    val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
+      "http_request_duration_seconds_bucket{job=\"prometheus\"}",
+      qParams)
+    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(0, 100))
+    roundTrip(execPlan1) shouldEqual execPlan1
+
+    // without shardcolumns in filters
+    val logicalPlan2 = Parser.metadataQueryToLogicalPlan(
+      "http_request_duration_seconds_bucket",
+      qParams)
+    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(0, 100))
+    roundTrip(execPlan2) shouldEqual execPlan2
+  }
+
   it ("should serialize and deserialize QueryError") {
     val err = QueryError("xdf", new IllegalStateException("Some message"))
     val deser1 = roundTrip(err).asInstanceOf[QueryError]
