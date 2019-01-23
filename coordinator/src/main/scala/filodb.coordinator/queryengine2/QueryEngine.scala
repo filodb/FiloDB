@@ -57,7 +57,8 @@ class QueryEngine(dataset: Dataset,
           case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
-    logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
+    logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
+      s" $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
   }
 

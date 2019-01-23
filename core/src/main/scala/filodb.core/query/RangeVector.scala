@@ -87,7 +87,7 @@ trait RangeVector {
 
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
-                                    partition: ReadablePartition,
+                                    val partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
