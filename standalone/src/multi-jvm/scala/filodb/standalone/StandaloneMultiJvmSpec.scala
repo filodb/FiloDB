@@ -24,6 +24,7 @@ import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.store.StoreConfig
 import filodb.http.PromCirceSupport
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
@@ -138,20 +139,67 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
-  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1m]"
+  def topValuesInShards(client: LocalClient, tagKey: String, shards: Seq[Int]): Unit = {
+    shards.foreach { shard =>
+      val values = client.getIndexValues(dataset, tagKey, shard)
+      info(s"Top values for shard=$shard tag=$tagKey is: $values")
+    }
+  }
+
+  val query = "heap_usage{dc=\"DC0\",app=\"App-2\"}[1m]"
+  val query1 = "heap_usage{dc=\"DC0\",app=\"App-2\"}"
+
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
     val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
 
+    val curTime = System.currentTimeMillis
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
-        val vals = r.result.flatMap(_.rows.map(_.getDouble(1)))
-        info(s"result values were $vals")
-        vals.sum
+        val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
+        // info(s"result values were $vals")
+        vals.length should be > 0
+        vals.map(_._2).sum
       case e: QueryError => fail(e.t)
     }
     info(s"CLI Query Result for $query at $queryTimestamp was $result")
     result
+  }
+
+  // Get a point for every minute of an interval for multiple time series for comparing missing data
+  // TODO: maybe do a sum_over_time() as current windowing just gets last data point
+  def runRangeQuery(client: LocalClient, startTime: Long, endTime: Long): Map[String, Array[Double]] = {
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query1, TimeStepParams(startTime/1000, 60, endTime/1000))
+
+    var totalSamples = 0
+    client.logicalPlan2Query(dataset, logicalPlan) match {
+      case r: QueryResult2 =>
+        // Transform range query vectors
+        val map = r.result.map { rv =>
+          val sampleArray = rv.rows.map(_.getDouble(1)).toArray
+          totalSamples += sampleArray.size
+          rv.key.toString -> sampleArray
+        }.toMap
+        info(s"Range query result for interval [$startTime, $endTime]: ${map.size} rows, $totalSamples samples")
+        map
+      case e: QueryError => fail(e.t)
+    }
+  }
+
+  def compareRangeResults(map1: Map[String, Array[Double]], map2: Map[String, Array[Double]]): Unit = {
+    map1.keySet shouldEqual map2.keySet
+    map1.foreach { case (key, samples) =>
+      samples.toList shouldEqual map2(key).toList
+    }
+  }
+
+  def printChunkMeta(client: LocalClient): Unit = {
+    val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",app=\"App-2\"})"
+    val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, TimeStepParams(0, 60, Int.MaxValue))
+    client.logicalPlan2Query(dataset, logicalPlan) match {
+      case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
+      case e: QueryError => fail(e.t)
+    }
   }
 
   def runHttpQuery(queryTimestamp: Long): Double = {
@@ -160,13 +208,15 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     import PromCirceSupport._
 
     implicit val sttpBackend = AkkaHttpBackend()
-    val url = uri"http://localhost:8080/promql/timeseries/api/v1/query?query=$query&time=${queryTimestamp/1000}"
+    val url = uri"http://localhost:8080/promql/prometheus/api/v1/query?query=$query&time=${queryTimestamp/1000}"
     info(s"Querying: $url")
     val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
-    val result = result1.flatMap(_.values.map(_.value))
+    val result = result1.flatMap(_.values.map { d => (d.timestamp, d.value) })
     info(s"result values were $result")
-    info(s"HTTP Query Result for $query at $queryTimestamp was ${result.sum}")
-    result.sum
+    result.length should be > 0
+    val sum = result.map(_._2).sum
+    info(s"HTTP Query Result for $query at $queryTimestamp was $sum")
+    sum
   }
 
   def runRemoteReadQuery(queryTimestamp: Long): Double = {
@@ -176,14 +226,14 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val end = queryTimestamp / 1000 * 1000
     val nameMatcher = LabelMatcher.newBuilder().setName("__name__").setValue("heap_usage")
     val dcMatcher = LabelMatcher.newBuilder().setName("dc").setValue("DC0")
-    val jobMatcher = LabelMatcher.newBuilder().setName("job").setValue("App-2")
+    val jobMatcher = LabelMatcher.newBuilder().setName("app").setValue("App-2")
     val query = Query.newBuilder().addMatchers(nameMatcher)
                                   .addMatchers(dcMatcher)
                                   .addMatchers(jobMatcher)
                                   .setStartTimestampMs(start)
                                   .setEndTimestampMs(queryTimestamp / 1000 * 1000)
     val rr = Snappy.compress(ReadRequest.newBuilder().addQueries(query).build().toByteArray())
-    val url = uri"http://localhost:8080/promql/timeseries/api/v1/read"
+    val url = uri"http://localhost:8080/promql/prometheus/api/v1/read"
     info(s"Querying: $url")
     val result1 = sttp.post(url).body(rr).response(asByteArray).send().futureValue.unsafeBody
     val result = ReadResponse.parseFrom(Snappy.uncompress(result1))

@@ -1,13 +1,16 @@
 package filodb.core.query
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
+import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkScanMethod, ReadablePartition}
+import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium}
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
@@ -29,13 +32,14 @@ class SeqMapConsumer extends MapItemConsumer {
 }
 
 /**
-  * Range Vector Key backed by a BinaryRecord v2 partition key, whic is basically a pointer to memory on or offheap.
+  * Range Vector Key backed by a BinaryRecord v2 partition key, which is basically a pointer to memory on or offheap.
   */
 final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partOffset: Long,
                                          partSchema: RecordSchema,
                                          partKeyCols: Seq[ColumnInfo],
-                                         sourceShard: Int) extends RangeVectorKey {
+                                         sourceShard: Int,
+                                         groupNum: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
@@ -50,7 +54,7 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
       }
     }.toMap
   }
-  override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)}"
+  override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 }
 
 final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {
@@ -79,33 +83,39 @@ object CustomRangeVectorKey {
 trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
-
-  /**
-    * Pretty prints all the elements into strings.
-    */
-  def prettyPrint(schema: ResultSchema, formatTime: Boolean = true): String = {
-    val curTime = System.currentTimeMillis
-    key.toString + "\n\t" +
-      rows.map {
-        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
-        case reader =>
-          val firstCol = if (formatTime && schema.isTimeSeries) {
-            val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
-          } else {
-            reader.getAny(0).toString
-          }
-          (firstCol +: (1 until schema.length).map(reader.getAny(_).toString)).mkString("\t")
-      }.mkString("\n\t") + "\n"
-  }
 }
 
+// First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+
+  // Obtain ChunkSetInfos from specific window of time from partition
+  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
+
+  def timestampColID: Int = partition.dataset.timestampColID
+  // the query engine is based around one main data column to query, so it will always be the second column passed in
+  def valueColID: Int = columnIDs(1)
+}
+
+/**
+ * A RangeVector designed to return one row per ChunkSetInfo, with the following schema:
+ * ID (Long), NumRows (Int), startTime (Long), endTime (Long), numBytes(I) of chunk, readerclass of chunk
+ * @param column the Column to return detailed chunk info about, must be a DataColumn
+ */
+final case class ChunkInfoRangeVector(key: RangeVectorKey,
+                                      partition: ReadablePartition,
+                                      chunkMethod: ChunkScanMethod,
+                                      column: Column) extends RangeVector {
+  val reader = new ChunkInfoRowReader(column)
+  // Iterators are stateful, for correct reuse make this a def
+  def rows: Iterator[RowReader] = partition.infos(chunkMethod).map { info =>
+    reader.setInfo(info)
+    reader
+  }
 }
 
 /**
@@ -123,9 +133,31 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
+
+  /**
+    * Pretty prints all the elements into strings using record schema
+    */
+  def prettyPrint(formatTime: Boolean = true): String = {
+    val curTime = System.currentTimeMillis
+    key.toString + "\n\t" +
+      rows.map {
+        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
+        case reader =>
+          val firstCol = if (formatTime && schema.isTimeSeries) {
+            val timeStamp = reader.getLong(0)
+            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
+          } else {
+            schema.columnTypes(0) match {
+              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case _ => reader.getAny(0).toString
+            }
+          }
+          (firstCol +: (1 until schema.numColumns).map(reader.getAny(_).toString)).mkString("\t")
+      }.mkString("\n\t") + "\n"
+  }
 }
 
-object SerializableRangeVector {
+object SerializableRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
@@ -142,10 +174,19 @@ object SerializableRangeVector {
             limit: Int): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
-    val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
-    rv.rows.take(limit).foreach { row =>
-      numRows += 1
-      builder.addFromReader(row)
+    val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
+    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
+    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
+    try {
+      OffheapLFSortedIDMap.validateNoSharedLocks()
+      val rows = rv.rows
+      while (rows.hasNext && numRows < limit) {
+        numRows += 1
+        builder.addFromReader(rows.next)
+      }
+    } finally {
+      // When the query is done, clean up lingering shared locks caused by iterator limit.
+      OffheapLFSortedIDMap.releaseAllSharedLocks()
     }
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to
@@ -172,8 +213,10 @@ object SerializableRangeVector {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo]): RecordSchema =
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols.map(_.colType)) })
+  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
+    val brSchemas = brColInfos.mapValues(toSchema(_))
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(columns = cols, brSchema = brSchemas) })
+  }
 
   def toBuilder(schema: RecordSchema): RecordBuilder =
     new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)

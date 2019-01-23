@@ -16,7 +16,7 @@ import remote.RemoteStorage.ReadRequest
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions}
 import filodb.core.DatasetRef
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.Sampl
 import filodb.query.{LogicalPlan, QueryError, QueryResult}
@@ -40,7 +40,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'step.as[Int]) { (query, start, end, step) =>
-          val logicalPlan = Parser.queryRangeToLogicalPlan(query, new QueryParams(start.toLong, step, end.toLong))
+          val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
           askQueryAndRespond(dataset, logicalPlan)
         }
       }
@@ -75,8 +75,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan,
-                QueryOptions(itemLimit = settings.querySampleLimit)))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions))
             }
             Future.sequence(asks)
           }
@@ -101,7 +100,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   }
 
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan) = {
-    val command = LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
+    val command = LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
     onSuccess(asyncAsk(nodeCoord, command)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr))
       case qr: QueryError => complete(toPromErrorResponse(qr))

@@ -112,8 +112,7 @@ object ZeroCopyBinary {
  * deserialize to a regular Java string
  */
 // scalastyle:off
-final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int)
-extends ZeroCopyBinary {
+final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int) extends ZeroCopyBinary {
   import ZeroCopyUTF8String._
   import filodb.memory.UTF8String._
 

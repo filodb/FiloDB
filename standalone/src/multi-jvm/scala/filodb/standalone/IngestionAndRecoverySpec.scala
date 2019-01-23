@@ -11,7 +11,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
 import filodb.coordinator.client.Client
-import filodb.core.{MetricsTestData, Success}
+import filodb.core.Success
 import filodb.timeseries.TestTimeseriesProducer
 
 object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
@@ -87,7 +87,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      val datasetObj = MetricsTestData.timeseriesDataset
+      val datasetObj = TestTimeseriesProducer.dataset
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       info("Dataset created")
@@ -159,6 +159,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
+        // NOTE: 10000 samples / 100 time series = 100 samples per series
+        // 100 * 10s = 1000seconds =~ 16 minutes
         queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
         TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
@@ -168,14 +170,27 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     }
   }
 
+  var rangeStart = 0L
+  var rangeEnd = 0L
+  var rangeResponse: Map[String, Array[Double]] = _
+
   it should "answer query successfully" in {
     runOn(first) {
+      rangeStart = queryTimestamp - 4.minutes.toMillis
+      rangeEnd   = rangeStart + 15.minutes.toMillis
+
+      // Print the top values in each shard just for debugging
+      topValuesInShards(client1, "app", 0 to 3)
+      topValuesInShards(client1, "dc", 0 to 3)
+
       query1Response = runCliQuery(client1, queryTimestamp)
       val httpQueryResponse = runHttpQuery(queryTimestamp)
       query1Response shouldEqual httpQueryResponse
       val remoteReadQueryResponse = runRemoteReadQuery(queryTimestamp)
       query1Response shouldEqual remoteReadQueryResponse
 
+      // Do a range query to find missing values
+      rangeResponse = runRangeQuery(client1, rangeStart, rangeEnd)
     }
     enterBarrier("query1-answered")
   }
@@ -219,8 +234,14 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "answer promQL query successfully with same value" in {
     runOn(first) {
+      // Debug chunk metadata
+      printChunkMeta(client2)
+
       val query2Response = runCliQuery(client2, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
+
+      val rangeResp2 = runRangeQuery(client2, rangeStart, rangeEnd)
+      compareRangeResults(rangeResponse, rangeResp2)
     }
     enterBarrier("query2-answered")
   }

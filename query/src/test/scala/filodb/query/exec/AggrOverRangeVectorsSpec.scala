@@ -128,29 +128,18 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     tdig.quantile(q)
   }
 
-  it ("should ignore NaN while aggregating") {
-    val ignoreKey = CustomRangeVectorKey(
-      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+  val ignoreKey = CustomRangeVectorKey(
+    Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-    val noKey = CustomRangeVectorKey(Map.empty)
-    def noGrouping(rv: RangeVector): RangeVectorKey = noKey
+  val noKey = CustomRangeVectorKey(Map.empty)
+  def noGrouping(rv: RangeVector): RangeVectorKey = noKey
+
+  it ("should ignore NaN while aggregating") {
 
     val samples: Array[RangeVector] = Array(
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, Double.NaN),
-                                                     new TransientRow(2L, 5.6d)).iterator
-      },
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 4.6d),
-                                                     new TransientRow(2L, 4.4d)).iterator
-      },
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 2.1d),
-                                                     new TransientRow(2L, 5.4d)).iterator
-      }
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, 4.6d), (2L, 4.4d))),
+      toRv(Seq((1L, 2.1d), (2L, 5.4d)))
     )
 
     // Sum
@@ -224,27 +213,10 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
-    val noKey = CustomRangeVectorKey(Map.empty)
-    def noGrouping(rv: RangeVector): RangeVectorKey = noKey
-
-    val ignoreKey = CustomRangeVectorKey(
-      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
     val samples: Array[RangeVector] = Array(
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, Double.NaN),
-          new TransientRow(2L, 5.6d)).iterator
-      },
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 4.6d),
-          new TransientRow(2L, 4.4d)).iterator
-      },
-      new RangeVector {
-        override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 2.1d),
-          new TransientRow(2L, 5.4d)).iterator
-      }
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, 4.6d), (2L, 4.4d))),
+      toRv(Seq((1L, 2.1d), (2L, 5.4d)))
     )
 
     // Quantile
@@ -266,6 +238,79 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
 
   }
 
+  private def toRv(samples: Seq[(Long, Double)]): RangeVector = {
+    new RangeVector {
+      override def key: RangeVectorKey = ignoreKey
+      override def rows: Iterator[RowReader] = samples.map(r => new TransientRow(r._1, r._2)).iterator
+    }
+  }
+
+  it ("average should work with NaN Test case 2 ") {
+    val s1 = Seq( (1541190600L, Double.NaN), (1541190660L, Double.NaN), (1541190720L, Double.NaN),
+         (1541190780L, Double.NaN), (1541190840L, Double.NaN), (1541190900L, 1.0), (1541190960L, 1.0))
+    val s2 = Seq( (1541190600L, 1.0d), (1541190660L,1.0d), (1541190720L,1.0d),
+         (1541190780L,1.0d), (1541190840L,1.0d), (1541190900L,1.0d), (1541190960L,1.0d))
+
+    val mapped1 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, false, Observable.fromIterable(Seq(toRv(s1))), noGrouping)
+
+    val mapped2 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, false, Observable.fromIterable(Seq(toRv(s2))), noGrouping)
+
+    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, true, mapped1 ++ mapped2, rv=>rv.key)
+    val result4 = resultObs4.toListL.runAsync.futureValue
+    result4.size shouldEqual 1
+    result4(0).key shouldEqual noKey
+    // prior to this fix, test was returning List(NaN, NaN, NaN, NaN, NaN, 1.0, 1.0)
+    result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+  }
+
+  it("should return NaN when all values are NaN for a timestamp ") {
+
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
+      toRv(Seq((1L, Double.NaN), (2L, 4.4d))),
+      toRv(Seq((1L, Double.NaN), (2L, 5.4d)))
+    )
+
+    // Sum
+    val resultObs = RangeVectorAggregator.mapReduce(AggregationOperator.Sum,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    compareIter(result(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 15.4d).iterator)
+
+    // Min
+    val resultObs2 = RangeVectorAggregator.mapReduce(AggregationOperator.Min,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val result2 = resultObs2.toListL.runAsync.futureValue
+    result2.size shouldEqual 1
+    result2(0).key shouldEqual noKey
+    compareIter(result2(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
+
+    // Count
+    val resultObs3a = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs3 = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
+      Nil, true, resultObs3a, rv => rv.key)
+    val result3 = resultObs3.toListL.runAsync.futureValue
+    result3.size shouldEqual 1
+    result3(0).key shouldEqual noKey
+    compareIter(result3(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 3d).iterator)
+
+    // Avg
+    val resultObs4a = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
+      Nil, true, resultObs4a, rv => rv.key)
+    val result4 = resultObs4.toListL.runAsync.futureValue
+    result4.size shouldEqual 1
+    result4(0).key shouldEqual noKey
+    compareIter(result4(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.133333333333333d).iterator)
+
+  }
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {

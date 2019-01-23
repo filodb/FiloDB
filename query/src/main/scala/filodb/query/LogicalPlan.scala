@@ -15,6 +15,8 @@ sealed trait RawSeriesPlan extends LogicalPlan
   */
 sealed trait PeriodicSeriesPlan extends LogicalPlan
 
+sealed trait MetadataQueryPlan extends LogicalPlan
+
 /**
   * A selector is needed in the RawSeries logical plan to specify
   * a row key range to extract from each partition.
@@ -22,15 +24,36 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan
 sealed trait RangeSelector extends java.io.Serializable
 case object AllChunksSelector extends RangeSelector
 case object WriteBufferSelector extends RangeSelector
+case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
 
 /**
   * Concrete logical plan to query for raw data in a given range
+  * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
+  *        the timestamp column, that will be automatically added.
+  *        If no columns are included, the default value column will be used.
   */
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
                      columns: Seq[String]) extends RawSeriesPlan
+
+
+case class LabelValues(labelName: String,
+                       labelConstraints: Map[String, String],
+                       lookbackTimeInMillis: Long) extends MetadataQueryPlan
+
+case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
+                               start: Long,
+                               end: Long) extends MetadataQueryPlan
+
+/**
+ * Concrete logical plan to query for chunk metadata from raw time series in a given range
+ * @param column the column name from which to extract chunk information like chunk size and encoding type
+ */
+case class RawChunkMeta(rangeSelector: RangeSelector,
+                        filters: Seq[ColumnFilter],
+                        column: String) extends PeriodicSeriesPlan
 
 /**
   * Concrete logical plan to query for data in a given range

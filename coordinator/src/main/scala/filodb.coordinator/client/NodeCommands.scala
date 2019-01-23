@@ -77,7 +77,7 @@ object IngestionCommands {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
-   * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
+   * @return Flushed when the flush cycle has finished successfully, committing data to columnstore.
    */
   final case class Flush(dataset: DatasetRef) extends NodeCommand
   case object Flushed extends NodeResponse

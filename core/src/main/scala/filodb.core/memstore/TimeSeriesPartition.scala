@@ -6,7 +6,7 @@ import scalaxy.loops._
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BlockMemFactory}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory}
 import filodb.memory.data.{MapHolder, OffheapLFSortedIDMapMutator}
 import filodb.memory.format._
 
@@ -15,6 +15,8 @@ object TimeSeriesPartition extends StrictLogging {
 
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
+
+  val _log = logger
 
   def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
     dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
@@ -57,9 +59,13 @@ class TimeSeriesPartition(val partID: Int,
                           // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
                           var mapPtr: BinaryRegion.NativePointer,
                           // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
-                          offheapInfoMap: OffheapLFSortedIDMapMutator)
+                          offheapInfoMap: OffheapLFSortedIDMapMutator,
+                          // Lock state used by OffheapLFSortedIDMap.
+                          var lockState: Int = 0)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
+
+  require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
@@ -104,13 +110,16 @@ extends ReadablePartition with MapHolder {
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
+    val ts = dataset.timestamp(row)
+    if (ts < timestampOfLatestSample) {
+      shardStats.outOfOrderDropped.increment
+      return
+    }
     if (currentChunks == nullChunks) {
       // First row of a chunk, set the start time to it
-      initNewChunk(dataset.timestamp(row))
+      initNewChunk(ts)
     }
-
-    // Update the end time as well.  For now assume everything arrives in increasing order
-    ChunkSetInfo.setEndTime(currentInfo.infoAddr, dataset.timestamp(row))
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -122,6 +131,9 @@ extends ReadablePartition with MapHolder {
       }
     }
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+
+    // Update the end time as well.  For now assume everything arrives in increasing order
+    ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -169,6 +181,7 @@ extends ReadablePartition with MapHolder {
     // Now, write metadata into offheap block metadata space and update infosChunks
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            dataset.blockMetaSize.toShort)
+
     infoPut(ChunkSetInfo(metaAddr + 4))
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
@@ -228,17 +241,70 @@ extends ReadablePartition with MapHolder {
                .filter(_ != currentInfo)  // filter out the appending chunk
 
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
-    case AllChunkScan               => allInfos
-    case InMemoryChunkScan          => allInfos
-    case r: RowKeyChunkScan         => allInfos.filter { ic =>
-                                         ic.intersection(r.startTime, r.endTime).isDefined
-                                       }
-    case LastSampleChunkScan        => if (numChunks == 0) ChunkInfoIterator.empty
-                                       else ChunkInfoIterator.single(infoLast)
+    case AllChunkScan        => allInfos
+    case InMemoryChunkScan   => allInfos
+    case r: RowKeyChunkScan  => allInfos.filter { ic =>
+                                  ic.intersection(r.startTime, r.endTime).isDefined
+                                }
+    case WriteBufferChunkScan => if (currentInfo == nullInfo) ChunkInfoIterator.empty
+                                else {
+                                  // Return a single element iterator which holds a shared lock.
+                                  try {
+                                    new OneChunkInfo(currentInfo)
+                                  } catch {
+                                    case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
+                                  }
+                                }
   }
 
-  final def earliestTime: Long =
-    if (numChunks == 0) Long.MinValue else ChunkSetInfo(offheapInfoMap.first(this)).startTime
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator =
+    allInfos.filter(_.intersection(startTime, endTime).isDefined)
+
+  def hasChunks(method: ChunkScanMethod): Boolean = {
+    val chunkIter = infos(method)
+    try {
+      chunkIter.hasNext
+    } finally {
+      chunkIter.close()
+    }
+  }
+
+  private class OneChunkInfo(info: => ChunkSetInfo) extends ChunkInfoIterator {
+    var closed = false
+    var valueSeen = false
+
+    def close(): Unit = {
+      if (!closed) doClose()
+    }
+
+    private def doClose(): Unit = {
+      closed = true
+      offheapInfoMap.releaseShared(TimeSeriesPartition.this)
+    }
+
+    def hasNext: Boolean = {
+      if (valueSeen) doClose()
+      !closed
+    }
+
+    def nextInfo: ChunkSetInfo = {
+      if (closed) throw new NoSuchElementException()
+      if (!valueSeen) {
+        offheapInfoMap.acquireShared(TimeSeriesPartition.this)
+        valueSeen = true
+      }
+      return info
+    }
+  }
+
+  final def earliestTime: Long = {
+    if (numChunks == 0) {
+      Long.MinValue
+    } else {
+      // Acquire shared lock to safely access the native pointer.
+      offheapInfoMap.withShared(this, ChunkSetInfo(offheapInfoMap.first(this)).startTime)
+    }
+  }
 
   /**
     * Timestamp of most recent sample in memory. If none, returns -1
@@ -247,11 +313,18 @@ extends ReadablePartition with MapHolder {
     * not been paged into memory
     */
   final def timestampOfLatestSample: Long = {
-    if (numChunks == 0) -1
-    else infoLast.endTime
+    if (currentInfo != nullInfo) {   // fastest: get the endtime from current chunk
+      currentInfo.endTime
+    } else if (numChunks > 0) {
+      // Acquire shared lock to safely access the native pointer.
+      offheapInfoMap.withShared(this, infoLast.endTime)
+    } else {
+      -1
+    }
   }
 
-  def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
+  // Disabled for now. Requires a shared lock on offheapInfoMap.
+  //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
 
   /**
     * Initializes vectors, chunkIDs for a new chunkset/chunkID.
@@ -269,26 +342,61 @@ extends ReadablePartition with MapHolder {
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    offheapInfoMap.remove(this, id)
+    offheapInfoMap.withExclusive(this, offheapInfoMap.remove(this, id))
     shardStats.chunkIdsEvicted.increment()
   }
 
   final def hasChunksAt(id: ChunkID): Boolean = offheapInfoMap.contains(this, id)
 
   // Used for adding chunksets that are paged in, ie that are already persisted
-  // Atomic and multi-thread safe; only mutates state and invokes infoAddrFunc if chunkID not present
-  final def addChunkInfoIfAbsent(id: ChunkID, infoAddrFunc: => BinaryRegion.NativePointer): Boolean = {
-    val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddrFunc)
-    // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
-    if (inserted) updateFlushedID(infoGet(id))
-    inserted
+  // Atomic and multi-thread safe; only mutates state if chunkID not present
+  final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
+    offheapInfoMap.withExclusive(this, {
+      val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddr)
+      // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
+      if (inserted) updateFlushedID(infoGet(id))
+      inserted
+    })
   }
 
   final def updateFlushedID(info: ChunkSetInfo): Unit = {
     newestFlushedID = Math.max(newestFlushedID, info.id)
   }
 
+  // Caller must hold lock on offheapInfoMap.
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
-  private def infoLast: ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
-  private def infoPut(info: ChunkSetInfo): Unit = offheapInfoMap.put(this, info.infoAddr)
+
+  // Caller must hold lock on offheapInfoMap.
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+
+  private def infoPut(info: ChunkSetInfo): Unit = {
+    offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+  }
+}
+
+final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
+  var currVal: TimeSeriesPartition = _
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = ???
+    def getAny(columnNo: Int): Any = ???
+
+    def getBlobBase(columnNo: Int): Any = currVal.partKeyBase
+    def getBlobOffset(columnNo: Int): Long = currVal.partKeyOffset
+    def getBlobNumBytes(columnNo: Int): Int =
+      BinaryRegionLarge.numBytes(currVal.partKeyBase, currVal.partKeyOffset) + BinaryRegionLarge.lenBytes
+  }
+
+  override def hasNext: Boolean = records.hasNext
+
+  override def next(): RowReader = {
+    currVal = records.next()
+    rowReader
+  }
 }

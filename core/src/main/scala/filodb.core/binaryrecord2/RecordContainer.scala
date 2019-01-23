@@ -22,7 +22,9 @@ import filodb.memory.format.{RowReader, UnsafeUtils}
  * @param offset 64-bit native pointer or offset into Array[Byte] object memory
  * @param maxLength the maximum allocated size the container can grow to, including the initial length bytes
  */
-final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
+final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
+                            // INTERNAL variable placed here to avoid Scalac using a bitfield and slowing things down
+                            var numRecords: Int = 0) {
   import RecordBuilder._
 
   @inline final def numBytes: Int =  UnsafeUtils.getInt(base, offset)
@@ -102,7 +104,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
   final def allOffsets: Buffer[Long] = map { case (b, o) => o }
 
   class CountingConsumer(var count: Int = 0) extends BinaryRegionConsumer {
-    def onNext(base: Any, offset: Long): Unit = count += 1
+    final def onNext(base: Any, offset: Long): Unit = count += 1
   }
 
   /**

@@ -164,7 +164,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * Adds an entire record from a RowReader, with no boxing, using builderAdders
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
    */
-  def addFromReader(row: RowReader): Long = {
+  final def addFromReader(row: RowReader): Long = {
     startNewRecord()
     for { pos <- 0 until schema.numFields optimized } {
       schema.builderAdders(pos)(row, this)
@@ -264,7 +264,7 @@ final class RecordBuilder(memFactory: MemFactory,
   /**
    * Ends creation of a map field
    */
-  def endMap(): Unit = {
+  final def endMap(): Unit = {
     mapOffset = -1L
     fieldNo += 1
   }
@@ -279,7 +279,7 @@ final class RecordBuilder(memFactory: MemFactory,
   final def endRecord(writeHash: Boolean = true): Long = {
     val recordOffset = curRecordOffset
 
-    if (writeHash && schema.partitionFieldStart.isDefined) setInt(curBase, curRecordOffset + hashOffset, recHash)
+    if (writeHash && firstPartField < Int.MaxValue) setInt(curBase, curRecordOffset + hashOffset, recHash)
 
     // Bring RecordOffset up to endOffset w/ align.  Now the state is complete at end of a record again.
     curRecEndOffset = align(curRecEndOffset)
@@ -287,7 +287,9 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo = -1
 
     // Update container length.  This is atomic so it is updated only when the record is complete.
-    containers.last.updateLengthWithOffset(curRecEndOffset)
+    val lastContainer = containers.last
+    lastContainer.updateLengthWithOffset(curRecEndOffset)
+    lastContainer.numRecords += 1
 
     recordOffset
   }

@@ -1,8 +1,6 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
-
-import akka.actor.{Actor, ActorRef, PoisonPill, Terminated}
+import akka.actor.{Actor, ActorRef}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
@@ -65,43 +63,4 @@ private[coordinator] trait NamingAwareBaseActor extends BaseActor {
     */
   def childrenForType(prefix: String): Iterable[ActorRef] =
     context.children filter (_.path.name startsWith prefix)
-}
-
-/** For Deathwatch actors, handles `akka.actor.Terminated` events,
-  * and Supervisors wanting graceful shutdown of supervised children
-  * for no data loss or clean behavior on shutdown, sends a
-  * `filodb.coordinator.NodeProtocol.ShutdownComplete` to the
-  * `filodb.coordinator.NodeProtocol.GracefulShutdown` sender.
-  */
-trait GracefulStopAwareSupervisor extends BaseActor {
-
-  import NodeProtocol.{GracefulShutdown, ShutdownComplete}
-
-  protected var gracefulShutdownStarted = false
-
-  protected def settings: FilodbSettings
-
-  override def receive: Actor.Receive = {
-    case Terminated(actor) => terminated(actor)
-    case GracefulShutdown  => gracefulShutdown(sender())
-  }
-
-  protected def terminated(actor: ActorRef): Unit = {
-    val message = s"$actor terminated."
-    if (gracefulShutdownStarted) logger.info(message) else logger.warn(message)
-  }
-
-  protected def gracefulShutdown(requester: ActorRef): Unit = {
-    import akka.pattern.{gracefulStop, pipe}
-    import context.dispatcher
-
-    logger.info("Starting graceful shutdown.")
-
-    gracefulShutdownStarted = true
-
-    Future
-      .sequence(context.children.map(gracefulStop(_, settings.GracefulStopTimeout, PoisonPill)))
-      .map(f => ShutdownComplete(self))
-      .pipeTo(requester)
-  }
 }

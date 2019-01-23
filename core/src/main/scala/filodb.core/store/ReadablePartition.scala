@@ -58,13 +58,15 @@ trait ReadablePartition extends FiloPartition {
   /**
    * Obtains the native offheap pointer for the chunk id for data column columnID
    */
-  def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr
+  // Disabled for now. Requires a shared lock on the chunk map.
+  //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr
 
   /**
    * Obtains the native offheap pointer for the chunk id for column columnID, including for partition key columns
    * @param id the chunkID for the chunk to obtain
    * @param columnID the column ID of the column to obtain the pointer for
    */
+  /* Disabled for now. Requires a shared lock on the chunk map.
   final def chunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr =
     if (Dataset.isPartitionID(columnID)) {
       // NOTE: we cannot actually query for the vector pointer for a partition key column
@@ -73,6 +75,7 @@ trait ReadablePartition extends FiloPartition {
     } else {
       dataChunkPointer(id, columnID)
     }
+  */
 
   /**
    * Obtains the correct VectorDataReader for the given column and pointer
@@ -87,6 +90,13 @@ trait ReadablePartition extends FiloPartition {
    * in order of increasing ChunkID.
    */
   def infos(method: ChunkScanMethod): ChunkInfoIterator
+
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator
+
+  /**
+    * Use to check if a ChunkScanMethod for this partition results in any chunks
+    */
+  def hasChunks(method: ChunkScanMethod): Boolean
 
   /**
    * Returns true if the partition has the chunk with the given id
@@ -105,8 +115,7 @@ trait ReadablePartition extends FiloPartition {
    * @param columnIDs the column IDs to query
    */
   final def timeRangeRows(startTime: Long, endTime: Long, columnIDs: Array[ColumnId]): Iterator[RowReader] =
-    new PartitionTimeRangeReader(this, startTime, endTime,
-                                 infos(RowKeyChunkScan(startTime, endTime)), columnIDs)
+    new PartitionTimeRangeReader(this, startTime, endTime, infos(startTime, endTime), columnIDs)
 
   final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): Iterator[RowReader] =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, infos(method), columnIDs)

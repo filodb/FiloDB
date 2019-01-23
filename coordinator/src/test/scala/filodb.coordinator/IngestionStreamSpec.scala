@@ -2,7 +2,6 @@ package filodb.coordinator
 
 import scala.concurrent.duration._
 
-import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import org.scalatest.BeforeAndAfterEach
@@ -58,14 +57,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.newDataset(dataset6).futureValue shouldEqual Success
     metaStore.newDataset(dataset33).futureValue shouldEqual Success
     coordinatorActor ! NodeProtocol.ResetState
+    expectMsg(NodeProtocol.StateReset)
     clusterActor ! NodeProtocol.ResetState
     expectMsg(NodeProtocol.StateReset)
     Thread sleep 2000
-  }
-
-  override def afterAll(): Unit = {
-    super.afterAll()
-    cluster.shutdown()
   }
 
   def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
@@ -103,20 +98,15 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     var latestStatus: ShardStatus = ShardStatusAssigned
     // sometimes we receive multiple status snapshots
-    while (latestStatus != ShardStatusStopped) {
+    while (latestStatus != ShardStatusError) {
       expectMsgPF(within) {
         case CurrentShardSnapshot(dataset33.ref, mapper) =>
-          mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
           latestStatus = mapper.statuses.head
+          if (latestStatus != ShardStatusError)
+            mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
       }
       info(s"Latest status = $latestStatus")
     }
-
-    // expectMsg(IngestionStopped(dataset33.ref, 0))
-
-    // NOTE: right now ingestion errors do not cause IngestionActor to disappear.  Should it?
-    coordinatorActor ! GetIngestionStats(dataset33.ref)
-    expectMsg(IngestionActor.IngestionStatus(45))   // the error happens earlier now, used to be 50
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -135,27 +125,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
         mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
-  }
-
-  // TODO: consider getting rid of this test, it's *almost* the same as the next one
-  it("should start and stop cleanly") {
-    import IngestionActor.IngestionStatus
-
-    val batchSize = 100
-    setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = batchSize, None)
-
-    import akka.pattern.ask
-    implicit val timeout: Timeout = cluster.settings.InitializationTimeout
-
-    // Wait for all messages to be ingested
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
-
-    val func = (coordinatorActor ? GetIngestionStats(dataset6.ref)).mapTo[IngestionStatus]
-    awaitCond(func.futureValue.rowsIngested == batchSize - 1, max=within)
   }
 
   it("should ingest all rows directly into MemStore") {

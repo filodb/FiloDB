@@ -120,6 +120,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
           logger.info(s"Starting recovery for shard ${e.shard}: from $startRecoveryWatermark to " +
                       s"$endRecoveryWatermark; last flushed group $lastFlushedGroup")
+          logger.info(s"Checkpoints for shard ${e.shard}: $checkpoints")
           for { lastOffset <- doRecovery(e.shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
                                          checkpoints) }
           yield {
@@ -132,7 +133,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       ingestion.recover {
         case NonFatal(t) =>
           logger.error(s"Error occurred during initialization/execution of ingestion for shard ${e.shard}", t)
-          // TODO should we respond to origin actor with an error?
+          handleError(dataset.ref, e.shard, t)
       }
     }
 
@@ -165,17 +166,22 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         stream,
         flushSched,
         flushStream(startingGroupNo),
-        diskTimeToLiveSeconds) {
-        ex => handleError(dataset.ref, shard, ex)
-      }
+        diskTimeToLiveSeconds)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
-      streamSubscriptions.get(shard).map(_.foreach { x =>
-        if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
-        ingestionStream.teardown()
-      })
+      streamSubscriptions(shard).onComplete {
+        case Failure(x) =>
+          handleError(dataset.ref, shard, x)
+        case Success(_) =>
+          // We dont release resources when fitite ingestion ends normally.
+          // Kafka ingestion is usually infinite and does not end unless canceled.
+          // Cancel operation is already releasing after cancel is done.
+          // We also have some tests that validate after finite ingestion is complete
+          if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
+      }
     } recover { case t: Throwable =>
+      logger.error(s"Error occurred when setting up ingestion pipeline for shard $shard ", t)
       handleError(dataset.ref, shard, t)
     }
   }
@@ -214,13 +220,13 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       fut.onComplete {
         case Success(_) =>
           ingestionStream.teardown()
+          streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
-          ingestionStream.teardown()
           recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
-          recoveryTrace.finish()
           logger.error(s"Recovery failed for shard $shard", ex)
           handleError(dataset.ref, shard, ex)
+          recoveryTrace.finish()
       }
       fut
     }
@@ -266,23 +272,27 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
-      // TODO: Wait for all the queries to stop
-      logger.warn(s"Stopping ingestion on shard $shard")
-      streamSubscriptions.remove(shard).foreach(_.cancel)
-      streams.remove(shard).foreach(_.teardown())
-      statusActor ! IngestionStopped(dataset.ref, shard)
-
-      // Release memory for shard in MemStore
-      val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(ds, shard)
-      shardInstance.shutdown()
-      logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+      streamSubscriptions.get(shard).foreach { s =>
+        s.onComplete {
+          case Success(_) =>
+            // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
+            removeAndReleaseResources(ds, shard)
+            // ingestion stopped event is already handled in the normalIngestion method
+            logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+          case Failure(_) =>
+            // release of resources on failure is already handled in the normalIngestion method
+        }
+      }
+      streamSubscriptions.get(shard).foreach(_.cancel())
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
+    logger.error(s"Exception thrown during ingestion stream for shard $shard. Stopping ingestion", err)
+    removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
-    logger.error(s"Exception thrown during ingestion stream for shard $shard", err)
+    logger.error(s"Stopped shard $shard after error was thrown")
   }
 
   private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {
@@ -290,8 +300,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin foreach(_ ! InvalidIngestionCommand(command.ref, command.shard))
   }
 
-  private def recover(): Unit = {
-    // TODO: start recovery, then.. could also be in Actor.preRestart()
-    // statusActor ! RecoveryStarted(dataset.ref, shard, context.parent)
+  private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {
+    // TODO: Wait for all the queries to stop
+    streamSubscriptions.remove(shard).foreach(_.cancel)
+    streams.remove(shard).foreach(_.teardown())
+    // Release memory for shard in MemStore
+    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
+      .foreach { shard =>
+        shard.shutdown()
+      }
   }
 }

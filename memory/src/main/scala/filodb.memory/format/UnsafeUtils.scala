@@ -23,22 +23,22 @@ object UnsafeUtils {
   //scalastyle:off method.name
   def BOLfromBuffer(buf: ByteBuffer): (Any, Long, Int) = {
     if (buf.hasArray) {
-      (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
+      (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position(), buf.limit() - buf.position())
     } else if (buf.isDirect) {
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
-      (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
+      (UnsafeUtils.ZeroPointer, address + buf.position(), buf.limit() - buf.position())
     } else {
       assert(buf.isReadOnly)
       (unsafe.getObject(buf, byteBufArrayField).asInstanceOf[Array[Byte]],
        unsafe.getInt(buf, byteBufOffsetField) + arayOffset,
-       buf.limit - buf.position)
+       buf.limit() - buf.position())
     }
   }
   //scalastyle:on method.name
 
   def addressFromDirectBuffer(buf: ByteBuffer): Long = {
     assert(buf.isDirect)
-    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf) + buf.position
+    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf) + buf.position()
   }
 
   def asDirectBuffer(address: Long, size: Int): ByteBuffer = {
@@ -52,6 +52,7 @@ object UnsafeUtils {
   final def getByte(obj: Any, offset: Long): Byte = unsafe.getByte(obj, offset)
   final def getShort(obj: Any, offset: Long): Short = unsafe.getShort(obj, offset)
   final def getInt(obj: Any, offset: Long): Int = unsafe.getInt(obj, offset)
+  final def getIntVolatile(obj: Any, offset: Long): Int = unsafe.getIntVolatile(obj, offset)
   final def getLong(obj: Any, offset: Long): Long = unsafe.getLong(obj, offset)
   final def getLongVolatile(obj: Any, offset: Long): Long = unsafe.getLongVolatile(obj, offset)
   final def getDouble(obj: Any, offset: Long): Double = unsafe.getDouble(obj, offset)
@@ -68,6 +69,7 @@ object UnsafeUtils {
   final def setByte(obj: Any, offset: Long, byt: Byte): Unit = unsafe.putByte(obj, offset, byt)
   final def setShort(obj: Any, offset: Long, s: Short): Unit = unsafe.putShort(obj, offset, s)
   final def setInt(obj: Any, offset: Long, i: Int): Unit = unsafe.putInt(obj, offset, i)
+  final def setIntVolatile(obj: Any, offset: Long, i: Int): Unit = unsafe.putIntVolatile(obj, offset, i)
   final def setLong(obj: Any, offset: Long, l: Long): Unit = unsafe.putLong(obj, offset, l)
   final def setDouble(obj: Any, offset: Long, d: Double): Unit = unsafe.putDouble(obj, offset, d)
   final def setFloat(obj: Any, offset: Long, f: Float): Unit = unsafe.putFloat(obj, offset, f)

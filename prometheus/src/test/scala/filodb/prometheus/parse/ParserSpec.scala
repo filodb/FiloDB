@@ -2,10 +2,26 @@ package filodb.prometheus.parse
 
 import org.scalatest.{FunSpec, Matchers}
 
+import filodb.prometheus.ast.TimeStepParams
+
 
 //noinspection ScalaStyle
 // scalastyle:off
 class ParserSpec extends FunSpec with Matchers {
+
+  it("metadata matcher query") {
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
+    parseSuccessfully("http_requests_total{job=\"prometheus\", method!=\"GET\"}")
+    parseError("job{__name__=\"prometheus\"}")
+    parseError("job[__name__=\"prometheus\"]")
+    val queryToLpString = ("http_requests_total{job=\"prometheus\", method=\"GET\"}" ->
+      "SeriesKeysByFilters(List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),1524855988000,1524855988000)")
+    val start: Long = 1524855988L
+    val end: Long = 1524855988L
+    val lp = Parser.metadataQueryToLogicalPlan(queryToLpString._1, TimeStepParams(start, -1, end))
+    lp.toString shouldEqual queryToLpString._2
+  }
 
   it("parse basic scalar expressions") {
     parseSuccessfully("1")
@@ -40,6 +56,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5")
     parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"})")
     parseSuccessfully("((1 + heap_size{a=\"b\"}) + 5) * (3 - cpu_load{c=\"d\"})")
+    parseSuccessfully("foo:ba-r:a.b{a=\"bc\"}")
+    parseSuccessfully("foo:ba-001:a.b{a=\"b-c\"}")
 
     parseError("")
     parseError("# just a comment\n\n")
@@ -226,12 +244,22 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
+      "primary:instance-001:no.ofrequests{job=\"my-job\"}" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(my-job)), ColumnFilter(__name__,Equals(primary:instance-001:no.ofrequests))),List()),1524855988000,1000,1524855988000)",
       "absent(nonexistent{job=\"myjob\"})" ->
         "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000,1524855988000),Absent,List())",
       "rate(http_requests_total[5m] offset 1w)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\",group=\"canary\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
+      "http_requests_total{job=\"prometheus\",__col__=\"min\"}" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(min)),1524855988000,1000,1524855988000)",
+      // Internal FiloDB debug function
+      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\"})" ->
+        "RawChunkMeta(IntervalSelector(List(1524855988000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),)",
+      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\",__col__=\"avg\"})" ->
+        "RawChunkMeta(IntervalSelector(List(1524855988000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),avg)",
+
       "sum(http_requests_total) by (application, group)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(),List(application, group),List())",
       "sum(http_requests_total) without (instance)" ->
@@ -270,6 +298,12 @@ class ParserSpec extends FunSpec with Matchers {
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(5.0),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Irate,List())",
+      "idelta(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Idelta,List())",
+      "resets(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Resets,List())",
+      "deriv(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Deriv,List())",
       "rate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
@@ -307,6 +341,4 @@ class ParserSpec extends FunSpec with Matchers {
       Parser.parseQuery(query)
     }
   }
-
-
 }

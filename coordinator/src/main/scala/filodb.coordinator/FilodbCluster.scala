@@ -3,12 +3,14 @@ package filodb.coordinator
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import scala.collection.immutable
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
 
 import akka.actor._
 import akka.cluster._
 import akka.cluster.ClusterEvent._
 import akka.util.Timeout
+import akka.Done
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -90,6 +92,7 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
     val c = Cluster(system)
     _cluster.set(Some(c))
     c.registerOnMemberUp(startListener())
+    logger.info(s"Filodb cluster node starting on ${c.selfAddress}")
     c
   }
 
@@ -98,7 +101,6 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   /** The address including a `uid` of this cluster member. */
   def selfUniqueAddress: UniqueAddress = cluster.selfUniqueAddress
 
-  logger.info(s"Filodb cluster node starting on $selfAddress")
 
   /** Current snapshot state of the cluster. */
   def state: ClusterEvent.CurrentClusterState = cluster.state
@@ -172,50 +174,45 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
       actor
     }
 
-  /** Begins node graceful shutdown:
-    *   A. Sets `isTerminating` to true and `isJoined` and `isInitialized` to false,
-    *   B. Calls `akka.cluster.Cluster.leave(selfAddress)`
-    *   C. Awaits the async graceful shutdown of the `filodb.coordinator.NodeGuardian`
-    *      supervised child actors via `filodb.coordinator.GracefulStopStrategy`
-    *   D. Shuts down `monix.execution.Scheduler.io` and `filodb.core.store.StoreFactory`'s MetaStore and MemStore
-    *   E. Calls the async terminate on `akka.actor.ActorSystem`
-    *
-    * Idempotent.
-    */
-  protected[filodb] def shutdown(): Unit =
-    if (!isTerminated) {
-      import akka.pattern.gracefulStop
+  /**
+   * Hook into Akka's CoordinatedShutdown sequence
+   * Please see https://doc.akka.io/docs/akka/current/actors.html#coordinated-shutdown for details
+   */
+  CoordinatedShutdown(system).addTask(CoordinatedShutdown.PhaseServiceUnbind, "queryShutdown") { () =>
+    implicit val timeout = Timeout(15.seconds)
+    // Reset shuts down all ingestion and query actors on this node
+    // TODO: be sure that status gets updated across cluster?
+    (coordinatorActor ? NodeProtocol.ResetState).map(_ ⇒ Done)
+  }
 
-      import NodeProtocol.GracefulShutdown
+  // TODO: hook into service-stop "forcefully kill connections?"  Maybe send each outstanding query "TooBad" etc.
 
-      logger.info("Leaving the cluster.")
-      _cluster.get foreach (_.leave(selfAddress))
+  CoordinatedShutdown(system).addTask(CoordinatedShutdown.PhaseBeforeClusterShutdown, "storeShutdown") { () =>
+    _isInitialized.set(false)
+    logger.info("Terminating: starting shutdown")
 
-      _isInitialized.set(false)
-      logger.info("Terminating: starting shutdown")
-
-      try {
-        if (clusterActor.isDefined) {
-          Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
-        }
-
-        system.terminate foreach { _ =>
-          logger.info("Actor system was shut down")
-        }
-        metaStore.shutdown()
-        memStore.shutdown()
+    try {
+      metaStore.shutdown()
+      memStore.shutdown()
+      ioPool.shutdown()
+    } catch {
+      case NonFatal(e) =>
+        system.terminate()
         ioPool.shutdown()
-      } catch {
-        case NonFatal(e) =>
-          system.terminate()
-          ioPool.shutdown()
-      }
-      finally _isTerminated.set(true)
     }
+    finally _isTerminated.set(true)
 
-  Runtime.getRuntime.addShutdownHook(new Thread() {
-    override def run(): Unit = shutdown()
-  })
+    Future.successful(Done)
+  }
+
+  /**
+   * Invokes CoordinatedShutdown to shut down the ActorSystem, leave the Cluster, and our hooks above
+   * which shuts down the stores and threadpools.
+   * NOTE: Depending on the setting of coordinated-shutdown.exit-jvm, this might cause the JVM to exit.
+   */
+  protected[filodb] def shutdown(): Unit = {
+    CoordinatedShutdown(system).run(CoordinatedShutdown.UnknownReason)
+  }
 
   /** For usage when the `akka.cluster.Member` is needed in a non-actor.
     * Creates a temporary actor which subscribes to `akka.cluster.MemberRemoved`.
@@ -252,7 +249,12 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
   /** The `ActorSystem` used to create the FilodbCluster Akka Extension. */
   final lazy val system = {
     val allConfig = roleConfig.withFallback(role match {
-      case ClusterRole.Cli => ConfigFactory.empty
+      // For CLI: leave off Cluster extension as cluster is not needed.  Turn off normal shutdown for quicker exit.
+      case ClusterRole.Cli => ConfigFactory.parseString(
+        """# akka.actor.provider=akka.remote.RemoteActorRefProvider
+          |akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+          |akka.extensions = ["com.romix.akka.serialization.kryo.KryoSerializationExtension$"]
+        """.stripMargin)
       case _ => ConfigFactory.parseString(s"""akka.cluster.roles=["${role.roleName}"]""")
     }).withFallback(systemConfig)
 
@@ -285,7 +287,5 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
   def clusterSingleton(role: ClusterRole, watcher: Option[ActorRef]): ActorRef =
     cluster.clusterSingleton(role, watcher)
 
-  /** Only calls `akka.cluster.leave` akka.cluster.Cluster was called by user. */
   def shutdown(): Unit = cluster.shutdown()
-
 }

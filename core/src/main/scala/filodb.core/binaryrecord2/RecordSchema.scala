@@ -1,6 +1,10 @@
 package filodb.core.binaryrecord2
 
+import scala.collection.mutable.ArrayBuffer
+
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
+import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => bv}
@@ -23,16 +27,20 @@ import filodb.memory.format.{vectors => bv}
  *   partition key fields share the same schema (they can start at differend field #'s).  This takes advantage of
  *   the fact that all variable length fields after the partitionFieldStart are contiguous and can be binary compared
  *
- * @param columnTypes In order, the field or column type of each field in this schema
+ * @param columns In order, the column of each field in this schema
+ * @param brSchema schema of any binary record type column
  * @param partitionFieldStart Some(n) from n to the last field are considered the partition key.  A field number.
  * @param predefinedKeys A list of predefined keys to save space for the tags/MapColumn field(s)
  */
-final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
+final class RecordSchema(val columns: Seq[ColumnInfo],
                          val partitionFieldStart: Option[Int] = None,
-                         val predefinedKeys: Seq[String] = Nil) {
+                         val predefinedKeys: Seq[String] = Nil,
+                         val brSchema: Map[Int, RecordSchema] = Map.empty) {
   import RecordSchema._
   import BinaryRegion.NativePointer
 
+  val colNames = columns.map(_.name)
+  val columnTypes = columns.map(_.colType)
   require(columnTypes.nonEmpty, "columnTypes cannot be empty")
   require(predefinedKeys.length < 4096, "Too many predefined keys")
   require(partitionFieldStart.isEmpty ||
@@ -63,10 +71,18 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     case (Column.ColumnType.StringColumn, colNo) =>
       // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
       (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
+    case (Column.ColumnType.BinaryRecordColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) =>
+        builder.addBlob(row.getBlobBase(colNo), row.getBlobOffset(colNo), row.getBlobNumBytes(colNo))
     case (t: Column.ColumnType, colNo) =>
       // TODO: add more efficient methods
       (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))
   }.toArray
+
+  def numColumns: Int = columns.length
+
+  def isTimeSeries: Boolean = columnTypes.length >= 1 &&
+    (columnTypes.head == LongColumn || columnTypes.head == TimestampColumn)
 
   def fieldOffset(index: Int): Int = offsets(index)
 
@@ -141,27 +157,50 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     asZCUTF8Str(UnsafeUtils.ZeroPointer, address, index)
 
   /**
-   * EXPENSIVE. Creates a easy-to-read Java String representation of the contents of this BinaryRecord.
+   * EXPENSIVE to do at server side. Creates a easy-to-read string
+   * representation of the contents of this BinaryRecord.
    */
   def stringify(base: Any, offset: Long): String = {
     import Column.ColumnType._
-    val parts: Seq[Any] = columnTypes.zipWithIndex.map {
-      case (IntColumn, i)    => getInt(base, offset, i)
-      case (LongColumn, i)   => getLong(base, offset, i)
-      case (DoubleColumn, i) => getDouble(base, offset, i)
-      case (StringColumn, i) => asJavaString(base, offset, i)
-      case (TimestampColumn, i) => getLong(base, offset, i)
-      case (BitmapColumn, i) => getInt(base, offset, i) != 0
-      case (MapColumn, i)    =>
-        val consumer = new StringifyMapItemConsumer
-        consumeMapItems(base, offset, i, consumer)
-        consumer.prettyPrint
+    val result = new ArrayBuffer[String]()
+    columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => result += s"${colNames(i)}= ${getInt(base, offset, i)}"
+      case (LongColumn, i)   => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
+      case (DoubleColumn, i) => result += s"${colNames(i)}= ${getDouble(base, offset, i)}"
+      case (StringColumn, i) => result += s"${colNames(i)}= ${asJavaString(base, offset, i)}"
+      case (TimestampColumn, i) => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
+      case (BitmapColumn, i) => result += s"${colNames(i)}= ${getInt(base, offset, i) != 0}"
+      case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
+                                consumeMapItems(base, offset, i, consumer)
+                                result += s"${colNames(i)}= ${consumer.prettyPrint}"
+      case (BinaryRecordColumn, i)  => result += s"${colNames(i)}= ${brSchema(i).stringify(base, offset)}"
     }
-    s"b2[${parts.mkString(",")}]"
+    s"b2[${result.mkString(",")}]"
   }
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
   def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
+
+  /**
+    * EXPENSIVE to do at server side. Creates a stringified map with contents of this BinaryRecord.
+    */
+  def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
+    import Column.ColumnType._
+    val resultMap = new collection.mutable.ArrayBuffer[(String, String)]()
+    columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => resultMap += ((colNames(i), getInt(base, offset, i).toString))
+      case (LongColumn, i)   => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (DoubleColumn, i) => resultMap += ((colNames(i), getDouble(base, offset, i).toString))
+      case (StringColumn, i) => resultMap += ((colNames(i), asJavaString(base, offset, i).toString))
+      case (TimestampColumn, i) => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (BitmapColumn, i) => resultMap += ((colNames(i), (getInt(base, offset, i) != 0).toString))
+      case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
+                                consumeMapItems(base, offset, i, consumer)
+                                resultMap ++= consumer.stringPairs
+      case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
+    }
+    resultMap
+  }
 
   /**
    * Iterates through each key/value pair of a MapColumn field without any object allocations.
@@ -253,8 +292,8 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
   }
 
   // For serialization purposes
-  private[filodb] def toSerializableTuple: (Seq[Column.ColumnType], Option[Int], Seq[String]) =
-    (columnTypes, partitionFieldStart, predefinedKeys)
+  private[filodb] def toSerializableTuple: (Seq[ColumnInfo], Option[Int], Seq[String], Map[Int, RecordSchema]) =
+    (columns, partitionFieldStart, predefinedKeys, brSchema)
 }
 
 trait MapItemConsumer {
@@ -273,7 +312,7 @@ trait MapItemConsumer {
  */
 class StringifyMapItemConsumer extends MapItemConsumer {
   val stringPairs = new collection.mutable.ArrayBuffer[(String, String)]
-  def prettyPrint: String = "[" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "]"
+  def prettyPrint: String = "{" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "}"
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     stringPairs += (UTF8StringMedium.toString(keyBase, keyOffset) ->
                     UTF8StringMedium.toString(valueBase, valueOffset))
@@ -288,6 +327,7 @@ object RecordSchema {
                                                        DoubleColumn -> 8,
                                                        TimestampColumn -> 8,  // Just a long ms timestamp
                                                        StringColumn -> 4,
+                                                       BinaryRecordColumn -> 4,
                                                        MapColumn -> 4)
 
   /**
@@ -312,12 +352,15 @@ object RecordSchema {
    * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
    */
   def ingestion(dataset: Dataset, predefinedKeys: Seq[String] = Nil): RecordSchema = {
-    val colTypes = dataset.dataColumns.map(_.columnType) ++ dataset.partitionColumns.map(_.columnType)
-    new RecordSchema(colTypes, Some(dataset.dataColumns.length), predefinedKeys)
+    val columns = dataset.dataColumns ++ dataset.partitionColumns
+    new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)),
+                     Some(dataset.dataColumns.length),
+                     predefinedKeys)
   }
 
-  def fromSerializableTuple(tuple: (Seq[Column.ColumnType], Option[Int], Seq[String])): RecordSchema =
-    new RecordSchema(tuple._1, tuple._2, tuple._3)
+  def fromSerializableTuple(tuple: (Seq[ColumnInfo],
+                                    Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
+    new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4)
 }
 
 // Used with PartitionTimeRangeReader, when a user queries for a partition column
@@ -347,7 +390,7 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getLong(columnNo: Int): Long = schema.getLong(recordBase, recordOffset, columnNo)
   def getDouble(columnNo: Int): Double = schema.getDouble(recordBase, recordOffset, columnNo)
   def getFloat(columnNo: Int): Float = ???
-  def getString(columnNo: Int): String = ???
+  def getString(columnNo: Int): String = filoUTF8String(columnNo).toString
   def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 

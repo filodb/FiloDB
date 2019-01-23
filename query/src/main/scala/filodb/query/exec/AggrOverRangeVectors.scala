@@ -11,6 +11,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.AggregationOperator._
@@ -288,10 +289,10 @@ object RowAggregator {
   * Present: The sum is directly presented
   */
 object SumRowAggregator extends RowAggregator {
-  class SumHolder(var timestamp: Long = 0L, var sum: Double = 0) extends AggregateHolder {
+  class SumHolder(var timestamp: Long = 0L, var sum: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, sum); row }
-    def resetToZero(): Unit = sum = 0
+    def resetToZero(): Unit = sum = Double.NaN
   }
   type AggHolderType = SumHolder
   def zero: SumHolder = new SumHolder
@@ -299,7 +300,10 @@ object SumRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: SumHolder, aggRes: RowReader): SumHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) acc.sum += aggRes.getDouble(1)
+    if (!aggRes.getDouble(1).isNaN) {
+      if (acc.sum.isNaN) acc.sum = 0
+      acc.sum += aggRes.getDouble(1)
+    }
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -314,10 +318,10 @@ object SumRowAggregator extends RowAggregator {
   * Present: The min is directly presented
   */
 object MinRowAggregator extends RowAggregator {
-  class MinHolder(var timestamp: Long = 0L, var min: Double = Double.MaxValue) extends AggregateHolder {
+  class MinHolder(var timestamp: Long = 0L, var min: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, min); row }
-    def resetToZero(): Unit = min = Double.MaxValue
+    def resetToZero(): Unit = min = Double.NaN
   }
   type AggHolderType = MinHolder
   def zero: MinHolder = new MinHolder()
@@ -325,7 +329,11 @@ object MinRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: MinHolder, aggRes: RowReader): MinHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) acc.min = Math.min(acc.min, aggRes.getDouble(1))
+    if (!aggRes.getDouble(1).isNaN) {
+      if (acc.min.isNaN)
+        acc.min = Double.MaxValue
+      acc.min = Math.min(acc.min, aggRes.getDouble(1))
+    }
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -340,10 +348,10 @@ object MinRowAggregator extends RowAggregator {
   * Present: The max is directly presented
   */
 object MaxRowAggregator extends RowAggregator {
-  class MaxHolder(var timestamp: Long = 0L, var max: Double = Double.MinValue) extends AggregateHolder {
+  class MaxHolder(var timestamp: Long = 0L, var max: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, max); row }
-    def resetToZero(): Unit = max = Double.MinValue
+    def resetToZero(): Unit = max = Double.NaN
   }
   type AggHolderType = MaxHolder
   def zero: MaxHolder = new MaxHolder()
@@ -351,7 +359,10 @@ object MaxRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: MaxHolder, aggRes: RowReader): MaxHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) acc.max = Math.max(acc.max, aggRes.getDouble(1))
+    if (!aggRes.getDouble(1).isNaN) {
+      if (acc.max.isNaN) acc.max = Double.MinValue
+      acc.max = Math.max(acc.max, aggRes.getDouble(1))
+    }
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -367,10 +378,10 @@ object MaxRowAggregator extends RowAggregator {
   * Present: The count is directly presented
   */
 object CountRowAggregator extends RowAggregator {
-  class CountHolder(var timestamp: Long = 0L, var count: Long = 0) extends AggregateHolder {
+  class CountHolder(var timestamp: Long = 0L, var count: Double = Double.NaN) extends AggregateHolder {
     val row = new TransientRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, count); row }
-    def resetToZero(): Unit = count = 0
+    def resetToZero(): Unit = count = Double.NaN
   }
   type AggHolderType = CountHolder
   def zero: CountHolder = new CountHolder()
@@ -387,8 +398,9 @@ object CountRowAggregator extends RowAggregator {
     mapInto
   }
   def reduceAggregate(acc: CountHolder, aggRes: RowReader): CountHolder = {
+    if (acc.count.isNaN && aggRes.getDouble(1) > 0) acc.count = 0d;
     acc.timestamp = aggRes.getLong(0)
-    acc.count += aggRes.getDouble(1).toLong
+    acc.count += aggRes.getDouble(1)
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -405,7 +417,9 @@ object CountRowAggregator extends RowAggregator {
   * Present: The current mean is presented. Count value is dropped from presentation
   */
 object AvgRowAggregator extends RowAggregator {
-  class AvgHolder(var timestamp: Long = 0L, var mean: Double = 0, var count: Long = 0) extends AggregateHolder {
+  class AvgHolder(var timestamp: Long = 0L,
+                  var mean: Double = Double.NaN,
+                  var count: Long = 0) extends AggregateHolder {
     val row = new AvgAggTransientRow()
     def toRowReader: MutableRowReader = {
       row.setLong(0, timestamp)
@@ -413,7 +427,7 @@ object AvgRowAggregator extends RowAggregator {
       row.setLong(2, count)
       row
     }
-    def resetToZero(): Unit = { count = 0; mean = 0 }
+    def resetToZero(): Unit = { count = 0; mean = Double.NaN }
   }
   type AggHolderType = AvgHolder
   def zero: AvgHolder = new AvgHolder()
@@ -421,13 +435,14 @@ object AvgRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0, item.getLong(0))
     mapInto.setDouble(1, item.getDouble(1))
-    mapInto.setLong(2, 1L)
+    mapInto.setLong(2, if (item.getDouble(1).isNaN) 0L else 1L)
     mapInto
   }
   def reduceAggregate(acc: AvgHolder, aggRes: RowReader): AvgHolder = {
-    val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2))/ (acc.count + aggRes.getLong(2))
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN) {
+      if (acc.mean.isNaN) acc.mean = 0d
+      val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2)) / (acc.count + aggRes.getLong(2))
       acc.mean = newMean
       acc.count += aggRes.getLong(2)
     }
@@ -513,18 +528,25 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializableRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    // We limit the results wherever it is materialized first. So it is done here.
-    aggRangeVector.rows.take(limit).foreach { row =>
-      var i = 1
-      while(row.notNull(i)) {
-        val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-        val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-        builder.startNewRecord()
-        builder.addLong(row.getLong(0))
-        builder.addDouble(row.getDouble(i + 1))
-        builder.endRecord()
-        i += 2
+    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
+    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
+    try {
+      OffheapLFSortedIDMap.validateNoSharedLocks()
+      // We limit the results wherever it is materialized first. So it is done here.
+      aggRangeVector.rows.take(limit).foreach { row =>
+        var i = 1
+        while(row.notNull(i)) {
+          val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
+          val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
+          builder.startNewRecord()
+          builder.addLong(row.getLong(0))
+          builder.addDouble(row.getDouble(i + 1))
+          builder.endRecord()
+          i += 2
+        }
       }
+    } finally {
+      OffheapLFSortedIDMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
@@ -572,7 +594,7 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
       tdig.asSmallBytes(buf)
       buf.flip()
       val len = buf.limit() - buf.position()
-      row.setBlob(1, buf.array, buf.arrayOffset + buf.position + UnsafeUtils.arayOffset, len)
+      row.setBlob(1, buf.array, buf.arrayOffset + buf.position() + UnsafeUtils.arayOffset, len)
       row
     }
 

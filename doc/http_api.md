@@ -15,7 +15,7 @@
     - [POST /api/v1/cluster/{dataset}/startshards](#post-apiv1clusterdatasetstartshards)
   - [Prometheus-compatible APIs](#prometheus-compatible-apis)
     - [GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}](#get-promqldatasetapiv1query_rangequerypromqlstringstartstarttimestepstependendtime)
-    - [GET /promql/{dataset}/api/v1/query?=query={promQLString}&time={timestamp}](#get-promqldatasetapiv1queryquerypromqlstringtimetimestamp)
+    - [GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}](#get-promqldatasetapiv1queryquerypromqlstringtimetimestamp)
     - [POST /promql/{dataset}/api/v1/read](#post-promqldatasetapiv1read)
     - [GET /api/v1/label/{label_name}/values](#get-apiv1labellabel_namevalues)
   - [Prometheus APIs not supported](#prometheus-apis-not-supported)
@@ -177,7 +177,7 @@ For more details, see Prometheus HTTP API Documentation
 [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
 
 
-#### GET /promql/{dataset}/api/v1/query?=query={promQLString}&time={timestamp}
+#### GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}
 
 Used to issue a promQL query for a single time instant `time`.  Can also be used to query raw data by issuing a PromQL
 range expression. For more details, see Prometheus HTTP API Documentation

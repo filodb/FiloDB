@@ -11,7 +11,9 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.metadata.Dataset
+import filodb.core.query.ColumnFilter
 import filodb.core.store._
+import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -52,7 +54,7 @@ extends MemStore with StrictLogging {
   /**
     * Retrieve shard for given dataset and shard number as an Option
     */
-  private[core] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
+  private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
   /**
@@ -74,10 +76,9 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)(errHandler)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -90,8 +91,7 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -107,7 +107,6 @@ extends MemStore with StrictLogging {
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
                   .foreach({ x => })(shard.ingestSched)
-                  .recover { case ex: Throwable => errHandler(ex) }
   }
 
   // a more optimized ingest stream handler specifically for recovery
@@ -138,6 +137,15 @@ extends MemStore with StrictLogging {
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
+  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String] =
+    getShard(dataset, shard)
+      .map(_.indexValuesWithFilters(filters, indexName, end, start, limit)).getOrElse(Iterator.empty)
+
+  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =
+    getShard(dataset, shard).map(_.partKeysWithFilters(filters, end, start, limit)).getOrElse(Iterator.empty)
+
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
@@ -167,6 +175,9 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
+  def groupsInDataset(dataset: Dataset): Int =
+    datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+
   def reset(): Unit = {
     datasets.clear()
     store.reset()
@@ -183,4 +194,5 @@ extends MemStore with StrictLogging {
     datasets.values.foreach(_.values().asScala.foreach(_.closePartKeyIndex()))
     reset()
   }
+
 }

@@ -9,6 +9,7 @@ import filodb.core._
 import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
+import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
 
 /**
@@ -89,7 +90,7 @@ class KryoInit {
 
     import filodb.core.store._
     kryo.register(classOf[ChunkSetInfo])
-    kryo.register(LastSampleChunkScan.getClass)
+    kryo.register(WriteBufferChunkScan.getClass)
     kryo.register(AllChunkScan.getClass)
     kryo.register(classOf[RowKeyChunkScan])
     kryo.register(classOf[FilteredPartitionScan])
@@ -124,7 +125,8 @@ class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
 class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
   override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema2]): RecordSchema2 = {
     val tuple = kryo.readClassAndObject(input)
-    RecordSchema2.fromSerializableTuple(tuple.asInstanceOf[(Seq[Column.ColumnType], Option[Int], Seq[String])])
+    RecordSchema2.fromSerializableTuple(tuple.asInstanceOf[(Seq[ColumnInfo], Option[Int],
+                                                            Seq[String], Map[Int, RecordSchema2])])
   }
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema2): Unit = {

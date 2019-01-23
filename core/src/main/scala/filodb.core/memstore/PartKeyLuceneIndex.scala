@@ -58,7 +58,6 @@ object PartKeyLuceneIndex {
     tempDir.mkdir()
     tempDir
   }
-
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
@@ -190,6 +189,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     * @param topK the number of top k results to fetch
     */
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
+    // FIXME this API returns duplicate values because same value can be present in multiple lucene segments
     val searcher = searcherManager.acquire()
     val indexReader = searcher.getIndexReader
     val segments = indexReader.leaves()
@@ -276,6 +276,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
                            partKeyNumBytes: Int,
                            partId: Int, startTime: Long, endTime: Long): Document = {
     val document = new Document()
+    // TODO We can use RecordSchema.toStringPairs to get the name/value pairs from partKey.
+    // That is far more simpler with much of the logic abstracted out.
+    // Currently there is a bit of leak in abstraction of Binary Record processing in this class.
+
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
     for { i <- 0 until numPartColumns optimized } {
       indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
@@ -428,6 +432,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
     collector.intIterator()
   }
 }
+
+
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
 

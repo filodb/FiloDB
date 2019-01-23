@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
@@ -117,6 +118,7 @@ object ChunkSetInfo extends StrictLogging {
 
   val emptySkips = new SkipMap()
   val log = logger
+  val nullInfo = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[NativePointer])
 
   /**
    * ChunkSetInfo metadata schema:
@@ -210,8 +212,14 @@ object ChunkSetInfo extends StrictLogging {
   }
 }
 
+/**
+ * When constructed, the iterator holds a shared lock over the backing collection, to protect
+ * the contents of the native pointers. The close method must be called when the native pointers
+ * don't need to be accessed anymore, and then the lock is released.
+ */
 // Why can't Scala have unboxed iterators??
 trait ChunkInfoIterator { base: ChunkInfoIterator =>
+  def close(): Unit
   def hasNext: Boolean
   def nextInfo: ChunkSetInfo
 
@@ -227,7 +235,13 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    */
   def map[B](func: ChunkSetInfo => B): Iterator[B] = new Iterator[B] {
     def hasNext: Boolean = base.hasNext
-    def next: B = func(base.nextInfo)
+    def next: B = {
+      try {
+        func(base.nextInfo)
+      } catch {
+        case e: Throwable => close(); throw e;
+      }
+    }
   }
 
   /**
@@ -236,42 +250,174 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    * please only use this for testing or convenience.  VERY MEMORY EXPENSIVE.
    */
   def toBuffer: Seq[ChunkSetInfo] = {
-    val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
-    while (hasNext) { buf += nextInfo }
-    buf
+    try {
+      val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
+      while (hasNext) { buf += nextInfo }
+      buf
+    } catch {
+      case e: Throwable => close(); throw e;
+    }
   }
 }
 
 object ChunkInfoIterator {
   val empty = new ChunkInfoIterator {
+    def close(): Unit = {}
     def hasNext: Boolean = false
     def nextInfo: ChunkSetInfo = ChunkSetInfo(0)
-  }
-
-  def single(info: ChunkSetInfo): ChunkInfoIterator = new ChunkInfoIterator {
-    var count = 0
-    def hasNext: Boolean = count == 0
-    def nextInfo: ChunkSetInfo = { count += 1; info }
   }
 }
 
 class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator {
-  def hasNext: Boolean = elIt.hasNext
-  def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
+  def close(): Unit = elIt.close()
+  final def hasNext: Boolean = elIt.hasNext
+  final def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
 }
 
-class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo => Boolean) extends ChunkInfoIterator {
-  var nextnext: ChunkSetInfo = ChunkSetInfo(0)
-  var gotNext: Boolean = false
-  def hasNext: Boolean = {
-    while (base.hasNext && !gotNext) {
-      nextnext = base.nextInfo
-      if (filter(nextnext)) gotNext = true
-    }
-    gotNext
+class FilteredChunkInfoIterator(base: ChunkInfoIterator,
+                                filter: ChunkSetInfo => Boolean,
+                                // Move vars here for better performance -- no init field
+                                var nextnext: ChunkSetInfo = ChunkSetInfo(0),
+                                var gotNext: Boolean = false) extends ChunkInfoIterator {
+  def close(): Unit = {
+    base.close()
   }
-  def nextInfo: ChunkSetInfo = {
-    gotNext = false   // reet so we can look for the next item where filter == true
+
+  final def hasNext: Boolean = {
+    try {
+      while (base.hasNext && !gotNext) {
+        nextnext = base.nextInfo
+        if (filter(nextnext)) gotNext = true
+      }
+      gotNext
+    } catch {
+      case e: Throwable => close(); throw e;
+    }
+  }
+
+  final def nextInfo: ChunkSetInfo = {
+    gotNext = false   // reset so we can look for the next item where filter == true
     nextnext
   }
+}
+
+/**
+ * A sliding window based iterator over the chunks needed to be read from for each window.
+ * Assumes the ChunkInfos are in increasing time order.
+ * The sliding window goes from (start-window, start] -> (end-window, end] in step increments, and for
+ * each window, this class may be used as a ChunkInfoIterator. Excludes start, includes end.
+
+ * @param infos the base ChunkInfoIterator to perform windowing over
+ * @param start the starting window end timestamp, must have same units as the ChunkSetInfo start/end times
+ * @param step the increment the window goes forward by
+ * @param end the ending window end timestamp.  If it does not line up on multiple of start + n * step, then
+ *            the windows will slide until the window end is beyond end.
+ * @param window the # of millis/time units that define the length of each window
+ */
+class WindowedChunkIterator(infos: ChunkInfoIterator, start: Long, step: Long, end: Long, window: Long,
+                            // internal vars, put it here for better performance
+                            var curWindowEnd: Long = -1L,
+                            var curWindowStart: Long = -1L,
+                            private var readIndex: Int = 0,
+                            windowInfos: Buffer[NativePointer] = Buffer.empty[NativePointer])
+extends ChunkInfoIterator {
+  final def close(): Unit = infos.close()
+
+  /**
+   * Returns true if there are more windows to process
+   */
+  final def hasMoreWindows: Boolean = (curWindowEnd < 0) || (curWindowEnd + step <= end)
+
+  /**
+   * Advances to the next window.
+   */
+  final def nextWindow(): Unit = {
+    // advance window pointers and reset read index
+    if (curWindowEnd == -1L) {
+      curWindowEnd = start
+      curWindowStart = start - Math.max(window - 1, 0)  // window cannot be below 0, ie start should never be > end
+    } else {
+      curWindowEnd += step
+      curWindowStart += step
+    }
+    readIndex = 0
+
+    // drop initial chunksets of window that are no longer part of the window
+    while (windowInfos.nonEmpty && ChunkSetInfo(windowInfos(0)).endTime < curWindowStart) {
+      windowInfos.remove(0)
+    }
+
+    var lastEndTime = if (windowInfos.isEmpty) -1L else ChunkSetInfo(windowInfos(windowInfos.length - 1)).endTime
+
+    // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
+    while (curWindowEnd > lastEndTime && infos.hasNext) {
+      val next = infos.nextInfo
+      // Add if next chunkset is within window.  Otherwise keep going
+      if (curWindowStart <= next.endTime) {
+        windowInfos += next.infoAddr
+        lastEndTime = Math.max(next.endTime, lastEndTime)
+      }
+    }
+  }
+
+  /**
+   * hasNext of ChunkInfoIterator.  Returns true if for current window there is another relevant chunk.
+   */
+  final def hasNext: Boolean = readIndex < windowInfos.length
+
+  /**
+   * Returns the next ChunkSetInfo for the current window
+   */
+  final def nextInfo: ChunkSetInfo = {
+    val next = windowInfos(readIndex)
+    readIndex += 1
+    ChunkSetInfo(next)
+  }
+}
+
+/**
+ * A RowReader that returns info about each ChunkSetInfo set via setInfo with a schema like this:
+ * 0:  ID (Long)
+ * 1:  NumRows (Int)
+ * 2:  startTime (Long)
+ * 3:  endTime (Long)
+ * 4:  numBytes(Int) of chunk
+ * 5:  readerclass of chunk
+ */
+class ChunkInfoRowReader(column: Column) extends RowReader {
+  import Column.ColumnType._
+  var info: ChunkSetInfo = _
+
+  def setInfo(newInfo: ChunkSetInfo): Unit = { info = newInfo }
+
+  def notNull(columnNo: Int): Boolean = columnNo < 6
+  def getBoolean(columnNo: Int): Boolean = ???
+  def getInt(columnNo: Int): Int = columnNo match {
+    case 1 => info.numRows
+    case 4 => BinaryVector.totalBytes(info.vectorPtr(column.id))
+  }
+  def getLong(columnNo: Int): Long = columnNo match {
+    case 0 => info.id
+    case 2 => info.startTime
+    case 3 => info.endTime
+  }
+
+  def getDouble(columnNo: Int): Double = ???
+  def getFloat(columnNo: Int): Float = ???
+  def getString(columnNo: Int): String = column.columnType match {
+    case IntColumn    => vectors.IntBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(info.vectorPtr(column.id)).getClass.getName
+    case o: Any       => "nananana, heyheyhey, goodbye"
+  }
+
+  override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = ZeroCopyUTF8String(getString(columnNo))
+
+  def getAny(columnNo: Int): Any = ???
+
+  def getBlobBase(columnNo: Int): Any = ???
+  def getBlobOffset(columnNo: Int): Long = ???
+  def getBlobNumBytes(columnNo: Int): Int = ???
 }

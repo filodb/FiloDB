@@ -13,11 +13,11 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 
+import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
-import filodb.prometheus.FormatConversion
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
@@ -45,6 +45,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
   val numQueries = 10    // Should be low, so most queries actually hit C*/disk
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 60         // # of seconds between each query sample "step"
+  val spread = 1
 
   // TODO: move setup and ingestion to another trait
   val config = ConfigFactory.parseString("""
@@ -61,7 +62,9 @@ class QueryOnDemandBenchmark extends StrictLogging {
   private val cluster = FilodbCluster(system)
 
   // Set up Prometheus dataset in cluster, initialize in metastore
-  private val dataset = FormatConversion.dataset
+  private val dataset = TestTimeseriesProducer.dataset
+  private val shardMapper = new ShardMapper(numShards)
+
   Await.result(cluster.metaStore.initialize(), 3.seconds)
   Await.result(cluster.metaStore.clearAllData(), 5.seconds)  // to clear IngestionConfig
   Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
@@ -91,12 +94,9 @@ class QueryOnDemandBenchmark extends StrictLogging {
   // Manually pump in data ourselves so we know when it's done.
   // TODO: ingest into multiple shards
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
-  val batchedData = TestTimeseriesProducer.timeSeriesData(startTime, numShards, numSeries)
-                                          .take(numSamples * numSeries)
-                                          .grouped(128)
-  val ingestTask = TestTimeseriesProducer.batchSingleThreaded(
-                    Observable.fromIterator(batchedData), dataset, numShards, Set("__name__", "job"))
-                    .groupBy(_._1)
+  val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
+                                          numSamples * numSeries, dataset, shardMapper, spread)
+  val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapAsync(numShards) { groupedStream =>
                       val shard = groupedStream.key
@@ -108,11 +108,10 @@ class QueryOnDemandBenchmark extends StrictLogging {
                       }
                       // Just do a single flush at the end for all groups
                       val combinedStream: Observable[DataOrCommand] = shardStream ++ FlushStream.allGroups(4)
-                      Task.fromFuture(
-                        memStore.ingestStream(dataset.ref, shard, combinedStream, global, 3 * 86400) {
-                          case e: Exception => throw e })
+                      Task.fromFuture(memStore.ingestStream(dataset.ref, shard, combinedStream, global, 3 * 86400))
                     }.countL.runAsync
-  Await.result(ingestTask, 30.seconds)
+  Await.result(producingFut, 30.seconds)
+  Thread sleep 2000
   memStore.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended.")
 
@@ -128,12 +127,12 @@ class QueryOnDemandBenchmark extends StrictLogging {
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  val queries = Seq("heap_usage{job=\"App-2\"}",  // raw time series
-                    """quantile(0.75, heap_usage{job="App-2"})""",
-                    """sum(rate(heap_usage{job="App-1"}[5m]))""",
-                    """sum_over_time(heap_usage{job="App-0"}[5m])""")
+  val queries = Seq("heap_usage{app=\"App-2\"}",  // raw time series
+                    """quantile(0.75, heap_usage{app="App-2"})""",
+                    """sum(rate(heap_usage{app="App-1"}[5m]))""",
+                    """sum_over_time(heap_usage{app="App-0"}[5m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
-  val qParams = QueryParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
+  val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
@@ -147,6 +146,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(10)
   def parallelQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))

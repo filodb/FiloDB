@@ -20,11 +20,12 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnFilter, ColumnInfo}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.UnsafeUtils
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -32,6 +33,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
@@ -100,9 +102,9 @@ object TimeSeriesShard {
     }
   }
 
-  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnType.LongColumn,  // startTime
-                                               ColumnType.LongColumn,       // endTime
-                                               ColumnType.StringColumn))    // partKey bytes
+  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
+                                                   ColumnInfo("endTime", ColumnType.LongColumn),
+                                                   ColumnInfo("partKey", ColumnType.StringColumn)))
 
   // TODO make configurable if necessary
   val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
@@ -115,6 +117,14 @@ object TimeSeriesShard {
   val OutOfMemPartition = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
 
   val EmptyBitmap = new EWAHCompressedBitmap()
+
+  /**
+   * Calculates the flush group of an ingest record or partition key.  Be sure to use the right RecordSchema -
+   * dataset.ingestionSchema or dataset.partKeySchema.l
+   */
+  def partKeyGroup(schema: RecordSchema, partKeyBase: Any, partKeyOffset: Long, numGroups: Int): Int = {
+    Math.abs(schema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
+  }
 }
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
@@ -153,6 +163,7 @@ class TimeSeriesShard(val dataset: Dataset,
                       evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ec: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
+
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(dataset.ref, shardNum)
@@ -173,6 +184,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * Maintained using a high-performance bitmap index.
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
+
+
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -204,7 +217,7 @@ class TimeSeriesShard(val dataset: Dataset,
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private val blockMemorySize = storeConfig.shardMemSize
-  private final val numGroups = storeConfig.groupsPerShard
+  protected val numGroups = storeConfig.groupsPerShard
   private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
@@ -332,7 +345,7 @@ class TimeSeriesShard(val dataset: Dataset,
   class IngestConsumer(var numActuallyIngested: Int = 0, var ingestOffset: Long = -1L) extends BinaryRegionConsumer {
     // Receives a new ingestion BinaryRecord
     final def onNext(recBase: Any, recOffset: Long): Unit = {
-      val group = partKeyGroup(recBase, recOffset)
+      val group = partKeyGroup(ingestSchema, recBase, recOffset, numGroups)
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
         try {
@@ -415,7 +428,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // look up partId in partSet if it already exists before assigning new partId.
       // We cant look it up in lucene because we havent flushed index yet
       val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
-        case None =>     val group = partKeyGroup(partKeyBaseOnHeap, partKeyOffset)
+        case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
                          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
                          // In theory, we should not get an OutOfMemPartition here since
                          // it should have occurred before node failed too, and with data sropped,
@@ -447,6 +460,89 @@ class TimeSeriesShard(val dataset: Dataset,
   def indexNames: Iterator[String] = partKeyIndex.indexNames
 
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
+
+  /**
+    * This method is to apply column filters and fetch matching time series partitions.
+    */
+  def indexValuesWithFilters(filter: Seq[ColumnFilter],
+                             indexName: String,
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[ZeroCopyUTF8String] = {
+    IndexValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), indexName, limit)
+  }
+
+  /**
+    * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
+    */
+  case class IndexValueResultIterator(partIterator: IntIterator, labelName: String, limit: Int)
+      extends Iterator[ZeroCopyUTF8String] {
+    var currVal: ZeroCopyUTF8String = _
+    var index = 0
+
+    override def hasNext: Boolean = {
+      var foundValue = false
+      while(partIterator.hasNext && index < limit && !foundValue) {
+        val partId = partIterator.next()
+        val nextPart = getPartitionFromPartId(partId)
+        if (nextPart != UnsafeUtils.ZeroPointer) {
+          // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+          // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+          // have a centralized service/store for serving metadata
+          dataset.partKeySchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
+            .find(_._1 equals labelName).foreach(pair => {
+              currVal = ZeroCopyUTF8String(pair._2)
+              foundValue = true
+          })
+        } else {
+          // FIXME partKey is evicted. Get partition key from lucene index
+        }
+      }
+      foundValue
+    }
+
+    override def next(): ZeroCopyUTF8String = {
+      index += 1
+      currVal
+    }
+  }
+
+  /**
+    * This method is to apply column filters and fetch matching time series partition keys.
+    */
+  def partKeysWithFilters(filter: Seq[ColumnFilter],
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[TimeSeriesPartition] = {
+    partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      .map(getPartitionFromPartId, limit)
+      .filter(_ != UnsafeUtils.ZeroPointer) // Needed since we have not addressed evicted partitions yet
+  }
+
+  implicit class IntIteratorMapper[T](intIterator: IntIterator) {
+    def map(f: Int => T, limit: Int): Iterator[T] = new Iterator[T] {
+      var currIndex: Int = 0
+      override def hasNext: Boolean = intIterator.hasNext && currIndex < limit
+      override def next(): T = {
+        currIndex += 1; f(intIterator.next())
+      }
+    }
+  }
+
+  /**
+    * WARNING, returns null for evicted partitions
+    */
+  private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
+    val nextPart = partitions.get(partId)
+    if (nextPart == UnsafeUtils.ZeroPointer)
+      logger.warn(s"PartId $partId was not found in memory and was not included in metadata query result. ")
+    // TODO Revisit this code for evicted partitions
+    /*if (nextPart == UnsafeUtils.ZeroPointer) {
+      val partKey = partKeyIndex.partKeyFromPartId(partId)
+      //map partKey bytes to UTF8String
+    }*/
+    nextPart
+  }
 
   /**
     * WARNING: use only for testing. Not performant
@@ -742,7 +838,8 @@ class TimeSeriesShard(val dataset: Dataset,
       val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
       if (newPart != OutOfMemPartition) {
         val partId = newPart.partID
-        val startTime = binRecordReader.getLong(timestampColId)
+        // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
+        val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
         activelyIngesting.set(partId)
@@ -791,10 +888,6 @@ class TimeSeriesShard(val dataset: Dataset,
       partitionGroups(group).set(partId)
       newPart
     }
-
-  protected def partKeyGroup(partKeyBase: Any, partKeyOffset: Long): Int = {
-    Math.abs(ingestSchema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
-  }
 
   private def disableAddPartitions(): Unit = {
     if (addPartitionsDisabled.compareAndSet(false, true))
@@ -929,12 +1022,11 @@ class TimeSeriesShard(val dataset: Dataset,
 
   /**
     * Reset all state in this shard.  Memory is not released as once released, then this class
-    * cannot be used anymore.
+    * cannot be used anymore (except partition key/chunkmap state is removed.)
     */
   def reset(): Unit = {
     logger.info(s"Clearing all MemStore state for shard $shardNum")
-    partitions.clear()
-    partSet.clear()
+    partitions.values.asScala.foreach(removePartition)
     partKeyIndex.reset()
     ingested = 0L
     for { group <- 0 until numGroups } {

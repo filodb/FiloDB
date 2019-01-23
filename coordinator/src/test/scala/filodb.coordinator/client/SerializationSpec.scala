@@ -1,4 +1,6 @@
- package filodb.coordinator.client
+package filodb.coordinator.client
+
+import scala.collection.mutable.Set
 
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
@@ -10,9 +12,8 @@ import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
-import filodb.memory.format.{RowReader, SeqRowReader}
-import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
-import filodb.prometheus.ast.QueryParams
+import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
 
@@ -31,9 +32,9 @@ object SerializationSpecConfig extends ActorSpecConfig {
  */
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
   import IngestionCommands._
+  import NamesTestData._
   import NodeClusterActor._
   import QueryCommands._
-  import NamesTestData._
 
   val serialization = SerializationExtension(system)
 
@@ -131,8 +132,9 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val reportingInterval = 10000
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
+    // scalastyle:off null
     val rvKey = new PartitionRangeVectorKey(null, defaultPartKey, dataset1.partKeySchema,
-                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 0)
+                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5)
 
     val rowbuf = tuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))
@@ -162,7 +164,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     result.resultSchema shouldEqual roundTripResult.resultSchema
     result.id shouldEqual roundTripResult.id
     for { i <- 0 until roundTripResult.result.size } {
-      // BinaryVector deserializes to different impl, so cannot compare top levle object
+      // BinaryVector deserializes to different impl, so cannot compare top level object
       roundTripResult.result(i).schema shouldEqual result.result(i).schema
       roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
         result.result(i).rows.map(_.getDouble(1)).toSeq
@@ -208,7 +210,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     mapper.registerNode(Seq(0), node0)
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
-    val qParams = QueryParams(from, 10, to)
+    val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
     val engine = new QueryEngine(dataset, mapperRef)
 
@@ -252,6 +254,26 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     roundTripResult.result.head.key.labelValues shouldEqual keysMap
 
+  }
+
+  it ("should serialize and deserialize result involving Metadata") {
+
+    val expected = List(UTF8Str("App-0"), UTF8Str("App-1"))
+    val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
+    val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
+    val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+      new ZCUTF8IteratorRowReader(expected.toIterator)), cols, 10))
+
+    val result = QueryResult2("someId", schema, ser)
+    val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
+    roundTripResult.result.size shouldEqual 1
+
+    val srv = roundTripResult.result(0)
+    srv.rows.size shouldEqual 2
+    val actual = srv.rows.map(record => {
+      record.filoUTF8String(0)
+    })
+    actual.toList shouldEqual expected
   }
 
 }

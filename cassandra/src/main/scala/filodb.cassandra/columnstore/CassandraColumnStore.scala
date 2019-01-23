@@ -56,7 +56,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
-  private val partitionListNumStripesPerShard = cassandraConfig.getInt("partition-list-num-stripes-per-shard")
 
   val sinkStats = new ChunkSinkStats
 

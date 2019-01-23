@@ -48,11 +48,11 @@ trait MemFactory {
 
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
-      (buf.array, UnsafeUtils.arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
+      (buf.array, UnsafeUtils.arayOffset.toLong + buf.arrayOffset + buf.position(), buf.limit() - buf.position())
     } else {
       assert(buf.isDirect)
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
-      (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
+      (UnsafeUtils.ZeroPointer, address + buf.position(), buf.limit() - buf.position())
     }
   }
 
@@ -113,11 +113,12 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     }
   }
 
-  protected[memory] def freeAll(): Unit = {
+  protected[memory] def freeAll(): Unit = synchronized {
     sizeMapping.foreach { case (addr, size) =>
       MemoryIO.getCheckedInstance().freeMemory(addr)
     }
     sizeMapping.clear()
+    usedSoFar.set(0)
   }
 
   def shutdown(): Unit = {

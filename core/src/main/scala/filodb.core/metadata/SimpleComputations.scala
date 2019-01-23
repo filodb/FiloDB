@@ -135,6 +135,7 @@ object SimpleComputations {
           case BitmapColumn => wrap((b: Boolean) => (if (b) 1 else 0) % numBuckets)
           case TimestampColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
           case MapColumn => wrap((m: UTF8Map) => Math.abs(m.hashCode % numBuckets))
+          case BinaryRecordColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
         }
         computedColumn(expr, dataset, info, IntColumn, extractor)
       }

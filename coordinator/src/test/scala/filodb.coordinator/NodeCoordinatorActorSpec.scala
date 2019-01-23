@@ -16,7 +16,7 @@ import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
@@ -54,15 +54,15 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   implicit val ec = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
 
   val clusterActor = system.actorOf(Props(new Actor {
     import StatusActor._
     def receive: Receive = {
       case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
-      case e: ShardEvent              => shardManager.updateFromShardEvent(e)
-      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromShardEvent)
+      case e: ShardEvent              => shardManager.updateFromExternalShardEvent(sender(), e)
+      case EventEnvelope(seq, events) => events.foreach(e => shardManager.updateFromExternalShardEvent(sender(), e))
                                          sender() ! StatusAck(seq)
     }
   }))
@@ -123,6 +123,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   }
 
   val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
+  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("count", DoubleColumn)), 1)
   val qOpt = QueryOptions(shardOverrides = Some(Seq(0)))
 
   describe("QueryActor commands and responses") {
@@ -173,27 +174,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       }
     }
 
-    // This is not really possible with Prom parser because function names are not passed in, they are parsed
-    // it("should return BadQuery if aggregation function not defined") {
-    //   val ref = setupTimeSeries()
-    //   val q1 = LogicalPlanQuery(ref, simpleAgg("not-a-func", childPlan=
-    //              PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("foo"))))
-    //   probe.send(coordinatorActor, q1)
-    //   probe.expectMsg(BadQuery("No such aggregation function not-a-func"))
-
-    //   // Need time-group-min (eg dashes)
-    //   val q2 = LogicalPlanQuery(ref, simpleAgg("TimeGroupMin", childPlan=
-    //              PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min"))))
-    //   probe.send(coordinatorActor, q2)
-    //   probe.expectMsg(BadQuery("No such aggregation function TimeGroupMin"))
-    // }
-
     // This actually returns a QueryError, but it should be validation done instead
     ignore("should return BadArgument if arguments could not be parsed successfully") {
       val ref = setupTimeSeries()
       val to = System.currentTimeMillis() / 1000
       val from = to - 50
-      val qParams = QueryParams(from, 10, to)
+      val qParams = TimeStepParams(from, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, series_1)", qParams)
       val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
       probe.send(coordinatorActor, q1)
@@ -214,9 +200,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
-                 // PeriodicSeriesWithWindowing(
-                 //   RawSeries(AllChunksSelector, multiFilter, Seq("min")),
-                 //   120000L, 10000L, 130000L, window=10000L, function=RangeFunctionId.AvgOverTime))
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -225,13 +208,26 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
 
-      // What if filter returns no results?
+      // Query the "count" long column, validate schema.  Should be able to translate everything
       val q3 = LogicalPlan2Query(ref,
+                 Aggregate(AggregationOperator.Avg,
+                   PeriodicSeries(
+                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)), qOpt)
+      probe.send(coordinatorActor, q3)
+      probe.expectMsgPF() {
+        case QueryResult(_, schema, vectors) =>
+          schema shouldEqual countSchema
+          vectors should have length (1)
+          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
+      }
+
+      // What if filter returns no results?
+      val q4 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, filters("series" -> "foobar"), Seq("min")),
                      120000L, 10000L, 130000L)), qOpt)
-      probe.send(coordinatorActor, q3)
+      probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
           schema shouldEqual timeMinSchema
@@ -262,7 +258,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors) =>
           schema shouldEqual timeMinSchema
           vectors should have length (1)
-          // TODO: for some reason the average computed is actually 14.0, 24.0, 14.0, when it should be 4.0
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 4.0)
       }
     }
@@ -350,10 +345,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
-    val split = memStore.getScanSplits(ref, 1).head
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
-                 PeriodicSeries(    // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
+                 PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
                    RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
@@ -365,7 +359,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         // TODO:  verify if the expected results are right.  They are something....
         vectors(0).rows.map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
     }
-
   }
 
   // TODO: need to find a new way to incur this error.   The problem is that when we create the BinaryRecords

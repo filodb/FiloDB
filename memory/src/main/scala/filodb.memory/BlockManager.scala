@@ -177,13 +177,13 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   protected def tryReclaim(num: Int): Unit = {
     var reclaimed = 0
     var currList = 0
-    val timeOrderedListIt = usedBlocksTimeOrdered.entrySet.iterator.asScala
+    val timeOrderedListIt = usedBlocksTimeOrdered.entrySet.iterator
     while ( reclaimed < num &&
             timeOrderedListIt.hasNext ) {
       val entry = timeOrderedListIt.next
       reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric)
       // If the block list is now empty, remove it from tree map
-      if (entry.getValue.isEmpty) usedBlocksTimeOrdered.remove(entry.getKey)
+      if (entry.getValue.isEmpty) timeOrderedListIt.remove()
     }
     if (reclaimed < num) reclaimFrom(usedBlocks, stats.blocksReclaimedMetric)
 
@@ -228,7 +228,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def releaseBlocks(): Unit = {
     lock.lock()
     try {
-      MemoryIO.getCheckedInstance.freeMemory(firstPageAddress)
+      if (firstPageAddress != 0) {
+        MemoryIO.getCheckedInstance.freeMemory(firstPageAddress)
+        firstPageAddress = 0
+      }
     } catch {
       case e: Throwable => logger.warn(s"Could not release blocks at $firstPageAddress", e)
     } finally {

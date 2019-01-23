@@ -27,6 +27,8 @@ class OnDemandPagingShard(dataset: Dataset,
                           evictionPolicy: PartitionEvictionPolicy)
                          (implicit ec: ExecutionContext) extends
 TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy)(ec) {
+  import TimeSeriesShard._
+
   private val singleThreadPool = Scheduler.singleThread("make-partition")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
@@ -102,7 +104,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
   private def odpPartTask(indexIt: PartitionIterator, partKeyBytesToPage: ArrayBuffer[Array[Byte]],
-                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) = {
+                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
+  if (indexIt.skippedPartIDs.nonEmpty) {
     createODPPartitionsTask(indexIt.skippedPartIDs, { case (bytes, offset) =>
       val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
@@ -110,7 +113,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       methods += chunkMethod
       shardStats.partitionsRestored.increment
     }).executeOn(ingestSched)
-  }
+  // No need to execute the task on ingestion thread if it's empty / no ODP partitions
+  } else Task.now(Nil)
 
   /**
    * Creates a Task which is meant ONLY TO RUN ON INGESTION THREAD
@@ -118,28 +122,28 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
-  Task[Seq[TimeSeriesPartition]] =
-    if (partIDs.nonEmpty) Task {
-      partIDs.map { id =>
-        // for each partID: look up in partitions
-        partitions.get(id) match {
-          case TimeSeriesShard.OutOfMemPartition =>
-            logger.debug(s"Creating TSPartition for ODP from part ID $id")
-            // If not there, then look up in Lucene and get the details
-            for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
-                  unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
-                  group = partKeyGroup(partKeyBytesRef.bytes, unsafeKeyOffset)
-                  part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
-              partSet.add(part)
-              callback(partKeyBytesRef.bytes, unsafeKeyOffset)
-              part
-            }
-            // create the partition and update data structures (but no need to add to Lucene!)
-            // NOTE: if no memory, then no partition!
-          case p: TimeSeriesPartition => Some(p)
-        }
-      }.toVector.flatten
-    } else Task.now(Nil)
+  Task[Seq[TimeSeriesPartition]] = Task {
+    require(partIDs.nonEmpty)
+    partIDs.map { id =>
+      // for each partID: look up in partitions
+      partitions.get(id) match {
+        case TimeSeriesShard.OutOfMemPartition =>
+          logger.debug(s"Creating TSPartition for ODP from part ID $id")
+          // If not there, then look up in Lucene and get the details
+          for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
+                unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
+                group = partKeyGroup(dataset.partKeySchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
+                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
+            partSet.add(part)
+            callback(partKeyBytesRef.bytes, unsafeKeyOffset)
+            part
+          }
+          // create the partition and update data structures (but no need to add to Lucene!)
+          // NOTE: if no memory, then no partition!
+        case p: TimeSeriesPartition => Some(p)
+      }
+    }.toVector.flatten
+  }
 
   def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
     AllChunkScan
@@ -175,8 +179,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           }
         // Return only in-memory data - ie return none so we never ODP
         case InMemoryChunkScan        => None
-        // Only used for tests -> last sample is pretty much always in memory, so don't ODP
-        case LastSampleChunkScan      => None
+        // Write buffers are always in memory only
+        case WriteBufferChunkScan      => None
       }
     } else {
       None

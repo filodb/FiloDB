@@ -6,24 +6,23 @@ import java.nio.charset.StandardCharsets
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
-import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.Scheduler
-import monix.kafka._
 import monix.reactive.Observable
 import org.rogach.scallop._
 
-import filodb.coordinator.ShardMapper
-import filodb.core.binaryrecord2.RecordBuilder
+import filodb.coordinator.{GlobalConfig, ShardMapper}
 import filodb.core.metadata.Dataset
-import filodb.gateway.KafkaContainerSink
-import filodb.memory.MemFactory
+import filodb.gateway.conversion.PrometheusInputRecord
+import filodb.gateway.GatewayServer
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
-final case class DataSample(tags: Map[String, String], timestamp: Long, value: Double) extends DataOrCommand
+final case class DataSample(tags: Map[String, String],
+                            metric: String,
+                            timestamp: Long,
+                            value: Double) extends DataOrCommand
 case object FlushCommand extends DataOrCommand
 
 /**
@@ -35,7 +34,7 @@ case object FlushCommand extends DataOrCommand
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
-  import collection.JavaConverters._
+  val dataset = FormatConversion.dataset
 
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
@@ -62,7 +61,10 @@ object TestTimeseriesProducer extends StrictLogging {
       .getOrElse((numSamples.toDouble / numTimeSeries / 6).ceil.toInt )  // at 6 samples per minute
 
     Await.result(produceMetrics(sourceConfig, numSamples, numTimeSeries, startMinutesAgo), 1.hour)
+    sys.exit(0)
   }
+
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   /**
     * Produce metrics
@@ -72,47 +74,57 @@ object TestTimeseriesProducer extends StrictLogging {
     * @param startMinutesAgo the samples will carry a timestamp starting from these many minutes ago
     * @return
     */
-  def produceMetrics(conf: Config, numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
+  def produceMetrics(sourceConfig: Config, numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
     val startTime = System.currentTimeMillis() - startMinutesAgo.minutes.toMillis
-    val numShards = conf.getInt("num-shards")
+    val numShards = sourceConfig.getInt("num-shards")
+    val shardMapper = new ShardMapper(numShards)
+    val spread = if (numShards >= 2) { (Math.log10(numShards / 2) / Math.log10(2.0)).toInt } else { 0 }
+    val topicName = sourceConfig.getString("sourceconfig.filo-topic-name")
 
-    // TODO: use the official KafkaIngestionStream stuff to parse the file.  This is just faster for now.
-    val producerCfg = KafkaProducerConfig.default.copy(
-      bootstrapServers = conf.getString("sourceconfig.bootstrap.servers").split(',').toList
-    )
-    val topicName = conf.getString("sourceconfig.filo-topic-name")
+    val (producingFut, containerStream) = metricsToContainerStream(startTime, numShards, numTimeSeries,
+                                            numSamples, dataset, shardMapper, spread)
+    GatewayServer.setupKafkaProducer(sourceConfig, containerStream)
 
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
       s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
 
-    implicit val io = Scheduler.io("kafka-producer")
+    producingFut.map { _ =>
+      // Give enough time for the last containers to be sent off successfully to Kafka
+      Thread sleep 2000
+      logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
+        s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
+      val startQuery = startTime / 1000
+      val endQuery = startQuery + 300
+      val query =
+        s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
+        s"""--promql 'heap_usage{dc="DC0",app="App-0"}' --start $startQuery --end $endQuery --limit 15"""
+      logger.info(s"Sample Query you can use: \n$query")
+      val q = URLEncoder.encode("heap_usage{dc=\"DC0\",app=\"App-0\"}", StandardCharsets.UTF_8.toString)
+      val url = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
+        s"query=$q&start=$startQuery&end=$endQuery&step=15"
+      logger.info(s"Sample URL you can use to query: \n$url")
+    }
+  }
 
-    val shardKeys = Set("__name__", "job")  // the tag keys used to compute the shard key hash
-    val batchedData = timeSeriesData(startTime, numShards, numTimeSeries)
-                        .take(numSamples)
-                        .grouped(128)
-    val containerStream = batchSingleThreaded(Observable.fromIterator(batchedData),
-                                              FormatConversion.dataset, numShards, shardKeys)
-    val sink = new KafkaContainerSink(producerCfg, topicName)
-    sink.writeTask(containerStream)
-        .runAsync
-        .map { _ =>
-          logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
-            s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
-          val startQuery = startTime / 1000
-          val endQuery = startQuery + 300
-          val query =
-            s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries """ +
-            s"""--promql 'heap_usage{dc="DC0",job="App-0"}' --start $startQuery --end $endQuery --limit 15"""
-          logger.info(s"Sample Query you can use: \n$query")
-          val q = URLEncoder.encode("heap_usage{dc=\"DC0\",job=\"App-0\"}", StandardCharsets.UTF_8.toString)
-          val url = s"http://localhost:8080/promql/timeseries/api/v1/query_range?" +
-            s"query=$q&start=$startQuery&end=$endQuery&step=15"
-          logger.info(s"Sample URL you can use to query: \n$url")
+  def metricsToContainerStream(startTime: Long,
+                               numShards: Int,
+                               numTimeSeries: Int,
+                               numSamples: Int,
+                               dataset: Dataset,
+                               shardMapper: ShardMapper,
+                               spread: Int): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
+    val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
+
+    val producingFut = Future {
+      timeSeriesData(startTime, numShards, numTimeSeries)
+        .take(numSamples)
+        .foreach { sample =>
+          val rec = PrometheusInputRecord(sample.tags, sample.metric, dataset, sample.timestamp, sample.value)
+          val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
+          while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
         }
-        .recover { case NonFatal(e) =>
-          logger.error("Error occurred while producing messages to Kafka", e)
-        }
+    }
+    (producingFut, containerStream)
   }
 
   /**
@@ -135,91 +147,12 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
-      val tags = Map("__name__" -> "heap_usage",
-                     "dc"       -> s"DC$dc",
-                     "job"      -> s"App-$app",
+      val tags = Map("dc"       -> s"DC$dc",
+                     "app"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
-      DataSample(tags, timestamp, value)
-    }
-  }
-
-  // scalastyle:off method.length
-  /**
-   * Batches the source data stream into separate RecordContainers per shard, single threaded,
-   * using proper logic to calculate hashes correctly for shard and partition hashes.
-   * @param {[Dataset]} dataset: Dataset the Dataset schema to use for encoding
-   * @param {[Int]} numShards: Int the total number of shards or Kafka partitions
-   * @param shardKeys The hash keys to use for shard number calculation
-   */
-  def batchSingleThreaded(items: Observable[Seq[DataSample]],
-                          dataset: Dataset,
-                          numShards: Int,
-                          shardKeys: Set[String],
-                          flushInterval: FiniteDuration = 1.second)
-                         (implicit io: Scheduler): Observable[(Int, Seq[Array[Byte]])] = {
-    val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema))
-                                      .toArray
-    val shardMapper = new ShardMapper(numShards)
-    val spread = if (numShards >= 2) { (Math.log10(numShards / 2) / Math.log10(2.0)).toInt } else { 0 }
-
-    var streamIsDone: Boolean = false
-    // Flush at 1 second intervals until original item stream is complete.  Also send one last flush at the end.
-    val itemStream = items.doOnComplete(() => streamIsDone = true)
-    val flushStream = Observable.intervalAtFixedRate(flushInterval).map(n => FlushCommand)
-                                .takeWhile(n => !streamIsDone)
-    (Observable.merge(itemStream, flushStream) ++ Observable.now(FlushCommand))
-      .flatMap {
-        case s: Seq[DataSample] @unchecked =>
-          logger.debug(s"Adding batch of ${s.length} samples")
-          s.foreach { case DataSample(tags, timestamp, value) =>
-            // Compute keys/values for shard calculation vs original
-            // Specifically we need to drop _bucket _sum _count etc from __name__ to put histograms in same shard
-            val scalaKVs = tags.toSeq
-            val originalKVs = new java.util.ArrayList(scalaKVs.asJava)
-            val forShardKVs = scalaKVs.map { case (k, v) =>
-                                val trimmedVal = RecordBuilder.trimShardColumn(dataset, k, v)
-                                (k, trimmedVal)
-                              }
-            val kvsForShardCalc = new java.util.ArrayList(forShardKVs.asJava)
-
-            // Get hashes and sort tags of the keys/values for shard calculation
-            val hashes = RecordBuilder.sortAndComputeHashes(kvsForShardCalc)
-
-            // Compute partition, shard key hashes and compute shard number
-            // TODO: what to do if not all shard keys included?  Just return a 0 hash?  Or maybe random?
-            val shardKeyHash = 0 // TODO: this code is being replaced w/ the PrometheusInputRecord
-            val partKeyHash = RecordBuilder.combineHashExcluding(kvsForShardCalc, hashes, shardKeys)
-            val shard = shardMapper.ingestionShard(shardKeyHash, partKeyHash, spread)
-
-            // Add stuff to RecordContainer for correct partition/shard
-            originalKVs.sort(RecordBuilder.stringPairComparator)
-            val builder = builders(shard)
-            builder.startNewRecord()
-            builder.addLong(timestamp)
-            builder.addDouble(value)
-            builder.addSortedPairsAsMap(originalKVs, hashes)
-            builder.endRecord()
-          }
-          Observable.empty
-
-        case FlushCommand =>  // now produce records, turn into observable
-          Observable.fromIterable(flushBuilders(builders))
-      }
-  }
-  // scalastyle:on method.length
-
-  private def flushBuilders(builders: Array[RecordBuilder]): Seq[(Int, Seq[Array[Byte]])] = {
-    builders.zipWithIndex.map { case (builder, shard) =>
-      logger.debug(s"Flushing shard $shard with ${builder.allContainers.length} containers")
-
-      // get optimal byte arrays out of containers and reset builder so it can keep going
-      if (builder.allContainers.nonEmpty) {
-        (shard, builder.optimalContainerBytes(true))
-      } else {
-        (0, Nil)
-      }
+      DataSample(tags, "heap_usage", timestamp, value)
     }
   }
 }

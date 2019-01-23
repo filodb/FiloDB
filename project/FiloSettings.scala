@@ -111,7 +111,7 @@ object FiloSettings extends Build {
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
-    javaOptions ++= List("-Xmx2G", "-Dakka.test.timefactor=3"),
+    javaOptions ++= List("-Xmx2G", "-XX:+CMSClassUnloadingEnabled", "-Dakka.test.timefactor=3"),
     // Needed to avoid cryptic EOFException crashes in forked tests
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
@@ -135,6 +135,7 @@ object FiloSettings extends Build {
       internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
+    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
     compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
 
   lazy val testMultiJvmToo = Seq(
@@ -172,9 +173,8 @@ object FiloSettings extends Build {
   }
 
   // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
+  // Also note: CLI-specific config overrides are set in FilodbCluster.scala
   lazy val shellScript = """#!/bin/bash
-  # ClusterActorRefProvider by default. Enable this line if needed for some of the commands
-  # allprops="-Dakka.actor.provider=akka.remote.RemoteActorRefProvider"
   while [ "${1:0:2}" = "-D" ]
   do
     allprops="$allprops $1"
@@ -274,6 +274,7 @@ object FiloSettings extends Build {
       "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
       "spray repo" at "http://repo.spray.io"
     ),
+    resolvers += Resolver.bintrayRepo("tanukkii007", "maven"),
 
     cancelable in Global := true,
 

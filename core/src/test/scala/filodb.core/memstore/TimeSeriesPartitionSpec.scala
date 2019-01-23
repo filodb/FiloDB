@@ -28,7 +28,7 @@ object TimeSeriesPartitionSpec {
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
     val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset1.ref, 0), infoMapAddr, offheapInfoMapKlass)
+          new TimeSeriesShardStats(dataset.ref, 0), infoMapAddr, offheapInfoMapKlass)
   }
 }
 
@@ -78,7 +78,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.appendingChunkLen shouldEqual 1
     part.unflushedChunksets shouldEqual 1
     val minData = data.map(_.getDouble(1)).take(1)
-    val iterator = part.timeRangeRows(LastSampleChunkScan, Array(1))
+    val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
     iterator.map(_.getDouble(0)).toSeq shouldEqual minData
   }
 
@@ -107,9 +107,10 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     data1 shouldEqual (minData take 10)
 
     val blockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
-    val flushFut = Future(part.makeFlushChunks(blockHolder))
+    // Task needs to fully iterate over the chunks, to release the shared lock.
+    val flushFut = Future(part.makeFlushChunks(blockHolder).toBuffer)
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
-    val chunkSets = flushFut.futureValue.toSeq
+    val chunkSets = flushFut.futureValue
 
     // After flush, the old writebuffers should be returned to pool, but new one allocated for ingesting
     myBufferPool.poolSize shouldEqual origPoolSize
@@ -140,14 +141,15 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     val initTS = data(0).getLong(0)
     val appendingTS = data.last.getLong(0)
     val minData = data.map(_.getDouble(1))
-    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
+    data.take(10).foreach { r => part.ingest(r, ingestBlockHolder) }
 
     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
     part.switchBuffers(ingestBlockHolder)
     part.appendingChunkLen shouldEqual 0
 
     val blockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
-    val flushFut = Future(part.makeFlushChunks(blockHolder))
+    // Task needs to fully iterate over the chunks, to release the shared lock.
+    val flushFut = Future(part.makeFlushChunks(blockHolder).toBuffer)
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
@@ -158,6 +160,12 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Read from flushed chunk only
     val readIt = part.timeRangeRows(RowKeyChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
     readIt.toBuffer shouldEqual minData.take(10)
+
+    val infos1 = part.infos(initTS, initTS + 9000)
+    infos1.hasNext shouldEqual true
+    val info1 = infos1.nextInfo
+    info1.numRows shouldEqual 10
+    info1.startTime shouldEqual initTS
 
     val readIt2 = part.timeRangeRows(RowKeyChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
     readIt2.toBuffer shouldEqual minData.drop(1).take(7)
@@ -195,9 +203,10 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
      part.switchBuffers(ingestBlockHolder)
      myBufferPool.poolSize shouldEqual origPoolSize    // current chunks become null, no new allocation yet
      val blockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
-     val flushFut = Future(part.makeFlushChunks(blockHolder))
+     // Task needs to fully iterate over the chunks, to release the shared lock.
+     val flushFut = Future(part.makeFlushChunks(blockHolder).toBuffer)
      data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
-     val chunkSets = flushFut.futureValue.toSeq
+     val chunkSets = flushFut.futureValue
 
      // After flush, the old writebuffers should be returned to pool, but new one allocated too
      myBufferPool.poolSize shouldEqual origPoolSize
@@ -225,9 +234,10 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
      // There should now be 3 chunks total, the current write buffers plus the two flushed ones
      part.switchBuffers(ingestBlockHolder)
      val holder2 = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
-     val flushFut2 = Future(part.makeFlushChunks(holder2))
+     // Task needs to fully iterate over the chunks, to release the shared lock.
+     val flushFut2 = Future(part.makeFlushChunks(holder2).toBuffer)
      data.drop(16).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
-     val chunkSets2 = flushFut2.futureValue.toSeq
+     val chunkSets2 = flushFut2.futureValue
 
      part.numChunks shouldEqual 3
      part.appendingChunkLen shouldEqual 5
@@ -267,7 +277,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.makeFlushChunks(blockHolder).isEmpty shouldEqual true
 
     val minData = data.map(_.getDouble(1))
-    val allData = part.timeRangeRows(LastSampleChunkScan, Array(1)).map(_.getDouble(0))
+    val allData = part.timeRangeRows(InMemoryChunkScan, Array(1)).map(_.getDouble(0))
     allData.toSeq shouldEqual minData
   }
 
@@ -275,6 +285,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Ingest data into 10 TSPartitions and switch and encode all of them.  Now WriteBuffers poolsize should be
     // down 10 and then back up.
     val data = singleSeriesReaders().take(10).toBuffer
+    val moreData = singleSeriesReaders().drop(10).take(50).toBuffer
     val origPoolSize = myBufferPool.poolSize
     val partitions = (0 to 9).map { partNo =>
       makePart(partNo, dataset1)
@@ -291,7 +302,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     // Do this 4 more times so that we get old recycled metadata back
     (0 until 4).foreach { n =>
       (0 to 9).foreach { i =>
-      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+        moreData.drop(n*10).take(10).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
         partitions(i).appendingChunkLen shouldEqual 10
         partitions(i).switchBuffers(ingestBlockHolder, true)
       }
@@ -299,7 +310,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     // Now ingest again but don't switch buffers.  Ensure appendingChunkLen is appropriate.
     (0 to 9).foreach { i =>
-      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+      moreData.drop(40).foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).appendingChunkLen shouldEqual 10
     }
   }
@@ -325,7 +336,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     myBufferPool.poolSize shouldEqual (origPoolSize - 1)
 
     val minData = data.map(_.getDouble(1)) drop 100
-    val readData1 = part.timeRangeRows(LastSampleChunkScan, Array(1)).map(_.getDouble(0))
+    val readData1 = part.timeRangeRows(WriteBufferChunkScan, Array(1)).map(_.getDouble(0))
     readData1.toBuffer shouldEqual minData
 
     // Now simulate a flush, verify that both chunksets flushed
@@ -338,4 +349,44 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.appendingChunkLen shouldEqual 0
     chunkSets.map(_.info.numRows) shouldEqual Seq(100, 10)
   }
+
+  it("should drop out of time order ingested samples") {
+    part = makePart(0, dataset1)
+    val data = singleSeriesReaders().take(12)
+    val minData = data.map(_.getDouble(1))
+
+    // Ingest first 5, then: 8th, 6th, 7th, 9th, 10th
+    data.take(5).foreach { r => part.ingest(r, ingestBlockHolder) }
+    part.ingest(data(7), ingestBlockHolder)
+    part.ingest(data(5), ingestBlockHolder)
+    part.ingest(data(6), ingestBlockHolder)
+    part.ingest(data(8), ingestBlockHolder)
+    part.ingest(data(9), ingestBlockHolder)
+
+    // Try ingesting old sample now at the end.  Verify that end time of chunkInfo is not incorrectly changed.
+    part.ingest(data(2), ingestBlockHolder)
+    // 8 of first 10 ingested, 2 should be dropped.  Switch buffers, and try ingesting out of order again.
+    part.appendingChunkLen shouldEqual 8
+    part.infoLast.numRows shouldEqual 8
+    part.infoLast.endTime shouldEqual data(9).getLong(0)
+
+    part.switchBuffers(ingestBlockHolder)
+    part.appendingChunkLen shouldEqual 0
+
+    // Now try ingesting an old smaple again at first element of next chunk.
+    part.ingest(data(8), ingestBlockHolder)   // This one should be dropped
+    part.appendingChunkLen shouldEqual 0
+    part.ingest(data(10), ingestBlockHolder)
+    part.ingest(data(11), ingestBlockHolder)
+
+    // there should be a frozen chunk of 10 records plus 2 records in currently appending chunks
+    part.numChunks shouldEqual 2
+    part.appendingChunkLen shouldEqual 2
+    val readData1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0))
+    readData1.toBuffer shouldEqual (minData take 5) ++ (minData drop 7)
+    val timestamps = data.map(_.getLong(0))
+    val readData2 = part.timeRangeRows(AllChunkScan, Array(0)).map(_.getLong(0))
+    readData2.toBuffer shouldEqual (timestamps take 5) ++ (timestamps drop 7)
+  }
+
 }
