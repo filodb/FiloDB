@@ -106,7 +106,7 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
                             rangeFunction: ChunkedRangeFunction,
                             queryConfig: QueryConfig)
                            (windowIt: WindowedChunkIterator =
-                              new WindowedChunkIterator(rv.chunkInfos(start - window, end), start, step, end, window)
+                              new WindowedChunkIterator(rv, start, step, end, window)
                            ) extends Iterator[TransientRow] {
   private val sampleToEmit = new TransientRow()
 
@@ -118,7 +118,8 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
 
     windowIt.nextWindow()
     while (windowIt.hasNext) {
-      rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
+      val queryInfo = windowIt.next
+      rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
                               windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
     }
     rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)

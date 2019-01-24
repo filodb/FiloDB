@@ -8,6 +8,7 @@ import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.query.RawDataRangeVector
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
@@ -301,26 +302,36 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
   }
 }
 
+final case class ChunkQueryInfo(info: NativePointer,
+                                tsVector: BinaryVector.BinaryVectorPtr,
+                                tsReader: vectors.LongVectorDataReader,
+                                valueVector: BinaryVector.BinaryVectorPtr,
+                                valueReader: VectorDataReader)
+
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
  * Assumes the ChunkInfos are in increasing time order.
- * The sliding window goes from (start-window, start] -> (end-window, end] in step increments, and for
- * each window, this class may be used as a ChunkInfoIterator. Excludes start, includes end.
+ * The sliding window goes from (start-window, start] -> (end-window, end] in step increments.
+ * Excludes start, includes end.
+ * Also parses the readers for each new info for query efficiency.
 
- * @param infos the base ChunkInfoIterator to perform windowing over
+ * @param rv a RawDataRangeVector to iterate over
  * @param start the starting window end timestamp, must have same units as the ChunkSetInfo start/end times
  * @param step the increment the window goes forward by
  * @param end the ending window end timestamp.  If it does not line up on multiple of start + n * step, then
  *            the windows will slide until the window end is beyond end.
  * @param window the # of millis/time units that define the length of each window
  */
-class WindowedChunkIterator(infos: ChunkInfoIterator, start: Long, step: Long, end: Long, window: Long,
+class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end: Long, window: Long,
                             // internal vars, put it here for better performance
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[NativePointer] = Buffer.empty[NativePointer])
-extends ChunkInfoIterator {
+                            windowInfos: Buffer[ChunkQueryInfo] = Buffer.empty[ChunkQueryInfo])
+extends Iterator[ChunkQueryInfo] {
+  private val infos = rv.chunkInfos(start - window, end)
+  private val tsColID = rv.timestampColID
+
   final def close(): Unit = infos.close()
 
   /**
@@ -343,18 +354,22 @@ extends ChunkInfoIterator {
     readIndex = 0
 
     // drop initial chunksets of window that are no longer part of the window
-    while (windowInfos.nonEmpty && ChunkSetInfo(windowInfos(0)).endTime < curWindowStart) {
+    while (windowInfos.nonEmpty && ChunkSetInfo(windowInfos(0).info).endTime < curWindowStart) {
       windowInfos.remove(0)
     }
 
-    var lastEndTime = if (windowInfos.isEmpty) -1L else ChunkSetInfo(windowInfos(windowInfos.length - 1)).endTime
+    var lastEndTime = if (windowInfos.isEmpty) -1L else ChunkSetInfo(windowInfos(windowInfos.length - 1).info).endTime
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfo
       // Add if next chunkset is within window.  Otherwise keep going
       if (curWindowStart <= next.endTime) {
-        windowInfos += next.infoAddr
+        val tsVector = next.vectorPtr(tsColID)
+        val tsReader = vectors.LongBinaryVector(tsVector)
+        val valueVector = next.vectorPtr(rv.valueColID)
+        val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
+        windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }
@@ -368,10 +383,10 @@ extends ChunkInfoIterator {
   /**
    * Returns the next ChunkSetInfo for the current window
    */
-  final def nextInfo: ChunkSetInfo = {
+  final def next: ChunkQueryInfo = {
     val next = windowInfos(readIndex)
     readIndex += 1
-    ChunkSetInfo(next)
+    next
   }
 }
 

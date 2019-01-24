@@ -1,8 +1,8 @@
 package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector}
+import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.{QueryConfig, RangeFunctionId}
 import filodb.query.exec._
 import filodb.query.RangeFunctionId._
@@ -92,12 +92,15 @@ trait ChunkedRangeFunction extends RangeFunction {
   /**
    * Called by the ChunkedWindowIterator to add multiple rows at a time to the range function for efficiency.
    * The idea is to call chunk-based methods such as sum and binarySearch.
-   * @param tsCol ColumnID for timestamp column
-   * @param valueCol ColumnID for value column
-   * @param info ChunkSetInfo with information for specific chunks
-   * @param startTime starting timestamp in millis since Epoch for time window
+   * @param tsVector raw pointer to the timestamp BinaryVector
+   * @param tsReader a LongVectorDataReader for parsing the tsVector
+   * @param valueVector a raw pointer to the value BinaryVector
+   * @param valueReader a VectorDataReader for the value BinaryVector. Method must cast to appropriate type.
+   * @param startTime starting timestamp in millis since Epoch for time window, inclusive
+   * @param endTime ending timestamp in millis since Epoch for time window, inclusive
    */
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
+  def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit
 
   /**
@@ -111,19 +114,15 @@ trait ChunkedRangeFunction extends RangeFunction {
  * and returning the double value vector and reader with the row numbers
  */
 trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val timestampVector = info.vectorPtr(tsCol)
-    val tsReader = bv.LongBinaryVector(timestampVector)
-    val doubleVector = info.vectorPtr(valueCol)
-    val dblReader = bv.DoubleVector(doubleVector)
-
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+    addTimeDoubleChunks(valueVector, valueReader.asDoubleReader, startRowNum, endRowNum)
   }
 
   /**
@@ -138,19 +137,15 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
 }
 
 trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
-  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val timestampVector = info.vectorPtr(tsCol)
-    val tsReader = bv.LongBinaryVector(timestampVector)
-    val longVector = info.vectorPtr(valueCol)
-    val longReader = bv.LongBinaryVector(longVector)
-
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+    addTimeLongChunks(valueVector, valueReader.asLongReader, startRowNum, endRowNum)
   }
 
   /**
@@ -280,30 +275,29 @@ abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
     sampleToEmit.setValues(endTimestamp, value)
   }
   // Add each chunk and update timestamp and value such that latest sample wins
-  final def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val timestampVector = info.vectorPtr(tsCol)
-    val tsReader = bv.LongBinaryVector(timestampVector)
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
+    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
     //   2) timestamp is within stale window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
-      val ts = tsReader(timestampVector, endRowNum)
+      val ts = tsReader(tsVector, endRowNum)
       if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
-        updateValue(ts, info.vectorPtr(valueCol), endRowNum)
+        updateValue(ts, valueVector, valueReader, endRowNum)
     }
   }
 
-  def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit
+  def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit
 }
 
 class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
-  final def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit = {
-    val dblReader = bv.DoubleVector(dataVector)
-    val doubleVal = dblReader(dataVector, endRowNum)
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val dblReader = valReader.asDoubleReader
+    val doubleVal = dblReader(valVector, endRowNum)
     // If the last value is NaN, that may be Prometheus end of time series marker.
     // In that case try to get the sample before last.
     // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
@@ -311,7 +305,7 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
     if (java.lang.Double.isNaN(doubleVal)) {
       if (endRowNum > 0) {
         timestamp = ts
-        value = dblReader(dataVector, endRowNum - 1)
+        value = dblReader(valVector, endRowNum - 1)
       }
     } else {
       timestamp = ts
@@ -321,9 +315,9 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
 }
 
 class LastSampleChunkedFunctionL extends LastSampleChunkedFunction() {
-  final def updateValue(ts: Long, dataVector: BinaryVector.BinaryVectorPtr, endRowNum: Int): Unit = {
-    val longReader = bv.LongBinaryVector(dataVector)
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val longReader = valReader.asLongReader
     timestamp = ts
-    value = longReader(dataVector, endRowNum).toDouble
+    value = longReader(valVector, endRowNum).toDouble
   }
 }

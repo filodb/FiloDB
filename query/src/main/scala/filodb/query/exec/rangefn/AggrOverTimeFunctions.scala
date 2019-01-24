@@ -3,8 +3,8 @@ package filodb.query.exec.rangefn
 import java.lang.{Double => JLDouble}
 import java.util
 
-import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector}
+import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
 import filodb.query.exec.TransientRow
 
@@ -165,14 +165,12 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
-  final def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val timestampVector = info.vectorPtr(tsCol)
-    val tsReader = bv.LongBinaryVector(timestampVector)
-
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
     val numRows = endRowNum - startRowNum + 1
     count += numRows
   }
