@@ -305,6 +305,7 @@ object CustomMetricsData {
                         partitionColumns,
                         columns,
                         Seq("timestamp"),
+                        Seq.empty,
                         DatasetOptions(Seq("metric", "app"), "metric", "count")).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
   val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
@@ -315,6 +316,7 @@ object CustomMetricsData {
                         partitionColumns2,
                         columns,
                         Seq("timestamp"),
+                        Seq.empty,
                         DatasetOptions(Seq("__name__"), "__name__", "count")).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
   val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
