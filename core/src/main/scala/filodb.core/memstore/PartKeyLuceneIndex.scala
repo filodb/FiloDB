@@ -120,9 +120,9 @@ class PartKeyLuceneIndex(dataset: Dataset,
       case StringColumn => new Indexer {
         val colName = UTF8Str(c.name)
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          val strOffset = dataset.partKeySchema.getStringOffset(base, UnsafeUtils.arayOffset, pos)
-          val value = new BytesRef(base.asInstanceOf[Array[Byte]], strOffset + 2,
-            UTF8StringMedium.numBytes(base, UnsafeUtils.arayOffset + strOffset))
+          val strOffset = dataset.partKeySchema.blobOffset(base, offset, pos)
+          val numBytes = dataset.partKeySchema.blobNumBytes(base, offset, pos)
+          val value = new BytesRef(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset, numBytes)
           addIndexEntry(colName.toString, value, partIndex)
         }
         def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
