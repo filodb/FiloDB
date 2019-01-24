@@ -13,6 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize}
+import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
@@ -230,16 +231,13 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
   }
 
-  it("should recover index from time buckets") {
-    import GdeltTestData._
-    memStore.metastore.writeHighestIndexTimeBucket(dataset1.ref, 0, 0)
-    memStore.setup(dataset1, 0, TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
-      flushInterval = 10.minutes))
-    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
+  def indexRecoveryTest(dataset: Dataset, partKeys: Seq[Long]): Unit = {
+    memStore.metastore.writeHighestIndexTimeBucket(dataset.ref, 0, 0)
+    memStore.setup(dataset, 0,
+      TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
+        flushInterval = 10.minutes))
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset.ref, 0).get
     val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
-
-    val readers = gdeltLines3.map { line => ArrayStringRowReader(line.split(",")) }
-    val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
 
     partKeys.zipWithIndex.foreach { case (off, i) =>
       timeBucketRb.startNewRecord()
@@ -250,6 +248,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       timeBucketRb.endRecord(false)
     }
     tsShard.initTimeBuckets()
+
     timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
       tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
     }
@@ -261,71 +260,21 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
       tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
     }
+  }
+
+  it("should recover index from time buckets") {
+    import GdeltTestData._
+    val readers = gdeltLines3.map { line => ArrayStringRowReader(line.split(",")) }
+    val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
+    indexRecoveryTest(dataset1, partKeys)
   }
 
   it("should recover index from time buckets - with two partition columns of type string") {
-    memStore.metastore.writeHighestIndexTimeBucket(CustomMetricsData.metricdataset.ref, 0, 0)
-    memStore.setup(CustomMetricsData.metricdataset, 0,
-      TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
-        flushInterval = 10.minutes))
-    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(CustomMetricsData.metricdataset.ref, 0).get
-    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
-
-    val partKeys = Seq(CustomMetricsData.defaultPartKey)
-
-    partKeys.zipWithIndex.foreach { case (off, i) =>
-      timeBucketRb.startNewRecord()
-      timeBucketRb.addLong(i + 10)
-      timeBucketRb.addLong(i + 20)
-      val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
-      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
-      timeBucketRb.endRecord(false)
-    }
-    tsShard.initTimeBuckets()
-
-    timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
-      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
-    }
-    tsShard.commitPartKeyIndexBlocking()
-    partKeys.zipWithIndex.foreach { case (off, i) =>
-      val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
-      val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
-      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
-      tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
-      tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
-    }
+    indexRecoveryTest(CustomMetricsData.metricdataset, Seq(CustomMetricsData.defaultPartKey))
   }
 
   it("should recover index from time buckets - with single partition column of type map") {
-    memStore.metastore.writeHighestIndexTimeBucket(CustomMetricsData.metricdataset2.ref, 0, 0)
-    memStore.setup(CustomMetricsData.metricdataset2, 0,
-      TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
-        flushInterval = 10.minutes))
-    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(CustomMetricsData.metricdataset2.ref, 0).get
-    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
-
-    val partKeys = Seq(CustomMetricsData.defaultPartKey2)
-
-    partKeys.zipWithIndex.foreach { case (off, i) =>
-      timeBucketRb.startNewRecord()
-      timeBucketRb.addLong(i + 10)
-      timeBucketRb.addLong(i + 20)
-      val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
-      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
-      timeBucketRb.endRecord(false)
-    }
-    tsShard.initTimeBuckets()
-    timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
-      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
-    }
-    tsShard.commitPartKeyIndexBlocking()
-    partKeys.zipWithIndex.foreach { case (off, i) =>
-      val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
-      val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
-      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
-      tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
-      tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
-    }
+    indexRecoveryTest(CustomMetricsData.metricdataset2, Seq(CustomMetricsData.defaultPartKey2))
   }
 
   import Iterators._
