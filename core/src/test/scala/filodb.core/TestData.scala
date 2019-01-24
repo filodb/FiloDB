@@ -313,7 +313,7 @@ object MachineMetricsData {
           (1 + n).toLong,
           buckets.sum.toLong,
           bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
-          extraTags ++ Map("__name__".utf8 -> s"http_requests_total${n % numSeries}".utf8))
+          extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 }

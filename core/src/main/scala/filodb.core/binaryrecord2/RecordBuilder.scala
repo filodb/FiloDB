@@ -9,7 +9,7 @@ import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColu
 import filodb.core.query.ColumnInfo
 import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
-import filodb.memory.format.vectors.{BinaryHistogram, MutableHistogram}
+import filodb.memory.format.vectors.Histogram
 
 
 // scalastyle:off number.of.methods
@@ -205,8 +205,6 @@ final class RecordBuilder(memFactory: MemFactory,
 
   import Column.ColumnType._
 
-  private lazy val histBuf = new UnsafeBuffer(new Array[Byte](2048))
-
   /**
    * A SLOW but FLEXIBLE method to add data to the current field.  Boxes for sure but can take any data.
    * Relies on passing in an object (Any) and using match, lots of allocations here.
@@ -222,10 +220,7 @@ final class RecordBuilder(memFactory: MemFactory,
       case (StringColumn, a: Array[Byte]) => addString(a)
       case (StringColumn, z: ZCUTF8) => addBlob(z)
       case (MapColumn, m: Map[ZCUTF8, ZCUTF8] @unchecked) => addMap(m)
-      case (HistogramColumn, h: MutableHistogram) =>
-        // NOTE: this is SLOW, serializes the HistogramBuckets every single time, and does conversion
-        BinaryHistogram.writeBinHistogram(h.buckets.toByteArray, h.values.map(_.toLong), histBuf)
-        addBlob(histBuf)
+      case (HistogramColumn, h: Histogram) => addBlob(h.serialize())
       case (other: Column.ColumnType, v) =>
         throw new UnsupportedOperationException(s"Column type of $other and value of class ${v.getClass}")
     }

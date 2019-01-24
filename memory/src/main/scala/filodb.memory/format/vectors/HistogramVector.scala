@@ -25,7 +25,7 @@ import filodb.memory.format.Encodings._
  *  NOTE: most of the methods below actually expect a pointer to the +2 hist bucket definition, not the length field
  */
 object BinaryHistogram {
-  // Pass in a buffer which includes the length bytes.
+  // Pass in a buffer which includes the length bytes.  Value class - no allocations.
   case class BinHistogram(buf: UnsafeBuffer) extends AnyVal {
     def totalLength: Int = buf.getShort(0).toInt + 2
     def numBuckets: Int = buf.getShort(4).toInt
@@ -36,13 +36,52 @@ object BinaryHistogram {
     def intoValuesBuf(destBuf: UnsafeBuffer): Unit =
       UnsafeUtils.wrapUnsafeBuf(buf.byteArray, buf.addressOffset + valuesIndex + 1,
                                 buf.getShort(valuesIndex - 2) - 1, destBuf)
-    override def toString: String = s"<BinHistogram with $numBuckets buckets>"
+    override def toString: String = s"<BinHistogram: ${toHistogram}>"
+
+    /**
+     * Converts this BinHistogram to a Histogram object.  May not be the most efficient.
+     * Intended for slower paths such as high level (lower # samples) aggregation and HTTP/CLI materialization
+     * by clients.  Materializes/deserializes everything.
+     * Ingestion ingests BinHistograms directly without conversion to Histogram first.
+     */
+    def toHistogram: Histogram = {
+      val bucketDef = HistogramBuckets(buf.byteArray, bucketDefOffset, totalLength)
+      valuesFormatCode match {
+        case ValuesFormat_Flat => FlatBucketHistogram(bucketDef, this)
+      }
+    }
+  }
+
+  private val tlValuesBuf = new ThreadLocal[UnsafeBuffer]()
+  def valuesBuf: UnsafeBuffer = tlValuesBuf.get match {
+    case UnsafeUtils.ZeroPointer => val buf = new UnsafeBuffer(new Array[Byte](4096))
+                                    tlValuesBuf.set(buf)
+                                    buf
+    case b: UnsafeBuffer         => b
+  }
+
+  // Thread local buffer used as temp buffer for writing binary histograms
+  private val tlHistBuf = new ThreadLocal[UnsafeBuffer]()
+  def histBuf: UnsafeBuffer = tlHistBuf.get match {
+    case UnsafeUtils.ZeroPointer => val buf = new UnsafeBuffer(new Array[Byte](8192))
+                                    tlHistBuf.set(buf)
+                                    buf
+    case b: UnsafeBuffer         => b
   }
 
   val ValuesFormat_Flat = 0x00.toByte
 
   case class FlatBucketValues(buf: UnsafeBuffer) extends AnyVal {
     def bucket(no: Int): Long = buf.getLong(no * 8)
+  }
+
+  private case class FlatBucketHistogram(buckets: HistogramBuckets, binHist: BinHistogram) extends Histogram {
+    binHist.intoValuesBuf(valuesBuf)
+    final def numBuckets: Int = buckets.numBuckets
+    final def bucketTop(no: Int): Double = buckets.bucketTop(no)
+    final def bucketValue(no: Int): Double = FlatBucketValues(valuesBuf).bucket(no)
+    final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer =
+      intoBuf.map { x => x.wrap(binHist.buf); x }.getOrElse(binHist.buf)
   }
 
   /**
@@ -65,6 +104,9 @@ object BinaryHistogram {
     }
     bytesNeeded
   }
+
+  def writeBinHistogram(bucketDef: Array[Byte], values: Array[Long]): Int =
+    writeBinHistogram(bucketDef, values, histBuf)
 }
 
 object HistogramVector {

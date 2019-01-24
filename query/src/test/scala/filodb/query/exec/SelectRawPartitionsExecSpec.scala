@@ -11,11 +11,11 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData._
-import filodb.core.TestData
+import filodb.core.{TestData, Types}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
@@ -51,6 +51,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory, MMD.dataset1.ingestionSchema)
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
+  val histData = MMD.linearHistSeries().take(100)
 
   implicit val execTimeout = 5.seconds
 
@@ -59,8 +60,11 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.setup(MMD.dataset1, 0, TestData.storeConf)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
+    memStore.setup(MMD.histDataset, 0, TestData.storeConf)
+    memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
     memStore.commitIndexForTesting(timeseriesDataset.ref)
     memStore.commitIndexForTesting(MMD.dataset1.ref)
+    memStore.commitIndexForTesting(MMD.histDataset.ref)
   }
 
   override def afterAll(): Unit = {
@@ -124,6 +128,24 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     result.result.size shouldEqual 1
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getLong(1))).toList
     dataRead shouldEqual mmdTuples.filter(_(5) == "Series 1").map(r => (r(0), r(4))).take(5)
+  }
+
+  it ("should read raw Histogram samples from Memstore using IntervalSelector") {
+    import ZeroCopyUTF8String._
+    val start: BinaryRecord = BinaryRecord(MMD.histDataset, Seq(100000L))
+    val end: BinaryRecord = BinaryRecord(MMD.histDataset, Seq(150000L))
+
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("id1", now, numRawSamples, dummyDispatcher, MMD.histDataset.ref, 0,
+      filters, RowKeyInterval(start, end), Seq(0, 3))
+
+    val resp = execPlan.execute(memStore, MMD.histDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
+    val orig = histData.filter(_(4).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
   it ("should read periodic samples from Memstore") {

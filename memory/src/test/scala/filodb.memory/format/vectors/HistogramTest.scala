@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import org.agrona.concurrent.UnsafeBuffer
+
 object HistogramTest {
   val bucketScheme = GeometricBuckets(1.0, 2.0, 8)
   val rawHistBuckets = Seq(
@@ -44,6 +46,27 @@ class HistogramTest extends NativeVectorTest {
         info(s"For histogram ${h.values.toList} -> quantile = $quantile")
         quantile shouldEqual res
       }
+    }
+
+    it("should serialize to and from BinaryHistograms and compare correctly") {
+      val binHistograms = mutableHistograms.map { h =>
+        val buf = new UnsafeBuffer(new Array[Byte](2048))
+        h.serialize(Some(buf))
+      }
+
+      binHistograms.zip(mutableHistograms).foreach { case (binHistBuf, mutHist) =>
+        val binHist = BinaryHistogram.BinHistogram(binHistBuf).toHistogram
+        binHist shouldEqual mutHist
+        binHist.hashCode shouldEqual mutHist.hashCode
+        println(binHist)
+      }
+    }
+
+    it("should compare different histograms correctly") {
+      mutableHistograms(0) shouldEqual mutableHistograms(0)
+      mutableHistograms(0) should not equal ("boofoo")
+
+      mutableHistograms(0).compare(mutableHistograms(1)) should be > 0
     }
   }
 }

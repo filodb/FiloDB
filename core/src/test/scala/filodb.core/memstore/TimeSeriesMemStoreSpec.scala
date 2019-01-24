@@ -100,7 +100,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(histDataset.ref, 0) shouldEqual 10
 
     val split = memStore.getScanSplits(histDataset.ref, 1).head
-    val filter = ColumnFilter("__name__", Filter.Equals("http_requests_total1".utf8))
+    val filter = ColumnFilter("dc", Filter.Equals("1".utf8))
     // check sums
     val sums = memStore.scanRows(histDataset, Seq(2), FilteredPartitionScan(split, Seq(filter)))
                        .map(_.getLong(0)).toList
@@ -110,10 +110,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                          data(31)(2).asInstanceOf[Long])
 
     val hists = memStore.scanRows(histDataset, Seq(3), FilteredPartitionScan(split, Seq(filter)))
-                        .map(_.as[MutableHistogram](0))
+                        .map(_.getHistogram(0))
     hists.zipWithIndex.foreach { case (h, i) =>
-      h.buckets shouldEqual histBucketScheme
-      h.values shouldEqual data(1 + 10*i)(3).asInstanceOf[MutableHistogram].values
+      h shouldEqual data(1 + 10*i)(3).asInstanceOf[MutableHistogram]
     }
   }
 

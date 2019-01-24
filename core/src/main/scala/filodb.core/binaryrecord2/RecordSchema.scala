@@ -62,14 +62,16 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   // Typed, efficient functions, one for each field/column, to add to a RecordBuilder efficiently from a RowReader
   // with no boxing or extra allocations involved
   val builderAdders = columnTypes.zipWithIndex.map {
-    case (Column.ColumnType.IntColumn, colNo) =>
-      (row: RowReader, builder: RecordBuilder) => builder.addInt(row.getInt(colNo))
     case (Column.ColumnType.LongColumn, colNo) =>
       (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
     case (Column.ColumnType.TimestampColumn, colNo) =>
       (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
     case (Column.ColumnType.DoubleColumn, colNo) =>
       (row: RowReader, builder: RecordBuilder) => builder.addDouble(row.getDouble(colNo))
+    case (Column.ColumnType.HistogramColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.getHistogram(colNo).serialize())
+    case (Column.ColumnType.IntColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addInt(row.getInt(colNo))
     case (Column.ColumnType.StringColumn, colNo) =>
       // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
       (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
@@ -420,6 +422,8 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getDouble(columnNo: Int): Double = schema.getDouble(recordBase, recordOffset, columnNo)
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = filoUTF8String(columnNo).toString
+  override def getHistogram(columnNo: Int): bv.Histogram =
+    bv.BinaryHistogram.BinHistogram(blobAsBuffer(columnNo)).toHistogram
   def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 

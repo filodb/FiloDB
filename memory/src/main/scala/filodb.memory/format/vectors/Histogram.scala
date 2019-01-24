@@ -1,5 +1,6 @@
 package filodb.memory.format.vectors
 
+import org.agrona.concurrent.UnsafeBuffer
 import scalaxy.loops._
 
 import filodb.memory.BinaryRegion
@@ -9,10 +10,10 @@ import filodb.memory.format._
  * A trait to represent bucket-based histograms as well as derived statistics such as sums or rates of
  * increasing histograms.
  * The schema is based on Prometheus histograms.  Each bucket is designed to contain all observations less than
- * or equal to the bucketTop, thus it is cumulative with increasing bucket number.
+ * or equal to the bucketTop ("upper bound"), thus it is cumulative with increasing bucket number.
  * Furthermore the LAST bucket should contain the total number of observations overall.
  */
-trait Histogram {
+trait Histogram extends Ordered[Histogram] {
   def numBuckets: Int
 
   /**
@@ -27,6 +28,15 @@ trait Histogram {
   def bucketValue(no: Int): Double
 
   /**
+   * Returns an UnsafeBuffer pointing to a serialized BinaryHistogram representation of this histogram.
+   * @param buf if Some(buf) supplied, then that buf is either written into or re-used to wrap where the serialized
+   *            representation is.  The supplied buffer must be large enough to hold serialized histogram.
+   *            if None is passed, then the thread-local buffer may be re-used, in which case be careful as that
+   *            buffer will be mutated with the next call to serialize() within the same thread.
+   */
+  def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer
+
+  /**
    * Finds the first bucket number with a value greater than or equal to the given "rank"
    * @return the bucket number, or numBuckets if not found
    */
@@ -35,6 +45,8 @@ trait Histogram {
     while (bucketValue(bucketNo) < rank) bucketNo += 1
     bucketNo
   }
+
+  final def topBucketValue: Double = bucketValue(numBuckets - 1)
 
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
@@ -45,7 +57,7 @@ trait Histogram {
     else if (numBuckets < 2) Double.NaN
     else {
       // find rank for the quantile using total number of occurrences (which is the last bucket value)
-      var rank = q * bucketValue(numBuckets - 1)
+      var rank = q * topBucketValue
       // using rank, find the le bucket which would have the identified rank
       val b = firstBucketGTE(rank)
 
@@ -66,6 +78,39 @@ trait Histogram {
     }
     result
   }
+
+  /**
+   * Compares two Histograms for equality.
+   * If the # buckets or bucket bounds are not equal, just compare the top bucket value.
+   * If they are equal, compare counts from top on down.
+   */
+  def compare(other: Histogram): Int = {
+    if (numBuckets != other.numBuckets) return topBucketValue compare other.topBucketValue
+    for { b <- 0 until numBuckets optimized } {
+      if (bucketTop(b) != other.bucketTop(b)) return topBucketValue compare other.topBucketValue
+    }
+    for { b <- (numBuckets - 1) to 0 by -1 optimized } {
+      val countComp = bucketValue(b) compare other.bucketValue(b)
+      if (countComp != 0) return countComp
+    }
+    return 0
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case h: Histogram => compare(h) == 0
+    case other: Any   => false
+  }
+
+  override def toString: String =
+    (0 until numBuckets).map { b => s"${bucketTop(b)}=${bucketValue(b)}" }.mkString("{", ", ", "}")
+
+  override def hashCode: Int = {
+    var hash = 7.0
+    for { b <- 0 until numBuckets optimized } {
+      hash = (31 * bucketTop(b) + hash) * 31 + bucketValue(b)
+    }
+    java.lang.Double.doubleToLongBits(hash).toInt
+  }
 }
 
 /**
@@ -75,6 +120,11 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def numBuckets: Int = buckets.numBuckets
   final def bucketTop(no: Int): Double = buckets.bucketTop(no)
   final def bucketValue(no: Int): Double = values(no)
+  final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
+    val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
+    BinaryHistogram.writeBinHistogram(HistogramBuckets.cachedBucketBytes(buckets), values.map(_.toLong), buf)
+    buf
+  }
 }
 
 object MutableHistogram {
@@ -169,6 +219,21 @@ object HistogramBuckets {
     UnsafeUtils.setDouble(bytes, UnsafeUtils.arayOffset + OffsetBucketDetails, firstBucket)
     UnsafeUtils.setDouble(bytes, UnsafeUtils.arayOffset + OffsetBucketDetails + 8, multiplier)
     bytes
+  }
+
+  private val bucketBuf = new ThreadLocal[(HistogramBuckets, Array[Byte])]
+
+  // Caches last binary bucket definition per thread and retrieves from cache for faster access
+  def cachedBucketBytes(buckets: HistogramBuckets): Array[Byte] = bucketBuf.get match {
+    case UnsafeUtils.ZeroPointer =>
+      val bucketBytes = buckets.toByteArray
+      bucketBuf.set((buckets, bucketBytes))
+      bucketBytes
+    case (bucketDef, bytes) if bucketDef != buckets =>
+      val bucketBytes = buckets.toByteArray
+      bucketBuf.set((buckets, bucketBytes))
+      bucketBytes
+    case (bucketDef, bytes) => bytes
   }
 
   // A bucket definition for the bits of a long, ie from 2^0 to 2^63
