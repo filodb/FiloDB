@@ -16,6 +16,7 @@ import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, Z
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
+import filodb.query.exec.{PartKeysDistConcatExec, PartKeysExec}
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -232,9 +233,11 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   it ("should serialize and deserialize ExecPlan2 involving metadata queries") {
     val node0 = TestProbe().ref
-    val mapper = new ShardMapper(1)
+    val node1 = TestProbe().ref
+    val mapper = new ShardMapper(2) // two shards
     def mapperRef: ShardMapper = mapper
     mapper.registerNode(Seq(0), node0)
+    mapper.registerNode(Seq(1), node1)
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
@@ -246,14 +249,19 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       "http_request_duration_seconds_bucket{job=\"prometheus\"}",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(0, 100))
-    roundTrip(execPlan1) shouldEqual execPlan1
+    val partKeysExec = execPlan1.asInstanceOf[PartKeysExec] // will be dispatched to single shard
+    roundTrip(partKeysExec) shouldEqual partKeysExec
 
     // without shardcolumns in filters
     val logicalPlan2 = Parser.metadataQueryToLogicalPlan(
       "http_request_duration_seconds_bucket",
       qParams)
     val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(0, 100))
-    roundTrip(execPlan2) shouldEqual execPlan2
+    val partKeysDistConcatExec = execPlan2.asInstanceOf[PartKeysDistConcatExec]
+
+    // will be dispatched to all active shards since no shard column filters in the query
+    partKeysDistConcatExec.children.size shouldEqual 2
+    roundTrip(partKeysDistConcatExec) shouldEqual partKeysDistConcatExec
   }
 
   it ("should serialize and deserialize QueryError") {

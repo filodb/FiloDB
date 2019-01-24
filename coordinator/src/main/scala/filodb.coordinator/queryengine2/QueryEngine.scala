@@ -7,6 +7,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
@@ -29,6 +30,8 @@ import filodb.query.exec._
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
+
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
   /**
     * This is the facade to trigger orchestration of the ExecPlan.
@@ -215,6 +218,7 @@ class QueryEngine(dataset: Dataset,
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
                         shardsFromFilters(filters, options)
                       } else {
+                        mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
                       }
     shardsToHit.map { shard =>
@@ -233,6 +237,7 @@ class QueryEngine(dataset: Dataset,
     val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
                         shardsFromFilters(lp.filters, options)
                       } else {
+                        mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
                       }
     shardsToHit.map { shard =>
