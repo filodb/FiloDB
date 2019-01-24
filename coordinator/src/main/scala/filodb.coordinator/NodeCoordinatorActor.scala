@@ -11,6 +11,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
 import filodb.core.store.{MetaStore, StoreConfig}
@@ -121,6 +122,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def setupDataset(dataset: Dataset,
                            storeConf: StoreConfig,
                            source: IngestionSource,
+                           downsample: DownsampleConfig,
                            origin: ActorRef): Unit = {
     import ActorName.{Ingestion, Query}
 
@@ -129,7 +131,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     clusterActor match {
       case Some(nca) =>
-        val props = IngestionActor.props(dataset, memStore, source, storeConf, statusActor.get)
+        val props = IngestionActor.props(dataset, memStore, source, downsample, storeConf, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
@@ -156,9 +158,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def ingestHandlers: Receive = LoggingReceive {
-    case DatasetSetup(compactDSString, storeConf, source) =>
+    case DatasetSetup(compactDSString, storeConf, source, downsample) =>
       val dataset = Dataset.fromCompactString(compactDSString)
-      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, sender()) }
+      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample, sender()) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset ${dataset.ref}") }
 
     case IngestRows(dataset, shard, rows) =>

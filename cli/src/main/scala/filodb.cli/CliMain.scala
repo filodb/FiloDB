@@ -30,6 +30,7 @@ class Arguments extends FieldArgs {
   var configPath: Option[String] = None
   var dataColumns: Seq[String] = Nil
   var partitionColumns: Seq[String] = Nil
+  var downsamplers: Seq[String] = Nil
   var rowKeys: Seq[String] = Seq("timestamp")
   var partitionKeys: Seq[String] = Nil
   var select: Option[Seq[String]] = None
@@ -142,11 +143,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.dataset.isDefined &&
                   args.dataColumns.nonEmpty &&
                   args.partitionColumns.nonEmpty, "Need to specify dataset and partition/dataColumns")
-          val datasetName = args.dataset.get
           createDataset(getRef(args),
                         args.dataColumns,
                         args.partitionColumns,
                         args.rowKeys,
+                        args.downsamplers,
                         args.metricColumn,
                         args.shardKeyColumns,
                         args.ignoreShardKeyColumnSuffixes,
@@ -259,13 +260,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                     dataColumns: Seq[String],
                     partitionColumns: Seq[String],
                     rowKeys: Seq[String],
+                    downsamplers: Seq[String],
                     metricColumn: String,
                     shardKeyColumns: Seq[String],
                     ignoreShardKeyColumnSuffixes: Map[String, Seq[String]],
                     ignoreTagsOnPartitionKeyHash: Seq[String],
                     timeout: FiniteDuration): Unit = {
     try {
-      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys)
+      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys, downsamplers)
       val options = DatasetOptions.DefaultOptions.copy(metricColumn = metricColumn,
                                                        shardKeyColumns = shardKeyColumns,
                                                        ignoreShardKeyColumnSuffixes = ignoreShardKeyColumnSuffixes,

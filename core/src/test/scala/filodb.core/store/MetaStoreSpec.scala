@@ -2,7 +2,7 @@ package filodb.core.store
 
 import java.util.UUID
 
-import com.typesafe.config.{ConfigException, ConfigFactory}
+import com.typesafe.config.{ConfigException, ConfigFactory, ConfigRenderOptions}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
@@ -100,7 +100,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   private def stripStoreConf(c: IngestionConfig): IngestionConfig =
-    c.copy(streamConfig = c.streamConfig.withoutPath("store"))
+    c.copy(sourceConfig = c.sourceConfig.withoutPath("store"))
 
   describe("IngestionConfig API") {
     val config1 = ConfigFactory.parseString("""brokers=["foo.bar.com:1234", "foo.baz.com:5678"]
@@ -148,34 +148,69 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
       ingestionConfig.ref shouldEqual DatasetRef("gdelt")
       ingestionConfig.streamFactoryClass shouldEqual "a.backup"
-      ingestionConfig.streamConfig.isEmpty shouldEqual false
+      ingestionConfig.sourceConfig.isEmpty shouldEqual false
     }
 
-    it("should be able to parse for IngestionConfig with sourceconfig") {
-      val sourceConf = """
-                         |dataset = "gdelt"
-                         |num-shards = 128
-                         |min-num-nodes = 32
-                         |sourceconfig {
-                         |  filo-topic-name = "org.example.app.topic1"
-                         |  bootstrap.servers = "host:port"
-                         |  filo-record-converter = "org.example.app.SomeRecordConverter"
-                         |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
-                         |  group.id = "org.example.app.consumer.group1"
-                         |  my.custom.key = "custom.value"
-                         |  store {
-                         |    flush-interval = 5m
-                         |    shard-mem-size = 500MB
-                         |  }
-                         |}
-                       """.stripMargin
+    val exampleSourceConf = """
+                       |dataset = "gdelt"
+                       |num-shards = 128
+                       |min-num-nodes = 32
+                       |sourceconfig {
+                       |  filo-topic-name = "org.example.app.topic1"
+                       |  bootstrap.servers = "host:port"
+                       |  filo-record-converter = "org.example.app.SomeRecordConverter"
+                       |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
+                       |  group.id = "org.example.app.consumer.group1"
+                       |  my.custom.key = "custom.value"
+                       |  store {
+                       |    flush-interval = 5m
+                       |    shard-mem-size = 500MB
+                       |  }
+                       |  downsample {
+                       |    enabled = true
+                       |    resolutions-ms = [ 60000 ]
+                       |    publisher-class = "filodb.kafka.KafkaDownsamplePublisher"
+                       |    publisher-config {
+                       |      kafka {
+                       |        bootstrap.servers = "localhost:9092"
+                       |        group.id = "filo-db-timeseries-downsample"
+                       |      }
+                       |      topics {
+                       |        60000 = "ts-downsample-60000"
+                       |      }
+                       |      max-queue-size = 5000
+                       |      min-queue-size = 100
+                       |      consume-batch-size = 20
+                       |    }
+                       |  }
+                       |}
+                     """.stripMargin
 
-      val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
+
+    it("should be able to parse for IngestionConfig with sourceconfig and downsample config") {
+      val ingestionConfig = IngestionConfig(exampleSourceConf, "a.backup").get
       ingestionConfig.ref shouldEqual DatasetRef("gdelt")
       ingestionConfig.streamFactoryClass shouldEqual "a.backup"
-      ingestionConfig.streamConfig.isEmpty shouldEqual false
-      ingestionConfig.streamConfig.getString("group.id") shouldEqual "org.example.app.consumer.group1"
-      ingestionConfig.streamConfig.getString("my.custom.key") shouldEqual "custom.value"
+      ingestionConfig.sourceConfig.isEmpty shouldEqual false
+      ingestionConfig.sourceConfig.getString("group.id") shouldEqual "org.example.app.consumer.group1"
+      ingestionConfig.sourceConfig.getString("my.custom.key") shouldEqual "custom.value"
+      ingestionConfig.downsampleConfig.config.getString("publisher-class")shouldEqual
+                               "filodb.kafka.KafkaDownsamplePublisher"
+    }
+
+    it("should be able to store and read back same source config") {
+      val ingestionConfig = IngestionConfig(exampleSourceConf, "a.backup").get
+      val storedConfig = ingestionConfig.sourceStoreConfig.root.render(ConfigRenderOptions.concise)
+      val readConfig = IngestionConfig(DatasetRef("gdelt"),
+        "a.backup","{\"min-num-nodes\":32,\"num-shards\":128}", storedConfig)
+      ingestionConfig.streamFactoryClass shouldEqual "a.backup"
+      ingestionConfig.sourceConfig.isEmpty shouldEqual false
+      ingestionConfig.sourceConfig.getString("group.id") shouldEqual "org.example.app.consumer.group1"
+      ingestionConfig.sourceConfig.getString("my.custom.key") shouldEqual "custom.value"
+      ingestionConfig.downsampleConfig.config.getString("publisher-class")shouldEqual
+                         "filodb.kafka.KafkaDownsamplePublisher"
+      ingestionConfig.storeConfig.flushInterval.toMillis shouldEqual 300000
+
     }
 
     it("should return failure context when no dataset is configured") {

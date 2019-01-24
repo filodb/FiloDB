@@ -9,6 +9,7 @@ import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, StoreConfig}
 
@@ -366,7 +367,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
         val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, setup.storeConfig, dataset)
+        val state = DatasetInfo(resources, metrics, source, setup.downsampleConfig, setup.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
@@ -450,7 +451,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             val now = System.currentTimeMillis()
             val info = _datasetInfo(event.ref)
             if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
-              logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
+              logger.warn(s"Attempting to reassign shard=${event.shard} from dataset=${event.ref}. " +
                 s"It was last reassigned at ${lastReassignment}")
               val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
               if (assignments.valuesIterator.flatten.contains(event.shard)) {
@@ -458,12 +459,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                 info.metrics.numErrorReassignmentsDone.increment()
               } else {
                 info.metrics.numErrorReassignmentsSkipped.increment()
-                logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
+                logger.warn(s"Shard=${event.shard} from dataset=${event.ref} was NOT reassigned possibly " +
                   s"because no other node was available")
               }
             } else {
               info.metrics.numErrorReassignmentsSkipped.increment()
-              logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
+              logger.warn(s"Skipping reassignment of shard=${event.shard} from dataset=${event.ref} since " +
                 s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
             }
           case _ =>
@@ -471,7 +472,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         updateShardMetrics()
       } else {
         logger.warn(s"Ignoring event $event from $sender since it does not match current " +
-          s"owner of shard ${event.shard} which is ${mapper.coordForShard(event.shard)}")
+          s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")
       }
     }
   }
@@ -511,7 +512,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                                               shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
     logger.info(s"Sending setup message for ${state.dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.storeConfig, state.source)
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
+      state.storeConfig, state.source, state.downsample)
     coord ! setupMsg
 
     for { shard <- shards }  {
@@ -570,6 +572,7 @@ private[coordinator] object ShardManager {
   final case class DatasetInfo(resources: DatasetResourceSpec,
                                metrics: ShardHealthStats,
                                source: IngestionSource,
+                               downsample: DownsampleConfig,
                                storeConfig: StoreConfig,
                                dataset: Dataset)
 }

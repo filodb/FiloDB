@@ -326,6 +326,7 @@ object MetricsTestData {
                                   Seq("tags:map"),
                                   Seq("timestamp:ts", "value:double"),
                                   Seq("timestamp"),
+                                  Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)

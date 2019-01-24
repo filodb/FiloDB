@@ -9,7 +9,7 @@ import filodb.memory.MemFactory
 import filodb.prometheus.FormatConversion
 
 object TimeSeriesFixture {
-  //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,app=filodb counter=0 1536790212000000000",
+  //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ns=filodb counter=0 1536790212000000000",
   def timeseries(no: Int, tags: Map[String, String]): TimeSeries = {
     val builder = TimeSeries.newBuilder
                     .addSamples(Sample.newBuilder.setTimestampMs(1000000L + no).setValue(1.1 + no).build)
@@ -27,13 +27,13 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
   val tagsWithMetric = baseTags + ("__name__" -> "num_partitions")
 
   it("should parse from TimeSeries proto and write to RecordBuilder") {
-    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("app" -> "filodb"))
+    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("_ns" -> "filodb"))
     val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
 
     val records = PrometheusInputRecord(proto1, dataset)
     records should have length (1)
     val record1 = records.head
-    record1.tags shouldEqual (baseTags + ("app" -> "filodb"))
+    record1.tags shouldEqual (baseTags + ("_ns" -> "filodb"))
     record1.getMetric shouldEqual "num_partitions"
     record1.nonMetricShardValues shouldEqual Seq("filodb")
 
@@ -47,7 +47,7 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
 
       val consumer = new StringifyMapItemConsumer()
       dataset.ingestionSchema.consumeMapItems(base, offset, 2, consumer)
-      consumer.stringPairs.toMap shouldEqual (tagsWithMetric + ("app" -> "filodb"))
+      consumer.stringPairs.toMap shouldEqual (tagsWithMetric + ("_ns" -> "filodb"))
     }
   }
 
@@ -64,7 +64,7 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
     val records = PrometheusInputRecord(proto1, dataset)
     records should have length (1)
     val record1 = records.head
-    record1.tags shouldEqual (tagsWithExporter - "__name__" + ("app" -> "gateway"))
+    record1.tags shouldEqual (tagsWithExporter - "__name__" + ("_ns" -> "gateway"))
     record1.getMetric shouldEqual "num_partitions"
     record1.nonMetricShardValues shouldEqual Seq("gateway")
 

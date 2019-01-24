@@ -22,7 +22,7 @@ object RateFunctions {
       var durationToStart = (window.head.timestamp - startTimestamp).toDouble / 1000
       val durationToEnd = (endTimestamp - window.last.timestamp).toDouble / 1000
       val sampledInterval = (window.last.timestamp - window.head.timestamp).toDouble / 1000
-      val averageDurationBetweenSamples = sampledInterval / window.size.toDouble
+      val averageDurationBetweenSamples = sampledInterval / (window.size.toDouble - 1)
       val delta = window.last.value - window.head.value
 
       if (isCounter && delta > 0 && window.head.value >= 0) {

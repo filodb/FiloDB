@@ -209,6 +209,33 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual windowResults
   }
 
+  it("should calculate the rate of given samples matching the prometheus rate function") {
+    val samples = Seq(
+      1548191486000L -> 84,
+      1548191496000L -> 152,
+      1548191506000L -> 195,
+      1548191516000L -> 222,
+      1548191526000L -> 245,
+      1548191536000L -> 251,
+      1548191546000L -> 329,
+      1548191556000L -> 374,
+      1548191566000L -> 431
+    )
+    val windowResults = Seq(
+      1548191496000L -> 0.34,
+      1548191511000L -> 0.555,
+      1548191526000L -> 0.60375,
+      1548191541000L -> 0.668,
+      1548191556000L -> 1.0357142857142858
+    )
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L,300000,
+      RangeFunction(Some(RangeFunctionId.Rate), ColumnType.DoubleColumn, useChunked = false), queryConfig)
+    slidingWinIterator.foreach{ v =>
+      windowResults.find(a => a._1 == v.timestamp).foreach(b => Math.abs(b._2 - v.value) should be < 0.0000000001)
+    }
+  }
+
   it ("should calculate lastSample when ingested samples are more than 5 minutes apart") {
     val samples = Seq(
       1540832354000L->1d,
