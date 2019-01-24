@@ -148,7 +148,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         override val rows: Iterator[RowReader] = rowbuf.iterator
         override val key: RangeVectorKey = rvKey
       }
-      val srv = SerializableRangeVector(rv, cols, limit)
+      val srv = SerializableRangeVector(rv, cols)
       val observedTs = srv.rows.toSeq.map(_.getLong(0))
       val observedVal = srv.rows.toSeq.map(_.getDouble(1))
       observedTs shouldEqual tuples.map(_._1).take(limit)
@@ -245,7 +245,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                       UTF8Str("key2") -> UTF8Str("val2"))
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
-    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols, 10)
+    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
 
@@ -262,7 +262,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
     val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new ZCUTF8IteratorRowReader(expected.toIterator)), cols, 10))
+      new ZCUTF8IteratorRowReader(expected.toIterator)), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]

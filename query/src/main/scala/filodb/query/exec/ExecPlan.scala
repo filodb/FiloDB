@@ -45,7 +45,7 @@ trait ExecPlan extends QueryCommand {
   def submitTime: Long
 
   /**
-    * Limit on number of samples returned per RangeVector
+    * Limit on number of samples
     */
   def limit: Int
 
@@ -91,6 +91,7 @@ trait ExecPlan extends QueryCommand {
     * such as sending off an asynchronous response message etc.
     *
     */
+  // scalastyle:off method.length
   final def execute(source: ChunkSource,
                     dataset: Dataset,
                     queryConfig: QueryConfig)
@@ -106,14 +107,26 @@ trait ExecPlan extends QueryCommand {
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
+      var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       finalRes._1
         .map {
-          case r: SerializableRangeVector => r
+          case srv: SerializableRangeVector =>
+            numResultSamples += srv.numRows
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            if (numResultSamples > limit)
+              throw new IllegalArgumentException(s"This query results in more than $limit samples. " +
+                s"Try applying more filters or reduce time range.")
+            srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            SerializableRangeVector(rv, builder, recSchema, limit)
+            val srv = SerializableRangeVector(rv, builder, recSchema)
+            numResultSamples += srv.numRows
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            if (numResultSamples > limit)
+              throw new IllegalArgumentException(s"This query results in more than $limit samples. " +
+                s"Try applying more filters or reduce time range.")
+            srv
         }
-        .take(queryConfig.vectorsLimit)
         .toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
