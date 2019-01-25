@@ -144,11 +144,11 @@ trait ExecPlan extends QueryCommand {
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
+          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
     } catch { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree()}", ex)
+      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       Task(QueryError(id, ex))
     }
   }
@@ -179,15 +179,17 @@ trait ExecPlan extends QueryCommand {
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
     * structure, useful for debugging
+    *
+    * @param useNewline pass false if the result string needs to be in one line
     */
-  final def printTree(level: Int = 0): String = {
+  final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
     val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
       s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
     }
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
-    val childr = children.map(_.printTree(nextLevel + 1))
-    ((transf :+ curNode) ++ childr).mkString("\n")
+    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
+    ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
   protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
