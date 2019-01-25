@@ -114,7 +114,7 @@ trait ExecPlan extends QueryCommand {
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (numResultSamples > limit)
-              throw new IllegalArgumentException(s"This query results in more than $limit samples. " +
+              throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
           case rv: RangeVector =>
@@ -123,7 +123,7 @@ trait ExecPlan extends QueryCommand {
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (numResultSamples > limit)
-              throw new IllegalArgumentException(s"This query results in more than $limit samples. " +
+              throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
         }
