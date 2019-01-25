@@ -157,7 +157,7 @@ object HistogramVector {
     new ColumnarAppendableHistogramVector(factory, addr, maxItems)
   }
 
-  def apply(p: BinaryVectorPtr): VectorDataReader =
+  def apply(p: BinaryVectorPtr): HistogramReader =
     new ColumnarHistogramReader(p)
 }
 
@@ -291,7 +291,13 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
   }
 }
 
-class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends VectorDataReader {
+trait HistogramReader extends VectorDataReader {
+  def buckets: HistogramBuckets
+  def apply(index: Int): Histogram
+  def sum(start: Int, end: Int): Histogram
+}
+
+class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader {
   import HistogramVector._
 
   final def length: Int = getNumHistograms(histVect)

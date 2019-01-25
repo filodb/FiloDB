@@ -47,11 +47,18 @@ final case class PeriodicSamplesMapper(start: Long,
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
+    // Really, use the stale lookback window size, not 0 which doesn't make sense
+    val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
+
     sampleRangeFunc match {
       // Chunked: use it and trust it has the right type
+      case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+                                       windowLength, rangeFuncGen().asChunkedH, queryConfig))
+        }
       case c: ChunkedRangeFunction[_] =>
-        // Really, use the stale lookback window size, not 0 which doesn't make sense
-        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
@@ -135,6 +142,14 @@ class ChunkedWindowIteratorD(rv: RawDataRangeVector,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientRow = new TransientRow()) extends
 ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, queryConfig)()
+
+class ChunkedWindowIteratorH(rv: RawDataRangeVector,
+    start: Long, step: Long, end: Long, window: Long,
+    rangeFunction: ChunkedRangeFunction[TransientHistRow],
+    queryConfig: QueryConfig,
+    // put emitter here in constructor for faster access
+    var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
+ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, queryConfig)()
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size

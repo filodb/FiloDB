@@ -55,7 +55,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
 }
 
-final class TransientHistRow(var timestamp: Long, var value: bv.Histogram) extends MutableRowReader {
+final class TransientHistRow(var timestamp: Long = 0L,
+                             var value: bv.Histogram = bv.Histogram.empty) extends MutableRowReader {
   def setValues(ts: Long, hist: bv.Histogram): Unit = {
     timestamp = ts
     value = hist

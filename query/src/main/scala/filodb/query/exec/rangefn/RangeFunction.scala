@@ -180,6 +180,7 @@ object RangeFunction {
       case ColumnType.DoubleColumn => doubleChunkedFunction(func, funcParams)
       case ColumnType.LongColumn   => longChunkedFunction(func, funcParams)
       case ColumnType.TimestampColumn => longChunkedFunction(func, funcParams)
+      case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams)
       case other: ColumnType       => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
       iteratingFunction(func, funcParams)
@@ -215,6 +216,12 @@ object RangeFunction {
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
     case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
     case _                    => iteratingFunction(func, funcParams)
+  }
+
+  def histChunkedFunction(func: Option[RangeFunctionId],
+                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+    case None                 => () => new LastSampleChunkedFunctionH
+    case _                    => ???
   }
 
   /**
@@ -288,11 +295,25 @@ extends ChunkedRangeFunction[R] {
   def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit
 }
 
+// LastSample functions with double value, based on TransientRow
 abstract class LastSampleChunkedFuncDblVal(var value: Double = Double.NaN)
 extends LastSampleChunkedFunction[TransientRow] {
   override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+// LastSample function for Histogram columns
+class LastSampleChunkedFunctionH(var value: bv.Histogram = bv.Histogram.empty)
+extends LastSampleChunkedFunction[TransientHistRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    timestamp = ts
+    value = valReader.asHistReader(endRowNum)
   }
 }
 

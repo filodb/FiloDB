@@ -124,6 +124,7 @@ trait VectorDataReader extends AvailableReader {
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
   def asDoubleReader: vectors.DoubleVectorDataReader = this.asInstanceOf[vectors.DoubleVectorDataReader]
   def asUTF8Reader: vectors.UTF8VectorDataReader = this.asInstanceOf[vectors.UTF8VectorDataReader]
+  def asHistReader: vectors.HistogramReader = this.asInstanceOf[vectors.HistogramReader]
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go

@@ -113,6 +113,19 @@ trait Histogram extends Ordered[Histogram] {
   }
 }
 
+object Histogram {
+  val empty = new Histogram {
+    final def numBuckets: Int = 0
+    final def bucketTop(no: Int): Double = ???
+    final def bucketValue(no: Int): Double = ???
+    final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
+      val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
+      BinaryHistogram.writeBinHistogram(HistogramBuckets.emptyBucketsBytes, Array[Long](), buf)
+      buf
+    }
+  }
+}
+
 /**
  * A histogram class that can be used for aggregation and to represent intermediate values
  */
@@ -240,6 +253,9 @@ object HistogramBuckets {
   // le's = [1, 3, 7, 15, 31, ....]
   val binaryBuckets64 = GeometricBuckets_1(2.0d, 2.0d, 64)
   val binaryBuckets64Bytes = binaryBuckets64.toByteArray
+
+  val emptyBuckets = GeometricBuckets(2.0d, 2.0d, 0)
+  val emptyBucketsBytes = emptyBuckets.toByteArray
 }
 
 /**

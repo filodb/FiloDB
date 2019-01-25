@@ -62,6 +62,13 @@ class HistogramTest extends NativeVectorTest {
       }
     }
 
+    it("should serialize to and from an empty Histogram") {
+      val binEmptyHist = BinaryHistogram.BinHistogram(Histogram.empty.serialize())
+      binEmptyHist.numBuckets shouldEqual 0
+      binEmptyHist.toHistogram shouldEqual Histogram.empty
+      Histogram.empty.toString shouldEqual "{}"
+    }
+
     it("should compare different histograms correctly") {
       mutableHistograms(0) shouldEqual mutableHistograms(0)
       mutableHistograms(0) should not equal ("boofoo")
