@@ -27,13 +27,13 @@ class RangeVectorSpec  extends FunSpec with Matchers {
 
   it("should be able to create and read from SerializableRangeVector") {
     val rv = new TuplesRangeVector(tuples)
-    val srv = SerializableRangeVector(rv, cols, numRawSamples)
+    val srv = SerializableRangeVector(rv, cols)
     val observedTs = srv.rows.toSeq.map(_.getLong(0))
     val observedVal = srv.rows.toSeq.map(_.getDouble(1))
     observedTs shouldEqual tuples.map(_._1)
     observedVal shouldEqual tuples.map(_._2)
 
-    val srv2 = SerializableRangeVector(srv, cols, numRawSamples)
+    val srv2 = SerializableRangeVector(srv, cols)
     val observedTs2 = srv2.rows.toSeq.map(_.getLong(0))
     val observedVal2 = srv2.rows.toSeq.map(_.getDouble(1))
     observedTs2 shouldEqual tuples.map(_._1)
@@ -46,7 +46,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
     val builder = SerializableRangeVector.toBuilder(schema)
 
     // Sharing one builder across multiple input RangeVectors
-    val srvs = rvs.map(rv => SerializableRangeVector(rv, builder, schema, numRawSamples))
+    val srvs = rvs.map(rv => SerializableRangeVector(rv, builder, schema))
 
     // Now verify each of them
     val observedTs = srvs(0).rows.toSeq.map(_.getLong(0))

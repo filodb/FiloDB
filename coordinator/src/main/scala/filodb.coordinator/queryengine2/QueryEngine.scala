@@ -195,7 +195,7 @@ class QueryEngine(dataset: Dataset,
     val renamedFilters = renameMetricFilter(lp.filters)
     shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         renamedFilters, toRowKeyRange(lp.rangeSelector), colIDs)
     }
   }
@@ -219,7 +219,7 @@ class QueryEngine(dataset: Dataset,
                       }
     shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      exec.LabelValuesExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         filters, labelName, lp.lookbackTimeInMillis)
     }
   }
@@ -231,7 +231,7 @@ class QueryEngine(dataset: Dataset,
     val renamedFilters = renameMetricFilter(lp.filters)
     shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         renamedFilters, lp.start, lp.end)
     }
   }
@@ -246,7 +246,7 @@ class QueryEngine(dataset: Dataset,
     val renamedFilters = renameMetricFilter(lp.filters)
     shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectChunkInfosExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      SelectChunkInfosExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         renamedFilters, toRowKeyRange(lp.rangeSelector), colID)
     }
   }

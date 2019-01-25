@@ -30,7 +30,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.prometheus.query.PrometheusModel._
 
   val queryOptions = QueryOptions(spreadFunc = { _ => settings.queryDefaultSpread },
-                                  itemLimit = settings.querySampleLimit)
+                                  sampleLimit = settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range

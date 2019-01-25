@@ -34,7 +34,7 @@ class Arguments extends FieldArgs {
   var partitionKeys: Seq[String] = Nil
   var select: Option[Seq[String]] = None
   // max # query items (vectors or tuples) returned. Don't make it too high.
-  var limit: Int = 100
+  var limit: Int = 1000
   var sampleLimit: Int = 200
   var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
