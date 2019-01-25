@@ -170,8 +170,7 @@ object SerializableRangeVector extends StrictLogging {
    */
   def apply(rv: RangeVector,
             builder: RecordBuilder,
-            schema: RecordSchema,
-            limit: Int): SerializableRangeVector = {
+            schema: RecordSchema): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -180,7 +179,7 @@ object SerializableRangeVector extends StrictLogging {
     try {
       OffheapSortedIDMap.validateNoSharedLocks()
       val rows = rv.rows
-      while (rows.hasNext && numRows < limit) {
+      while (rows.hasNext) {
         numRows += 1
         builder.addFromReader(rows.next)
       }
@@ -201,9 +200,9 @@ object SerializableRangeVector extends StrictLogging {
    * Creates a SerializableRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
    * Since it wastes space when working with multiple RVs, should be used mostly for testing.
    */
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo], limit: Int): SerializableRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, toBuilder(schema), schema, limit)
+    apply(rv, toBuilder(schema), schema)
   }
 
   // TODO: make this configurable....

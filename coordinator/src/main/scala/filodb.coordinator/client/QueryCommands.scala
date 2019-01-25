@@ -35,12 +35,12 @@ object QueryCommands {
   final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Int = { x => 1 },
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
-                                itemLimit: Int = 100,
+                                sampleLimit: Int = 1000000,
                                 shardOverrides: Option[Seq[Int]] = None)
 
   object QueryOptions {
-    def apply(constSpread: Int, itemLimit: Int): QueryOptions =
-      QueryOptions(spreadFunc = { x => constSpread}, itemLimit = itemLimit)
+    def apply(constSpread: Int, sampleLimit: Int): QueryOptions =
+      QueryOptions(spreadFunc = { x => constSpread}, sampleLimit = sampleLimit)
 
     /**
      * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
