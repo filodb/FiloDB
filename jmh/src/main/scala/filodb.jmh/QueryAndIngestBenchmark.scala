@@ -129,7 +129,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 10000))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 20000))
   }
 
   private var testProducingFut: Option[Future[Unit]] = None

@@ -45,7 +45,7 @@ trait ExecPlan extends QueryCommand {
   def submitTime: Long
 
   /**
-    * Limit on number of samples
+    * Limit on number of samples returned by this ExecPlan
     */
   def limit: Int
 
