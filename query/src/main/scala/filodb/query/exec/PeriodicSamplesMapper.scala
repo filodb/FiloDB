@@ -49,28 +49,27 @@ final case class PeriodicSamplesMapper(start: Long,
     val sampleRangeFunc = rangeFuncGen()
     sampleRangeFunc match {
       // Chunked: use it and trust it has the right type
-      case c: ChunkedRangeFunction =>
+      case c: ChunkedRangeFunction[_] =>
         // Really, use the stale lookback window size, not 0 which doesn't make sense
         val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                      windowLength, rangeFuncGen().asInstanceOf[ChunkedRangeFunction],
-                                      queryConfig)())
+            new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+                                       windowLength, rangeFuncGen().asChunkedD, queryConfig))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
-              rangeFuncGen(), queryConfig))
+              rangeFuncGen().asSliding, queryConfig))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
-              rangeFuncGen(), queryConfig))
+              rangeFuncGen().asSliding, queryConfig))
         }
     }
   }
@@ -98,20 +97,21 @@ final case class PeriodicSamplesMapper(start: Long,
  * However, note that sliding window iterators have to do twice as much work, adding and removing, so it would
  * only be worth it if the overlap is more than 50%.
  */
-class ChunkedWindowIterator(rv: RawDataRangeVector,
-                            start: Long,
-                            step: Long,
-                            end: Long,
-                            window: Long,
-                            rangeFunction: ChunkedRangeFunction,
-                            queryConfig: QueryConfig)
-                           (windowIt: WindowedChunkIterator =
-                              new WindowedChunkIterator(rv, start, step, end, window)
-                           ) extends Iterator[TransientRow] {
-  private val sampleToEmit = new TransientRow()
+abstract class ChunkedWindowIterator[R <: MutableRowReader](
+    rv: RawDataRangeVector,
+    start: Long,
+    step: Long,
+    end: Long,
+    window: Long,
+    rangeFunction: ChunkedRangeFunction[R],
+    queryConfig: QueryConfig)
+    (windowIt: WindowedChunkIterator =
+      new WindowedChunkIterator(rv, start, step, end, window)
+    ) extends Iterator[R] {
+  def sampleToEmit: R
 
   override def hasNext: Boolean = windowIt.hasMoreWindows
-  override def next: TransientRow = {
+  override def next: R = {
     rangeFunction.reset()
     // TODO: detect if rangeFunction needs items completely sorted.  For example, it is possible
     // to do rate if only each chunk is sorted.  Also check for counter correction here
@@ -127,6 +127,14 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
     sampleToEmit
   }
 }
+
+class ChunkedWindowIteratorD(rv: RawDataRangeVector,
+    start: Long, step: Long, end: Long, window: Long,
+    rangeFunction: ChunkedRangeFunction[TransientRow],
+    queryConfig: QueryConfig,
+    // put emitter here in constructor for faster access
+    var sampleToEmit: TransientRow = new TransientRow()) extends
+ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, queryConfig)()
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size

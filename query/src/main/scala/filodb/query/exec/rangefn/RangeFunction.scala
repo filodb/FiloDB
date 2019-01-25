@@ -18,17 +18,22 @@ trait Window {
   def last: TransientRow
 }
 
+// Just a marker trait for all RangeFunction implementations, sliding and chunked
+sealed trait BaseRangeFunction {
+  def asSliding: RangeFunction = this.asInstanceOf[RangeFunction]
+  def asChunkedD: ChunkedRangeFunction[TransientRow] = this.asInstanceOf[ChunkedRangeFunction[TransientRow]]
+  def asChunkedH: ChunkedRangeFunction[TransientHistRow] = this.asInstanceOf[ChunkedRangeFunction[TransientHistRow]]
+}
+
 /**
-  * All Range Vector Functions are implementation of this trait.
+  * Double-based Range Vector Functions that work with the SlidingWindowIterator.
   * There are multiple choices for function implementation:
   * 1. Use the `addToWindow` and `removeFromWindow` events to evaluate the next value to emit.
   *    This may result in O(n) complexity for emitting the entire range vector.
   * 2. Use the entire window content in `apply` to emit the next value. Depending on whether the
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
-  * 3. Use the addChunks() API of the ChunkedRangeFunction subtrait for more efficient proessing of windows
-  *    in chunks of rows (rather than one at a time)
   */
-trait RangeFunction {
+trait RangeFunction extends BaseRangeFunction {
   /**
     * Needs last sample prior to window start
     */
@@ -73,17 +78,10 @@ trait RangeFunction {
 }
 
 /**
- * Improved RangeFunction API with direct chunk access for faster columnar/bulk operations
+ * Improved RangeFunction API with direct chunk access for faster columnar/bulk operations.
+ * It also allows for different MutableRows to be plugged in for different types.
  */
-trait ChunkedRangeFunction extends RangeFunction {
-  def addedToWindow(row: TransientRow, window: Window): Unit = {}
-
-  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
-
-  def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
-            sampleToEmit: TransientRow,
-            queryConfig: QueryConfig): Unit = {}
-
+trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
   /**
    * Resets the state
    */
@@ -106,14 +104,14 @@ trait ChunkedRangeFunction extends RangeFunction {
   /**
    * Return the computed result in the sampleToEmit
    */
-  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit
+  def apply(endTimestamp: Long, sampleToEmit: R): Unit
 }
 
 /**
  * Standard ChunkedRangeFunction implementation extracting the start and ending row numbers from the timestamp
  * and returning the double value vector and reader with the row numbers
  */
-trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
+trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                       startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
@@ -136,7 +134,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
                           endRowNum: Int): Unit
 }
 
-trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
+trait ChunkedLongRangeFunction extends ChunkedRangeFunction[TransientRow] {
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                       startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
@@ -160,7 +158,7 @@ trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
 }
 
 object RangeFunction {
-  type RangeFunctionGenerator = () => RangeFunction
+  type RangeFunctionGenerator = () => BaseRangeFunction
 
   /**
    * Returns a (probably new) instance of RangeFunction given the func ID and column type
@@ -168,7 +166,7 @@ object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             columnType: ColumnType,
             funcParams: Seq[Any] = Nil,
-            useChunked: Boolean): RangeFunction =
+            useChunked: Boolean): BaseRangeFunction =
     generatorFor(func, columnType, funcParams, useChunked)()
 
   /**
@@ -268,12 +266,8 @@ object LastSampleFunction extends RangeFunction {
  * Directly obtain the last sample from chunks for much much faster performance compared to above
  * TODO: one day we should expose higher level means of returning the actual Long value instead of converting to Double
  */
-abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
-                                         var value: Double = Double.NaN) extends ChunkedRangeFunction {
-  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
-  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, value)
-  }
+abstract class LastSampleChunkedFunction[R <: MutableRowReader](var timestamp: Long = -1L)
+extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
@@ -294,7 +288,15 @@ abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
   def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit
 }
 
-class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
+abstract class LastSampleChunkedFuncDblVal(var value: Double = Double.NaN)
+extends LastSampleChunkedFunction[TransientRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
   final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
     val doubleVal = dblReader(valVector, endRowNum)
@@ -314,7 +316,7 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFunction() {
   }
 }
 
-class LastSampleChunkedFunctionL extends LastSampleChunkedFunction() {
+class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
   final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
     val longReader = valReader.asLongReader
     timestamp = ts

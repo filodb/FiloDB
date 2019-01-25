@@ -12,7 +12,7 @@ import filodb.core.{MetricsTestData, TestData}
 import filodb.memory._
 import filodb.memory.format.TupleRowReader
 import filodb.query.QueryConfig
-import filodb.query.exec.{ChunkedWindowIterator, SlidingWindowIterator}
+import filodb.query.exec.{ChunkedWindowIteratorD, SlidingWindowIterator, TransientRow}
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
@@ -61,14 +61,14 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   def chunkedWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,
-                      func: ChunkedRangeFunction,
+                      func: ChunkedRangeFunction[TransientRow],
                       windowSize: Int,
-                      step: Int): ChunkedWindowIterator = {
+                      step: Int): ChunkedWindowIteratorD = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new ChunkedWindowIterator(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)()
+    new ChunkedWindowIteratorD(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
   }
 
   def slidingWindowIt(data: Seq[Double],

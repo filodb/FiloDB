@@ -118,7 +118,7 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   }
 }
 
-abstract class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedRangeFunction {
+abstract class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = 0d }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
@@ -160,7 +160,7 @@ class CountOverTimeFunction(var count: Int = 0) extends RangeFunction {
   }
 }
 
-class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction {
+class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { count = 0 }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
@@ -210,7 +210,8 @@ class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends Rang
   }
 }
 
-abstract class AvgOverTimeChunkedFunction(var sum: Double = 0d, var count: Int = 0) extends ChunkedRangeFunction {
+abstract class AvgOverTimeChunkedFunction(var sum: Double = 0d, var count: Int = 0)
+extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = 0d; count = 0 }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
