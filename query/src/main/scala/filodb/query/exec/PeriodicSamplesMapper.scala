@@ -8,7 +8,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format.RowReader
-import filodb.query.{Query, QueryConfig, RangeFunctionId}
+import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
 
@@ -39,6 +39,9 @@ final case class PeriodicSamplesMapper(start: Long,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
+    // enforcement of minimum step is good since we have a high limit on number of samples
+    if (step < queryConfig.minStepMs)
+      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams)
 

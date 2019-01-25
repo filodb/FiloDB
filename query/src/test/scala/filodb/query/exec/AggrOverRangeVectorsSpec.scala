@@ -240,7 +240,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializableRangeVector.toBuilder(recSchema)
-    val srv = SerializableRangeVector(result7(0), builder, recSchema, 10)
+    val srv = SerializableRangeVector(result7(0), builder, recSchema)
 
     val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.5), Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue
