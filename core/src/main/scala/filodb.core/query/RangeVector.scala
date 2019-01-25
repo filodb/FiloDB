@@ -12,7 +12,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
-import filodb.memory.data.OffheapLFSortedIDMap
+import filodb.memory.data.OffheapSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
@@ -183,7 +183,7 @@ object SerializableRangeVector extends StrictLogging {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      OffheapLFSortedIDMap.validateNoSharedLocks()
+      OffheapSortedIDMap.validateNoSharedLocks()
       rv.rows.take(limit).foreach { row =>
         numRows += 1
         builder.addFromReader(row)
@@ -192,7 +192,7 @@ object SerializableRangeVector extends StrictLogging {
       }
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.
-      OffheapLFSortedIDMap.releaseAllSharedLocks()
+      OffheapSortedIDMap.releaseAllSharedLocks()
     }
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to

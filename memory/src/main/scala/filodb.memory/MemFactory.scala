@@ -69,7 +69,7 @@ object MemFactory {
 /**
   * Native (off heap) memory manager, allocating using MemoryIO with every call to allocateWithMagicHeader
   * and relying on a cap to not allocate more than upperBoundSizeInBytes
-  * Synchronized to be multi-thread safe -- for example, the OffheapLFSortedIDMap will cause concurrent free/allocates
+  * Synchronized to be multi-thread safe -- for example, the OffheapSortedIDMap will cause concurrent free/allocates
   * TODO: we don't really need freeAll(), consider not needing the map and just storing the size of allocation in
   * first four bytes.  That in fact matches what is needed for BinaryVector and BinaryRecord allocations.
   * Have an allocateOffheapWithSizeHeader which just returns the address to the size bytes  :)

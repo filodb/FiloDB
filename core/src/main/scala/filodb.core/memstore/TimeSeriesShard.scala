@@ -25,7 +25,6 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo, SeqIndexValueConsumer}
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
@@ -260,9 +259,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
-  // Not really one instance of a map; more like an accessor class shared amongst all TSPartition instances
-  private val offheapInfoMap = new OffheapLFSortedIDMapMutator(bufferMemoryManager, classOf[TimeSeriesPartition])
-  // Use 1/4 of max # buckets for initial ChunkInfo map size
+  // Use 1/4 of max # buckets for initial OffheapSortedIDMap size
   private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
 
   /**
@@ -862,11 +859,10 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initMapSize)
       val partId = nextPartitionID
       incrementPartitionID()
-      val newPart = new TimeSeriesPartition(partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats,
-        infoMapAddr, offheapInfoMap)
+      val newPart = new TimeSeriesPartition(
+        partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
@@ -961,7 +957,7 @@ class TimeSeriesShard(val dataset: Dataset,
   // Also frees partition key if necessary
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
-    offheapInfoMap.free(partitionObj)
+    partitionObj.mapFree()
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     partitions.remove(partitionObj.partID)
   }
