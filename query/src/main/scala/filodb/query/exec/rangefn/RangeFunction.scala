@@ -221,6 +221,7 @@ object RangeFunction {
   def histChunkedFunction(func: Option[RangeFunctionId],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionH
+    case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case _                    => ???
   }
 

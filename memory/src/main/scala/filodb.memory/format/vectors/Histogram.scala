@@ -138,6 +138,24 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     BinaryHistogram.writeBinHistogram(HistogramBuckets.cachedBucketBytes(buckets), values.map(_.toLong), buf)
     buf
   }
+
+  /**
+   * Copies this histogram as a new copy so it can be used for aggregation or mutation. Allocates new storage.
+   */
+  final def copy: Histogram = MutableHistogram(buckets, values.clone)
+
+  /**
+   * Adds the values from another MutableHistogram having the same bucket schema.  If it does not, then
+   * an exception is thrown -- for now.  Modifies itself.
+   */
+  final def add(other: MutableHistogram): Unit =
+    if (buckets == other.buckets) {
+      for { b <- 0 until numBuckets optimized } {
+        values(b) += other.values(b)
+      }
+    } else {
+      throw new UnsupportedOperationException(s"Cannot add other with buckets ${other.buckets} to myself $buckets")
+    }
 }
 
 object MutableHistogram {
@@ -174,6 +192,8 @@ sealed trait HistogramBuckets {
     }
     tops
   }
+
+  override def toString: String = allBucketTops.mkString("buckets[", ", ", "]")
 }
 
 object HistogramBuckets {

@@ -75,5 +75,15 @@ class HistogramTest extends NativeVectorTest {
 
       mutableHistograms(0).compare(mutableHistograms(1)) should be > 0
     }
+
+    it("should copy and not be affected by mutation to original") {
+      val addedBuckets = rawHistBuckets(0).zip(rawHistBuckets(1)).map { case(a,b) => a + b }.toArray
+      val hist = mutableHistograms(0)
+      val hist2 = hist.copy
+      hist shouldEqual hist2
+      hist.add(mutableHistograms(1))
+      hist should not equal (hist2)
+      hist.values shouldEqual addedBuckets
+    }
   }
 }

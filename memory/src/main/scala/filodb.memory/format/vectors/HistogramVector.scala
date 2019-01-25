@@ -294,7 +294,7 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
 trait HistogramReader extends VectorDataReader {
   def buckets: HistogramBuckets
   def apply(index: Int): Histogram
-  def sum(start: Int, end: Int): Histogram
+  def sum(start: Int, end: Int): MutableHistogram
 }
 
 class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader {
@@ -340,10 +340,10 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
-  final def sum(start: Int, end: Int): Histogram = {
+  final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0)
     for { b <- 0 until numBuckets optimized } {
-      returnHist.values(b) = readers(b).sum(b, start, end)
+      returnHist.values(b) = readers(b).sum(bucketAddrs(b), start, end)
     }
     returnHist
   }

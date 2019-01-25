@@ -13,6 +13,7 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
 
+//scalastyle:off regex
 /**
  * Benchmark measuring ingestion/encoding performance of various HistogramColumn schemes
  * (plus versus traditional Prom schema).

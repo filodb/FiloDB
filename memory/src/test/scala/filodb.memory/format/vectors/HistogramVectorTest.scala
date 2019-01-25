@@ -76,6 +76,10 @@ class HistogramVectorTest extends NativeVectorTest {
       verifyHistogram(h, i)
     }
 
+    val sum = optReader.sum(0, rawHistBuckets.length - 1)  // should not crash
+    val expected = (0 until 8).map { b => rawHistBuckets.map(_(b)).sum }.toArray
+    sum.values shouldEqual expected
+
     appender.reset()
     appender.length shouldEqual 0
   }
@@ -105,6 +109,4 @@ class HistogramVectorTest extends NativeVectorTest {
 
     appender.addData(buffer) shouldEqual VectorTooSmall(0, 0)
   }
-
-  it("should calculate sum of multiple histograms correctly") (pending)
 }
