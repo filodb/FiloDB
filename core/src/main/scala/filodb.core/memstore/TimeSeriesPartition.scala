@@ -62,6 +62,8 @@ class TimeSeriesPartition(val partID: Int,
 extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
+  require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
+
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 
@@ -126,6 +128,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       }
     }
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+
     // Update the end time as well.  For now assume everything arrives in increasing order
     ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
   }
@@ -230,7 +233,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(mapIterate)
 
   // NOT including currently flushing writeBuffer chunks if there are any
-  private def infosToBeFlushed: ChunkInfoIterator =
+  private[memstore] def infosToBeFlushed: ChunkInfoIterator =
     new ElementChunkInfoIterator(mapSliceToEnd(newestFlushedID + 1))
                .filter(_ != currentInfo)  // filter out the appending chunk
 
@@ -250,6 +253,9 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
                                   }
                                 }
   }
+
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator =
+    allInfos.filter(_.intersection(startTime, endTime).isDefined)
 
   def hasChunks(method: ChunkScanMethod): Boolean = {
     val chunkIter = infos(method)

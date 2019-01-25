@@ -7,6 +7,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
@@ -29,6 +30,8 @@ import filodb.query.exec._
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
+
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
   /**
     * This is the facade to trigger orchestration of the ExecPlan.
@@ -57,7 +60,8 @@ class QueryEngine(dataset: Dataset,
           case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
-    logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
+    logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
+      s" $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
   }
 
@@ -207,15 +211,21 @@ class QueryEngine(dataset: Dataset,
     val filters = lp.labelConstraints.map { case (k, v) =>
       new ColumnFilter(k, Filter.Equals(v))
     }.toSeq
+    // If the label is PromMetricLabel and is different than dataset's metric name,
+    // replace it with dataset's metric name. (needed for prometheus plugins)
+    val labelName = if (PromMetricLabel == lp.labelName && dataset.options.metricColumn != PromMetricLabel)
+      dataset.options.metricColumn else lp.labelName
+
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
                         shardsFromFilters(filters, options)
                       } else {
+                        mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
                       }
     shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        filters, lp.labelName, lp.lookbackTimeInMillis)
+        filters, labelName, lp.lookbackTimeInMillis)
     }
   }
 
@@ -223,10 +233,18 @@ class QueryEngine(dataset: Dataset,
                                      submitTime: Long,
                                      options: QueryOptions,
                                      lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
-    shardsFromFilters(lp.filters, options).map { shard =>
+    val renamedFilters = renameMetricFilter(lp.filters)
+    val filterCols = lp.filters.map(_.column).toSet
+    val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
+                        shardsFromFilters(lp.filters, options)
+                      } else {
+                        mdNoShardKeyFilterRequests.increment()
+                        shardMapperFunc.assignedShards
+                      }
+    shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, lp.start, lp.end)
+        renamedFilters, lp.start, lp.end)
     }
   }
 

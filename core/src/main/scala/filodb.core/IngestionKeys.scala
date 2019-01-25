@@ -27,7 +27,7 @@ object IngestionKeys {
   val MinNumNodes = "min-num-nodes"
 
   /** Error helpers for Config. */
-  implicit final class IngestionConfigOps(c: Config) {
+  implicit final class ConfigOps(c: Config) {
 
     /** Attempts to resolve config submitted. */
     def resolveT: Try[Config] = Try(c.resolve)

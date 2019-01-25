@@ -535,13 +535,15 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1
-        while(row.notNull(i)) {
-          val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-          val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-          builder.startNewRecord()
-          builder.addLong(row.getLong(0))
-          builder.addDouble(row.getDouble(i + 1))
-          builder.endRecord()
+        while (row.notNull(i)) {
+          if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
+            val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
+            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
+            builder.startNewRecord()
+            builder.addLong(row.getLong(0))
+            builder.addDouble(row.getDouble(i + 1))
+            builder.endRecord()
+          }
           i += 2
         }
       }
