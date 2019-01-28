@@ -1008,6 +1008,7 @@ class TimeSeriesShard(val dataset: Dataset,
    * @param locked true if caller holds partSetLock write lock
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
+  //scalastyle:off method.length
   private[filodb] def ensureFreeSpace(locked: Boolean): Boolean = {
     var lastPruned = EmptyBitmap
     while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
@@ -1061,6 +1062,7 @@ class TimeSeriesShard(val dataset: Dataset,
     }
     true
   }
+  //scalastyle:on
 
   /**
    * Permanently removes the given partition ID from our in-memory data structures
