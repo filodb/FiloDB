@@ -67,8 +67,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema, 100)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema, 100)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq(lhs, rhs)), queryConfig).toListL.runAsync.futureValue
 
@@ -98,8 +98,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema, 100)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema, 100)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq(lhs, rhs)), queryConfig).toListL.runAsync.futureValue
 
@@ -137,8 +137,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema, 100)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema, 100)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq(lhs, rhs)), queryConfig).toListL.runAsync
@@ -170,8 +170,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializableRangeVector(rv, schema, 100)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema, 100)))
+    val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq(lhs, rhs)), queryConfig).toListL.runAsync

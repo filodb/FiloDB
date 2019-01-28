@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.binaryrecord2.{RecordSchema}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column
 import filodb.core.store.ChunkScanMethod
 import filodb.memory.format.RowReader

@@ -147,7 +147,7 @@ class DatasetSpec extends FunSpec with Matchers {
 
   describe("Dataset serialization") {
     it("should serialize and deserialize") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, Seq("age"), Seq("dMin(1)"))
                  .copy(options = DatasetOptions.DefaultOptions.copy(
                    copyTags = Map("exporter" -> "app")))
       Dataset.fromCompactString(ds.asCompactString) shouldEqual ds

@@ -345,7 +345,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
-    val split = memStore.getScanSplits(ref, 1).head
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
                  PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
@@ -360,7 +359,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         // TODO:  verify if the expected results are right.  They are something....
         vectors(0).rows.map(_.getDouble(1).toInt).toSeq shouldEqual Seq(5, 47, 81, 122, 158, 185, 229, 249, 275, 323)
     }
-
   }
 
   // TODO: need to find a new way to incur this error.   The problem is that when we create the BinaryRecords

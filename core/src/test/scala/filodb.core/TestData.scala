@@ -294,12 +294,43 @@ object MachineMetricsData {
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 }
 
+// A simulation of custom machine metrics data - for testing extractTimeBucket
+object CustomMetricsData {
+
+  val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
+
+  //Partition Key with multiple string columns
+  val partitionColumns = Seq("metric:string", "app:string")
+  val metricdataset = Dataset.make("tsdbdata",
+                        partitionColumns,
+                        columns,
+                        Seq("timestamp"),
+                        Seq.empty,
+                        DatasetOptions(Seq("metric", "app"), "metric", "count")).get
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
+  val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
+
+  //Partition Key with single map columns
+  val partitionColumns2 = Seq("tags:map")
+  val metricdataset2 = Dataset.make("tsdbdata",
+                        partitionColumns2,
+                        columns,
+                        Seq("timestamp"),
+                        Seq.empty,
+                        DatasetOptions(Seq("__name__"), "__name__", "count")).get
+  val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
+  val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
+
+}
+
 object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
                                   Seq("timestamp:ts", "value:double"),
                                   Seq("timestamp"),
+                                  Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 
   final case class TagsRowReader(tags: Map[String, String]) extends SchemaRowReader {

@@ -11,5 +11,6 @@ object GlobalScheduler extends StrictLogging {
     * not have a configurable uncaught exception handler.
     */
   implicit lazy val globalImplicitScheduler = Scheduler.computation(
+    name = "global-implicit",
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalScheduler", _)))
 }

@@ -16,6 +16,7 @@ import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, Z
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
+import filodb.query.exec.{PartKeysDistConcatExec, PartKeysExec}
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -148,11 +149,11 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         override val rows: Iterator[RowReader] = rowbuf.iterator
         override val key: RangeVectorKey = rvKey
       }
-      val srv = SerializableRangeVector(rv, cols, limit)
+      val srv = SerializableRangeVector(rv, cols)
       val observedTs = srv.rows.toSeq.map(_.getLong(0))
       val observedVal = srv.rows.toSeq.map(_.getDouble(1))
-      observedTs shouldEqual tuples.map(_._1).take(limit)
-      observedVal shouldEqual tuples.map(_._2).take(limit)
+      observedTs shouldEqual tuples.map(_._1)
+      observedVal shouldEqual tuples.map(_._2)
       srv
     }
 
@@ -230,6 +231,39 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   }
 
+  it ("should serialize and deserialize ExecPlan2 involving metadata queries") {
+    val node0 = TestProbe().ref
+    val node1 = TestProbe().ref
+    val mapper = new ShardMapper(2) // two shards
+    def mapperRef: ShardMapper = mapper
+    mapper.registerNode(Seq(0), node0)
+    mapper.registerNode(Seq(1), node1)
+    val to = System.currentTimeMillis() / 1000
+    val from = to - 50
+    val qParams = TimeStepParams(from, 10, to)
+    val dataset = MetricsTestData.timeseriesDataset
+    val engine = new QueryEngine(dataset, mapperRef)
+
+    // with column filters having shardcolumns
+    val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
+      "http_request_duration_seconds_bucket{job=\"prometheus\"}",
+      qParams)
+    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(0, 100))
+    val partKeysExec = execPlan1.asInstanceOf[PartKeysExec] // will be dispatched to single shard
+    roundTrip(partKeysExec) shouldEqual partKeysExec
+
+    // without shardcolumns in filters
+    val logicalPlan2 = Parser.metadataQueryToLogicalPlan(
+      "http_request_duration_seconds_bucket",
+      qParams)
+    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(0, 100))
+    val partKeysDistConcatExec = execPlan2.asInstanceOf[PartKeysDistConcatExec]
+
+    // will be dispatched to all active shards since no shard column filters in the query
+    partKeysDistConcatExec.children.size shouldEqual 2
+    roundTrip(partKeysDistConcatExec) shouldEqual partKeysDistConcatExec
+  }
+
   it ("should serialize and deserialize QueryError") {
     val err = QueryError("xdf", new IllegalStateException("Some message"))
     val deser1 = roundTrip(err).asInstanceOf[QueryError]
@@ -245,7 +279,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                       UTF8Str("key2") -> UTF8Str("val2"))
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
-    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols, 10)
+    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
 
@@ -262,7 +296,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
     val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new ZCUTF8IteratorRowReader(expected.toIterator)), cols, 10))
+      new ZCUTF8IteratorRowReader(expected.toIterator)), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]

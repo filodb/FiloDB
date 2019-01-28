@@ -4,13 +4,10 @@ import scala.util.control.NonFatal
 
 import akka.actor.ActorRef
 import akka.cluster.Cluster
-import com.typesafe.config.Config
-import net.ceedubs.ficus.Ficus._
 
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.metadata.Dataset
 import filodb.http.FiloHttpServer
 
 /**
@@ -72,19 +69,6 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
         shutdown()
     }
   }
-
-  // Design: unused - why is it here still? why was FiloServer made a class and main separate?
-  def createDatasetFromConfig(datasetName: String, config: Config): Unit = {
-    val partColumns = config.as[Seq[String]]("partition-columns")
-    val dataColumns = config.as[Seq[String]]("data-columns")
-    val rowKeys = config.as[Seq[String]]("row-keys")
-
-    val dataset = Dataset(datasetName, partColumns, dataColumns, rowKeys)
-    logger.info(s"Created dataset $dataset...")
-    client.createNewDataset(dataset)
-  }
-
-  // NOTE: user must watch for ingestion manually using CLI and logs
 
   def shutdownAndExit(code: Int): Unit = {
     shutdown()
