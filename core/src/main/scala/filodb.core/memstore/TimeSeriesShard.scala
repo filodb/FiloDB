@@ -233,6 +233,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
     */
   private[memstore] final val partSet = PartitionSet.ofSize(InitialNumPartitions, ingestSchema, recordComp)
+  // Use a StampedLock because it supports optimistic read locking. This means that no blocking
+  // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
 
   // The off-heap block store used for encoded chunks
@@ -546,14 +548,17 @@ class TimeSeriesShard(val dataset: Dataset,
   def numRowsIngested: Long = ingested
 
   def numActivePartitions: Int = {
-    while (true) {
-      val stamp = partSetLock.tryOptimisticRead()
-      val size = partSet.size
-      if (partSetLock.validate(stamp)) {
-        return size
-      }
+    var stamp = partSetLock.tryOptimisticRead()
+    var size = partSet.size
+    if (!partSetLock.validate(stamp)) {
+      // It's not expected that the optimistic lock will fail, considering that this method is
+      // expected to be called by the ingestion thread. Only the ingestion thread modifies the
+      // partition set. Try again with a pessimistic lock instead of spinning.
+      stamp = partSetLock.readLock()
+      size = partSet.size
+      partSetLock.unlockRead(stamp)
     }
-    0 // not reached
+    size
   }
 
   def latestOffset: Long = _offset
@@ -1010,8 +1015,11 @@ class TimeSeriesShard(val dataset: Dataset,
       partSet.remove(partitionObj)
     } else {
       val stamp = partSetLock.writeLock()
-      partSet.remove(partitionObj)
-      partSetLock.unlockWrite(stamp)
+      try {
+        partSet.remove(partitionObj)
+      } finally {
+        partSetLock.unlockWrite(stamp)
+      }
     }
     offheapInfoMap.free(partitionObj)
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
@@ -1032,8 +1040,11 @@ class TimeSeriesShard(val dataset: Dataset,
     }
     if (!partSetLock.validate(stamp)) {
       stamp = partSetLock.readLock()
-      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
-      partSetLock.unlockRead(stamp)
+      try {
+        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
+      } finally {
+        partSetLock.unlockRead(stamp)
+      }
     }
     part.map(_.asInstanceOf[TimeSeriesPartition])
   }
