@@ -7,7 +7,7 @@ import scala.util.control.NonFatal
 import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
-import scalaj.http.Http
+import scalaj.http.{Http, HttpResponse}
 
 /** Seed node strategy. Some implementations discover, some simply read from immutable config. */
 abstract class ClusterSeedDiscovery(val cluster: Cluster,
@@ -24,39 +24,43 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
   }
 
   @throws(classOf[DiscoveryTimeoutException])
+  //scalastyle:off null
   protected def discoverPeersForNewCluster: Seq[Address]
 
   protected def discoverExistingCluster: Seq[Address] = {
 
     val seedsEndpoint = settings.seedsBaseUrl + settings.seedsPath
-
-    logger.info("Checking seeds endpoint {} to see if cluster already exists", seedsEndpoint)
-
-    try {
-
-      val response = Http(seedsEndpoint).timeout(1000, 1000).asString
-      if (!response.is2xx) {
-        logger.info("Seeds endpoint returned a {}. Assuming cluster does not exist. Response body was {}",
-          response.code.toString, response.body)
-        Seq.empty[Address]
-      } else {
-        decode[ClusterMembershipHttpResponse](response.body) match {
-          case Right(membersResponse) =>
-            logger.info("Cluster exists. Response: {}", membersResponse)
-            membersResponse.members.sorted.map(a => AddressFromURIString.parse(a))
-          case Left(ex) =>
-            logger.error(s"Exception parsing JSON response ${response.body}, returning empty seeds", ex)
-            Seq.empty[Address]
-        }
+    var response: HttpResponse[String] = null
+    var retriesRemaining = settings.seedsHttpRetries
+    do {
+      try {
+        logger.info(s"Trying to fetch seeds from $seedsEndpoint ... $retriesRemaining retries remaining.")
+        response = Http(seedsEndpoint).timeout(2000, 2000).asString
+        logger.info(s"Seeds endpoint returned a ${response.code}. Response body was ${response.body}")
+      } catch {
+        case NonFatal(e) =>
+          logger.error(s"Seeds endpoint $seedsEndpoint call threw an exception", e)
       }
-    } catch {
-      case NonFatal(e) =>
-        logger.info("Seeds endpoint {} did not return the seeds. Cluster does not exist.", seedsEndpoint)
-        Seq.empty[Address]
+      Thread.sleep(settings.seedsHttpSleepBetweenRetries.toMillis)
+      retriesRemaining -= 1
+    } while ((response == null || !response.is2xx) && retriesRemaining > 0)
+
+    if (response == null || !response.is2xx) {
+      logger.info(s"Giving up on discovering seeds after ${settings.seedsHttpSleepBetweenRetries} retries. " +
+        s"Assuming cluster does not exist. ")
+      Seq.empty[Address]
+    } else {
+      decode[ClusterMembershipHttpResponse](response.body) match {
+        case Right(membersResponse) =>
+          logger.info("Cluster exists. Response: {}", membersResponse)
+          membersResponse.members.sorted.map(a => AddressFromURIString.parse(a))
+        case Left(ex) =>
+          logger.error(s"Exception parsing JSON response ${response.body}, returning empty seeds", ex)
+          Seq.empty[Address]
+      }
     }
   }
 }
-
 
 object ClusterSeedDiscovery {
   /** Seed node strategy. Some implementations discover, some simply read them. */
