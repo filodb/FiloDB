@@ -38,7 +38,7 @@ Downsampling for prometheus counters will come soon.
 Downsampling is configured at the time of dataset creation. For example:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
 ```
 
 In the above example, the data column `value` with index 1 is configured with the dMin, dMax, sSum, dCount and dAvg downsamplers.
@@ -53,7 +53,7 @@ order as the downsample type configuration. For the above example, we would crea
 dataset as:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
 ```
 
 Note that there is no downsampling configuration here in the above dataset. Note that partition
