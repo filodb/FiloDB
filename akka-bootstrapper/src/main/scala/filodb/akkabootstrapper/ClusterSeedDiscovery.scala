@@ -39,14 +39,14 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
         logger.info(s"Seeds endpoint returned a ${response.code}. Response body was ${response.body}")
       } catch {
         case NonFatal(e) =>
-          logger.error(s"Seeds endpoint $seedsEndpoint call threw an exception", e)
+          logger.info(s"Seeds endpoint $seedsEndpoint failed. This is expected on cluster bootstrap", e)
       }
-      Thread.sleep(settings.seedsHttpSleepBetweenRetries.toMillis)
       retriesRemaining -= 1
+      if (retriesRemaining > 0) Thread.sleep(settings.seedsHttpSleepBetweenRetries.toMillis)
     } while ((response == null || !response.is2xx) && retriesRemaining > 0)
 
     if (response == null || !response.is2xx) {
-      logger.info(s"Giving up on discovering seeds after ${settings.seedsHttpSleepBetweenRetries} retries. " +
+      logger.info(s"Giving up on discovering seeds after ${settings.seedsHttpRetries} retries. " +
         s"Assuming cluster does not exist. ")
       Seq.empty[Address]
     } else {
