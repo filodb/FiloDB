@@ -21,14 +21,14 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
 
   val maxChunkSize = 200
 
-  val promDataset = Dataset.make("prom",
-    Seq("tags:map"),
+  val promDataset = Dataset.make("custom1",
+    Seq("someStr:string", "tags:map"),
     Seq("timestamp:ts", "value:double"),
     Seq("timestamp"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
-  val customDataset = Dataset.make("custom",
+  val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string","instance:string"),
     Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double"),
     Seq("timestamp"),
@@ -52,6 +52,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, promDataset.partKeySchema, 4096)
   partKeyBuilder.startNewRecord()
+  partKeyBuilder.addString("someStringValue")
   partKeyBuilder.addSortedPairsAsMap(partKeyTags, RecordBuilder.sortAndComputeHashes(partKeyTags))
   partKeyBuilder.endRecord(true)
   val partKeyBase = partKeyBuilder.allContainers.head.base
@@ -71,15 +72,16 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   val downsampleOps = new ShardDownsampler(promDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
     new TimeSeriesShardStats(promDataset.ref, 0))
 
-  it ("should formulate downsample ingest schema correctly for prom schema") {
+  it ("should formulate downsample ingest schema correctly for custom1 schema") {
     val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "tags")
+      Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "someStr", "tags")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, MapColumn)
+      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
+        StringColumn, MapColumn)
   }
 
-  it ("should formulate downsample ingest schema correctly for non prom schema") {
+  it ("should formulate downsample ingest schema correctly for custom2 schema") {
     val downsampleOps = new ShardDownsampler(customDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
       new TimeSeriesShardStats(customDataset.ref, 0))
     val dsSchema = downsampleOps.downsampleIngestSchema()
@@ -113,7 +115,8 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
             partKeyInRecord.put(key.toString, value.toString)
           }
         }
-        dsSchema.consumeMapItems(c.base, off, 6, consumer)
+        dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
+        dsSchema.consumeMapItems(c.base, off, 7, consumer)
         partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
@@ -165,7 +168,8 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
             partKeyInRecord.put(key.toString, value.toString)
           }
         }
-        dsSchema.consumeMapItems(c.base, off, 6, consumer)
+        dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
+        dsSchema.consumeMapItems(c.base, off, 7, consumer)
         partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
