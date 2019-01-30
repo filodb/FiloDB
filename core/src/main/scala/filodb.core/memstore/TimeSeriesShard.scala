@@ -898,33 +898,55 @@ class TimeSeriesShard(val dataset: Dataset,
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
   //scalastyle:off null
-  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
-    partSet.getWithIngestBR(recordBase, recordOff) match {
-      case null =>
-        val stamp = partSetLock.writeLock()
-        try {
-          val part = partSet.getOrAddWithIngestBR(recordBase, recordOff, {
-            val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-            val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
-            if (newPart != OutOfMemPartition) {
-              val partId = newPart.partID
-              // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
-              val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
-              partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-              timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-              activelyIngesting.set(partId)
-              logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
-                s"shard $shardNum at offset $ingestOffset")
-            }
-            newPart
-          })
-          part
-        } finally {
-          partSetLock.unlockWrite(stamp)
-        }
-
-      case existing => existing
+  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long)
+      : FiloPartition = {
+    var stamp = partSetLock.tryOptimisticRead()
+    if (stamp != 0) {
+      val part = partSet.getWithIngestBR(recordBase, recordOff)
+      if (part != null && partSetLock.validate(stamp)) {
+        return part
+      }
     }
+
+    stamp = partSetLock.readLock()
+    try {
+      val part = partSet.getWithIngestBR(recordBase, recordOff)
+      if (part != null) {
+        return part
+      }
+    } finally {
+      partSetLock.unlockRead(stamp)
+    }
+
+    stamp = partSetLock.writeLock()
+    var part = partSet.getWithIngestBR(recordBase, recordOff)
+    var newPart: TimeSeriesPartition = null
+
+    try {
+      if (part == null) {
+        val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+        newPart = createNewPartition(partKeyArray, partKeyOffset, group)
+        if (newPart != OutOfMemPartition) {
+          val partId = newPart.partID
+          // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
+          val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
+          partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+          timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
+          activelyIngesting.set(partId)
+          partSet.add(newPart)
+        }
+        part = newPart
+      }
+    } finally {
+      partSetLock.unlockWrite(stamp)
+    }
+
+    if (newPart != null && newPart != OutOfMemPartition) {
+      logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
+        s"shard $shardNum at offset $ingestOffset")
+    }
+
+    part
   }
   //scalastyle:on null
 
