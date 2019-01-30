@@ -148,8 +148,9 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   private def addBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
-    val strDataOffset = schema.utf8StringOffset(base, offset, col)
-    addBlob(base, strDataOffset + 2, schema.blobNumBytes(base, strDataOffset, col))
+    val blobDataOffset = schema.blobOffset(base, offset, col)
+    val blobNumBytes = schema.blobNumBytes(base, offset, col)
+    addBlob(base, blobDataOffset, blobNumBytes)
   }
 
   /**
