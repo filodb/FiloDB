@@ -12,13 +12,13 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
+import filodb.coordinator.{FilodbCluster, IngestionStarted, ShardMapper}
 import filodb.coordinator.client.QueryCommands._
 import filodb.coordinator.queryengine2.QueryEngine
-import filodb.coordinator.{FilodbCluster, IngestionStarted, ShardMapper}
+import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.memory.format.SeqRowReader
 import filodb.memory.MemFactory
 import filodb.prometheus.parse.Parser
