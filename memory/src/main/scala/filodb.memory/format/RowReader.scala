@@ -232,7 +232,7 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getBlobNumBytes(columnNo: Int): Int = ???
 }
 
-final case class ZCUTF8IteratorRowReader(records: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]) extends Iterator[RowReader] {
+final case class UTF8MapIteratorRowReader(records: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]) extends Iterator[RowReader] {
   var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
 
   private val rowReader = new RowReader {

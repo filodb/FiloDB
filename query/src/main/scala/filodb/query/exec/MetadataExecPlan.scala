@@ -13,7 +13,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format._
-import filodb.memory.format.ZCUTF8IteratorRowReader
+import filodb.memory.format.UTF8MapIteratorRowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -92,7 +92,7 @@ final case class LabelValuesDistConcatExec(id: String,
       })
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new ZCUTF8IteratorRowReader(metadataResult.toIterator))
+        new UTF8MapIteratorRowReader(metadataResult.toIterator))
     }
     Observable.fromTask(taskOfResults)
   }
@@ -170,7 +170,7 @@ final case class  LabelValuesExec(id: String,
         case false => memStore.indexValuesWithFilters(dataset, shard, filters, columns, end, start, limit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new ZCUTF8IteratorRowReader(response)))
+        new UTF8MapIteratorRowReader(response)))
     } else {
       Observable.empty
     }

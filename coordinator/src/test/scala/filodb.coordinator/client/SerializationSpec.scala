@@ -13,7 +13,7 @@ import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
-import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
@@ -297,7 +297,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val schema = new ResultSchema(Seq(new ColumnInfo("_ns", ColumnType.MapColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
     val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new ZCUTF8IteratorRowReader(input.toIterator)), cols))
+      new UTF8MapIteratorRowReader(input.toIterator)), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
