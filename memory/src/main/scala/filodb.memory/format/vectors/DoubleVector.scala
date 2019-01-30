@@ -173,6 +173,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
 
   // end is inclusive
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = 0d
