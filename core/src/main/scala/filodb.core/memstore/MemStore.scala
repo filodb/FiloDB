@@ -142,7 +142,7 @@ trait MemStore extends ChunkSource {
    * in order of decreasing frequency/# of series per item.
    * @param topK the number of top items to return
    */
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
+  def indexValues(dataset: DatasetRef, shard: Int, indexNames: String, topK: Int = 100): Seq[TermInfo]
 
   /**
     * Returns the values of a given index name for the matching Column Filters
@@ -151,7 +151,8 @@ trait MemStore extends ChunkSource {
     * @return an Iterator for the index values
     */
   def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
+                             indexNames: Seq[String], end: Long,
+                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
     * Returns the indexed TimeSeriesPartitions matching the column filters,

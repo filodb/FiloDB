@@ -232,8 +232,8 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getBlobNumBytes(columnNo: Int): Int = ???
 }
 
-final case class ZCUTF8IteratorRowReader(records: Iterator[ZeroCopyUTF8String]) extends Iterator[RowReader] {
-  var currVal: ZeroCopyUTF8String = _
+final case class ZCUTF8IteratorRowReader(records: Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]) extends Iterator[RowReader] {
+  var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
 
   private val rowReader = new RowReader {
     def notNull(columnNo: Int): Boolean = true
@@ -245,9 +245,9 @@ final case class ZCUTF8IteratorRowReader(records: Iterator[ZeroCopyUTF8String]) 
     def getString(columnNo: Int): String = currVal.toString
     def getAny(columnNo: Int): Any = currVal
 
-    def getBlobBase(columnNo: Int): Any = currVal.base
-    def getBlobOffset(columnNo: Int): Long = currVal.offset
-    def getBlobNumBytes(columnNo: Int): Int = currVal.numBytes
+    def getBlobBase(columnNo: Int): Any = ???
+    def getBlobOffset(columnNo: Int): Long = ???
+    def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
   override def hasNext: Boolean = records.hasNext

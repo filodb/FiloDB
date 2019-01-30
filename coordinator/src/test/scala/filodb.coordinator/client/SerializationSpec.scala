@@ -10,6 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
+import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, ZeroCopyUTF8String => UTF8Str}
@@ -291,21 +292,22 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   }
 
   it ("should serialize and deserialize result involving Metadata") {
-
-    val expected = List(UTF8Str("App-0"), UTF8Str("App-1"))
-    val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
-    val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
+    val input = Seq(Map(UTF8Str("App-0") -> UTF8Str("App-1")))
+    val expected = Seq(Map("App-0" -> "App-1"))
+    val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.MapColumn)), 1)
+    val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
     val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-      new ZCUTF8IteratorRowReader(expected.toIterator)), cols))
+      new ZCUTF8IteratorRowReader(input.toIterator)), cols))
 
     val result = QueryResult2("someId", schema, ser)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
     roundTripResult.result.size shouldEqual 1
 
     val srv = roundTripResult.result(0)
-    srv.rows.size shouldEqual 2
+    srv.rows.size shouldEqual 1
     val actual = srv.rows.map(record => {
-      record.filoUTF8String(0)
+      val rowReader = record.asInstanceOf[BinaryRecordRowReader]
+      srv.schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
     })
     actual.toList shouldEqual expected
   }

@@ -74,7 +74,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0,
-      filters, "instance", now, now - 5000, 10)
+      filters, Seq("instance"), now, now - 5000, 10)
 
     metadata.hasNext shouldEqual true
     metadata.next.toString shouldEqual "someHost:8787"
