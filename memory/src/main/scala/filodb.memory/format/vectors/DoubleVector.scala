@@ -194,6 +194,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   }
 
   final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var count = 0
