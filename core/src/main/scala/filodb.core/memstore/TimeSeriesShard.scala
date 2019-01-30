@@ -579,9 +579,8 @@ class TimeSeriesShard(val dataset: Dataset,
     var stamp = partSetLock.tryOptimisticRead()
     var size = partSet.size
     if (!partSetLock.validate(stamp)) {
-      // It's not expected that the optimistic lock will fail, considering that this method is
-      // expected to be called by the ingestion thread. Only the ingestion thread modifies the
-      // partition set. Try again with a pessimistic lock instead of spinning.
+      // It's not expected that the optimistic lock will fail, considering that this method is typically
+      // called by one thread. Try again with a pessimistic lock instead of spinning, just to be safe.
       stamp = partSetLock.readLock()
       size = partSet.size
       partSetLock.unlockRead(stamp)
@@ -898,7 +897,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
-  //scalastyle:off
+  //scalastyle:off null
   private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
     partSet.getWithIngestBR(recordBase, recordOff) match {
       case null =>
@@ -927,7 +926,7 @@ class TimeSeriesShard(val dataset: Dataset,
       case existing => existing
     }
   }
-  //scalastyle:on
+  //scalastyle:on null
 
   /**
    * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
@@ -950,7 +949,7 @@ class TimeSeriesShard(val dataset: Dataset,
     }
 
   // Note: Caller must hold partSetLock write lock.
-  // scalastyle:off
+  // scalastyle:off simplify.boolean.expression
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
                                    group: Int, initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
     // Check and evict, if after eviction we still don't have enough memory, then don't proceed
@@ -970,7 +969,7 @@ class TimeSeriesShard(val dataset: Dataset,
       partitionGroups(group).set(partId)
       newPart
     }
-  // scalastyle:on
+  // scalastyle:on simplify.boolean.expression
 
   private def disableAddPartitions(): Unit = {
     if (addPartitionsDisabled.compareAndSet(false, true))
@@ -1101,7 +1100,7 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
-    var part = None: Option[FiloPartition]
+    var part: Option[FiloPartition] = None
     var stamp = partSetLock.tryOptimisticRead()
     if (stamp != 0) {
       part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
