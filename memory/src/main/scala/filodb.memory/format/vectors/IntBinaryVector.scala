@@ -84,7 +84,7 @@ object IntBinaryVector {
     case 4 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = UnsafeUtils.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else UnsafeUtils.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
@@ -95,7 +95,7 @@ object IntBinaryVector {
     case 2 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = UnsafeUtils.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else UnsafeUtils.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
