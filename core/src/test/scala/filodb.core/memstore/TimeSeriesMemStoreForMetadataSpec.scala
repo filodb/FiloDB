@@ -77,7 +77,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       filters, Seq("instance"), now, now - 5000, 10)
 
     metadata.hasNext shouldEqual true
-    metadata.next.toString shouldEqual "someHost:8787"
+    metadata.next shouldEqual Map("instance".utf8 -> "someHost:8787".utf8)
   }
 
 }
