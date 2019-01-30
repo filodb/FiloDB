@@ -30,12 +30,15 @@ object UTF8String {
 object UTF8StringMedium extends BinaryRegion {
   import format.UnsafeUtils
   import UTF8String._
+  import java.nio.charset.StandardCharsets
 
   final def numBytes(base: Any, offset: Long): Int = UnsafeUtils.getShort(base, offset) & 0x0FFFF
 
   val lenBytes = 2
 
-  def apply(s: String, factory: MemFactory = MemFactory.onHeapFactory): (Any, Long) = apply(s.getBytes(), factory)
+  def apply(s: String, factory: MemFactory = MemFactory.onHeapFactory): (Any, Long) = {
+    apply(s.getBytes(StandardCharsets.UTF_8), factory)
+  }
 
   // Unfortunately we need to prepend the length bytes so need to allocate another byte array :(
   def apply(bytes: Array[Byte], factory: MemFactory): (Any, Long) = {
@@ -102,7 +105,7 @@ object UTF8StringMedium extends BinaryRegion {
 
   final def toString(base: Any, offset: Long): String = {
     val bytes = asNewByteArray(base, offset)
-    new String(bytes, 2, bytes.size - 2)
+    new String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_8)
   }
 }
 
