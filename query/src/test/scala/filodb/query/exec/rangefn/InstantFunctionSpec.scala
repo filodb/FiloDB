@@ -7,7 +7,6 @@ import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.{MachineMetricsData => MMD, MetricsTestData}
-import filodb.core.memstore.TimeSeriesPartition
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._

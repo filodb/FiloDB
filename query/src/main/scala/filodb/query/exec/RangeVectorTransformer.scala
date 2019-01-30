@@ -72,12 +72,12 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
         }
       case ColumnType.DoubleColumn =>
-        val instantFunction = InstantFunction.double(function, funcParams)
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
           val mapper = HistogramQuantileMapper(funcParams)
           mapper.apply(source, queryConfig, limit, sourceSchema)
         } else {
+          val instantFunction = InstantFunction.double(function, funcParams)
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction))
           }

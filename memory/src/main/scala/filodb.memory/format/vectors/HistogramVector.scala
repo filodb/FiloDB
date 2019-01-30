@@ -341,7 +341,7 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
   final def sum(start: Int, end: Int): MutableHistogram = {
-    require(length > 0)
+    require(length > 0 && start >= 0 && end < length)
     for { b <- 0 until numBuckets optimized } {
       returnHist.values(b) = readers(b).sum(bucketAddrs(b), start, end)
     }
