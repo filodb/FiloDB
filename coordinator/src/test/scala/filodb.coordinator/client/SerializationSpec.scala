@@ -293,7 +293,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   it ("should serialize and deserialize result involving Metadata") {
 
     val expected = List(UTF8Str("App-0"), UTF8Str("App-1"))
-    val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
+    val schema = new ResultSchema(Seq(new ColumnInfo("_ns", ColumnType.StringColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
     val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
       new ZCUTF8IteratorRowReader(expected.toIterator)), cols))
