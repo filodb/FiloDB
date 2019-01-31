@@ -150,14 +150,14 @@ extends MemStore with StrictLogging {
       }
     }.getOrElse(Iterator.empty)
 
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
-    getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
+  def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo] =
+    getShard(dataset, shard).map(_.labelValues(labelName, topK)).getOrElse(Nil)
 
-  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             indexNames: Seq[String], end: Long,
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             labelNames: Seq[String], end: Long,
                              start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
     = getShard(dataset, shard)
-        .map(_.indexValuesWithFilters(filters, indexNames, end, start, limit)).getOrElse(Iterator.empty)
+        .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =

@@ -472,23 +472,30 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def indexNames: Iterator[String] = partKeyIndex.indexNames
 
-  def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
+  def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
 
   /**
     * This method is to apply column filters and fetch matching time series partitions.
+    *
+    * @param filter column filter
+    * @param labelNames labels to return in the response
+    * @param endTime end time
+    * @param startTime start time
+    * @param limit series limit
+    * @return returns an iterator of map of label key value pairs of each matching time series
     */
-  def indexValuesWithFilters(filter: Seq[ColumnFilter],
-                             indexNames: Seq[String],
+  def labelValuesWithFilters(filter: Seq[ColumnFilter],
+                             labelNames: Seq[String],
                              endTime: Long,
                              startTime: Long,
                              limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    IndexValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), indexNames, limit)
+    LabelValueResultIterator(partKeyIndex.partIdsFromFilters(filter, startTime, endTime), labelNames, limit)
   }
 
   /**
     * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
     */
-  case class IndexValueResultIterator(partIterator: IntIterator, labelNames: Seq[String], limit: Int)
+  case class LabelValueResultIterator(partIterator: IntIterator, labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
     var index = 0

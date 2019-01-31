@@ -45,7 +45,7 @@ class Arguments extends FieldArgs {
   var port: Int = 2552
   var promql: Option[String] = None
   var matcher: Option[String] = None
-  var labelNames: Option[Seq[String]] = None
+  var labelNames: Seq[String] = Seq.empty
   var labelFilter: Map[String, String] = Map.empty
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
@@ -207,7 +207,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
             timeout, args.shards.map(_.map(_.toInt)), spread)
-          parseLabelValuesQuery(remote, args.labelNames.get, args.labelFilter, args.dataset.get,
+          parseLabelValuesQuery(remote, args.labelNames, args.labelFilter, args.dataset.get,
             getQueryRange(args), options)
 
         case x: Any =>

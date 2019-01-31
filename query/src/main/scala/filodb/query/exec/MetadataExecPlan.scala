@@ -84,7 +84,7 @@ final case class LabelValuesDistConcatExec(id: String,
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.foreach(rv => {
-        metadataResult ++= rv(0).rows.toSeq.map(rowReader => {
+        metadataResult ++= rv(0).rows.map(rowReader => {
           val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
           rv(0).schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
             .map(pair => pair._1.utf8 -> pair._2.utf8).toMap
@@ -161,13 +161,13 @@ final case class  LabelValuesExec(id: String,
       val end = curr - curr % 1000 // round to the floor second
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
-        // retrieves index values for a single label - no column filter
-        case true if (columns.size == 1) => memStore.indexValues(dataset, shard, columns.head, limit)
+        // retrieves label values for a single label - no column filter
+        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, limit)
           .map(termInfo => Map(columns.head.utf8 -> termInfo.term))
           .toIterator
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
-        case false => memStore.indexValuesWithFilters(dataset, shard, filters, columns, end, start, limit)
+        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, end, start, limit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(response)))

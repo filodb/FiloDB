@@ -142,16 +142,16 @@ trait MemStore extends ChunkSource {
    * in order of decreasing frequency/# of series per item.
    * @param topK the number of top items to return
    */
-  def indexValues(dataset: DatasetRef, shard: Int, indexNames: String, topK: Int = 100): Seq[TermInfo]
+  def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo]
 
   /**
-    * Returns the values of a given index name for the matching Column Filters
+    * Returns the values of a given label-names for the matching Column Filters
     * that are indexed at the partition level, on the given
     * shard on this node.
     * @return an Iterator for the index values
     */
-  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             indexNames: Seq[String], end: Long,
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             labelNames: Seq[String], end: Long,
                              start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
