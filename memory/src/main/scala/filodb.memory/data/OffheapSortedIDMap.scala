@@ -129,15 +129,15 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Returns the number of total elements in the map.
    */
-  final def mapSize(): Int = {
-    mapWithShared(size)
+  final def chunkmapSize(): Int = {
+    chunkmapWithShared(size)
   }
 
   /**
    * Returns the element at the given key, or NULL (0) if the key isn't found. Takes O(log n)
    * time. Caller must hold any lock.
    */
-  final def doMapGet(key: Long): NativePointer = {
+  final def chunkmapDoGet(key: Long): NativePointer = {
     val index = doBinarySearch(key)
     if (index >= 0) arrayGet(realIndex(index)) else 0
   }
@@ -145,15 +145,15 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Returns true if the given key exists in this map. Takes O(log n) time.
    */
-  final def mapContains(key: Long): Boolean = {
-    mapWithShared(doBinarySearch(key) >= 0)
+  final def chunkmapContains(key: Long): Boolean = {
+    chunkmapWithShared(doBinarySearch(key) >= 0)
   }
 
   /**
    * Returns the first element, the one with the lowest key. Caller must hold any lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    */
-  final def doMapGetFirst(): NativePointer = {
+  final def chunkmapDoGetFirst(): NativePointer = {
     if (size <= 0) {
       throw new IndexOutOfBoundsException
     }
@@ -164,7 +164,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Returns the last element, the one with the highest key. Caller must hold any lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    */
-  final def doMapGetLast(): NativePointer = {
+  final def chunkmapDoGetLast(): NativePointer = {
     if (size <= 0) {
       throw new IndexOutOfBoundsException
     }
@@ -174,13 +174,13 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Produces an ElementIterator for going through every element of the map in increasing key order.
    */
-  final def mapIterate(): ElementIterator = {
+  final def chunkmapIterate(): ElementIterator = {
     new LazyElementIterator(() => {
-      mapAcquireShared()
+      chunkmapAcquireShared()
       try {
         new MapIterator(first, first + size)
       } catch {
-        case e: Throwable => mapReleaseShared(); throw e;
+        case e: Throwable => chunkmapReleaseShared(); throw e;
       }
     })
   }
@@ -191,15 +191,15 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * @param startKey start at element whose key is equal or immediately greater than startKey
    * @param endKey end iteration when element is greater than endKey.  endKey is inclusive.
    */
-  final def mapSlice(startKey: Long, endKey: Long): ElementIterator = {
+  final def chunkmapSlice(startKey: Long, endKey: Long): ElementIterator = {
     new LazyElementIterator(() => {
-      mapAcquireShared()
+      chunkmapAcquireShared()
       try {
         new MapIterator(doBinarySearch(startKey) & 0x7fffffff, first + size) {
-          override def isPastEnd: Boolean = mapKeyRetrieve(getNextElem) > endKey
+          override def isPastEnd: Boolean = chunkmapKeyRetrieve(getNextElem) > endKey
         }
       } catch {
-        case e: Throwable => mapReleaseShared(); throw e;
+        case e: Throwable => chunkmapReleaseShared(); throw e;
       }
     })
   }
@@ -209,13 +209,13 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * with startKey.
    * @param startKey start at element whose key is equal or immediately greater than startKey
    */
-  final def mapSliceToEnd(startKey: Long): ElementIterator = {
+  final def chunkmapSliceToEnd(startKey: Long): ElementIterator = {
     new LazyElementIterator(() => {
-      mapAcquireShared()
+      chunkmapAcquireShared()
       try {
         new MapIterator(doBinarySearch(startKey) & 0x7fffffff, first + size)
       } catch {
-        case e: Throwable => mapReleaseShared(); throw e;
+        case e: Throwable => chunkmapReleaseShared(); throw e;
       }
     })
   }
@@ -223,7 +223,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Acquire exclusive access to this map, spinning if necessary. Exclusive lock isn't re-entrant.
    */
-  final def mapAcquireExclusive(): Unit = {
+  final def chunkmapAcquireExclusive(): Unit = {
     // Spin-lock implementation. Because the owner of the shared lock might be blocked by this
     // thread as it waits for an exclusive lock, deadlock is possible. To mitigate this problem,
     // timeout and retry, allowing shared lock waiters to make progress. The timeout doubles
@@ -298,26 +298,26 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Release an acquired exclusive lock.
    */
-  final def mapReleaseExclusive(): Unit = {
+  final def chunkmapReleaseExclusive(): Unit = {
     UnsafeUtils.setIntVolatile(this, lockStateOffset, 0)
   }
 
   /**
    * Run the given function body with the exclusive lock held, which isn't re-entrant.
    */
-  final def mapWithExclusive[T](body: => T): T = {
-    mapAcquireExclusive()
+  final def chunkmapWithExclusive[T](body: => T): T = {
+    chunkmapAcquireExclusive()
     try {
       body
     } finally {
-      mapReleaseExclusive()
+      chunkmapReleaseExclusive()
     }
   }
 
   /**
    * Acquire shared access to this map, spinning if necessary.
    */
-  final def mapAcquireShared(): Unit = {
+  final def chunkmapAcquireShared(): Unit = {
     // Spin-lock implementation.
 
     var lockState = 0
@@ -337,7 +337,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Release an acquired shared lock.
    */
-  final def mapReleaseShared(): Unit = {
+  final def chunkmapReleaseShared(): Unit = {
     var lockState = 0
     do {
       lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
@@ -348,12 +348,12 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
   /**
    * Run the given function body with the shared lock held.
    */
-  final def mapWithShared[T](body: => T): T = {
-    mapAcquireShared()
+  final def chunkmapWithShared[T](body: => T): T = {
+    chunkmapAcquireShared()
     try {
       body
     } finally {
-      mapReleaseShared()
+      chunkmapReleaseShared()
     }
   }
 
@@ -363,11 +363,11 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Takes O(1) time if key is the highest in the map, or O(n) otherwise. Caller must hold
    * exclusive lock.
    * @param element the native pointer to the offheap element; must be able to apply
-   * mapKeyRetrieve to it to get the key
+   * chunkmapKeyRetrieve to it to get the key
    */
-  final def doMapPut(element: NativePointer): Unit = {
+  final def chunkmapDoPut(element: NativePointer): Unit = {
     require(element != 0)
-    doMapPut(mapKeyRetrieve(element), element)
+    chunkmapDoPut(chunkmapKeyRetrieve(element), element)
   }
 
   /**
@@ -375,18 +375,18 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * already in the map. Caller must hold exclusive lock.
    * @return true if the element was inserted, false otherwise
    */
-  final def doMapPutIfAbsent(element: NativePointer): Boolean = {
+  final def chunkmapDoPutIfAbsent(element: NativePointer): Boolean = {
     require(element != 0)
-    val key = mapKeyRetrieve(element)
+    val key = chunkmapKeyRetrieve(element)
     if (doBinarySearch(key) >= 0) {
       return false
     }
-    doMapPut(key, element)
+    chunkmapDoPut(key, element)
     true
   }
 
   //scalastyle:off
-  private def doMapPut(key: Long, element: NativePointer): Unit = {
+  private def chunkmapDoPut(key: Long, element: NativePointer): Unit = {
     if (size == 0) {
       arraySet(0, element)
       first = 0
@@ -416,7 +416,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
     {
       val last = first + size - 1
       val rlast = realIndex(last)
-      val lastKey = mapKeyRetrieve(arrayGet(rlast))
+      val lastKey = chunkmapKeyRetrieve(arrayGet(rlast))
 
       if (key > lastKey) {
         // New highest key; this is the expected common case.
@@ -466,13 +466,13 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * otherwise O(n) time on average. Caller must hold exclusive lock.
    * @param key the key to remove. If key isn't present, then nothing is changed.
    */
-  final def doMapRemove(key: Long): Unit = {
+  final def chunkmapDoRemove(key: Long): Unit = {
     if (size <= 0) {
       return
     }
 
     // Check if matches the first key.
-    if (key == mapKeyRetrieve(arrayGet(first))) {
+    if (key == chunkmapKeyRetrieve(arrayGet(first))) {
       first += 1
       if (first >= capacity) {
         // Wraparound.
@@ -501,8 +501,8 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
     size -= 1
   }
 
-  final def mapFree(): Unit = {
-    mapWithExclusive({
+  final def chunkmapFree(): Unit = {
+    chunkmapWithExclusive({
       if (arrayPtr != 0) {
         memFactory.freeMemory(arrayPtr)
         capacity = 0
@@ -517,7 +517,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Method which retrieves a pointer to the key/ID within the element. It just reads the first
    * eight bytes from the element as the ID. Please override to implement custom functionality.
    */
-  private def mapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
+  private def chunkmapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
 
   /**
    * Does a binary search for the element with the given key. Caller must hold any lock.
@@ -530,7 +530,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
 
     while (low <= high) {
       var mid = (low + high) >>> 1
-      var midKey = mapKeyRetrieve(arrayGet(realIndex(mid)))
+      var midKey = chunkmapKeyRetrieve(arrayGet(realIndex(mid)))
       if (midKey < key) {
         low = mid + 1
       } else if (midKey > key) {
@@ -581,7 +581,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
     private def doClose(): Unit = {
       closed = true
       nextElem = 0
-      mapReleaseShared()
+      chunkmapReleaseShared()
     }
 
     final def hasNext: Boolean = {

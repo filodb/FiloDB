@@ -1024,7 +1024,7 @@ class TimeSeriesShard(val dataset: Dataset,
   // Also frees partition key if necessary
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
-    partitionObj.mapFree()
+    partitionObj.chunkmapFree()
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     partitions.remove(partitionObj.partID)
   }

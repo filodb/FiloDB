@@ -223,7 +223,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = mapSize // inherited from OffheapSortedIDMap
+  def numChunks: Int = chunkmapSize // inherited from OffheapSortedIDMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**
@@ -231,13 +231,13 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
    * when flushes happen.  Computed dynamically from current infosChunks state.
    * NOTE: since sliceToEnd is inclusive, we need to start just past the newestFlushedID
    */
-  def unflushedChunksets: Int = mapSliceToEnd(newestFlushedID + 1).count
+  def unflushedChunksets: Int = chunkmapSliceToEnd(newestFlushedID + 1).count
 
-  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(mapIterate)
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate)
 
   // NOT including currently flushing writeBuffer chunks if there are any
   private[memstore] def infosToBeFlushed: ChunkInfoIterator =
-    new ElementChunkInfoIterator(mapSliceToEnd(newestFlushedID + 1))
+    new ElementChunkInfoIterator(chunkmapSliceToEnd(newestFlushedID + 1))
                .filter(_ != currentInfo)  // filter out the appending chunk
 
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
@@ -252,7 +252,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
                                   try {
                                     new OneChunkInfo(currentInfo)
                                   } catch {
-                                    case e: Throwable => mapReleaseShared(); throw e;
+                                    case e: Throwable => chunkmapReleaseShared(); throw e;
                                   }
                                 }
   }
@@ -279,7 +279,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
 
     private def doClose(): Unit = {
       closed = true
-      mapReleaseShared()
+      chunkmapReleaseShared()
     }
 
     def hasNext: Boolean = {
@@ -290,7 +290,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
     def nextInfo: ChunkSetInfo = {
       if (closed) throw new NoSuchElementException()
       if (!valueSeen) {
-        mapAcquireShared()
+        chunkmapAcquireShared()
         valueSeen = true
       }
       return info
@@ -302,7 +302,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       Long.MinValue
     } else {
       // Acquire shared lock to safely access the native pointer.
-      mapWithShared(ChunkSetInfo(doMapGetFirst).startTime)
+      chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst).startTime)
     }
   }
 
@@ -317,7 +317,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       currentInfo.endTime
     } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
-      mapWithShared(infoLast.endTime)
+      chunkmapWithShared(infoLast.endTime)
     } else {
       -1
     }
@@ -342,17 +342,17 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    mapWithExclusive(doMapRemove(id))
+    chunkmapWithExclusive(chunkmapDoRemove(id))
     shardStats.chunkIdsEvicted.increment()
   }
 
-  final def hasChunksAt(id: ChunkID): Boolean = mapContains(id)
+  final def hasChunksAt(id: ChunkID): Boolean = chunkmapContains(id)
 
   // Used for adding chunksets that are paged in, ie that are already persisted
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
-    mapWithExclusive({
-      val inserted = doMapPutIfAbsent(infoAddr)
+    chunkmapWithExclusive({
+      val inserted = chunkmapDoPutIfAbsent(infoAddr)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
@@ -364,13 +364,13 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   // Caller must hold lock on the inherited map.
-  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(doMapGet(id))
+  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(chunkmapDoGet(id))
 
   // Caller must hold lock on the inherited map.
-  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(doMapGetLast)
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast)
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    mapWithExclusive(doMapPut(info.infoAddr))
+    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr))
   }
 }
 
