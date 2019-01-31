@@ -35,8 +35,6 @@ object Parent {
   final case class GetDsCreated(ds: DatasetRef)
 }
 
-// Ignore this test as not clear it really tests anything and it keeps failing with "unable to bound to port 2552"
-@org.scalatest.Ignore
 class NamingAwareBaseActorSpec extends AkkaSpec {
 
   import ActorName.{CoordinatorName, Ingestion, Query}
