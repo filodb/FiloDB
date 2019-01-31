@@ -323,6 +323,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       queryConfig)
     slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
 
+    // ChunkedWindowIterator requires window to be staleSampleAfterMs + 1 when window of SlidingWindowIterator is 0
     val chunkedWinIt = new ChunkedWindowIterator(rv, 100000L,
       100000, 600000L, queryConfig.staleSampleAfterMs + 1,
       RangeFunction(None, ColumnType.DoubleColumn, useChunked = true)
