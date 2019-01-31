@@ -50,6 +50,9 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  * is constant regardless of the number of chunks in a TSPartition. The partition key and
  * infoMap are both in offheap write buffers, and chunks and chunk metadata are kept in offheap
  * block memory.
+ *
+ * Note: Inheritance is chosen over composition to avoid an extra object allocation, which
+ * speeds up GC and reduces memory overhead a bit.
  */
 class TimeSeriesPartition(val partID: Int,
                           val dataset: Dataset,
@@ -299,7 +302,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       Long.MinValue
     } else {
       // Acquire shared lock to safely access the native pointer.
-      mapWithShared(ChunkSetInfo(mapGetFirst).startTime)
+      mapWithShared(ChunkSetInfo(doMapGetFirst).startTime)
     }
   }
 
@@ -339,7 +342,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    mapWithExclusive(mapRemove(id))
+    mapWithExclusive(doMapRemove(id))
     shardStats.chunkIdsEvicted.increment()
   }
 
@@ -349,7 +352,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
     mapWithExclusive({
-      val inserted = mapPutIfAbsent(infoAddr)
+      val inserted = doMapPutIfAbsent(infoAddr)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
@@ -361,13 +364,13 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   // Caller must hold lock on the inherited map.
-  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(mapGet(id))
+  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(doMapGet(id))
 
   // Caller must hold lock on the inherited map.
-  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(mapGetLast)
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(doMapGetLast)
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    mapWithExclusive(mapPut(info.infoAddr))
+    mapWithExclusive(doMapPut(info.infoAddr))
   }
 }
 

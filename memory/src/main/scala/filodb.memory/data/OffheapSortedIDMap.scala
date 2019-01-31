@@ -37,51 +37,43 @@ import filodb.memory.format.UnsafeUtils
  * map is very large.
  */
 object OffheapSortedIDMap extends StrictLogging {
-  val _logger = logger
+  private val _logger = logger
 
-  val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(classOf[OffheapSortedIDMap].getDeclaredField("lockState"))
+  private val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(
+    classOf[OffheapSortedIDMap].getDeclaredField("lockState"))
 
-  val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
-  val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
+  private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
+  private val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
 
-  val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
-  val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
+  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
+  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
 
   // Tracks all the shared locks held, by each thread.
-  val sharedLockCounts = new ThreadLocal[Map[OffheapSortedIDMap, Int]]
+  private val sharedLockCounts = new ThreadLocal[Map[OffheapSortedIDMap, Int]] {
+    override def initialValue() = new HashMap[OffheapSortedIDMap, Int]
+  }
 
   // Updates the shared lock count, for the current thread.
-  //scalastyle:off
-  def adjustSharedLockCount(inst: OffheapSortedIDMap, amt: Int): Unit = {
-    var countMap = sharedLockCounts.get
-
-    if (countMap == null) {
-      if (amt <= 0) {
-        return
+  private def adjustSharedLockCount(inst: OffheapSortedIDMap, amt: Int): Unit = {
+    val countMap = sharedLockCounts.get
+    if (!countMap.contains(inst)) {
+      if (amt > 0) {
+        countMap.put(inst, amt)
       }
-      countMap = new HashMap[OffheapSortedIDMap, Int]
-      sharedLockCounts.set(countMap)
-    }
-
-    var newCount = amt
-
-    countMap.get(inst) match {
-      case None => if (newCount <= 0) return
-      case Some(count) => {
-        newCount += count
-        if (newCount <= 0) {
-          countMap.remove(inst)
-          return
-        }
+    } else {
+      val newCount = countMap(inst) + amt
+      if (newCount <= 0) {
+        countMap.remove(inst)
+      } else {
+        countMap.put(inst, newCount)
       }
     }
-
-    countMap.put(inst, newCount)
   }
 
   /**
    * Releases all shared locks, against all OffheapSortedIDMap instances, for the current thread.
    */
+  //scalastyle:off null
   def releaseAllSharedLocks(): Int = {
     var total = 0
     val countMap = sharedLockCounts.get
@@ -102,7 +94,7 @@ object OffheapSortedIDMap extends StrictLogging {
     }
     total
   }
-  //scalastyle:on
+  //scalastyle:on null
 
   /**
     * Validate no locks are held by the thread. Typically invoked prior to
@@ -145,8 +137,8 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Returns the element at the given key, or NULL (0) if the key isn't found. Takes O(log n)
    * time. Caller must hold any lock.
    */
-  final def mapGet(key: Long): NativePointer = {
-    val index = binarySearch(key)
+  final def doMapGet(key: Long): NativePointer = {
+    val index = doBinarySearch(key)
     if (index >= 0) arrayGet(realIndex(index)) else 0
   }
 
@@ -154,14 +146,14 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Returns true if the given key exists in this map. Takes O(log n) time.
    */
   final def mapContains(key: Long): Boolean = {
-    mapWithShared(binarySearch(key) >= 0)
+    mapWithShared(doBinarySearch(key) >= 0)
   }
 
   /**
    * Returns the first element, the one with the lowest key. Caller must hold any lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    */
-  final def mapGetFirst(): NativePointer = {
+  final def doMapGetFirst(): NativePointer = {
     if (size <= 0) {
       throw new IndexOutOfBoundsException
     }
@@ -172,7 +164,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Returns the last element, the one with the highest key. Caller must hold any lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    */
-  final def mapGetLast(): NativePointer = {
+  final def doMapGetLast(): NativePointer = {
     if (size <= 0) {
       throw new IndexOutOfBoundsException
     }
@@ -203,7 +195,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
     new LazyElementIterator(() => {
       mapAcquireShared()
       try {
-        new MapIterator(binarySearch(startKey) & 0x7fffffff, first + size) {
+        new MapIterator(doBinarySearch(startKey) & 0x7fffffff, first + size) {
           override def isPastEnd: Boolean = mapKeyRetrieve(getNextElem) > endKey
         }
       } catch {
@@ -221,7 +213,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
     new LazyElementIterator(() => {
       mapAcquireShared()
       try {
-        new MapIterator(binarySearch(startKey) & 0x7fffffff, first + size)
+        new MapIterator(doBinarySearch(startKey) & 0x7fffffff, first + size)
       } catch {
         case e: Throwable => mapReleaseShared(); throw e;
       }
@@ -373,7 +365,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * @param element the native pointer to the offheap element; must be able to apply
    * mapKeyRetrieve to it to get the key
    */
-  final def mapPut(element: NativePointer): Unit = {
+  final def doMapPut(element: NativePointer): Unit = {
     require(element != 0)
     doMapPut(mapKeyRetrieve(element), element)
   }
@@ -383,10 +375,10 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * already in the map. Caller must hold exclusive lock.
    * @return true if the element was inserted, false otherwise
    */
-  final def mapPutIfAbsent(element: NativePointer): Boolean = {
+  final def doMapPutIfAbsent(element: NativePointer): Boolean = {
     require(element != 0)
     val key = mapKeyRetrieve(element)
-    if (binarySearch(key) >= 0) {
+    if (doBinarySearch(key) >= 0) {
       return false
     }
     doMapPut(key, element)
@@ -440,7 +432,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
       }
     }
 
-    var index = binarySearch(key)
+    var index = doBinarySearch(key)
 
     if (index >= 0) {
       // Replacing an existing element.
@@ -474,7 +466,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * otherwise O(n) time on average. Caller must hold exclusive lock.
    * @param key the key to remove. If key isn't present, then nothing is changed.
    */
-  final def mapRemove(key: Long): Unit = {
+  final def doMapRemove(key: Long): Unit = {
     if (size <= 0) {
       return
     }
@@ -487,7 +479,7 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
         first = 0
       }
     } else {
-      val index = binarySearch(key)
+      val index = doBinarySearch(key)
       if (index < 0) {
         // Not found.
         return
@@ -525,14 +517,14 @@ class OffheapSortedIDMap(val memFactory: MemFactory,
    * Method which retrieves a pointer to the key/ID within the element. It just reads the first
    * eight bytes from the element as the ID. Please override to implement custom functionality.
    */
-  def mapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
+  private def mapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
 
   /**
    * Does a binary search for the element with the given key. Caller must hold any lock.
    * @param key the key to search for
    * @return found index, or index with bit 31 set if not found
    */
-  private def binarySearch(key: Long): Int = {
+  private def doBinarySearch(key: Long): Int = {
     var low = first
     var high = first + size - 1
 

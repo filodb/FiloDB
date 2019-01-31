@@ -29,9 +29,9 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 8)
     map.mapSize shouldEqual 0
     map.mapContains(5L) shouldEqual false
-    intercept[IndexOutOfBoundsException] { map.mapGetFirst }
-    intercept[IndexOutOfBoundsException] { map.mapGetLast }
-    map.mapGet(5L) shouldEqual 0
+    intercept[IndexOutOfBoundsException] { map.doMapGetFirst }
+    intercept[IndexOutOfBoundsException] { map.doMapGetLast }
+    map.doMapGet(5L) shouldEqual 0
     map.mapIterate.toBuffer shouldEqual Buffer.empty[Long]
 
     map.mapFree()
@@ -42,41 +42,41 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val elems = makeElems((0 to 11).map(_.toLong))
 
     // when empty
-    map.mapPut(elems(5))
+    map.doMapPut(elems(5))
     map.mapSize shouldEqual 1
     map.mapContains(5L) shouldEqual true
-    map.mapGet(5L) shouldEqual elems(5)
-    map.mapGetLast shouldEqual elems(5)
-    map.mapGetFirst shouldEqual elems(5)
+    map.doMapGet(5L) shouldEqual elems(5)
+    map.doMapGetLast shouldEqual elems(5)
+    map.doMapGetFirst shouldEqual elems(5)
     checkElems(Seq(5L), map.mapIterate.toBuffer)
 
     // last, not empty and not full
-    map.mapPut(elems(8))
+    map.doMapPut(elems(8))
     map.mapSize shouldEqual 2
     map.mapContains(8L) shouldEqual true
-    map.mapGetLast shouldEqual elems(8)
-    map.mapGetFirst shouldEqual elems(5)
+    map.doMapGetLast shouldEqual elems(8)
+    map.doMapGetFirst shouldEqual elems(5)
     checkElems(Seq(5L, 8L), map.mapIterate.toBuffer)
 
     // middle, not empty and not full (no resize)
-    map.mapPut(elems(6))
+    map.doMapPut(elems(6))
     map.mapSize shouldEqual 3
     map.mapContains(6L) shouldEqual true
-    map.mapGetLast shouldEqual elems(8)
-    map.mapGetFirst shouldEqual elems(5)
+    map.doMapGetLast shouldEqual elems(8)
+    map.doMapGetFirst shouldEqual elems(5)
     checkElems(Seq(5L, 6L, 8L), map.mapIterate.toBuffer)
 
     // Should be no resizing as long as length/# elements < 7
     Seq(2, 3, 9, 7).foreach { n =>
-      map.mapPut(elems(n))
+      map.doMapPut(elems(n))
       map.mapContains(n.toLong) shouldEqual true
     }
     map.mapSize shouldEqual 7
-    map.mapGetLast shouldEqual elems(9)
+    map.doMapGetLast shouldEqual elems(9)
     checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L), map.mapIterate.toBuffer)
 
     // last, full (should resize)
-    map.mapPut(elems(10))
+    map.doMapPut(elems(10))
     map.mapSize shouldEqual 8
     checkElems(Seq(2L, 3L, 5L, 6L, 7L, 8L, 9L, 10L), map.mapIterate.toBuffer)
 
@@ -84,13 +84,13 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     // should not resize until # elements = 15
     val elems2 = makeElems((21 to 27).map(_.toLong))
     elems2.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
       map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
     }
     map.mapSize shouldEqual 15
-    map.mapGetLast shouldEqual elems2.last
+    map.doMapGetLast shouldEqual elems2.last
 
-    map.mapPut(elems(4))
+    map.doMapPut(elems(4))
     map.mapSize shouldEqual 16
     checkElems(((2 to 10) ++ (21 to 27)).map(_.toLong), map.mapIterate.toBuffer)
 
@@ -102,28 +102,28 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 8)
     val elems = makeElems((2 to 10).map(_.toLong))
     elems.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
       map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
     }
     map.mapSize shouldEqual 9
-    map.mapGetLast shouldEqual elems.last
-    map.mapGet(4L) shouldEqual elems(2)
+    map.doMapGetLast shouldEqual elems.last
+    map.doMapGet(4L) shouldEqual elems(2)
 
     // replace in middle
     val newElem4 = makeElementWithID(4L)
-    map.mapPut(newElem4)
+    map.doMapPut(newElem4)
     map.mapSize shouldEqual 9
-    map.mapGet(4L) shouldEqual newElem4
-    map.mapGet(4L) should not equal (elems(2))
+    map.doMapGet(4L) shouldEqual newElem4
+    map.doMapGet(4L) should not equal (elems(2))
     checkElems((2 to 10).map(_.toLong), map.mapIterate.toBuffer)
 
     // replace at head
     val newElem10 = makeElementWithID(10L)
-    map.mapPut(newElem10)
+    map.doMapPut(newElem10)
     map.mapSize shouldEqual 9
-    map.mapGet(10L) shouldEqual newElem10
-    map.mapGetLast shouldEqual newElem10
-    map.mapGet(10L) should not equal (elems.last)
+    map.doMapGet(10L) shouldEqual newElem10
+    map.doMapGetLast shouldEqual newElem10
+    map.doMapGet(10L) should not equal (elems.last)
     checkElems((2 to 10).map(_.toLong), map.mapIterate.toBuffer)
 
     map.mapFree()
@@ -135,17 +135,17 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val elems = makeElems((2 to 10).map(_.toLong))
     map.mapSize shouldEqual 0
 
-    map.mapPutIfAbsent(elems(0)) shouldEqual true
+    map.doMapPutIfAbsent(elems(0)) shouldEqual true
     map.mapSize shouldEqual 1
 
     val twoElem = makeElementWithID(2)
-    map.mapPutIfAbsent(twoElem) shouldEqual false
+    map.doMapPutIfAbsent(twoElem) shouldEqual false
     map.mapSize shouldEqual 1
 
-    map.mapPutIfAbsent(elems(3)) shouldEqual true
+    map.doMapPutIfAbsent(elems(3)) shouldEqual true
     map.mapSize shouldEqual 2
 
-    map.mapPutIfAbsent(elems(3)) shouldEqual false
+    map.doMapPutIfAbsent(elems(3)) shouldEqual false
     map.mapSize shouldEqual 2
 
     val elemIt = map.mapIterate
@@ -164,7 +164,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   it("should not be able to put NULL elements") {
     val map = new OffheapSortedIDMap(memFactory, 8)
     intercept[IllegalArgumentException] {
-      map.mapPut(0)
+      map.doMapPut(0)
     }
     map.mapFree()
   }
@@ -172,36 +172,36 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   it("should insert, delete, and reinsert") {
     // insert 1 item, then delete it, test map is truly empty
     val map = new OffheapSortedIDMap(memFactory, 8)
-    map.mapPut(makeElementWithID(1))
+    map.doMapPut(makeElementWithID(1))
     map.mapSize shouldEqual 1
-    map.mapRemove(1L)
+    map.doMapRemove(1L)
     map.mapSize shouldEqual 0
     checkElems(Nil, map.mapIterate.toBuffer)
 
     // pre-populate with various elements
     val elems = makeElems((2 to 10).map(_.toLong))
     elems.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
       map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
     }
     map.mapSize shouldEqual 9
-    map.mapGetLast shouldEqual elems.last
-    map.mapGetFirst shouldEqual elems.head
-    map.mapGet(4L) shouldEqual elems(2)
+    map.doMapGetLast shouldEqual elems.last
+    map.doMapGetFirst shouldEqual elems.head
+    map.doMapGet(4L) shouldEqual elems(2)
 
     // remove at tail.  No resizing should occur.
-    map.mapRemove(2L)
-    map.mapGetFirst shouldEqual elems(1)
+    map.doMapRemove(2L)
+    map.doMapGetFirst shouldEqual elems(1)
     map.mapSize shouldEqual 8
     checkElems((3 to 10).map(_.toLong), map.mapIterate.toBuffer)
 
     // remove in middle.  Resizing because 8 -> 7?
-    map.mapRemove(6L)
+    map.doMapRemove(6L)
     map.mapSize shouldEqual 7
     checkElems(Seq(3L, 4L, 5L, 7L, 8L, 9L, 10L), map.mapIterate.toBuffer)
 
     // re-insert removed element
-    map.mapPut(elems(4))
+    map.doMapPut(elems(4))
     map.mapSize shouldEqual 8
     checkElems((3 to 10).map(_.toLong), map.mapIterate.toBuffer)
 
@@ -218,13 +218,13 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val headThread = Future {
       headElems.foreach { elem =>
-        map.mapWithExclusive(map.mapPut(elem))
+        map.mapWithExclusive(map.doMapPut(elem))
         map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
     val midThread = Future {
       midElems.foreach { elem =>
-        map.mapWithExclusive(map.mapPut(elem))
+        map.mapWithExclusive(map.doMapPut(elem))
         map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
@@ -244,7 +244,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val insertThread = Future {
       Random.shuffle(elems).foreach { elem =>
-        map.mapWithExclusive(map.mapPut(elem))
+        map.mapWithExclusive(map.doMapPut(elem))
         map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
@@ -278,7 +278,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 99).map(_.toLong))
     elems.foreach { elem =>
-      map.mapWithExclusive(map.mapPut(elem))
+      map.mapWithExclusive(map.doMapPut(elem))
     }
     map.mapSize shouldEqual elems.length
 
@@ -288,14 +288,14 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     // Now, have one thread deleting 0-99, while second one inserts 100-199
     val deleteThread = Future {
       toDelete.foreach { n =>
-        map.mapWithExclusive(map.mapRemove(n))
+        map.mapWithExclusive(map.doMapRemove(n))
         map.mapContains(n) shouldEqual false
       }
     }
 
     val insertThread = Future {
       moreElems.foreach { elem =>
-        map.mapWithExclusive(map.mapPut(elem))
+        map.mapWithExclusive(map.doMapPut(elem))
         // once in a while this could fail
         //map.mapContains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
@@ -314,7 +314,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
     }
     map.mapSize shouldEqual elems.length
 
@@ -342,7 +342,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
     }
     map.mapSize shouldEqual elems.length
 
@@ -360,20 +360,20 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = new OffheapSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
-      map.mapPut(elem)
+      map.doMapPut(elem)
     }
     map.mapSize shouldEqual elems.length
 
     map.mapFree()
     map.mapSize shouldEqual 0
-    map.mapGet(2L) shouldEqual 0
+    map.doMapGet(2L) shouldEqual 0
     map.mapContains(3L) shouldEqual false
-    intercept[IndexOutOfBoundsException] { map.mapGetFirst }
-    intercept[IndexOutOfBoundsException] { map.mapGetLast }
+    intercept[IndexOutOfBoundsException] { map.doMapGetFirst }
+    intercept[IndexOutOfBoundsException] { map.doMapGetLast }
     map.mapIterate.toBuffer shouldEqual Buffer.empty[Long]
     map.mapSliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
     map.mapSize shouldEqual 0
-    map.mapRemove(6L)
+    map.doMapRemove(6L)
 
     // Double free does nothing.
     map.mapFree()
@@ -394,14 +394,14 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
       val id = rnd.nextInt(50)
       if (rnd.nextBoolean()) {
         set.add(id)
-        if (map.mapPutIfAbsent(makeElementWithID(id))) {
+        if (map.doMapPutIfAbsent(makeElementWithID(id))) {
           size += 1
         }
         map.mapContains(id) shouldEqual true
       } else {
         if (map.mapContains(id)) {
           set.remove(id) shouldEqual true
-          map.mapRemove(id)
+          map.doMapRemove(id)
           map.mapContains(id) shouldEqual false
           size -= 1
         } else {
