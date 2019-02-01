@@ -210,6 +210,7 @@ object FiloBuild extends Build {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
+    "io.kamon"             %% "kamon-zipkin"      % "1.0.0",
     "org.slf4j"             % "slf4j-api"         % "1.7.10",
     "com.beachape"         %% "enumeratum"        % "1.5.10",
     "io.monix"             %% "monix"             % "2.3.0",
