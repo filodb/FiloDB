@@ -7,7 +7,7 @@ import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
-import filodb.memory.data.OffheapSortedIDMap
+import filodb.memory.data.ChunkMap
 import filodb.memory.format._
 
 object TimeSeriesPartition extends StrictLogging {
@@ -44,12 +44,11 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  *     This allows for safe and cheap write buffer churn without losing any data.
  *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
- * The main data structure used in inherited from OffheapSortedIDMap, an efficient, offheap
- * sorted map.  Note that other than the variables used in this class, there is NO JVM-maneged
- * memory used for managing chunks.  Thus the amount of JVM-managed memory used for a partition
- * is constant regardless of the number of chunks in a TSPartition. The partition key and
- * infoMap are both in offheap write buffers, and chunks and chunk metadata are kept in offheap
- * block memory.
+ * The main data structure used in inherited from ChunkMap, an efficient, offheap sorted map.
+ * Note that other than the variables used in this class, there is NO JVM-maneged memory used
+ * for managing chunks.  Thus the amount of JVM-managed memory used for a partition is constant
+ * regardless of the number of chunks in a TSPartition. The partition key and infoMap are both
+ * in offheap write buffers, and chunks and chunk metadata are kept in offheap block memory.
  *
  * Note: Inheritance is chosen over composition to avoid an extra object allocation, which
  * speeds up GC and reduces memory overhead a bit.
@@ -62,7 +61,7 @@ class TimeSeriesPartition(val partID: Int,
                           val shardStats: TimeSeriesShardStats,
                           memFactory: MemFactory,
                           initMapSize: Int)
-extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
+extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
   require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
@@ -223,7 +222,7 @@ extends OffheapSortedIDMap(memFactory, initMapSize) with ReadablePartition {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = chunkmapSize // inherited from OffheapSortedIDMap
+  def numChunks: Int = chunkmapSize // inherited from ChunkMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**

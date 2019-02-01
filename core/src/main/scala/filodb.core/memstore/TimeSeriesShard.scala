@@ -262,7 +262,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
-  // Use 1/4 of max # buckets for initial OffheapSortedIDMap size
+  // Use 1/4 of max # buckets for initial ChunkMap size
   private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
 
   /**

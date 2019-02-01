@@ -11,7 +11,7 @@ import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.vectors.NativeVectorTest
 
-class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
+class ChunkMapTest extends NativeVectorTest with ScalaFutures {
   def makeElementWithID(id: Long): NativePointer = {
     val newElem = memFactory.allocateOffheap(16)
     UnsafeUtils.setLong(newElem, id)
@@ -26,7 +26,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should be empty when first starting") {
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     map.chunkmapSize shouldEqual 0
     map.chunkmapContains(5L) shouldEqual false
     intercept[IndexOutOfBoundsException] { map.chunkmapDoGetFirst }
@@ -38,7 +38,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should insert and read back properly in various places") {
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     val elems = makeElems((0 to 11).map(_.toLong))
 
     // when empty
@@ -99,7 +99,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should replace existing elements in various places") {
     // pre-populate with elements 2 to 10
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     val elems = makeElems((2 to 10).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -131,7 +131,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should putIfAbsent only if item doesn't already exist") {
     // pre-populate with elements 2 to 10
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     val elems = makeElems((2 to 10).map(_.toLong))
     map.chunkmapSize shouldEqual 0
 
@@ -162,7 +162,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should not be able to put NULL elements") {
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     intercept[IllegalArgumentException] {
       map.chunkmapDoPut(0)
     }
@@ -171,7 +171,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should insert, delete, and reinsert") {
     // insert 1 item, then delete it, test map is truly empty
-    val map = new OffheapSortedIDMap(memFactory, 8)
+    val map = new ChunkMap(memFactory, 8)
     map.chunkmapDoPut(makeElementWithID(1))
     map.chunkmapSize shouldEqual 1
     map.chunkmapDoRemove(1L)
@@ -212,7 +212,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should handle concurrent inserts in various places") {
     // Let's have 1 thread inserting at head, and another one inserting in middle
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val headElems = makeElems((100 to 199).map(_.toLong))
     val midElems = makeElems((0 to 99).map(_.toLong))
 
@@ -239,7 +239,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   it("should handle concurrent inserts and ensure slice/iterations return sane data") {
     // 1 thread inserts random elem.  Another allocates random strings in the buffer, just to
     // increase chances of reading random crap
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val elems = makeElems((0 to 99).map(_.toLong)).toSeq
 
     val insertThread = Future {
@@ -275,7 +275,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
   it("should handle concurrent inserts and deletes in various places") {
     // First insert 0 to 99 single threaded
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val elems = makeElems((0 to 99).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapWithExclusive(map.chunkmapDoPut(elem))
@@ -311,7 +311,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should slice correctly") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -339,7 +339,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should sliceToEnd correctly") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -357,7 +357,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should behave gracefully once map is freed") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
     val elems = makeElems((0 to 30 by 3).map(_.toLong))
     elems.foreach { elem =>
       map.chunkmapDoPut(elem)
@@ -385,7 +385,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     // elements, which do end up getting tested with these parameters.
 
     val rnd = new java.util.Random(8675309)
-    val map = new OffheapSortedIDMap(memFactory, 4)
+    val map = new ChunkMap(memFactory, 4)
     val set = new HashSet[Long]()
 
     var size = 0
@@ -416,7 +416,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should support uncontended locking behavior") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireExclusive()
     map.chunkmapReleaseExclusive()
@@ -442,7 +442,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should support exclusive lock") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireExclusive()
 
@@ -478,7 +478,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should block exclusive lock when shared lock is held") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -524,7 +524,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should block shared lock when exclusive lock is held") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireExclusive()
 
@@ -570,7 +570,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should delay shared lock when exclusive lock is waiting") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireShared()
 
@@ -617,7 +617,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should release all shared locks held by the current thread") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -643,7 +643,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     acquired shouldBe false
 
     // Releasing all shared locks allows the exclusive lock request to complete.
-    OffheapSortedIDMap.releaseAllSharedLocks()
+    ChunkMap.releaseAllSharedLocks()
     Thread.`yield`
 
     stuck.join(10000)
@@ -654,7 +654,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
   }
 
   it("should release all shared locks held for only the current thread") {
-    val map = new OffheapSortedIDMap(memFactory, 32)
+    val map = new ChunkMap(memFactory, 32)
 
     map.chunkmapAcquireShared()
     map.chunkmapAcquireShared()
@@ -688,7 +688,7 @@ class OffheapSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     acquired shouldBe false
 
     // Releasing one thread shared locks isn't sufficient.
-    OffheapSortedIDMap.releaseAllSharedLocks()
+    ChunkMap.releaseAllSharedLocks()
     Thread.`yield`
 
     startNanos = System.nanoTime()

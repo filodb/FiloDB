@@ -36,11 +36,11 @@ import filodb.memory.format.UnsafeUtils
  * the contents of the circular buffer must shift around, leading to a very high cost when the
  * map is very large.
  */
-object OffheapSortedIDMap extends StrictLogging {
+object ChunkMap extends StrictLogging {
   private val _logger = logger
 
   private val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(
-    classOf[OffheapSortedIDMap].getDeclaredField("lockState"))
+    classOf[ChunkMap].getDeclaredField("lockState"))
 
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
   private val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
@@ -49,12 +49,12 @@ object OffheapSortedIDMap extends StrictLogging {
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
 
   // Tracks all the shared locks held, by each thread.
-  private val sharedLockCounts = new ThreadLocal[Map[OffheapSortedIDMap, Int]] {
-    override def initialValue() = new HashMap[OffheapSortedIDMap, Int]
+  private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
+    override def initialValue() = new HashMap[ChunkMap, Int]
   }
 
   // Updates the shared lock count, for the current thread.
-  private def adjustSharedLockCount(inst: OffheapSortedIDMap, amt: Int): Unit = {
+  private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
     val countMap = sharedLockCounts.get
     if (!countMap.contains(inst)) {
       if (amt > 0) {
@@ -71,7 +71,7 @@ object OffheapSortedIDMap extends StrictLogging {
   }
 
   /**
-   * Releases all shared locks, against all OffheapSortedIDMap instances, for the current thread.
+   * Releases all shared locks, against all ChunkMap instances, for the current thread.
    */
   //scalastyle:off null
   def releaseAllSharedLocks(): Int = {
@@ -102,7 +102,7 @@ object OffheapSortedIDMap extends StrictLogging {
     * it is quite possible a lock acquire or release bug exists
     */
   def validateNoSharedLocks(): Unit = {
-    val numLocksReleased = OffheapSortedIDMap.releaseAllSharedLocks()
+    val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
       logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
@@ -114,17 +114,17 @@ object OffheapSortedIDMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class OffheapSortedIDMap(val memFactory: MemFactory,
-                         var capacity: Int,
-                         // Must be declared here to be ordinary fast fields.
-                         private var lockState: Int = 0,
-                         private var size: Int = 0,
-                         private var first: Int = 0) {
+class ChunkMap(val memFactory: MemFactory,
+               var capacity: Int,
+               // Must be declared here to be ordinary fast fields.
+               private var lockState: Int = 0,
+               private var size: Int = 0,
+               private var first: Int = 0) {
   require(capacity > 0)
 
   private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero=true)
 
-  import OffheapSortedIDMap._
+  import ChunkMap._
 
   /**
    * Returns the number of total elements in the map.
