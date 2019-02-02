@@ -2,7 +2,7 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
@@ -18,34 +18,35 @@ import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.QueryConfig
+import filodb.query.exec.ExecPlan
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
 /**
- * A macrobenchmark (IT-test level) for QueryEngine2 aggregations, in-memory only (no on-demand paging)
- * No ingestion occurs while query test is running -- this is intentional to allow for query-focused CPU
- * and memory allocation analysis.
- * Ingests a fixed amount of tsgenerator data in Prometheus schema (time, value, tags) and runs various queries.
+ * Benchmark for scan performed at the lowest leaf of an ExecPlan tree for various queries
  */
 @State(Scope.Thread)
-class ScanInMemoryBenchmark extends StrictLogging {
+class QueryLeafScanInMemoryBenchmark extends StrictLogging {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
 
   import filodb.coordinator._
-  import client.Client.{actorAsk, asyncAsk}
+  import client.Client.actorAsk
   import client.QueryCommands._
   import NodeClusterActor._
 
   val numShards = 1
-  val numSeries = 500
-  val samplesDuration = 4.hours
+  val numSeries = 200
+  val samplesDuration = 2.hours
   val numSamples = numSeries * (samplesDuration / 10.seconds).toInt
   val ingestionStartTime = System.currentTimeMillis - samplesDuration.toMillis
   val spread = 0
+  val config = ConfigFactory.load("filodb-defaults.conf")
+  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  implicit val _ = queryConfig.askTimeout
 
   // TODO: move setup and ingestion to another trait
-  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
+  val system = ActorSystem("test", config)
   private val cluster = FilodbCluster(system)
   cluster.join()
 
@@ -77,7 +78,8 @@ class ScanInMemoryBenchmark extends StrictLogging {
   // Manually pump in data ourselves so we know when it's done.
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(ingestionStartTime,
-                                            numShards, numSeries, numSamples * numSeries, dataset, shardMapper, spread)
+    numShards, numSeries, numSamples * numSeries, dataset, shardMapper, spread)
+  println(s"Ingesting $numSamples samples")
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapAsync(numShards) { groupedStream =>
@@ -90,9 +92,10 @@ class ScanInMemoryBenchmark extends StrictLogging {
                       }
                       Task.fromFuture(cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global))
                     }.countL.runAsync
-  Await.result(producingFut, 30.seconds)
+  Await.result(producingFut, 200.seconds)
   Thread sleep 2000
-  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
+  val store = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
+  store.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves
@@ -102,31 +105,42 @@ class ScanInMemoryBenchmark extends StrictLogging {
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
-  val sumRateQuery = """sum(rate(heap_usage{_ns="App-2"}[5m]))"""
-  val queryStartTime = ingestionStartTime + 5.minutes.toMillis  // 5 minutes from start until 60 minutes from start
-  val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
-  val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(sumRateQuery, qParams), QueryOptions(1, 20000))
-  val scanExecPlan = execPlan.children(0)
+
+
+  private def toExecPlan(query: String): ExecPlan = {
+    val queryStartTime = ingestionStartTime + 5.minutes.toMillis  // 5 minutes from start until 60 minutes from start
+    val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
+    val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams), QueryOptions(0, 20000))
+    var child = execPlan
+    while (child.children.size > 0) child = child.children(0)
+    child
+  }
 
   @TearDown
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
   }
 
+  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ns="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
-  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(500)
-  def scanSubQuery(): Unit = {
-    val futures = (0 until numQueries).map { n =>
-      val f = asyncAsk(coordinator, scanExecPlan)
-      f.onSuccess {
-        case q: QueryResult2 =>
-          if (q.result.head.numRows == 0) throw new RuntimeException("Empty query result")
-        case e: QError => throw new RuntimeException(s"Query error $e")
-      }
-      f
+  def scanSumOfRateBenchmark(): Unit = {
+    (0 until numQueries).foreach { _ =>
+      Await.result(scanSumOfRate.execute(store, dataset, queryConfig).runAsync, 60.seconds)
     }
-    Await.result(Future.sequence(futures), 60.seconds)
   }
+
+  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ns="App-2"}[5m]))""")
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  @OperationsPerInvocation(500)
+  def scanSumOfSumOverTimeBenchmark(): Unit = {
+    (0 until numQueries).foreach { _ =>
+      Await.result(scanSumSumOverTime.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+    }
+  }
+
 }
