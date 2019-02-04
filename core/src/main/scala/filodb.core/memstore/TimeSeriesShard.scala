@@ -901,40 +901,29 @@ class TimeSeriesShard(val dataset: Dataset,
     }
     part
   }
+  // scalastyle:on
 
   private def addPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
-    val stamp = partSetLock.writeLock()
-
-    // Double check just in case multiple threads are calling this method.
-    val part = partSet.getWithIngestBR(recordBase, recordOff)
-    if (part != null) {
-      partSetLock.unlockWrite(stamp)
-      part
-    } else {
-      var newPart: TimeSeriesPartition = null
+    val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+    val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
+    if (newPart != OutOfMemPartition) {
+      val partId = newPart.partID
+      // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
+      val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
+      partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
+      activelyIngesting.set(partId)
+      val stamp = partSetLock.writeLock()
       try {
-        val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-        newPart = createNewPartition(partKeyArray, partKeyOffset, group)
-        if (newPart != OutOfMemPartition) {
-          val partId = newPart.partID
-          // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
-          val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
-          partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-          timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-          activelyIngesting.set(partId)
-          partSet.add(newPart)
-        }
+        partSet.add(newPart)
       } finally {
         partSetLock.unlockWrite(stamp)
       }
-      if (newPart != OutOfMemPartition) {
-        logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
-          s"shard $shardNum at offset $ingestOffset")
-      }
-      newPart
+      logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
+        s"shard $shardNum at offset $ingestOffset")
     }
+    newPart
   }
-  // scalastyle:on
 
   /**
     * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
