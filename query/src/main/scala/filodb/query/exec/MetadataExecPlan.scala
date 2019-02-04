@@ -6,14 +6,18 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format.{ZCUTF8IteratorRowReader, ZeroCopyUTF8String}
+import filodb.memory.format._
+import filodb.memory.format.UTF8MapIteratorRowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
+
 
 final case class PartKeysDistConcatExec(id: String,
                                       dispatcher: PlanDispatcher,
@@ -78,13 +82,17 @@ final case class LabelValuesDistConcatExec(id: String,
       case QueryResult(_, _, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
-      var metadataResult = Seq.empty[ZeroCopyUTF8String]
+      var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.foreach(rv => {
-        metadataResult ++= rv(0).rows.toSeq.map(rowReader => rowReader.filoUTF8String(0))
+        metadataResult ++= rv(0).rows.map(rowReader => {
+          val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+          rv(0).schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
+            .map(pair => pair._1.utf8 -> pair._2.utf8).toMap
+        })
       })
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new ZCUTF8IteratorRowReader(metadataResult.distinct.toIterator))
+        new UTF8MapIteratorRowReader(metadataResult.toIterator))
     }
     Observable.fromTask(taskOfResults)
   }
@@ -138,7 +146,7 @@ final case class  LabelValuesExec(id: String,
                                   dataset: DatasetRef,
                                   shard: Int,
                                   filters: Seq[ColumnFilter],
-                                  column: String,
+                                  columns: Seq[String],
                                   lookBackInMillis: Long) extends LeafExecPlan {
 
   protected def doExecute(source: ChunkSource,
@@ -153,21 +161,26 @@ final case class  LabelValuesExec(id: String,
       val end = curr - curr % 1000 // round to the floor second
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
-        case true => memStore.indexValues(dataset, shard, column, limit).map(_.term).toIterator
-        case false => memStore.indexValuesWithFilters(dataset, shard, filters, column, end, start, limit)
+        // retrieves label values for a single label - no column filter
+        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, limit)
+          .map(termInfo => Map(columns.head.utf8 -> termInfo.term))
+          .toIterator
+        case true => throw new BadQueryException("either label name is missing " +
+          "or there are multiple label names without filter")
+        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, end, start, limit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
-        new ZCUTF8IteratorRowReader(response)))
+        new UTF8MapIteratorRowReader(response)))
     } else {
       Observable.empty
     }
   }
 
-  def args: String = s"shard=$shard, filters=$filters, col=$column, limit=$limit, lookBackInMillis=$lookBackInMillis"
+  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=$limit, lookBackInMillis=$lookBackInMillis"
 
   /**
     * Schema of QueryResponse returned by running execute()
     */
   def schemaOfDoExecute(dataset: Dataset): ResultSchema =
-    new ResultSchema(Seq(ColumnInfo(column, ColumnType.StringColumn)), 1)
+    new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
 }

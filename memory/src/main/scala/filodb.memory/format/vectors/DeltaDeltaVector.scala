@@ -231,8 +231,10 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   // let len = end - start + 1
   //   = initVal + start*slope + initVal + (start+1)*slope + .... + initVal + end*slope
   //   = len * initVal + len*start*slope + ((end-start)*len/2) * slope
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     slopeSum(initValue(vector), slope(vector), start, end)
+  }
 
   private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
     val len = end - start + 1

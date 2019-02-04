@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
@@ -12,6 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
+import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
@@ -29,7 +31,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService")
-  val jobQueryResult1 = "myCoolService"
+  val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
 
   val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
   val now = System.currentTimeMillis()
@@ -69,15 +71,15 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = LabelValuesExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, "job", 10)
+      timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
-        val record = rv.rows.next()
-        record.filoUTF8String(0).toString
+        val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
+        rv.schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
     result shouldEqual jobQueryResult1

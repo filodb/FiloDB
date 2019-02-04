@@ -145,8 +145,8 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
@@ -211,7 +211,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{app="App-2"}'
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{_ns="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -369,7 +369,7 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
-    http_req_timer{app="foo",__col__="min"}
+    http_req_timer{_ns="foo",__col__="min"}
 
 By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
 
@@ -381,7 +381,7 @@ Some special functions exist to aid debugging and for other purposes:
 
 Example of debugging chunk metadata using the CLI:
 
-    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{app="App-0"})' --start XX --end YY
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
 
 ### Using the FiloDB HTTP API
 
@@ -389,7 +389,7 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bapp="filodb"%7D%5B1m%5D&time=1539908476'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%_ns="filodb"%7D%5B1m%5D&time=1539908476'
 
 ```json
 {
@@ -401,8 +401,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "1",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -436,8 +436,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "0",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -546,7 +546,7 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{app="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{_ns="filodb"}'
 
 ```
 Sending query command to server for timeseries with options QueryOptions(<function1>,16,60,100,None)...
