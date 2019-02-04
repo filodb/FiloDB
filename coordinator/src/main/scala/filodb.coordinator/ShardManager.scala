@@ -438,10 +438,13 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     */
   def updateFromExternalShardEvent(sender: ActorRef, event: ShardEvent): Unit = {
     _shardMappers.get(event.ref) foreach { mapper =>
-      // ensure that we respond to shard events only from the node shard is currently assigned to.
-      // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
       val currentCoord = mapper.coordForShard(event.shard)
-      if (currentCoord.path.address == sender.path.address) {
+      if (currentCoord == ActorRef.noSender) {
+        logger.warn(s"Ignoring event $event from sender $sender since shard ${event.shard} is not currently assigned." +
+          s" Was $sender the previous owner for a shard that was just unassigned? How else could this happen? ")
+      } else if (currentCoord.path.address == sender.path.address) {
+        // Above condition ensures that we respond to shard events only from the node shard is currently assigned to.
+        // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
         updateFromShardEvent(event)
         // reassign shard if IngestionError. Exclude previous node since it had error shards.
         event match {
