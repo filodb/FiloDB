@@ -444,27 +444,26 @@ class TimeSeriesShard(val dataset: Dataset,
 
       // look up partId in partSet if it already exists before assigning new partId.
       // We cant look it up in lucene because we havent flushed index yet
-      val stamp = partSetLock.writeLock()
-      var partId: Int = -1
-      try {
-        partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
-          case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
-                           val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
-                           // In theory, we should not get an OutOfMemPartition here since
-                           // it should have occurred before node failed too, and with data sropped,
-                           // index would not be updated. But if for some reason we see it, drop data
-                           if (part == OutOfMemPartition) {
-                             logger.error("Could not accommodate partKey while recovering index. " +
-                               "WriteBuffer size may not be configured correctly")
-                             -1
-                           } else {
-                             partSet.add(part) // createNewPartition doesnt add part to partSet
-                             part.partID
-                           }
-          case Some(p) =>  p.partID
-        }
-      } finally {
-        partSetLock.unlockWrite(stamp)
+      val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
+        case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
+          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
+          // In theory, we should not get an OutOfMemPartition here since
+          // it should have occurred before node failed too, and with data sropped,
+          // index would not be updated. But if for some reason we see it, drop data
+          if (part == OutOfMemPartition) {
+            logger.error("Could not accommodate partKey while recovering index. " +
+              "WriteBuffer size may not be configured correctly")
+            -1
+          } else {
+            val stamp = partSetLock.writeLock()
+            try {
+              partSet.add(part) // createNewPartition doesn't add part to partSet
+            } finally {
+              partSetLock.unlockWrite(stamp)
+            }
+            part.partID
+          }
+        case Some(p) =>  p.partID
       }
       if (partId != -1) {
         // upsert into lucene since there can be multiple records for one partKey, and most recent wins.
@@ -583,18 +582,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def numRowsIngested: Long = ingested
 
-  def numActivePartitions: Int = {
-    var stamp = partSetLock.tryOptimisticRead()
-    var size = partSet.size
-    if (!partSetLock.validate(stamp)) {
-      // It's not expected that the optimistic lock will fail, considering that this method is typically
-      // called by one thread. Try again with a pessimistic lock instead of spinning, just to be safe.
-      stamp = partSetLock.readLock()
-      size = partSet.size
-      partSetLock.unlockRead(stamp)
-    }
-    size
-  }
+  def numActivePartitions: Int = partSet.size
 
   def latestOffset: Long = _offset
 
@@ -905,33 +893,26 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
-  //scalastyle:off null
-  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long)
-      : FiloPartition = {
-    var stamp = partSetLock.tryOptimisticRead()
-    if (stamp != 0) {
-      val part = partSet.getWithIngestBR(recordBase, recordOff)
-      if (part != null && partSetLock.validate(stamp)) {
-        return part
-      }
-    }
-
-    stamp = partSetLock.readLock()
-    try {
-      val part = partSet.getWithIngestBR(recordBase, recordOff)
-      if (part != null) {
-        return part
-      }
-    } finally {
-      partSetLock.unlockRead(stamp)
-    }
-
-    stamp = partSetLock.writeLock()
+  // scalastyle:off null
+  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff)
-    var newPart: TimeSeriesPartition = null
+    if (part == null) {
+      part = addPartition(recordBase, recordOff, group, ingestOffset)
+    }
+    part
+  }
 
-    try {
-      if (part == null) {
+  private def addPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
+    val stamp = partSetLock.writeLock()
+
+    // Double check just in case multiple threads are calling this method.
+    val part = partSet.getWithIngestBR(recordBase, recordOff)
+    if (part != null) {
+      partSetLock.unlockWrite(stamp)
+      part
+    } else {
+      var newPart: TimeSeriesPartition = null
+      try {
         val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
         newPart = createNewPartition(partKeyArray, partKeyOffset, group)
         if (newPart != OutOfMemPartition) {
@@ -943,20 +924,17 @@ class TimeSeriesShard(val dataset: Dataset,
           activelyIngesting.set(partId)
           partSet.add(newPart)
         }
-        part = newPart
+      } finally {
+        partSetLock.unlockWrite(stamp)
       }
-    } finally {
-      partSetLock.unlockWrite(stamp)
+      if (newPart != OutOfMemPartition) {
+        logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
+          s"shard $shardNum at offset $ingestOffset")
+      }
+      newPart
     }
-
-    if (newPart != null && newPart != OutOfMemPartition) {
-      logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
-        s"shard $shardNum at offset $ingestOffset")
-    }
-
-    part
   }
-  //scalastyle:on null
+  // scalastyle:on
 
   /**
     * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
@@ -978,12 +956,10 @@ class TimeSeriesShard(val dataset: Dataset,
         s"shard=$shardNum", e); disableAddPartitions()
     }
 
-  // Note: Caller must hold partSetLock write lock.
-  // scalastyle:off simplify.boolean.expression
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
                                    group: Int, initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
-    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
-    if (addPartitionsDisabled() || !ensureFreeSpace(true)) { OutOfMemPartition }
+  // Check and evict, if after eviction we still don't have enough memory, then don't proceed
+    if (addPartitionsDisabled() || !ensureFreeSpace()) { OutOfMemPartition }
     else {
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
@@ -999,7 +975,6 @@ class TimeSeriesShard(val dataset: Dataset,
       partitionGroups(group).set(partId)
       newPart
     }
-  // scalastyle:on simplify.boolean.expression
 
   private def disableAddPartitions(): Unit = {
     if (addPartitionsDisabled.compareAndSet(false, true))
@@ -1008,9 +983,8 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.dataDropped.increment
   }
 
-  // Note: Caller must _not_ hold partSetLock write lock.
   private def checkEnableAddPartitions(): Unit = if (addPartitionsDisabled()) {
-    if (ensureFreeSpace(true)) {
+    if (ensureFreeSpace()) {
       logger.info(s"dataset=${dataset.ref} shard=$shardNum: Enough free space to add partitions again!  Yay!")
       addPartitionsDisabled := false
     }
@@ -1034,11 +1008,10 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This should be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
-   * @param locked true if caller holds partSetLock write lock
    * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
-  //scalastyle:off method.length
-  private[filodb] def ensureFreeSpace(locked: Boolean): Boolean = {
+  // scalastyle:off method.length
+  private[filodb] def ensureFreeSpace(): Boolean = {
     var lastPruned = EmptyBitmap
     while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
       // Eliminate partitions evicted from last cycle so we don't have an endless loop
@@ -1073,7 +1046,7 @@ class TimeSeriesShard(val dataset: Dataset,
             if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
               logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
             } else {
-              doRemovePartition(partitionObj, locked)
+              removePartition(partitionObj)
               partsRemoved += 1
               maxEndTime = Math.max(maxEndTime, endTime)
             }
@@ -1096,30 +1069,14 @@ class TimeSeriesShard(val dataset: Dataset,
   }
   //scalastyle:on
 
-  /**
-   * Permanently removes the given partition ID from our in-memory data structures
-   * Also frees partition key if necessary
-   * Caller must _not_ hold partSetLock write lock.
-   */
+  // Permanently removes the given partition ID from our in-memory data structures
+  // Also frees partition key if necessary
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
-    doRemovePartition(partitionObj, false)
-  }
-
-  /**
-   * Permanently removes the given partition ID from our in-memory data structures
-   * Also frees partition key if necessary
-   * @param locked true if caller holds partSetLock write lock
-   */
-  private def doRemovePartition(partitionObj: TimeSeriesPartition, locked: Boolean): Unit = {
-    if (locked) {
+    val stamp = partSetLock.writeLock()
+    try {
       partSet.remove(partitionObj)
-    } else {
-      val stamp = partSetLock.writeLock()
-      try {
-        partSet.remove(partitionObj)
-      } finally {
-        partSetLock.unlockWrite(stamp)
-      }
+    } finally {
+      partSetLock.unlockWrite(stamp)
     }
     offheapInfoMap.free(partitionObj)
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
