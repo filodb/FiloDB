@@ -172,8 +172,11 @@ object SerializableRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            limit: Int = Int.MaxValue): SerializableRangeVector = {
+            resultSize: Int = Int.MaxValue,
+            limit: Int = Int.MaxValue,
+            failOnLimit: Boolean = true): SerializableRangeVector = {
     var numRows = 0
+    var totalRows = resultSize
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
@@ -181,10 +184,14 @@ object SerializableRangeVector extends StrictLogging {
     try {
       OffheapLFSortedIDMap.validateNoSharedLocks()
       val rows = rv.rows
-      while (numRows < limit && rows.hasNext) {
+      while (totalRows < limit && rows.hasNext) {
         numRows += 1
+        totalRows += 1
         builder.addFromReader(rows.next)
       }
+      if (failOnLimit && totalRows >= limit)
+        throw new ResponseTooLargeException(s"result size is more than $limit samples. " +
+          s"Try applying more filters or reduce time range.")
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.
       OffheapLFSortedIDMap.releaseAllSharedLocks()
@@ -225,3 +232,9 @@ object SerializableRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: Iterator[RowReader]) extends RangeVector
+
+/**
+  * Use this exception to raise user errors when inside the context of an observable.
+  * Currently no other way to raise user errors when returning an observable
+  */
+class ResponseTooLargeException(message: String) extends RuntimeException(message)
