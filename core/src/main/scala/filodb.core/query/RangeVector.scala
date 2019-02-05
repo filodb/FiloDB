@@ -172,7 +172,7 @@ object SerializableRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            resultSize: Int = Int.MaxValue,
+            resultSize: Int = 0,
             limit: Int = Int.MaxValue,
             failOnLimit: Boolean = true): SerializableRangeVector = {
     var numRows = 0
