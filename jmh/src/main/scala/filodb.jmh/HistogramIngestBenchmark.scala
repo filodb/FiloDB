@@ -4,6 +4,7 @@ import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
+import org.agrona.concurrent.UnsafeBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
@@ -11,7 +12,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
 import filodb.memory.MemFactory
-import filodb.memory.format.SeqRowReader
+import filodb.memory.format.{NibblePack, SeqRowReader}
 
 //scalastyle:off regex
 /**
@@ -116,5 +117,25 @@ class HistogramIngestBenchmark {
   def ingestPromHistograms(): Unit = {
     pShard.ingest(promContainers(containerNo), 0)
     containerNo += 1
+  }
+
+  val inputs = Array(0L, 0x003322110000L, 0x004433220000L, 0x005544330000L,
+                     0x006655440000L, 0L, 0L, 0L)
+  val inputs2 = Array(0L, 0x003322100000L, 0x004433200000L, 0x005544300000L,
+                      0x006655400000L, 0L, 0L, 0L)
+  val buf = new UnsafeBuffer(new Array[Byte](1024))
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nibblePack8Even(): Int = {
+    NibblePack.pack8(inputs, buf)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nibblePack8Odd(): Int = {
+    NibblePack.pack8(inputs2, buf)
   }
 }
