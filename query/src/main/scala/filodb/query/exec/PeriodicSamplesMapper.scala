@@ -51,7 +51,7 @@ final case class PeriodicSamplesMapper(start: Long,
       // Chunked: use it and trust it has the right type
       case c: ChunkedRangeFunction =>
         // Really, use the stale lookback window size, not 0 which doesn't make sense
-        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
+        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs + 1 else 0L)
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,

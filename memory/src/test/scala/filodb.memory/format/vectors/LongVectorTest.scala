@@ -117,6 +117,26 @@ class LongVectorTest extends NativeVectorTest {
       readVect.sum(optimized, 0, 13) shouldEqual orig.take(14).sum.toDouble
     }
 
+    it("should not allow sum() with out of bound indices") {
+      val start = System.currentTimeMillis
+      val orig = (0 to 50).map(_ * 10000 + start)   // simulate 10 second samples
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
+      orig.foreach(builder.addData)
+      builder.frozenSize shouldEqual (8 + 51 * 8)
+      val optimized = builder.optimize(memFactory)
+
+      builder.reader.asLongReader.sum(builder.addr, 0, 13) shouldEqual orig.take(14).sum.toDouble
+
+      intercept[IllegalArgumentException] {
+        builder.reader.asLongReader.sum(builder.addr, 25, 52)
+      }
+
+      val readVect = LongBinaryVector(optimized)
+      intercept[IllegalArgumentException] {
+        readVect.asLongReader.sum(optimized, 25, 52)
+      }
+    }
+
     it("should iterate with startElement > 0") {
       val orig = Seq(1000L, 2001L, 2999L, 5123L, 5250L, 6004L, 7678L)
       val builder = LongBinaryVector.appendingVectorNoNA(memFactory, orig.length)

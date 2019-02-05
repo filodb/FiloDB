@@ -613,7 +613,7 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
-  private def purgeExpiredPartitions(): Unit = {
+  private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
     val deletedParts = partKeyIndex.removePartKeysEndedBefore(
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
@@ -995,39 +995,42 @@ class TimeSeriesShard(val dataset: Dataset,
         partitionGroups(group) = partitionGroups(group).andNot(prunedPartitions)
       }
 
-      // Finally, prune partitions and keyMap data structures
-      logger.info(s"Evicting partitions from dataset=${dataset.ref} shard=$shardNum, watermark = $evictionWatermark...")
-      val intIt = prunedPartitions.intIterator
-      var partsRemoved = 0
-      var partsSkipped = 0
-      var maxEndTime = evictionWatermark
-      while (intIt.hasNext) {
-        val partitionObj = partitions.get(intIt.next)
-        if (partitionObj != UnsafeUtils.ZeroPointer) {
-          // TODO we can optimize fetching of endTime by getting them along with top-k query
-          val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-          if (activelyIngesting.get(partitionObj.partID))
-            logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
-          if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
-            logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
+      // Be sure the below executes in the ingestion thread for mutation safety
+      ingestSched.executeTrampolined { () =>
+        // Finally, prune partitions and keyMap data structures
+        logger.info(s"Evicting partitions from dataset=${dataset.ref} shard=$shardNum, watermark=$evictionWatermark...")
+        val intIt = prunedPartitions.intIterator
+        var partsRemoved = 0
+        var partsSkipped = 0
+        var maxEndTime = evictionWatermark
+        while (intIt.hasNext) {
+          val partitionObj = partitions.get(intIt.next)
+          if (partitionObj != UnsafeUtils.ZeroPointer) {
+            // TODO we can optimize fetching of endTime by getting them along with top-k query
+            val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
+            if (activelyIngesting.get(partitionObj.partID))
+              logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
+            if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
+              logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
+            } else {
+              removePartition(partitionObj)
+              partsRemoved += 1
+              maxEndTime = Math.max(maxEndTime, endTime)
+            }
           } else {
-            removePartition(partitionObj)
-            partsRemoved += 1
-            maxEndTime = Math.max(maxEndTime, endTime)
+            partsSkipped += 1
           }
-        } else {
-          partsSkipped += 1
         }
+        evictionWatermark = maxEndTime + 1
+        // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
+        // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
+        // we would be processing same partIds again and again without moving watermark forward.
+        // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
+        // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
+        logger.info(s"dataset=${dataset.ref} shard=$shardNum: evicted $partsRemoved partitions," +
+          s"skipped $partsSkipped, h20=$evictionWatermark")
+        shardStats.partitionsEvicted.increment(partsRemoved)
       }
-      evictionWatermark = maxEndTime + 1
-      // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
-      // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
-      // we would be processing same partIds again and again without moving watermark forward.
-      // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
-      // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
-      logger.info(s"dataset=${dataset.ref} shard=$shardNum: evicted $partsRemoved partitions," +
-        s"skipped $partsSkipped, h20=$evictionWatermark")
-      shardStats.partitionsEvicted.increment(partsRemoved)
     }
     true
   }
