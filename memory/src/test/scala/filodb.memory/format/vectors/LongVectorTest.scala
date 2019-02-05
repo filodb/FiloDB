@@ -208,11 +208,23 @@ class LongVectorTest extends NativeVectorTest {
       val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
       orig.foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
+      BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
       val binReader = LongBinaryVector(optimized)
       binReader.binarySearch(optimized, start - 1) shouldEqual 0x80000000 | 0   // first elem, not equal
       binReader.binarySearch(optimized, start) shouldEqual 0               // first elem, equal
       binReader.binarySearch(optimized, start + 1) shouldEqual 0x80000000 | 1
       binReader.binarySearch(optimized, start + 100001) shouldEqual 0x80000000 | 11
+
+      // Test vector with slope=0
+      val builder2 = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
+      (0 until 16).foreach(x => builder2.addData(1000L))
+      val optimized2 = builder2.optimize(memFactory)
+      BinaryVector.totalBytes(optimized2) shouldEqual 24   // DeltaDeltaConstVector
+      val binReader2 = LongBinaryVector(optimized2)
+      DeltaDeltaConstDataReader.slope(optimized2) shouldEqual 0
+      binReader2.binarySearch(optimized2,  999L) shouldEqual 0x80000000 | 0   // first elem, not equal
+      binReader2.binarySearch(optimized2, 1000L) shouldEqual 0               // first elem, equal
+      binReader2.binarySearch(optimized2, 1001L) shouldEqual 0x80000000 | 16
     }
 
     it("should not use Delta-Delta for short vectors, NAs, etc.") {
