@@ -7,6 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
@@ -53,9 +54,12 @@ trait MemStore extends ChunkSource {
    * This method only succeeds if the dataset and shard has not already been setup.
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
+   * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
    * @throws ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit
+  def setup(dataset: Dataset, shard: Int,
+            storeConf: StoreConfig,
+            downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
 
   /**
    * Ingests new rows, making them immediately available for reads
@@ -138,16 +142,17 @@ trait MemStore extends ChunkSource {
    * in order of decreasing frequency/# of series per item.
    * @param topK the number of top items to return
    */
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
+  def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo]
 
   /**
-    * Returns the values of a given index name for the matching Column Filters
+    * Returns the values of a given label-names for the matching Column Filters
     * that are indexed at the partition level, on the given
     * shard on this node.
     * @return an Iterator for the index values
     */
-  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             labelNames: Seq[String], end: Long,
+                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
 
   /**
     * Returns the indexed TimeSeriesPartitions matching the column filters,

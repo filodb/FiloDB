@@ -45,7 +45,7 @@ trait ExecPlan extends QueryCommand {
   def submitTime: Long
 
   /**
-    * Limit on number of samples returned per RangeVector
+    * Limit on number of samples returned by this ExecPlan
     */
   def limit: Int
 
@@ -91,6 +91,7 @@ trait ExecPlan extends QueryCommand {
     * such as sending off an asynchronous response message etc.
     *
     */
+  // scalastyle:off method.length
   final def execute(source: ChunkSource,
                     dataset: Dataset,
                     queryConfig: QueryConfig)
@@ -106,14 +107,26 @@ trait ExecPlan extends QueryCommand {
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
+      var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       finalRes._1
         .map {
-          case r: SerializableRangeVector => r
+          case srv: SerializableRangeVector =>
+            numResultSamples += srv.numRows
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            if (numResultSamples > limit)
+              throw new BadQueryException(s"This query results in more than $limit samples. " +
+                s"Try applying more filters or reduce time range.")
+            srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            SerializableRangeVector(rv, builder, recSchema, limit)
+            val srv = SerializableRangeVector(rv, builder, recSchema)
+            numResultSamples += srv.numRows
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            if (numResultSamples > limit)
+              throw new BadQueryException(s"This query results in more than $limit samples. " +
+                s"Try applying more filters or reduce time range.")
+            srv
         }
-        .take(queryConfig.vectorsLimit)
         .toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
@@ -131,11 +144,11 @@ trait ExecPlan extends QueryCommand {
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
+          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
     } catch { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree()}", ex)
+      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       Task(QueryError(id, ex))
     }
   }
@@ -166,15 +179,17 @@ trait ExecPlan extends QueryCommand {
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
     * structure, useful for debugging
+    *
+    * @param useNewline pass false if the result string needs to be in one line
     */
-  final def printTree(level: Int = 0): String = {
+  final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
     val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
       s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
     }
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
-    val childr = children.map(_.printTree(nextLevel + 1))
-    ((transf :+ curNode) ++ childr).mkString("\n")
+    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
+    ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
   protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
@@ -218,7 +233,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                 queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
-    val childTasks = Observable.fromIterable(children).mapAsync { plan =>
+    val childTasks = Observable.fromIterable(children).mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)

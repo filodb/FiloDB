@@ -5,10 +5,11 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnInfo, IteratorBackedRangeVector, RangeVector, ResultSchema}
+import filodb.core.query._
+import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format.RowReader
-import filodb.query.{Query, QueryConfig, RangeFunctionId}
-import filodb.query.exec.rangefn.{RangeFunction, Window}
+import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
+import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
 
 /**
@@ -33,24 +34,44 @@ final case class PeriodicSamplesMapper(start: Long,
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorTransformer.valueColumnType(sourceSchema) match {
-      case ColumnType.DoubleColumn =>
+    // enforcement of minimum step is good since we have a high limit on number of samples
+    if (step < queryConfig.minStepMs)
+      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
+    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams)
+
+    // Generate one range function to check if it is chunked
+    val sampleRangeFunc = rangeFuncGen()
+    sampleRangeFunc match {
+      // Chunked: use it and trust it has the right type
+      case c: ChunkedRangeFunction =>
+        // Really, use the stale lookback window size, not 0 which doesn't make sense
+        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs + 1 else 0L)
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
-              RangeFunction(functionId, funcParams), queryConfig))
+            new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+                                      windowLength, rangeFuncGen().asInstanceOf[ChunkedRangeFunction],
+                                      queryConfig)())
         }
-      case ColumnType.LongColumn =>
+      // Iterator-based: Wrap long columns to yield a double value
+      case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
-              RangeFunction(functionId, funcParams), queryConfig))
+              rangeFuncGen(), queryConfig))
         }
-      case t: ColumnType => throw new IllegalArgumentException(s"Column type $t is not supported for queries")
+      // Otherwise just feed in the double column
+      case f: RangeFunction =>
+        source.map { rv =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
+              rangeFuncGen(), queryConfig))
+        }
     }
   }
 
@@ -64,6 +85,46 @@ final case class PeriodicSamplesMapper(start: Long,
         ColumnInfo(name, ColumnType.DoubleColumn)
       case (c: ColumnInfo, _) => c
     })
+}
+
+/**
+ * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
+ * to compute each window as fast as possible on multiple rows at a time.
+ *
+ * TODO: we can add a sliding-window version of this as well.  Assuming start2 < end1:
+ *  - Calculate initial (first) window  - (start1, end1)
+ *  - Subtract non-overlapping portion of initial window start2 - start1
+ *  - Add next portion of window beyond overlap:  end2 - end1
+ * However, note that sliding window iterators have to do twice as much work, adding and removing, so it would
+ * only be worth it if the overlap is more than 50%.
+ */
+class ChunkedWindowIterator(rv: RawDataRangeVector,
+                            start: Long,
+                            step: Long,
+                            end: Long,
+                            window: Long,
+                            rangeFunction: ChunkedRangeFunction,
+                            queryConfig: QueryConfig)
+                           (windowIt: WindowedChunkIterator =
+                              new WindowedChunkIterator(rv.chunkInfos(start - window, end), start, step, end, window)
+                           ) extends Iterator[TransientRow] {
+  private val sampleToEmit = new TransientRow()
+
+  override def hasNext: Boolean = windowIt.hasMoreWindows
+  override def next: TransientRow = {
+    rangeFunction.reset()
+    // TODO: detect if rangeFunction needs items completely sorted.  For example, it is possible
+    // to do rate if only each chunk is sorted.  Also check for counter correction here
+
+    windowIt.nextWindow()
+    while (windowIt.hasNext) {
+      rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
+                              windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
+    }
+    rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
+    if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively
+    sampleToEmit
+  }
 }
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
@@ -182,8 +243,8 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   */
 class LongToDoubleIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
   val sampleToEmit = new TransientRow()
-  override def hasNext: Boolean = iter.hasNext
-  override def next(): TransientRow = {
+  override final def hasNext: Boolean = iter.hasNext
+  override final def next(): TransientRow = {
     val next = iter.next()
     sampleToEmit.setLong(0, next.getLong(0))
     sampleToEmit.setDouble(1, next.getLong(1).toDouble)
@@ -225,17 +286,16 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
   * Is bufferable - caller can do iterator.buffered safely since it buffers ONE value
   */
 class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  private var lastVal: Double = 0
+  private var correction = 0d
+  private var prevVal = 0d
   private var prev = new TransientRow()
   private var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
     val next = iter.next()
     val nextVal = next.getDouble(1)
-    if (nextVal < lastVal) {
-      lastVal = nextVal + lastVal
-    } else {
-      lastVal = nextVal
+    if (nextVal < prevVal) {
+      correction += prevVal
     }
     // swap prev an cur
     val temp = prev
@@ -243,7 +303,8 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
     cur = temp
     // place value in cur and return
     cur.setLong(0, next.getLong(0))
-    cur.setDouble(1, lastVal)
+    cur.setDouble(1, nextVal + correction)
+    prevVal = nextVal
     cur
   }
 }

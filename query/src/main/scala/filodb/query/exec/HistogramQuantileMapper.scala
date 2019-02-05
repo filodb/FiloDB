@@ -55,6 +55,9 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
 
         // sort the bucket range vectors by increasing le tag value
         val sortedBucketRvs = histBuckets._2.toArray.map { bucket =>
+          if (!bucket.key.labelValues.contains(le))
+            throw new IllegalArgumentException("Cannot calculate histogram quantile" +
+              s"because 'le' tag is absent in the time series ${bucket.key.labelValues}")
           val leStr = bucket.key.labelValues(le).toString
           val leDouble = if (leStr == "+Inf") Double.PositiveInfinity else leStr.toDouble
           leDouble -> bucket

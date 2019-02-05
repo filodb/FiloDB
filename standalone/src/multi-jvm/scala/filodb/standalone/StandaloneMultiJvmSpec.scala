@@ -146,8 +146,8 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
-  val query = "heap_usage{dc=\"DC0\",app=\"App-2\"}[1m]"
-  val query1 = "heap_usage{dc=\"DC0\",app=\"App-2\"}"
+  val query = "heap_usage{dc=\"DC0\",_ns=\"App-2\"}[1m]"
+  val query1 = "heap_usage{dc=\"DC0\",_ns=\"App-2\"}"
 
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
@@ -194,7 +194,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   }
 
   def printChunkMeta(client: LocalClient): Unit = {
-    val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",app=\"App-2\"})"
+    val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",_ns=\"App-2\"})"
     val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, TimeStepParams(0, 60, Int.MaxValue))
     client.logicalPlan2Query(dataset, logicalPlan) match {
       case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
@@ -226,7 +226,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val end = queryTimestamp / 1000 * 1000
     val nameMatcher = LabelMatcher.newBuilder().setName("__name__").setValue("heap_usage")
     val dcMatcher = LabelMatcher.newBuilder().setName("dc").setValue("DC0")
-    val jobMatcher = LabelMatcher.newBuilder().setName("app").setValue("App-2")
+    val jobMatcher = LabelMatcher.newBuilder().setName("_ns").setValue("App-2")
     val query = Query.newBuilder().addMatchers(nameMatcher)
                                   .addMatchers(dcMatcher)
                                   .addMatchers(jobMatcher)

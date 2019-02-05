@@ -127,15 +127,15 @@ class QueryOnDemandBenchmark extends StrictLogging {
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  val queries = Seq("heap_usage{app=\"App-2\"}",  // raw time series
-                    """quantile(0.75, heap_usage{app="App-2"})""",
-                    """sum(rate(heap_usage{app="App-1"}[5m]))""",
-                    """sum_over_time(heap_usage{app="App-0"}[5m])""")
+  val queries = Seq("heap_usage{_ns=\"App-2\"}",  // raw time series
+                    """quantile(0.75, heap_usage{_ns="App-2"})""",
+                    """sum(rate(heap_usage{_ns="App-1"}[5m]))""",
+                    """sum_over_time(heap_usage{_ns="App-0"}[5m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 20000))
   }
 
   @TearDown

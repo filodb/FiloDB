@@ -10,6 +10,7 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
+import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -24,6 +25,11 @@ extends MemStore with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
 
+  /**
+    * The Downsample Publisher is per dataset on the memstore and is shared among all shards of the dataset
+    */
+  private val downsamplePublishers = new HashMap[DatasetRef, DownsamplePublisher]
+
   val stats = new ChunkSourceStats
 
   private val numParallelFlushes = config.getInt("memstore.flush-task-parallelism")
@@ -32,13 +38,22 @@ extends MemStore with StrictLogging {
     new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
+  private def makeAndStartPublisher(downsample: DownsampleConfig): DownsamplePublisher = {
+    val pub = downsample.makePublisher()
+    pub.start()
+    pub
+  }
+
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit = synchronized {
+  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig,
+            downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore, partEvictionPolicy)
+      val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
+      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore,
+                              partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
   }
@@ -64,7 +79,7 @@ extends MemStore with StrictLogging {
   private[filodb] def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesShard = {
     datasets.get(dataset)
             .flatMap(shards => Option(shards.get(shard)))
-            .getOrElse(throw new IllegalArgumentException(s"Dataset $dataset and shard $shard have not been set up"))
+            .getOrElse(throw new IllegalArgumentException(s"dataset=$dataset shard=$shard have not been set up"))
   }
 
   def ingest(dataset: DatasetRef, shard: Int, data: SomeData): Unit =
@@ -100,6 +115,7 @@ extends MemStore with StrictLogging {
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
+                                                // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
                                                                 diskTimeToLiveSeconds, flushTimeBucket))
@@ -134,13 +150,14 @@ extends MemStore with StrictLogging {
       }
     }.getOrElse(Iterator.empty)
 
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
-    getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
+  def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo] =
+    getShard(dataset, shard).map(_.labelValues(labelName, topK)).getOrElse(Nil)
 
-  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String] =
-    getShard(dataset, shard)
-      .map(_.indexValuesWithFilters(filters, indexName, end, start, limit)).getOrElse(Iterator.empty)
+  def labelValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             labelNames: Seq[String], end: Long,
+                             start: Long, limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+    = getShard(dataset, shard)
+        .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =
@@ -180,6 +197,8 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
+    downsamplePublishers.valuesIterator.foreach { _.stop() }
+    downsamplePublishers.clear()
     store.reset()
   }
 
