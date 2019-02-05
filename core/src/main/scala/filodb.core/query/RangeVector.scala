@@ -184,12 +184,12 @@ object SerializableRangeVector extends StrictLogging {
     try {
       OffheapLFSortedIDMap.validateNoSharedLocks()
       val rows = rv.rows
-      while (totalRows < limit && rows.hasNext) {
+      while (totalRows <= limit && rows.hasNext) {
         numRows += 1
         totalRows += 1
         builder.addFromReader(rows.next)
       }
-      if (failOnLimit && totalRows >= limit)
+      if (failOnLimit && totalRows > limit)
         throw new ResponseTooLargeException(s"result size is more than $limit samples. " +
           s"Try applying more filters or reduce time range.")
     } finally {
