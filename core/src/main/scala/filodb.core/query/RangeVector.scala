@@ -167,10 +167,12 @@ object SerializableRangeVector extends StrictLogging {
    * The most efficient option when you need to create multiple SRVs as the containers are automatically
    * shared correctly.
    * The containers are sent whole as most likely more than one would be sent, so they should mostly be packed.
+   * limit - to limit the rows added to the result
    */
   def apply(rv: RangeVector,
             builder: RecordBuilder,
-            schema: RecordSchema): SerializableRangeVector = {
+            schema: RecordSchema,
+            limit: Int = Int.MaxValue): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -179,7 +181,7 @@ object SerializableRangeVector extends StrictLogging {
     try {
       OffheapLFSortedIDMap.validateNoSharedLocks()
       val rows = rv.rows
-      while (rows.hasNext) {
+      while (numRows < limit && rows.hasNext) {
         numRows += 1
         builder.addFromReader(rows.next)
       }

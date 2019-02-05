@@ -36,6 +36,8 @@ final case class PartKeysDistConcatExec(id: String,
     */
   override protected def args: String = ""
 
+  override def throwErrorOnLimit: Boolean = false
+
   /**
     * Compose the sub-query/leaf results here.
     */
@@ -57,6 +59,8 @@ final case class PartKeysDistConcatExec(id: String,
 final case class LabelValuesDistConcatExec(id: String,
                                     dispatcher: PlanDispatcher,
                                     children: Seq[ExecPlan]) extends NonLeafExecPlan {
+
+  override def throwErrorOnLimit: Boolean = false
 
   require(!children.isEmpty)
 
@@ -109,6 +113,8 @@ final case class PartKeysExec(id: String,
                               start: Long,
                               end: Long) extends LeafExecPlan {
 
+  override def throwErrorOnLimit: Boolean = false
+
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
@@ -148,6 +154,8 @@ final case class  LabelValuesExec(id: String,
                                   filters: Seq[ColumnFilter],
                                   columns: Seq[String],
                                   lookBackInMillis: Long) extends LeafExecPlan {
+
+  override def throwErrorOnLimit: Boolean = false
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
