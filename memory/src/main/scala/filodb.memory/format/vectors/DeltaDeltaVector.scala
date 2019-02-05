@@ -220,7 +220,9 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
 
   // This is O(1) since we can find exactly where on line it is
   final def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val guess = ((item - initValue(vector) + (slope(vector) - 1)) / slope(vector)).toInt
+    val _slope = slope(vector)
+    val guess = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
+                else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
     if (guess < 0)                         { 0x80000000 }
     else if (guess >= length(vector))      { 0x80000000 | length(vector) }
     else if (item != apply(vector, guess)) { 0x80000000 | guess }
