@@ -30,6 +30,11 @@ import filodb.memory.format.UnsafeUtils
  * exclusive waiter when it's timeout has reached one second. This indicates that a deadlock
  * likely exists and cannot be auto resolved.
  *
+ * NOTE: By convention, methods which require that the caller obtain the lock are denoted with
+ * a "Do" in the name, such as `chunkmapDoGet`. All other methods acquire the lock
+ * automatically. Care must be take with respect to reentrancy. An exclusive lock cannot be
+ * acquired again once held, and the current thread will deadlock with itself.
+ *
  * The implementation stores elements in a sorted circular buffer, assuming that most inserts
  * are higher than all other keys, and that most deletes are against the lowest key. These
  * operations can perform in constant time as a result. For keys not at the extremities, the
