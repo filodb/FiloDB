@@ -214,7 +214,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
-    logger.info(s"Attempting to restore previous ingestion state...")
+    logger.info(s"NodeClusterActor starting. Attempting to restore previous ingestion state...")
     metaStore.readIngestionConfigs()
              .map { configs =>
                initDatasets ++= configs.map(_.ref)
