@@ -152,7 +152,7 @@ Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
 NOTE: if you have already gone through the procedure above, you may need to clear out the existing metadata: `./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command clearMetadata`, then repeat the steps above.  Otherwise you will not be in a clean state and may have stale schemas especially if the code has changed.
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
 ./filodb-dev-start.sh -s
@@ -167,7 +167,7 @@ For queries to work properly you'll want to start a second server to serve all t
 To quickly verify that both servers are up and set up for ingestion, do this (the output below was formatted using `| jq '.'`, ports may vary):
 
 ```
-curl localhost:8080/api/v1/cluster/timeseries/status
+curl localhost:8080/api/v1/cluster/prometheus/status
 
 {
   "status": "success",
@@ -299,7 +299,7 @@ Start two servers as follows. This will not start ingestion yet:
 Set up ingestion:
 
 ```bash
-./filo-cli --host 127.0.0.1 --dataset timeseries --command setup --filename conf/timeseries-128shards-source.conf
+./filo-cli --host 127.0.0.1 --dataset prometheus --command setup --filename conf/timeseries-128shards-source.conf
 ```
 
 Now if you curl the cluster status you should see 128 shards which are slowly turning active: `curl http://127.0.0.1:8080/api/v1/cluster/timeseries/status | jq '.'`
@@ -517,7 +517,7 @@ The CLI is now primarily used to interact with standalone FiloDB servers, includ
 
 The **indexnames** command lists all of the indexed tag keys or column names, based on the partition key or Prometheus key/value tags that define time series:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexnames
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --command indexnames
 
 ```
 le
@@ -529,7 +529,7 @@ dataset
 
 The **indexvalues** command lists the top values (as well as their cardinality) in specific shards for any given tag key or column name.  Here we list the top metrics (for Prometheus schema, which uses the tag `__name__`) in shard 0:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexvalues --indexName __name__ --shards 0
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --command indexvalues --indexName __name__ --shards 0
 
 ```
              chunk_bytes_per_call_bucket  10
@@ -546,16 +546,16 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{_ns="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ns="filodb"}'
 
 ```
-Sending query command to server for timeseries with options QueryOptions(<function1>,16,60,100,None)...
+Sending query command to server for prometheus with options QueryOptions(<function1>,16,60,100,None)...
 Query Plan:
 PeriodicSeries(RawSeries(IntervalSelector(List(1539908042000),List(1539908342000)),List(ColumnFilter(app,Equals(filodb)), ColumnFilter(__name__,Equals(memstore_rows_ingested_total))),List()),1539908342000,10000,1539908342000)
-/shard:1/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 1]]
+/shard:1/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: prometheus, host: MacBook-Pro-229.local, shard: 1]]
   2018-10-18T17:19:02.000-07:00 (1s ago) 1539908342000  36.0
 
-/shard:3/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 0]]
+/shard:3/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: prometheus, host: MacBook-Pro-229.local, shard: 0]]
   2018-10-18T17:19:02.000-07:00 (2s ago) 1539908342000  66.0
 ```
 
