@@ -129,13 +129,13 @@ class HistogramIngestBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def nibblePack8Even(): Int = {
-    NibblePack.pack8(inputs, buf)
+    NibblePack.pack8(inputs, 0, buf)
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def nibblePack8Odd(): Int = {
-    NibblePack.pack8(inputs2, buf)
+    NibblePack.pack8(inputs2, 0, buf)
   }
 }
