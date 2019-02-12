@@ -157,7 +157,8 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
     val _slope = slope(vector)
     val _len   = length(vector)
-    var elemNo = ((item - initValue(vector) + (_slope - 1)) / _slope).toInt
+    var elemNo = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
+                 else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
     if (elemNo < 0) elemNo = 0
     if (elemNo >= _len) elemNo = _len - 1
     var curBase = initValue(vector) + _slope * elemNo

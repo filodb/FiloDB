@@ -200,6 +200,21 @@ class LongVectorTest extends NativeVectorTest {
       binReader.binarySearch(optimized, 7677L) shouldEqual 0x80000000 | 6
       binReader.binarySearch(optimized, 7678L) shouldEqual 6
       binReader.binarySearch(optimized, 7679L) shouldEqual 0x80000000 | 7
+
+      binReader.ceilingIndex(optimized, 7679L) shouldEqual 6
+    }
+
+    it("should binarySearch DDV vectors with slope=0") {
+      // Test vector with slope=0
+      val builder2 = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
+      (0 until 16).foreach(x => builder2.addData(1000L + (x % 3)))
+      val optimized2 = builder2.optimize(memFactory)
+      val binReader2 = LongBinaryVector(optimized2)
+      binReader2 shouldEqual DeltaDeltaDataReader
+      DeltaDeltaDataReader.slope(optimized2) shouldEqual 0
+      binReader2.binarySearch(optimized2,  999L) shouldEqual 0x80000000 | 0   // first elem, not equal
+      binReader2.binarySearch(optimized2, 1000L) shouldEqual 0               // first elem, equal
+      binReader2.binarySearch(optimized2, 1001L) shouldEqual 0x80000000 | 16
     }
 
     it("should binarySearch DeltaDeltaConst vectors") {
@@ -214,6 +229,7 @@ class LongVectorTest extends NativeVectorTest {
       binReader.binarySearch(optimized, start) shouldEqual 0               // first elem, equal
       binReader.binarySearch(optimized, start + 1) shouldEqual 0x80000000 | 1
       binReader.binarySearch(optimized, start + 100001) shouldEqual 0x80000000 | 11
+      binReader.binarySearch(optimized, start + orig.length*10000) shouldEqual 0x80000000 | orig.length
 
       // Test vector with slope=0
       val builder2 = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
