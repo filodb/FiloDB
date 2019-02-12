@@ -1,5 +1,6 @@
 package filodb.standalone;
 
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InterruptedIOException;
 import java.io.IOException;
@@ -19,6 +20,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Simple profiler which samples threads and periodically logs a report to a file. When the
  * process is cleanly shutdown, the profiler stops and reports what it has immediately. This
@@ -33,8 +37,10 @@ public class SimpleProfiler {
      * -Dfilodb.SimpleProfiler.topCount=<n>
      * -Dfilodb.SimpleProfiler.outFile=<filename>
      *
-     * In order for profiling to be enabled, all of the above properies must be set.
+     * In order for profiling to be enabled, all of the above properies must be set except for
+     * the file. If no file is provided, then a temporary file is created, whose name is logged.
      *
+     * @return false if not configured
      * @throws IOException if file cannot be opened
      */
     public static boolean launch() throws IOException {
@@ -55,9 +61,16 @@ public class SimpleProfiler {
             return false;
         }
 
-        String outFile = System.getProperty(prefix + "outFile");
-        if (outFile == null) {
-            return false;
+        File outFile;
+        {
+            String outFileName = System.getProperty(prefix + "outFile");
+            if (outFileName != null) {
+                outFile = new File(outFileName);
+            } else {
+                outFile = File.createTempFile("filodb.SimpleProfiler", ".txt");
+                LoggerFactory.getLogger(SimpleProfiler.class).info
+                    ("Created temp file for profile reporting: " + outFile);
+            }
         }
 
         FileOutputStream out = new FileOutputStream(outFile);
