@@ -209,6 +209,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
    */
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
     var len = length(vector)
+    if (len == 0) return 0x80000000
     var first = 0
     var element = 0L
     while (len > 0) {
