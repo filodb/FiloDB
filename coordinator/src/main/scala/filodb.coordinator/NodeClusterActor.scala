@@ -10,6 +10,7 @@ import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
+import kamon.Kamon
 
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
@@ -202,6 +203,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
   val shardUpdates = new MutableHashSet[DatasetRef]
+  val iamShardManager = Kamon.counter("shardmanager-ping")
 
   val publishInterval = settings.ShardMapPublishFrequency
 
@@ -355,6 +357,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: ShardEvent            => handleShardEvent(e)
     case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
     case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+                                     //This counter gets published from ShardManager,
+                                     // > 0 means this node is shardmanager
+                                     iamShardManager.increment()
                                      shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
