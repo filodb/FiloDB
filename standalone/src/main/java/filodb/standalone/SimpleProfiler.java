@@ -300,6 +300,10 @@ public class SimpleProfiler {
                 if (elem.getMethodName().equals("unpark")) {
                     return null;
                 }
+                // Sometimes the thread state is runnable for this method. Filter it out.
+                if (elem.getMethodName().equals("park")) {
+                    return null;
+                }
             }
 
             switch (className) {
@@ -318,6 +322,10 @@ public class SimpleProfiler {
             case "java.lang.Thread":
                 // Reject threads which appeared as doing work only because they yielded.
                 if (elem.getMethodName().equals("yield")) {
+                    return null;
+                }
+                // Sometimes the thread state is runnable for this method. Filter it out.
+                if (elem.getMethodName().equals("sleep")) {
                     return null;
                 }
                 break;
