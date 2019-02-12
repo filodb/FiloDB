@@ -1,10 +1,11 @@
 package filodb.memory.format.vectors
 
 import debox.Buffer
+import org.scalatest.prop.PropertyChecks
 
 import filodb.memory.format.{BinaryVector, GrowableVector, WireFormat}
 
-class LongVectorTest extends NativeVectorTest {
+class LongVectorTest extends NativeVectorTest with PropertyChecks {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i
 
   describe("LongMaskedAppendableVector") {
@@ -207,14 +208,14 @@ class LongVectorTest extends NativeVectorTest {
     it("should binarySearch DDV vectors with slope=0") {
       // Test vector with slope=0
       val builder2 = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
-      (0 until 16).foreach(x => builder2.addData(1000L + (x % 3)))
+      (0 until 16).foreach(x => builder2.addData(1000L + (x / 5)))
       val optimized2 = builder2.optimize(memFactory)
       val binReader2 = LongBinaryVector(optimized2)
       binReader2 shouldEqual DeltaDeltaDataReader
       DeltaDeltaDataReader.slope(optimized2) shouldEqual 0
       binReader2.binarySearch(optimized2,  999L) shouldEqual 0x80000000 | 0   // first elem, not equal
       binReader2.binarySearch(optimized2, 1000L) shouldEqual 0               // first elem, equal
-      binReader2.binarySearch(optimized2, 1001L) shouldEqual 0x80000000 | 16
+      binReader2.binarySearch(optimized2, 1001L) shouldEqual 9
     }
 
     it("should binarySearch DeltaDeltaConst vectors") {
@@ -323,5 +324,56 @@ class LongVectorTest extends NativeVectorTest {
       readVect shouldEqual DeltaDeltaDataReader
       readVect.toBuffer(optimized).toList shouldEqual orig
     }
+
+    it("should not return -1 when binarySearching") {
+      val orig = List(290, 264, 427, 746, 594, 216, 864, 85, 747, 897, 821).scanLeft(10000L)(_ + _)
+      val builder = LongBinaryVector.timestampVector(memFactory, orig.length)
+      orig.foreach(builder.addData)
+      val optimized = builder.optimize(memFactory)
+      val reader = LongBinaryVector(optimized)
+      val out = reader.binarySearch(optimized, 9603)  // less than first item, should return 0x80000000
+      out shouldEqual 0x80000000
+    }
+
+    import org.scalacheck._
+
+    // Generate a list of bounded integers, every time bound it slightly differently
+    // (to test different int compression techniques)
+    def boundedIntList: Gen[Seq[Int]] =
+      for {
+        maxVal <- Gen.oneOf(1000, 5000, 30000)   // must be greater than 250ms so not within approximation
+        seqList <- Gen.containerOf[Seq, Int](Gen.choose(10, maxVal))
+      } yield { seqList }
+
+    it("should binarySearch ts vector correctly for random elements and searches") {
+      try {
+        forAll(boundedIntList) { s =>
+          val increasingTimes = s.scanLeft(10000L)(_ + Math.abs(_))
+          val builder = LongBinaryVector.timestampVector(memFactory, increasingTimes.length)
+          increasingTimes.foreach(builder.addData)
+          val optimized = builder.optimize(memFactory)
+          val reader = LongBinaryVector(optimized)
+          forAll(Gen.choose(0, increasingTimes.last * 3)) { num =>
+            val out = reader.binarySearch(optimized, num)
+            (out & 0x7fffffff) should be >= 0
+            val posMatch = increasingTimes.indexWhere(_ >= num)
+            (out & 0x7fffffff) should be < 100000
+            // Unfortunately it's really hard to tell with approximate DDV which is the right position
+            // if (posMatch >= 0) {
+            //   if (increasingTimes(posMatch) == num) {    // exact match, or within 250ms
+            //     out shouldEqual posMatch
+            //   } else {  // not match, but # at pos is first # greater than num.  So insert here.
+            //     out shouldEqual (posMatch | 0x80000000)
+            //   }
+            // } else {   // our # is greater than all numbers; ie _ >= num never true.
+            //   out shouldEqual (0x80000000 | increasingTimes.length)
+            // }
+          }
+        }
+      } finally {
+        memFactory.freeAll()
+      }
+    }
+
   }
 }

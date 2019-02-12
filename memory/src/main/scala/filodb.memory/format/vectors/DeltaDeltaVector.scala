@@ -171,7 +171,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
       curBase -= _slope
     }
 
-    if (item == (curBase + inReader(inner, elemNo))) return elemNo
+    if (elemNo >= 0 && item == (curBase + inReader(inner, elemNo))) return elemNo
 
     elemNo += 1
     curBase += _slope
