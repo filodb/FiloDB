@@ -102,12 +102,21 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
-class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
+class SumOverTimeFunction(var sum: Double = Double.NaN) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    sum += row.value
+    if (row.value!=Double.NaN) {
+      if (sum.isNaN) {
+        sum=0d
+      }
+        sum += row.value
+
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+    if (sum.isNaN) {
+      sum=0d
+    }
     sum -= row.value
   }
 
@@ -118,8 +127,8 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   }
 }
 
-abstract class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedRangeFunction {
-  override final def reset(): Unit = { sum = 0d }
+abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN )extends ChunkedRangeFunction {
+  override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
@@ -130,8 +139,14 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+   val currentSum=doubleReader.sum(doubleVect, startRowNum, endRowNum)
     // NaN values are ignored by default in the sum method
-    sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
+    if (!currentSum.isNaN) {
+      if (sum.isNaN) {
+        sum = 0d
+      }
+      sum += currentSum
+    }
   }
 }
 
