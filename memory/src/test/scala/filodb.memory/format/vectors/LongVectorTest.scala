@@ -244,6 +244,45 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
       binReader2.binarySearch(optimized2, 1001L) shouldEqual 0x80000000 | 16
     }
 
+    import org.scalacheck._
+
+    // Generate a list of bounded integers, every time bound it slightly differently
+    // (to test different int compression techniques)
+    def boundedIntList: Gen[Seq[Int]] =
+      for {
+        maxVal <- Gen.oneOf(1000, 5000, 30000)   // must be greater than 250ms so not within approximation
+        seqList <- Gen.containerOf[Seq, Int](Gen.choose(10, maxVal))
+      } yield { seqList }
+
+    it("should binarySearch Long/DDV vector correctly for random elements and searches") {
+      try {
+        forAll(boundedIntList) { s =>
+          val increasingTimes = s.scanLeft(10000L)(_ + Math.abs(_))
+          val builder = LongBinaryVector.appendingVectorNoNA(memFactory, increasingTimes.length)
+          increasingTimes.foreach(builder.addData)
+          val optimized = builder.optimize(memFactory)
+          val reader = LongBinaryVector(optimized)
+          forAll(Gen.choose(0, increasingTimes.last * 3)) { num =>
+            val out = reader.binarySearch(optimized, num)
+            (out & 0x7fffffff) should be >= 0
+            val posMatch = increasingTimes.indexWhere(_ >= num)
+            (out & 0x7fffffff) should be < 100000
+            if (posMatch >= 0) {
+              if (increasingTimes(posMatch) == num) {    // exact match, or within 250ms
+                out shouldEqual posMatch
+              } else {  // not match, but # at pos is first # greater than num.  So insert here.
+                out shouldEqual (posMatch | 0x80000000)
+              }
+            } else {   // our # is greater than all numbers; ie _ >= num never true.
+              out shouldEqual (0x80000000 | increasingTimes.length)
+            }
+          }
+        }
+      } finally {
+        memFactory.freeAll()
+      }
+    }
+
     it("should not use Delta-Delta for short vectors, NAs, etc.") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
       builder.addData(1L)
@@ -334,46 +373,5 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
       val out = reader.binarySearch(optimized, 9603)  // less than first item, should return 0x80000000
       out shouldEqual 0x80000000
     }
-
-    import org.scalacheck._
-
-    // Generate a list of bounded integers, every time bound it slightly differently
-    // (to test different int compression techniques)
-    def boundedIntList: Gen[Seq[Int]] =
-      for {
-        maxVal <- Gen.oneOf(1000, 5000, 30000)   // must be greater than 250ms so not within approximation
-        seqList <- Gen.containerOf[Seq, Int](Gen.choose(10, maxVal))
-      } yield { seqList }
-
-    it("should binarySearch ts vector correctly for random elements and searches") {
-      try {
-        forAll(boundedIntList) { s =>
-          val increasingTimes = s.scanLeft(10000L)(_ + Math.abs(_))
-          val builder = LongBinaryVector.timestampVector(memFactory, increasingTimes.length)
-          increasingTimes.foreach(builder.addData)
-          val optimized = builder.optimize(memFactory)
-          val reader = LongBinaryVector(optimized)
-          forAll(Gen.choose(0, increasingTimes.last * 3)) { num =>
-            val out = reader.binarySearch(optimized, num)
-            (out & 0x7fffffff) should be >= 0
-            val posMatch = increasingTimes.indexWhere(_ >= num)
-            (out & 0x7fffffff) should be < 100000
-            // Unfortunately it's really hard to tell with approximate DDV which is the right position
-            // if (posMatch >= 0) {
-            //   if (increasingTimes(posMatch) == num) {    // exact match, or within 250ms
-            //     out shouldEqual posMatch
-            //   } else {  // not match, but # at pos is first # greater than num.  So insert here.
-            //     out shouldEqual (posMatch | 0x80000000)
-            //   }
-            // } else {   // our # is greater than all numbers; ie _ >= num never true.
-            //   out shouldEqual (0x80000000 | increasingTimes.length)
-            // }
-          }
-        }
-      } finally {
-        memFactory.freeAll()
-      }
-    }
-
   }
 }
