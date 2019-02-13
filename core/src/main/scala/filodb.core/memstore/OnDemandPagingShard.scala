@@ -34,9 +34,6 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
-  private val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
-  private val inMemoryPartitionsMetric = Kamon.counter("odp-shard-inmemory-partitions").refine(tags)
-  private val opdPartitionsMetric = Kamon.counter("odp-shard-odp-partitions").refine(tags)
   private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}-$shardNum")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
@@ -76,7 +73,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       }
     }
     shardStats.partitionsQueried.increment(inMemoryPartitions.length)
-    val span = Kamon.buildSpan(s"odp-shard-rawchunks-loadtime")
+    val span = Kamon.buildSpan(s"odp-cassandra-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
       .start()

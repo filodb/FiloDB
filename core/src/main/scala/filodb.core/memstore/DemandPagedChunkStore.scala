@@ -65,6 +65,7 @@ extends RawToPartitionMaker with StrictLogging {
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       tsShard.shardStats.partitionsPagedFromColStore.increment()
+      tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
       // One chunkset at a time, load them into offheap and populate the partition
       rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
         val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))

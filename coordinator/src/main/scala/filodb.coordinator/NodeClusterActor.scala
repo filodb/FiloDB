@@ -203,6 +203,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
   val shardUpdates = new MutableHashSet[DatasetRef]
+
+  // Counter is incremented each time shardmapper snapshot is published.
+  // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
   val iamShardManager = Kamon.counter("shardmanager-ping")
 
   val publishInterval = settings.ShardMapPublishFrequency

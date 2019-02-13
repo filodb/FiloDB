@@ -418,7 +418,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): IntIterator = {
-    val partKeySpan = Kamon.buildSpan("lucene partition lookup time")
+    val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
       .start()
