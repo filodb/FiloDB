@@ -712,6 +712,8 @@ Another good option is generating a FlameGraph:  `-prof jmh.extras.Async:dir=/tm
 
 There is also a script, `run_benchmarks.sh`
 
+For running basic continuous profiling in a test environment, a simple profiler can be enabled. It periodically writes a report of the top called methods, as a percentage over a sampling interval. Methods which simply indicate that threads are blocked are excluded. See the profiler section in the filodb-defaults.conf file, and copy this section to a local configuration file.
+
 ## You can help!
 
 Contributions are welcome!
