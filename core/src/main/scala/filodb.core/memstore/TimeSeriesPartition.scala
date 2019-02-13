@@ -16,6 +16,7 @@ object TimeSeriesPartition extends StrictLogging {
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
 
+  // Use global logger so we can save a few fields for each of millions of TSPartitions  :)
   val _log = logger
 
   def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
@@ -128,7 +129,9 @@ extends ReadablePartition with MapHolder {
           // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
           // So we do not call ingest again unless switcing buffers succeeds.
           // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode=true)) ingest(row, blockHolder)
+          if (switchBuffers(blockHolder, encode=true)) { ingest(row, blockHolder) }
+          else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
+                           s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
         case other: AddResponse =>
       }

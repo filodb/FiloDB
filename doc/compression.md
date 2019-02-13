@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Compression](#compression)
+  - [Long/Integer Compression](#longinteger-compression)
+  - [Floating Point Compression](#floating-point-compression)
+  - [Predictive NibblePacking](#predictive-nibblepacking)
+    - [Example](#example)
+  - [Histograms](#histograms)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Compression
 
 Here we will discuss some of the compression algorithms in FiloDB's underlying chunk format.
@@ -75,5 +88,10 @@ Now here is how they would be stored in memory:
 
 Or, if the above was viewed in a little-endian system as a 32-bit int, then the above would be 0x00456123.
 
+## Histograms
 
+FiloDB supports first class histograms as HistogramColumns in schemas.  This means histograms are ingested as single entities and kept together as a single time series.  Compressed histograms (using NibblePacking) are stored in write buffers and may be compressed further.
 
+Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details about the on-the-wire / BinaryRecord format used for histograms.
+
+TODO: document histogram compression techniques more when done.

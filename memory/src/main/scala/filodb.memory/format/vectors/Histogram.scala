@@ -50,6 +50,7 @@ trait Histogram extends Ordered[Histogram] {
 
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
+   * TODO: monotonicity check, which will be in a separate function.
    */
   final def quantile(q: Double): Double = {
     val result = if (q < 0) Double.NegativeInfinity

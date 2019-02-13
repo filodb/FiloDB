@@ -302,11 +302,20 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
   }
 }
 
-final case class ChunkQueryInfo(info: NativePointer,
+/**
+ * Stores, for each chunk in the WindowedChunkIterator, the reader and vector pointer for both
+ * the timestamp and value columns.
+ * NOTE: to prevent object bloat for value classes, the pointer to the info is stored.  Use info member
+ * for easy access.
+ */
+final case class ChunkQueryInfo(infoPtr: NativePointer,
                                 tsVector: BinaryVector.BinaryVectorPtr,
                                 tsReader: vectors.LongVectorDataReader,
                                 valueVector: BinaryVector.BinaryVectorPtr,
-                                valueReader: VectorDataReader)
+                                valueReader: VectorDataReader) {
+  // ChunkSetInfo is a value class, use this for typed and efficient access without allocations
+  def info: ChunkSetInfo = ChunkSetInfo(infoPtr)
+}
 
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
@@ -354,11 +363,11 @@ extends Iterator[ChunkQueryInfo] {
     readIndex = 0
 
     // drop initial chunksets of window that are no longer part of the window
-    while (windowInfos.nonEmpty && ChunkSetInfo(windowInfos(0).info).endTime < curWindowStart) {
+    while (windowInfos.nonEmpty && windowInfos(0).info.endTime < curWindowStart) {
       windowInfos.remove(0)
     }
 
-    var lastEndTime = if (windowInfos.isEmpty) -1L else ChunkSetInfo(windowInfos(windowInfos.length - 1).info).endTime
+    var lastEndTime = if (windowInfos.isEmpty) -1L else windowInfos(windowInfos.length - 1).info.endTime
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {

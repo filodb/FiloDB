@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Downsampling](#downsampling)
+  - [Configuration](#configuration)
+  - [Downsample Data Generation](#downsample-data-generation)
+  - [Best Practices](#best-practices)
+  - [Querying of Downsample Data](#querying-of-downsample-data)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Downsampling
 
 Downsampling is a process of reducing the number of samples stored for a time series. 
