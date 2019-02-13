@@ -20,8 +20,13 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import java.util.concurrent.TimeUnit;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigException;
 
 /**
  * Simple profiler which samples threads and periodically logs a report to a file. When the
@@ -30,12 +35,13 @@ import org.slf4j.LoggerFactory;
  */
 public class SimpleProfiler {
     /**
-     * Launches a global profiler, based on system properties.
+     * Launches a global profiler, based on config. Typically, these are nested under the
+     * "filodb.profiler" path:
      *
-     * -Dfilodb.SimpleProfiler.sampleRateMillis=<n>
-     * -Dfilodb.SimpleProfiler.reportIntervalSeconds=<n>
-     * -Dfilodb.SimpleProfiler.topCount=<n>
-     * -Dfilodb.SimpleProfiler.outFile=<filename>
+     * sample-rate = 10ms
+     * report-interval = 60s
+     * top-count = 50
+     * out-file = "filodb.prof"
      *
      * In order for profiling to be enabled, all of the above properies must be set except for
      * the file. If no file is provided, then a temporary file is created, whose name is logged.
@@ -43,49 +49,35 @@ public class SimpleProfiler {
      * @return false if not configured
      * @throws IOException if file cannot be opened
      */
-    public static boolean launch() throws IOException {
-        String prefix = "filodb.SimpleProfiler.";
-
-        int sampleRateMillis = getIntProperty(prefix, "sampleRateMillis");
-        if (sampleRateMillis <= 0) {
+    public static boolean launch(Config config) throws IOException {
+        try {
+            long sampleRateMillis = config.getDuration("sample-rate", TimeUnit.MILLISECONDS);
+            long reportIntervalSeconds = config.getDuration("report-interval", TimeUnit.SECONDS);
+            int topCount = config.getInt("top-count");
+            File outFile = selectProfilerFile(config.getString("out-file"));
+            FileOutputStream out = new FileOutputStream(outFile);
+            new SimpleProfiler(sampleRateMillis, reportIntervalSeconds, topCount, out).start();
+            return true;
+        } catch (ConfigException e) {
+            LoggerFactory.getLogger(SimpleProfiler.class).debug("Not profiling: " + e);
             return false;
         }
-
-        int reportIntervalSeconds = getIntProperty(prefix, "reportIntervalSeconds");
-        if (reportIntervalSeconds <= 0) {
-            return false;
-        }
-
-        int topCount = getIntProperty(prefix, "topCount");
-        if (topCount <= 0) {
-            return false;
-        }
-
-        File outFile;
-        {
-            String outFileName = System.getProperty(prefix + "outFile");
-            if (outFileName != null) {
-                outFile = new File(outFileName);
-            } else {
-                outFile = File.createTempFile("filodb.SimpleProfiler", ".txt");
-                LoggerFactory.getLogger(SimpleProfiler.class).info
-                    ("Created temp file for profile reporting: " + outFile);
-            }
-        }
-
-        FileOutputStream out = new FileOutputStream(outFile);
-
-        new SimpleProfiler(sampleRateMillis, reportIntervalSeconds, topCount, out).start();
-
-        return true;
     }
 
-    private static int getIntProperty(String prefix, String name) {
-        Integer value = Integer.getInteger(prefix + name);
-        return value == null ? -1 : value;
+    /**
+     * @param fileName candidate file name; if null, a temp file is created
+     */
+    private static File selectProfilerFile(String fileName) throws IOException {
+        if (fileName != null) {
+            return new File(fileName);
+        }
+        File file = File.createTempFile("filodb.SimpleProfiler", ".txt");
+        LoggerFactory.getLogger(SimpleProfiler.class).info
+            ("Created temp file for profile reporting: " + file);
+        return file;
     }
 
-    private final int mSampleRateMillis;
+    private final long mSampleRateMillis;
     private final long mReportIntervalMillis;
     private final int mTopCount;
     private final OutputStream mOut;
@@ -98,7 +90,7 @@ public class SimpleProfiler {
     /**
      * Reports to System.out.
      */
-    public SimpleProfiler(int sampleRateMillis, int reportIntervalSeconds, int topCount) {
+    public SimpleProfiler(long sampleRateMillis, long reportIntervalSeconds, int topCount) {
         this(sampleRateMillis, reportIntervalSeconds, topCount, System.out);
     }
 
@@ -108,7 +100,7 @@ public class SimpleProfiler {
      * @param topCount number of methods to report
      * @param out where to write the report
      */
-    public SimpleProfiler(int sampleRateMillis, int reportIntervalSeconds, int topCount,
+    public SimpleProfiler(long sampleRateMillis, long reportIntervalSeconds, int topCount,
                           OutputStream out)
     {
         mSampleRateMillis = sampleRateMillis;

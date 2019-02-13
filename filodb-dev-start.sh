@@ -40,17 +40,7 @@ if [ ! -f standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar ]; the
 fi
 
 echo "Starting FiloDB standalone server..."
-java -Xmx4G $PORTS_ARG \
--Dconfig.file=$CONFIG \
--DlogSuffix=$LOG_SUFFIX \
--cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar \
-filodb.standalone.FiloServer &
-
-# Include these options above to enable profiling.
-#-Dfilodb.SimpleProfiler.sampleRateMillis=10 \
-#-Dfilodb.SimpleProfiler.reportIntervalSeconds=60 \
-#-Dfilodb.SimpleProfiler.topCount=50 \
-#-Dfilodb.SimpleProfiler.outFile=filodb.prof \
+java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer &
 
 if [ "$SETUP_DATASET" = "YES" ]; then
     echo "Waiting 20s so server can come up ..."
