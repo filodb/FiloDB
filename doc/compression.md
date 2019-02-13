@@ -43,7 +43,7 @@ The predictive nibblepacking scheme encodes 8 64-bit values at once, storing the
 | offset | description |
 | ------ | ----------- |
 | +0     | u8: bitmask, 1=nonzero value, 0=zero value  |
-| +1     | u8: bits 0-3 = number of trailing zero nibbles (0-15); 4-7 = number of leading zero nibbles (0-15); skipped if bitmask == 0  |
+| +1     | u8: bits 0-3 = number of trailing zero nibbles (0-15); 4-7 = number of nonzero nibbles - 1 (0-15; 15=all 16 nibbles occupied); skipped if bitmask == 0  |
 | +2     | little-endian nibble storage for each nonzero value in the bitmask; each value has (16 - leading - trailing) nibbles.  Skipped if bitmask = 0 |
 
 The total space required to encode the 8 values can be derived as follows:
