@@ -77,8 +77,6 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
       .start()
-    inMemoryPartitionsMetric.increment(inMemoryPartitions.length)
-    opdPartitionsMetric.increment(methods.length)
     logger.debug(s"dataset=${dataset.ref} shard=$shardNum Querying ${inMemoryPartitions.length} in memory " +
       s"partitions, ODPing ${methods.length}")
 
