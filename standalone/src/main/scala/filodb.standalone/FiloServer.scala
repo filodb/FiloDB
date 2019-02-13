@@ -79,7 +79,6 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 }
 
 object FiloServer {
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit =
     new FiloServer().start()
-  }
 }
