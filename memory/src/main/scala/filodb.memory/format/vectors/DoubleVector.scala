@@ -133,7 +133,7 @@ trait DoubleVectorDataReader extends VectorDataReader {
   /**
    * Counts the values excluding NaN / not available bits
    */
-  def count(vector: BinaryVectorPtr, start: Int, end: Int): Int
+  def count(vector: BinaryVectorPtr, start: Int, end: Int): Double
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
@@ -201,15 +201,19 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     sum
   }
 
-  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
-    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
-    var count = 0
+    val untilAddr = vector + OffsetData + end * 8 + 8 // one past the end
+    var count = Double.NaN
     while (addr < untilAddr) {
       val nextDbl = UnsafeUtils.getDouble(addr)
       // There are many possible values of NaN.  Use a function to ignore them reliably.
-      if (!java.lang.Double.isNaN(nextDbl)) count += 1
+      if (!java.lang.Double.isNaN(nextDbl)) {
+        if (count.isNaN)
+          count = 0d;
+        count += 1
+      }
       addr += 8
     }
     count
@@ -230,7 +234,7 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     DoubleVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end, ignoreNaN)
 
-  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int =
+  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Double =
     DoubleVector(subvectAddr(vector)).count(subvectAddr(vector), start, end)
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
@@ -347,7 +351,7 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
     LongBinaryVector(vector)(vector, n).toDouble
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     LongBinaryVector(vector).sum(vector, start, end)   // Long vectors cannot contain NaN, ignore it
-  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
+  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Double = end - start + 1
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
 }
