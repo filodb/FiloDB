@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
 import debox.Buffer
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
@@ -72,25 +73,28 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       }
     }
     shardStats.partitionsQueried.increment(inMemoryPartitions.length)
-
+    val span = Kamon.buildSpan(s"odp-cassandra-latency")
+      .withTag("dataset", dataset.name)
+      .withTag("shard", shardNum)
+      .start()
     logger.debug(s"dataset=${dataset.ref} shard=$shardNum Querying ${inMemoryPartitions.length} in memory " +
       s"partitions, ODPing ${methods.length}")
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
-    if (storeConfig.multiPartitionODP) {
+    (if (storeConfig.multiPartitionODP) {
       Observable.fromIterable(inMemoryPartitions) ++
       Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
         val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
         shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
-        (if (partKeyBytesToPage.nonEmpty) {
+        if (partKeyBytesToPage.nonEmpty) {
           rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
             // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
             // In the future optimize this if needed.
             .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
             // This is needed so future computations happen in a different thread
             .asyncBoundary(strategy)
-        } else { Observable.empty })
+        } else { Observable.empty }
       }
     } else {
       Observable.fromIterable(inMemoryPartitions) ++
@@ -104,7 +108,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
               .headL
           }
       }
-    }
+    }).doOnComplete(() => span.finish())
   }
 
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.

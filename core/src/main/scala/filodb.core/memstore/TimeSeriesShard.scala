@@ -69,6 +69,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numPartitions = Kamon.gauge("num-partitions").refine(tags)
   val numActivelyIngestingParts = Kamon.gauge("num-ingesting-partitions").refine(tags)
 
+  val numChunksPagedIn = Kamon.gauge("chunks-paged-in").refine(tags)
   val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").refine(tags)
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
   val purgedPartitions = Kamon.counter("memstore-partitions-purged").refine(tags)
