@@ -172,25 +172,25 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     "It should exclude values at curWindowStart") {
 
     val samples = Seq(
-      100000L -> 1d,
-      153000L -> 2d,
-      250000L -> 3d, // should not be part of window 240000 to 350000
-      270000L -> 4d,
-      280000L -> 5d,
-      360000L -> 6d,
-      430000L -> 7d,
-      690000L -> 8d,
-      700000L -> 9d,
-      710000L -> Double.NaN // NOTE: Prom end of time series marker
+      100000L->1d,
+      153000L->2d,
+      250000L->3d, // should not be part of window 240000 to 350000
+      270000L->4d,
+      280000L->5d,
+      360000L->6d,
+      430000L->7d,
+      690000L->8d,
+      700000L->9d,
+      710000L->Double.NaN // NOTE: Prom end of time series marker
     )
     val rv = timeValueRV(samples)
 
     val windowResults = Seq(
-      150000 -> 1.0,
-      250000 -> 5.0,
-      350000 -> 9.0,
-      450000 -> 13.0,
-      750000 -> 17.0
+      150000->1.0,
+      250000->5.0,
+      350000->9.0,
+      450000->13.0,
+      750000->17.0
     )
     val slidingWinIterator = new SlidingWindowIterator(rv.rows, 50000L, 100000, 1100000L, 100000,
       RangeFunction(Some(RangeFunctionId.SumOverTime), ColumnType.DoubleColumn, useChunked = false), queryConfig)

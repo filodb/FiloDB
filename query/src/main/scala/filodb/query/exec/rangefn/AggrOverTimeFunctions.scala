@@ -41,13 +41,12 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN) extends ChunkedD
     val it = doubleReader.iterate(doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal))
-        {
-          if (min.isNaN) {
-            min = Double.MaxValue
-          }
-          min = Math.min(min, nextVal)
-        }  // cannot compare NaN, always < anything else
+      if (!JLDouble.isNaN(nextVal)) {
+        if (min.isNaN) {
+          min = Double.MaxValue
+        }
+        min = Math.min(min, nextVal) // cannot compare NaN, always < anything else
+      }
       rowNum += 1
     }
   }
@@ -281,7 +280,7 @@ abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var coun
   }
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, if (count > 0) sum / count else if (sum.isNaN()) sum else 0d)
+    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else if (sum.isNaN()) sum else 0d)
   }
 }
 

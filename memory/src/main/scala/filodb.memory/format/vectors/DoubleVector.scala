@@ -190,7 +190,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
         addr += 8
       }
     } else {
-      while (addr < untilAddr) { //ask what for
+      while (addr < untilAddr) {
         if (sum.isNaN) {
           sum = 0d
         }
