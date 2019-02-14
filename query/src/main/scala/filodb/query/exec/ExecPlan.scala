@@ -233,7 +233,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                 queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
-    val childTasks = Observable.fromIterable(children).mapAsync { plan =>
+    val childTasks = Observable.fromIterable(children).mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)

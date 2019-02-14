@@ -128,6 +128,7 @@ brew services start kafka
 Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
 ```
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
+kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
 Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
@@ -144,7 +145,8 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
@@ -367,7 +369,7 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
-    http_req_timer{app="foo",__col__="min"}
+    http_req_timer{_ns="foo",__col__="min"}
 
 By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
 
@@ -379,7 +381,7 @@ Some special functions exist to aid debugging and for other purposes:
 
 Example of debugging chunk metadata using the CLI:
 
-    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{app="App-0"})' --start XX --end YY
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
 
 ### Using the FiloDB HTTP API
 
@@ -387,7 +389,7 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bapp="filodb"%7D%5B1m%5D&time=1539908476'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%_ns="filodb"%7D%5B1m%5D&time=1539908476'
 
 ```json
 {
@@ -399,8 +401,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "1",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -434,8 +436,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "0",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -709,6 +711,8 @@ This should last a good 15 minutes at least.  While it is running, fire up JMC (
 Another good option is generating a FlameGraph:  `-prof jmh.extras.Async:dir=/tmp/filodbprofile`. Be sure to read the instructions for setting up FlameGraph profiling.  You can also run a stack profiler with an option like ` -prof stack:lines=4;detailLine=true`, but the analysis is not as good as JMC or Async Profiler/FlameGraph/
 
 There is also a script, `run_benchmarks.sh`
+
+For running basic continuous profiling in a test environment, a simple profiler can be enabled. It periodically writes a report of the top called methods, as a percentage over a sampling interval. Methods which simply indicate that threads are blocked are excluded. See the profiler section in the filodb-defaults.conf file, and copy this section to a local configuration file.
 
 ## You can help!
 

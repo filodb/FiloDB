@@ -63,9 +63,9 @@ extends RawToPartitionMaker with StrictLogging {
    */
   def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
     // Find the right partition given the partition key
-    tsShard.getPartition(rawPartition.partitionKey).map { partition =>
-      val tsPart = partition.asInstanceOf[TimeSeriesPartition]
+    tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       tsShard.shardStats.partitionsPagedFromColStore.increment()
+      tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
       // One chunkset at a time, load them into offheap and populate the partition
       rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
         val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
@@ -80,12 +80,12 @@ extends RawToPartitionMaker with StrictLogging {
         val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
         if (!inserted) {
-          logger.info(s"Chunks not copied to ${partition.stringPartition}, already has chunk $chunkID.  " +
+          logger.info(s"Chunks not copied to ${tsPart.stringPartition}, already has chunk $chunkID.  " +
             s"Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, ${ChunkSetInfo.getEndTime(infoBytes)})" +
-            s" partition earliestTime=${partition.earliestTime}")
+            s" partition earliestTime=${tsPart.earliestTime}")
         }
       }
-      partition
+      tsPart
     }.getOrElse {
       // This should never happen.  The code in OnDemandPagingShard pre-creates partitions before we ODP them.
       throw new RuntimeException(s"Partition [${new String(rawPartition.partitionKey)}] not found, this is bad")

@@ -9,6 +9,7 @@ import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, StoreConfig}
 
@@ -72,12 +73,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   def subscribe(subscriber: ActorRef, dataset: DatasetRef): Unit =
     mapperOpt(dataset) match {
       case Some(current) =>
-        logger.info(s"Adding $subscriber as a subscriber for dataset $dataset")
+        logger.info(s"Adding $subscriber as a subscriber for dataset=$dataset")
         _subscriptions = subscriptions.subscribe(subscriber, dataset)
         _subscriptions.watchers foreach (_ ! subscriptions)
         subscriber ! current
       case _ =>
-        logger.error(s"Dataset $dataset unknown, unable to subscribe $subscriber.")
+        logger.error(s"dataset=$dataset unknown, unable to subscribe $subscriber.")
         subscriber ! DatasetUnknown(dataset)
     }
 
@@ -244,7 +245,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     */
   def stopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit = {
     logger.info(s"Stop Shard request=${shardStopReq.unassignmentConfig} " +
-                  s"for dataSet=${shardStopReq.datasetRef} ")
+                  s"for dataset=${shardStopReq.datasetRef} ")
     val answer: Response = validateRequestAndStopShards(shardStopReq, ackTo)
                             .fold(_ => SuccessResponse, errorResponse => errorResponse)
     ackTo ! answer
@@ -286,7 +287,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     */
   def startShards(shardStartReq: StartShards, ackTo: ActorRef): Unit = {
     logger.info(s"Start Shard request=${shardStartReq.assignmentConfig} " +
-                  s"for dataSet=${shardStartReq.datasetRef} ")
+                  s"for dataset=${shardStartReq.datasetRef} ")
     val answer: Response = validateRequestAndStartShards(shardStartReq.datasetRef,
                                                          shardStartReq.assignmentConfig, ackTo)
                               .fold(_ => SuccessResponse, errorResponse => errorResponse)
@@ -353,10 +354,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                  dataset: Dataset,
                  ackTo: ActorRef): Map[ActorRef, Seq[Int]] = {
 
-    logger.info(s"Initiated Setup for Dataset ${setup.ref}")
+    logger.info(s"Initiated setup for dataset=${setup.ref}")
     val answer: Map[ActorRef, Seq[Int]] = mapperOpt(setup.ref) match {
       case Some(_) =>
-        logger.info(s"Dataset ${setup.ref} already exists - ignoring")
+        logger.info(s"dataset=${setup.ref} already exists - skipping addDataset workflow")
         ackTo ! DatasetExists(setup.ref)
         Map.empty
       case None =>
@@ -366,7 +367,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
         val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, setup.storeConfig, dataset)
+        val state = DatasetInfo(resources, metrics, source, setup.downsampleConfig, setup.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
@@ -375,7 +376,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Add dataset to subscribers and send initial ShardMapper snapshot
         _subscriptions :+= ShardSubscription(dataset.ref, Set.empty)
         _subscriptions.watchers foreach (subscribe(_, dataset.ref))
-        logger.info(s"Completed Setup for Dataset ${setup.ref}")
+        logger.info(s"Completed Setup for dataset=${setup.ref}")
         ackTo ! DatasetVerified
         assignments
     }
@@ -397,7 +398,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   }
 
   def removeDataset(dataset: DatasetRef): Unit = {
-    logger.info(s"Initiated removal for Dataset $dataset")
+    logger.info(s"Initiated removal for dataset=$dataset")
     for {
       (_, coord) <- _coordinators
       mapper = _shardMappers(dataset)
@@ -406,7 +407,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     _datasetInfo remove dataset
     _shardMappers remove dataset
     _subscriptions = _subscriptions - dataset
-    logger.info(s"Completed removal for Dataset $dataset")
+    logger.info(s"Completed removal for dataset=$dataset")
   }
 
   /**
@@ -414,9 +415,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * members / coordinator ActorRefs
     */
   def recoverShards(ref: DatasetRef, map: ShardMapper): Unit = {
-    logger.info(s"Recovering map for dataset $ref")
+    logger.info(s"Recovering ShardMap for dataset=$ref ; ShardMap contents: $map")
     _shardMappers(ref) = map
-    logger.debug(s"Map contents: $map")
     updateShardMetrics()
   }
 
@@ -436,11 +436,18 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * the ShardMapper for dataset.
     */
   def updateFromExternalShardEvent(sender: ActorRef, event: ShardEvent): Unit = {
+    logger.info(s"Received event=$event from sender=$sender for dataset=${event.ref} for shard=${event.shard}")
     _shardMappers.get(event.ref) foreach { mapper =>
-      // ensure that we respond to shard events only from the node shard is currently assigned to.
-      // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
       val currentCoord = mapper.coordForShard(event.shard)
-      if (currentCoord.path.address == sender.path.address) {
+      if (currentCoord == ActorRef.noSender) {
+        logger.warn(s"Ignoring event=$event from sender=$sender for dataset=${event.ref} since shard=${event.shard} " +
+          s"is not currently assigned. Was $sender the previous owner for a shard that was just unassigned? " +
+          s"How else could this happen? ")
+        // Note that this path is not used for an initial shard assignment when currentCoord would indeed be noSender;
+        // used only for reacting to shard events sent from member nodes.
+      } else if (currentCoord.path.address == sender.path.address) {
+        // Above condition ensures that we respond to shard events only from the node shard is currently assigned to.
+        // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
         updateFromShardEvent(event)
         // reassign shard if IngestionError. Exclude previous node since it had error shards.
         event match {
@@ -450,7 +457,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             val now = System.currentTimeMillis()
             val info = _datasetInfo(event.ref)
             if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
-              logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
+              logger.warn(s"Attempting to reassign shard=${event.shard} from dataset=${event.ref}. " +
                 s"It was last reassigned at ${lastReassignment}")
               val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
               if (assignments.valuesIterator.flatten.contains(event.shard)) {
@@ -458,20 +465,20 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                 info.metrics.numErrorReassignmentsDone.increment()
               } else {
                 info.metrics.numErrorReassignmentsSkipped.increment()
-                logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
+                logger.warn(s"Shard=${event.shard} from dataset=${event.ref} was NOT reassigned possibly " +
                   s"because no other node was available")
               }
             } else {
               info.metrics.numErrorReassignmentsSkipped.increment()
-              logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
+              logger.warn(s"Skipping reassignment of shard=${event.shard} from dataset=${event.ref} since " +
                 s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
             }
           case _ =>
         }
         updateShardMetrics()
       } else {
-        logger.warn(s"Ignoring event $event from $sender since it does not match current " +
-          s"owner of shard ${event.shard} which is ${mapper.coordForShard(event.shard)}")
+        logger.warn(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
+          s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")
       }
     }
   }
@@ -493,11 +500,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     _shardMappers.get(event.ref) foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
-          logger.error(s"Invalid shard.", l)
+          logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
         case Success(r) =>
-          logger.info(s"Updated mapper for dataset ${event.ref} event $event")
+          logger.info(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
       }
-      logger.debug(s"Shard Mapper after updateFromShardEvent: $mapper")
     }
     updateShardMetrics()
   }
@@ -510,8 +516,9 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                                               coord: ActorRef,
                                               shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
-    logger.info(s"Sending setup message for ${state.dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.storeConfig, state.source)
+    logger.info(s"Sending setup message for dataset=${state.dataset.ref} to coordinators $coord.")
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
+      state.storeConfig, state.source, state.downsample)
     coord ! setupMsg
 
     for { shard <- shards }  {
@@ -520,7 +527,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     }
     publishSnapshot(dataset)
     /* If no shards are assigned to a coordinator, no commands are sent. */
-    logger.info(s"Sending start ingestion message for $dataset to coordinator $coord for shards $shards")
+    logger.info(s"Sending start ingestion message for dataset=$dataset to coordinator $coord for shards $shards")
     for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
   }
 
@@ -533,14 +540,15 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                                                 mapper: ShardMapper,
                                                 shardsToDown: Seq[Int],
                                                 nodeUp: Boolean = true): Unit = {
-    logger.info(s"Sending stop ingestion message for $dataset to coordinator $coordinator for shards $shardsToDown")
+    logger.info(s"Sending stop ingestion message for dataset=$dataset to " +
+      s"coordinator $coordinator for shards $shardsToDown")
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
       updateFromShardEvent(event)
       if (nodeUp) coordinator ! StopShardIngestion(dataset, shard)
     }
     publishSnapshot(dataset)
-    logger.debug(s"Unassigned shards $shardsToDown from $coordinator")
+    logger.debug(s"Unassigned shards $shardsToDown of dataset=$dataset from $coordinator")
   }
 
   /** Publishes a ShardMapper snapshot of given dataset to all subscribers of that dataset. */
@@ -570,6 +578,7 @@ private[coordinator] object ShardManager {
   final case class DatasetInfo(resources: DatasetResourceSpec,
                                metrics: ShardHealthStats,
                                source: IngestionSource,
+                               downsample: DownsampleConfig,
                                storeConfig: StoreConfig,
                                dataset: Dataset)
 }

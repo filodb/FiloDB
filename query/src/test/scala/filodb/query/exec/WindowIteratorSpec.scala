@@ -301,4 +301,33 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
                                                    .asInstanceOf[ChunkedRangeFunction], queryConfig)()
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
+
+  it("should not return NaN if value is present at time - staleSampleAfterMs") {
+    val samples = Seq(
+      100000L -> 100d,
+      153000L -> 160d,
+      200000L -> 200d
+    )
+    val windowResults = Seq(
+      100000L -> 100d,
+      200000L -> 200d,
+      300000L -> 200d,
+      400000L -> 200d,
+      500000L -> 200d
+    )
+    val rv = timeValueRV(samples)
+
+    val slidingWinIterator = new SlidingWindowIterator(rv.rows, 100000L,
+      100000, 600000L, 0,
+      RangeFunction(None, ColumnType.DoubleColumn, useChunked = false),
+      queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
+
+    // ChunkedWindowIterator requires window to be staleSampleAfterMs + 1 when window of SlidingWindowIterator is 0
+    val chunkedWinIt = new ChunkedWindowIterator(rv, 100000L,
+      100000, 600000L, queryConfig.staleSampleAfterMs + 1,
+      RangeFunction(None, ColumnType.DoubleColumn, useChunked = true)
+        .asInstanceOf[ChunkedRangeFunction], queryConfig)()
+    chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
+  }
 }

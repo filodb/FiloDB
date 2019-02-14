@@ -84,6 +84,10 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def isTimeSeries: Boolean = columnTypes.length >= 1 &&
     (columnTypes.head == LongColumn || columnTypes.head == TimestampColumn)
 
+  /**
+    * Offset to the fixed field primitive or pointer which are at the beginning of the BR
+    * @param index column number (and not column id)
+    */
   def fieldOffset(index: Int): Int = offsets(index)
 
   def numBytes(base: Any, offset: Long): Int = BinaryRegionLarge.numBytes(base, offset)

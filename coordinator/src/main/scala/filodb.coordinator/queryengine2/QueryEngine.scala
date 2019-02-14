@@ -7,6 +7,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
@@ -29,6 +30,8 @@ import filodb.query.exec._
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
+
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
   /**
     * This is the facade to trigger orchestration of the ExecPlan.
@@ -57,7 +60,8 @@ class QueryEngine(dataset: Dataset,
           case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
-    logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
+    logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
+      s" $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
   }
 
@@ -209,18 +213,20 @@ class QueryEngine(dataset: Dataset,
     }.toSeq
     // If the label is PromMetricLabel and is different than dataset's metric name,
     // replace it with dataset's metric name. (needed for prometheus plugins)
-    val labelName = if (PromMetricLabel == lp.labelName && dataset.options.metricColumn != PromMetricLabel)
-      dataset.options.metricColumn else lp.labelName
+    val metricLabelIndex = lp.labelNames.indexOf(PromMetricLabel)
+    val labelNames = if (metricLabelIndex > -1 && dataset.options.metricColumn != PromMetricLabel)
+      lp.labelNames.updated(metricLabelIndex, dataset.options.metricColumn) else lp.labelNames
 
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
                         shardsFromFilters(filters, options)
                       } else {
+                        mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
                       }
     shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        filters, labelName, lp.lookbackTimeInMillis)
+        filters, labelNames, lp.lookbackTimeInMillis)
     }
   }
 
@@ -229,7 +235,14 @@ class QueryEngine(dataset: Dataset,
                                      options: QueryOptions,
                                      lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
     val renamedFilters = renameMetricFilter(lp.filters)
-    shardsFromFilters(renamedFilters, options).map { shard =>
+    val filterCols = lp.filters.map(_.column).toSet
+    val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
+                        shardsFromFilters(lp.filters, options)
+                      } else {
+                        mdNoShardKeyFilterRequests.increment()
+                        shardMapperFunc.assignedShards
+                      }
+    shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         renamedFilters, lp.start, lp.end)

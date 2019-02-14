@@ -24,6 +24,8 @@ final class AkkaBootstrapperSettings(val config: Config) extends StrictLogging {
 
   val seedsBaseUrl = bootstrapper.getString("http-seeds.base-url")
   val seedsPath = bootstrapper.getString("http-seeds.path")
+  val seedsHttpRetries = bootstrapper.getInt("http-seeds.retries")
+  val seedsHttpSleepBetweenRetries = bootstrapper.getDuration("http-seeds.sleep-between-retries")
 
   // used by simple dns srv and consul
   lazy val seedNodeCount: Integer = bootstrapper.getInt("dns-srv.seed-node-count")
