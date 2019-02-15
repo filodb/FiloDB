@@ -14,8 +14,8 @@ import org.rogach.scallop._
 
 import filodb.coordinator.{GlobalConfig, ShardMapper}
 import filodb.core.metadata.Dataset
-import filodb.gateway.conversion.PrometheusInputRecord
 import filodb.gateway.GatewayServer
+import filodb.gateway.conversion.PrometheusInputRecord
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
@@ -97,12 +97,22 @@ object TestTimeseriesProducer extends StrictLogging {
       val endQuery = startQuery + 300
       val query =
         s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
-        s"""--promql 'heap_usage{dc="DC0",app="App-0"}' --start $startQuery --end $endQuery --limit 15"""
-      logger.info(s"Sample Query you can use: \n$query")
-      val q = URLEncoder.encode("heap_usage{dc=\"DC0\",app=\"App-0\"}", StandardCharsets.UTF_8.toString)
-      val url = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
+        s"""--promql 'heap_usage{dc="DC0",_ns="App-0"}' --start $startQuery --end $endQuery --limit 15"""
+      logger.info(s"Periodic Samples CLI Query : \n$query")
+
+      val q = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}[2m]""", StandardCharsets.UTF_8.toString)
+      val periodicSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
         s"query=$q&start=$startQuery&end=$endQuery&step=15"
-      logger.info(s"Sample URL you can use to query: \n$url")
+      logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
+
+      val q2 = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0",__col__="sum"}[2m]""",
+        StandardCharsets.UTF_8.toString)
+      val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$q2&time=$endQuery"
+      logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
+      val downsampledSamplesUrl = s"http://localhost:8080/promql/prometheus_ds_1m/api/v1/query?" +
+        s"query=$q2&time=$endQuery"
+      logger.info(s"Downsampled Samples query URL: \n$downsampledSamplesUrl")
+
     }
   }
 
@@ -148,7 +158,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"       -> s"DC$dc",
-                     "app"      -> s"App-$app",
+                     "_ns"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")

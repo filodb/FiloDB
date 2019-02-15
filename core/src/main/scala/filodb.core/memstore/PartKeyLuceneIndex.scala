@@ -8,6 +8,7 @@ import scala.collection.immutable.HashSet
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
@@ -417,6 +418,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): IntIterator = {
+    val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
+      .withTag("dataset", dataset.name)
+      .withTag("shard", shardNum)
+      .start()
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
@@ -429,11 +434,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
     val searcher = searcherManager.acquire()
     val collector = new PartIdCollector() // passing zero for unlimited results
     searcher.search(query, collector)
+    partKeySpan.finish()
     collector.intIterator()
   }
 }
-
-
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
 

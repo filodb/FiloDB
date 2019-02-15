@@ -114,6 +114,24 @@ class DoubleVectorTest extends NativeVectorTest {
       reader.sum(builder.addr, 2, orig.length) shouldEqual (orig.drop(2).sum)
     }
 
+    it("should not allow sum() with out of bound indices") {
+      val orig = Seq(1000, 2001.1, 2999.99, 5123.4, 5250, 6004, 7678)
+      val builder = DoubleVector.appendingVectorNoNA(memFactory, orig.length + 2)
+      orig.foreach(builder.addData)
+      val optimized = builder.optimize(memFactory)
+
+      builder.reader.asDoubleReader.sum(builder.addr, 0, 4) shouldEqual orig.take(5).sum
+
+      intercept[IllegalArgumentException] {
+        builder.reader.asDoubleReader.sum(builder.addr, 1, orig.length)
+      }
+
+      val readVect = DoubleVector(optimized)
+      intercept[IllegalArgumentException] {
+        readVect.sum(optimized, 1, orig.length)
+      }
+    }
+
     it("should support resetting and optimizing AppendableVector multiple times") {
       val cb = DoubleVector.appendingVector(memFactory, 5)
       // Use large numbers on purpose so cannot optimize to Doubles or const

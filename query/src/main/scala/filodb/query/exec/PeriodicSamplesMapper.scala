@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
@@ -7,7 +8,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
-import filodb.memory.format.RowReader
+import filodb.memory.format.{vectors => bv, RowReader}
 import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
@@ -51,7 +52,7 @@ final case class PeriodicSamplesMapper(start: Long,
       // Chunked: use it and trust it has the right type
       case c: ChunkedRangeFunction =>
         // Really, use the stale lookback window size, not 0 which doesn't make sense
-        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
+        val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs + 1 else 0L)
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
@@ -107,7 +108,7 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
                             queryConfig: QueryConfig)
                            (windowIt: WindowedChunkIterator =
                               new WindowedChunkIterator(rv.chunkInfos(start - window, end), start, step, end, window)
-                           ) extends Iterator[TransientRow] {
+                           ) extends Iterator[TransientRow] with StrictLogging {
   private val sampleToEmit = new TransientRow()
 
   override def hasNext: Boolean = windowIt.hasMoreWindows
@@ -118,8 +119,18 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
 
     windowIt.nextWindow()
     while (windowIt.hasNext) {
-      rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
-                              windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
+      try {
+        rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
+                                windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
+      } catch {
+        case e: Exception =>
+          val timestampVector = windowIt.nextInfo.vectorPtr(rv.timestampColID)
+          val tsReader = bv.LongBinaryVector(timestampVector)
+          logger.error(s"addChunks Exception: info.numRows=${windowIt.nextInfo.numRows} " +
+                       s"info.endTime=${windowIt.nextInfo.endTime} curWindowEnd=${windowIt.curWindowEnd} " +
+                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
+          throw e
+      }
     }
     rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
     if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively

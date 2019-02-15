@@ -145,14 +145,14 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,app
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
 NOTE: if you have already gone through the procedure above, you may need to clear out the existing metadata: `./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command clearMetadata`, then repeat the steps above.  Otherwise you will not be in a clean state and may have stale schemas especially if the code has changed.
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
 ./filodb-dev-start.sh -s
@@ -167,7 +167,7 @@ For queries to work properly you'll want to start a second server to serve all t
 To quickly verify that both servers are up and set up for ingestion, do this (the output below was formatted using `| jq '.'`, ports may vary):
 
 ```
-curl localhost:8080/api/v1/cluster/timeseries/status
+curl localhost:8080/api/v1/cluster/prometheus/status
 
 {
   "status": "success",
@@ -211,7 +211,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{app="App-2"}'
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ns="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -299,7 +299,7 @@ Start two servers as follows. This will not start ingestion yet:
 Set up ingestion:
 
 ```bash
-./filo-cli --host 127.0.0.1 --dataset timeseries --command setup --filename conf/timeseries-128shards-source.conf
+./filo-cli --host 127.0.0.1 --dataset prometheus --command setup --filename conf/timeseries-128shards-source.conf
 ```
 
 Now if you curl the cluster status you should see 128 shards which are slowly turning active: `curl http://127.0.0.1:8080/api/v1/cluster/timeseries/status | jq '.'`
@@ -369,7 +369,7 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
-    http_req_timer{app="foo",__col__="min"}
+    http_req_timer{_ns="foo",__col__="min"}
 
 By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
 
@@ -381,7 +381,7 @@ Some special functions exist to aid debugging and for other purposes:
 
 Example of debugging chunk metadata using the CLI:
 
-    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{app="App-0"})' --start XX --end YY
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
 
 ### Using the FiloDB HTTP API
 
@@ -389,7 +389,7 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bapp="filodb"%7D%5B1m%5D&time=1539908476'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%_ns="filodb"%7D%5B1m%5D&time=1539908476'
 
 ```json
 {
@@ -401,8 +401,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "1",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -436,8 +436,8 @@ Example:
           "host": "MacBook-Pro-229.local",
           "shard": "0",
           "__name__": "memstore_rows_ingested_total",
-          "dataset": "timeseries",
-          "app": "filodb"
+          "dataset": "prometheus",
+          "_ns": "filodb"
         },
         "values": [
           [
@@ -517,7 +517,7 @@ The CLI is now primarily used to interact with standalone FiloDB servers, includ
 
 The **indexnames** command lists all of the indexed tag keys or column names, based on the partition key or Prometheus key/value tags that define time series:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexnames
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --command indexnames
 
 ```
 le
@@ -529,7 +529,7 @@ dataset
 
 The **indexvalues** command lists the top values (as well as their cardinality) in specific shards for any given tag key or column name.  Here we list the top metrics (for Prometheus schema, which uses the tag `__name__`) in shard 0:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexvalues --indexName __name__ --shards 0
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --command indexvalues --indexName __name__ --shards 0
 
 ```
              chunk_bytes_per_call_bucket  10
@@ -546,16 +546,16 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{app="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ns="filodb"}'
 
 ```
-Sending query command to server for timeseries with options QueryOptions(<function1>,16,60,100,None)...
+Sending query command to server for prometheus with options QueryOptions(<function1>,16,60,100,None)...
 Query Plan:
 PeriodicSeries(RawSeries(IntervalSelector(List(1539908042000),List(1539908342000)),List(ColumnFilter(app,Equals(filodb)), ColumnFilter(__name__,Equals(memstore_rows_ingested_total))),List()),1539908342000,10000,1539908342000)
-/shard:1/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 1]]
+/shard:1/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: prometheus, host: MacBook-Pro-229.local, shard: 1]]
   2018-10-18T17:19:02.000-07:00 (1s ago) 1539908342000  36.0
 
-/shard:3/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 0]]
+/shard:3/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: prometheus, host: MacBook-Pro-229.local, shard: 0]]
   2018-10-18T17:19:02.000-07:00 (2s ago) 1539908342000  66.0
 ```
 
@@ -711,6 +711,8 @@ This should last a good 15 minutes at least.  While it is running, fire up JMC (
 Another good option is generating a FlameGraph:  `-prof jmh.extras.Async:dir=/tmp/filodbprofile`. Be sure to read the instructions for setting up FlameGraph profiling.  You can also run a stack profiler with an option like ` -prof stack:lines=4;detailLine=true`, but the analysis is not as good as JMC or Async Profiler/FlameGraph/
 
 There is also a script, `run_benchmarks.sh`
+
+For running basic continuous profiling in a test environment, a simple profiler can be enabled. It periodically writes a report of the top called methods, as a percentage over a sampling interval. Methods which simply indicate that threads are blocked are excluded. See the profiler section in the filodb-defaults.conf file, and copy this section to a local configuration file.
 
 ## You can help!
 

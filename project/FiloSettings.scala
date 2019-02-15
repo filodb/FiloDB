@@ -32,7 +32,6 @@ object FiloSettings extends Build {
       "-unchecked",
       "-feature",
       "-Xfuture",
-      "-Xcheckinit",
       "-Xfatal-warnings",
       "-Ywarn-inaccessible",
       "-Ywarn-dead-code",
@@ -44,6 +43,9 @@ object FiloSettings extends Build {
       "-language:implicitConversions"
       // TODO relocate here: -Ywarn-unused-import, add -Ywarn-numeric-widen
       // TODO in 2.12: remove: -Yinline-warnings, add the new applicable ones
+
+      // Don't enable this option. It makes all fields lazy, hurting performance.
+      //"-Xcheckinit"
     ),
 
     javacOptions ++= Seq(
