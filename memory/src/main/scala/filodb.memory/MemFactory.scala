@@ -124,6 +124,8 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   def shutdown(): Unit = {
     freeAll()
   }
+
+  override def finalize(): Unit = shutdown
 }
 
 /**

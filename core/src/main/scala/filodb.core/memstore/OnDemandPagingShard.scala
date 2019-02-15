@@ -144,7 +144,12 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
                 group = partKeyGroup(dataset.partKeySchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
-            partSet.add(part)
+            val stamp = partSetLock.writeLock()
+            try {
+              partSet.add(part)
+            } finally {
+              partSetLock.unlockWrite(stamp)
+            }
             callback(partKeyBytesRef.bytes, unsafeKeyOffset)
             part
           }

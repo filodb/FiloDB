@@ -333,6 +333,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
       val j = i & mask
       val status = buckets(j)
       if (status == 3 && items(j) == item) {
+        items(j) = null // allow item to be garbage collected
         buckets(j) = 2
         len -= 1
         true
@@ -513,6 +514,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     if (lhs.size <= rhs.size) {
       cfor(0)(_ < buckets.length, _ + 1) { i =>
         if (buckets(i) == 3 && !rhs(items(i))) {
+          items(i) = null // allow item to be garbage collected
           buckets(i) = 2
           len -= 1
         }
@@ -561,6 +563,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     } else {
       cfor(0)(_ < buckets.length, _ + 1) { i =>
         if (buckets(i) == 3 && rhs(items(i))) {
+          items(i) = null // allow item to be garbage collected
           buckets(i) = 2
           len -= 1
         }
@@ -665,6 +668,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   def filterSelf(p: FiloPartition => Boolean): Unit =
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3 && !p(items(i))) {
+        items(i) = null // allow item to be garbage collected
         buckets(i) = 2
         len -= 1
       }
