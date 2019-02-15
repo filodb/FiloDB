@@ -119,14 +119,12 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory,
-               var capacity: Int,
-               // Must be declared here to be ordinary fast fields.
-               private var lockState: Int = 0,
-               private var size: Int = 0,
-               private var first: Int = 0) {
+class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
   require(capacity > 0)
 
+  private var lockState: Int = 0
+  private var size: Int = 0
+  private var first: Int = 0
   private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero=true)
 
   import ChunkMap._
@@ -575,10 +573,10 @@ class ChunkMap(val memFactory: MemFactory,
    * @param index initialized to first index to read from
    * @param lastIndex last index to read from (exclusive)
    */
-  private class MapIterator(var index: Int, val lastIndex: Int,
-                            // Must be declared here to be ordinary fast fields.
-                            private var closed: Boolean = false,
-                            private var nextElem: NativePointer = 0) extends ElementIterator {
+  private class MapIterator(var index: Int, val lastIndex: Int) extends ElementIterator {
+    private var closed: Boolean = false
+    private var nextElem: NativePointer = 0
+
     final def close(): Unit = {
       if (!closed) doClose()
     }
