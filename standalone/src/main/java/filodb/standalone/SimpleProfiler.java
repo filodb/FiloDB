@@ -455,7 +455,11 @@ public class SimpleProfiler {
 
             while (!mShouldStop) {
                 try {
-                    Thread.sleep(mSampleRateMillis);
+                    try {
+                        Thread.sleep(mSampleRateMillis);
+                    } catch (InterruptedException e) {
+                        // Probably should report upon JVM shutdown and then stop.
+                    }
 
                     ThreadInfo[] infos;
                     if (dumpMethod == null) {
@@ -469,7 +473,7 @@ public class SimpleProfiler {
                     }
 
                     analyze(mSamples, infos);
-                } catch (InterruptedException | InterruptedIOException e) {
+                } catch (InterruptedIOException e) {
                     // Probably should stop.
                 } catch (Throwable e) {
                     Thread t = Thread.currentThread();
