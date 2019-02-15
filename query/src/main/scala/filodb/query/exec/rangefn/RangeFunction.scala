@@ -123,7 +123,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
 
-    addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+    addTimeDoubleChunks(doubleVector, dblReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
   }
 
   /**
@@ -150,7 +150,7 @@ trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
 
-    addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+    addTimeLongChunks(longVector, longReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
   }
 
   /**
@@ -284,7 +284,8 @@ abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    // Just in case timestamp vectors are a bit longer than others.
+    val endRowNum = Math.min(tsReader.ceilingIndex(timestampVector, endTime), info.numRows - 1)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)

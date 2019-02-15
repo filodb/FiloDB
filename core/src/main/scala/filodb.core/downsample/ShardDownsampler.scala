@@ -91,7 +91,7 @@ class ShardDownsampler(dataset: Dataset,
           while (pStart <= endTime) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
             val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
-            val endRowNum = tsReader.ceilingIndex(vecPtr, pEnd)
+            val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
             builder.startNewRecord()
             // for each downsampler, add downsample column value
             dataset.downsamplers.foreach {
