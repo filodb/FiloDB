@@ -1081,11 +1081,17 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] = {
     var part: Option[FiloPartition] = None
+    // Access the partition set optimistically. If nothing acquired the write lock, then
+    // nothing changed in the set, and the partition object is the correct one.
     var stamp = partSetLock.tryOptimisticRead()
     if (stamp != 0) {
       part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
     }
     if (!partSetLock.validate(stamp)) {
+      // Because the stamp changed, the write lock was acquired and the set likely changed.
+      // Try again with a full read lock, which will block if necessary so as to not run
+      // concurrently with any thread making changes to the set. This guarantees that
+      // the correct partition is returned.
       stamp = partSetLock.readLock()
       try {
         part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
