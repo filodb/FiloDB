@@ -62,6 +62,8 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
       val singleton = cluster.clusterSingleton(role, watcher)
       val filoHttpServer = new FiloHttpServer(cluster.system)
       filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
+      // Launch the profiler after startup, if configured.
+      SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
     } catch {
       // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       case NonFatal(e) =>
