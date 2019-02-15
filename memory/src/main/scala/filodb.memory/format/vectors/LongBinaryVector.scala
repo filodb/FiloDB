@@ -197,6 +197,9 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = Double.NaN
     while (addr < untilAddr) {
+      if (java.lang.Double.isNaN(sum)) {
+        sum = 0d
+      }
       sum += UnsafeUtils.getLong(addr)
       addr += 8
     }

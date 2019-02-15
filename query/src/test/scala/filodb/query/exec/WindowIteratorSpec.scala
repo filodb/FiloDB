@@ -325,7 +325,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
 
-  it("should calculate AvgOverTime correctly") {
+  it("should calculate AvgOverTime correctly even for windows with no values") {
 
     val samples = Seq(
       100000L -> 1d,
@@ -358,7 +358,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
-  it("should calculate CountOverTime correctly") {
+  it("should calculate CountOverTime correctly even for windows with no values") {
 
     val samples = Seq(
       100000L -> 1d,
@@ -392,7 +392,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
-  it("should calculate MinOverTime correctly") {
+  it("should calculate MinOverTime correctly even for windows with no values") {
 
     val samples = Seq(
       100000L -> 1d,
@@ -426,7 +426,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
   }
 
-  it("should calculate MaxOverTime correctly") {
+  it("should calculate MaxOverTime correctly even for windows with no values") {
 
     val samples = Seq(
       100000L -> 1d,
