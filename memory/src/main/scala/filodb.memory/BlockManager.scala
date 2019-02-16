@@ -239,4 +239,5 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
+  override def finalize(): Unit = releaseBlocks
 }
