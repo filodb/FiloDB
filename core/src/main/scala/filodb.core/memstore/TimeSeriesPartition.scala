@@ -44,8 +44,8 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  *     This allows for safe and cheap write buffer churn without losing any data.
  *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
- * The main data structure used in inherited from ChunkMap, an efficient, offheap sorted map.
- * Note that other than the variables used in this class, there is NO JVM-maneged memory used
+ * The main data structure used is inherited from ChunkMap, an efficient, offheap sorted map.
+ * Note that other than the variables used in this class, there is NO JVM-managed memory used
  * for managing chunks.  Thus the amount of JVM-managed memory used for a partition is constant
  * regardless of the number of chunks in a TSPartition. The partition key and infoMap are both
  * in offheap write buffers, and chunks and chunk metadata are kept in offheap block memory.
