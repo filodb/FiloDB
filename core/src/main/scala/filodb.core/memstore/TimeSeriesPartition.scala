@@ -115,9 +115,18 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       shardStats.outOfOrderDropped.increment
       return
     }
-    if (currentChunks == nullChunks) {
+
+    val newChunk = currentChunks == nullChunks
+    if (newChunk) {
       // First row of a chunk, set the start time to it
-      initNewChunk(ts)
+      val (infoAddr, newAppenders) = bufferPool.obtain()
+      val currentChunkID = newChunkID(ts)
+      ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
+      ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
+      ChunkSetInfo.setStartTime(infoAddr, ts)
+      currentInfo = ChunkSetInfo(infoAddr)
+      currentChunks = newAppenders
+      // Don't publish the new chunk just yet. Wait until it has one row.
     }
 
     for { col <- 0 until numColumns optimized } {
@@ -133,6 +142,11 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
     // Update the end time as well.  For now assume everything arrives in increasing order
     ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
+
+    if (newChunk) {
+      // Publish it now that it has something.
+      infoPut(currentInfo)
+    }
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -324,21 +338,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
   // Disabled for now. Requires a shared lock on the inherited map.
   //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
-
-  /**
-    * Initializes vectors, chunkIDs for a new chunkset/chunkID.
-    * This is called after switchBuffers() upon the first data that arrives.
-    */
-  private def initNewChunk(startTime: Long): Unit = {
-    val (infoAddr, newAppenders) = bufferPool.obtain()
-    val currentChunkID = newChunkID(startTime)
-    ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
-    ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-    ChunkSetInfo.setStartTime(infoAddr, startTime)
-    currentInfo = ChunkSetInfo(infoAddr)
-    currentChunks = newAppenders
-    infoPut(currentInfo)
-  }
 
   final def removeChunksAt(id: ChunkID): Unit = {
     chunkmapWithExclusive(chunkmapDoRemove(id))

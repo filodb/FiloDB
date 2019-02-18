@@ -292,7 +292,17 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).numChunks shouldEqual 1
       partitions(i).appendingChunkLen shouldEqual 10
+      val infos = partitions(i).infos(AllChunkScan)
+      infos.hasNext shouldEqual true
+      val writeBufInfo = infos.nextInfo
+      writeBufInfo.numRows shouldEqual 10
+
+      // Have to give up read lock
+      infos.close()
       partitions(i).switchBuffers(ingestBlockHolder, true)
+
+      // After switchBuffers, write buffer is recycled, and numRows should be reset
+      writeBufInfo.numRows shouldEqual 0
     }
 
     myBufferPool.poolSize shouldEqual origPoolSize
