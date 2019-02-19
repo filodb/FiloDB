@@ -207,7 +207,7 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
-    val numRows = endRowNum - startRowNum + 1
+    val numRows = Math.min(endRowNum, info.numRows - 1) - startRowNum + 1
     count += numRows
   }
 }

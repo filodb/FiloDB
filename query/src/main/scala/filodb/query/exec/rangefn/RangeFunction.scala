@@ -122,6 +122,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+
     // At least one sample is present
     if (startRowNum <= endRowNum) {
       addTimeDoubleChunks(doubleVector, dblReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
@@ -288,7 +289,8 @@ abstract class LastSampleChunkedFunction(var timestamp: Long = -1L,
                 startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
     val timestampVector = info.vectorPtr(tsCol)
     val tsReader = bv.LongBinaryVector(timestampVector)
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    // Just in case timestamp vectors are a bit longer than others.
+    val endRowNum = Math.min(tsReader.ceilingIndex(timestampVector, endTime), info.numRows - 1)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)

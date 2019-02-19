@@ -119,15 +119,16 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
 
     windowIt.nextWindow()
     while (windowIt.hasNext) {
+      val nextInfo = windowIt.nextInfo
       try {
-        rangeFunction.addChunks(rv.timestampColID, rv.valueColID, windowIt.nextInfo,
+        rangeFunction.addChunks(rv.timestampColID, rv.valueColID, nextInfo,
                                 windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
       } catch {
         case e: Exception =>
-          val timestampVector = windowIt.nextInfo.vectorPtr(rv.timestampColID)
+          val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
           val tsReader = bv.LongBinaryVector(timestampVector)
-          logger.error(s"addChunks Exception: info.numRows=${windowIt.nextInfo.numRows} " +
-                       s"info.endTime=${windowIt.nextInfo.endTime} curWindowEnd=${windowIt.curWindowEnd} " +
+          logger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
+                       s"info.endTime=${nextInfo.endTime} curWindowEnd=${windowIt.curWindowEnd} " +
                        s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
           throw e
       }
