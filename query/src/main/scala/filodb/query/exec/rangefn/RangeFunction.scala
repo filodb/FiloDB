@@ -124,7 +124,7 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
     // At least one sample is present
     if (startRowNum <= endRowNum) {
-      addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+      addTimeDoubleChunks(doubleVector, dblReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
     }
   }
 
@@ -153,7 +153,7 @@ trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
 
     if (startRowNum <= endRowNum) {
-      addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+      addTimeLongChunks(longVector, longReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
     }
   }
 
