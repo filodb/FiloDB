@@ -122,8 +122,10 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
-
-    addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+    }
   }
 
   /**
@@ -150,7 +152,9 @@ trait ChunkedLongRangeFunction extends ChunkedRangeFunction {
     val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
 
-    addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+    if (startRowNum <= endRowNum) {
+      addTimeLongChunks(longVector, longReader, startRowNum, endRowNum)
+    }
   }
 
   /**
