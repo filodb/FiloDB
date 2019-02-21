@@ -38,8 +38,13 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
         response = Http(seedsEndpoint).timeout(2000, 2000).asString
         logger.info(s"Seeds endpoint returned a ${response.code}. Response body was ${response.body}")
       } catch {
-        case NonFatal(e) =>
+        case NonFatal(e) => {
+          if (e.isInstanceOf[java.net.ConnectException]) {
+            // Don't bother logging the full the trace for something which is expected.
+            e.setStackTrace(new Array[StackTraceElement](0))
+          }
           logger.info(s"Seeds endpoint $seedsEndpoint failed. This is expected on cluster bootstrap", e)
+        }
       }
       retriesRemaining -= 1
       if (retriesRemaining > 0) Thread.sleep(settings.seedsHttpSleepBetweenRetries.toMillis)

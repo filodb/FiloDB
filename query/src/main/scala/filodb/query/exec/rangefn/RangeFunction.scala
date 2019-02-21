@@ -121,8 +121,11 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeDoubleChunks(valueVector, valueReader.asDoubleReader,
-                        startRowNum, Math.min(endRowNum, info.numRows - 1))
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      addTimeDoubleChunks(valueVector, valueReader.asDoubleReader,
+                          startRowNum, Math.min(endRowNum, info.numRows - 1))
+    }
   }
 
   /**
@@ -145,8 +148,10 @@ trait ChunkedLongRangeFunction extends ChunkedRangeFunction[TransientRow] {
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeLongChunks(valueVector, valueReader.asLongReader,
-                      startRowNum, Math.min(endRowNum, info.numRows - 1))
+    if (startRowNum <= endRowNum) {
+      addTimeLongChunks(valueVector, valueReader.asLongReader,
+                        startRowNum, Math.min(endRowNum, info.numRows - 1))
+    }
   }
 
   /**
