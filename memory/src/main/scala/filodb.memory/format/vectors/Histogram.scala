@@ -121,7 +121,7 @@ object Histogram {
     final def bucketValue(no: Int): Double = ???
     final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
       val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-      BinaryHistogram.writeBinHistogram(HistogramBuckets.emptyBucketsBytes, Array[Long](), buf)
+      BinaryHistogram.writeNonIncreasing(HistogramBuckets.emptyBucketsBytes, Array[Long](), buf)
       buf
     }
   }
@@ -136,7 +136,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    BinaryHistogram.writeBinHistogram(HistogramBuckets.cachedBucketBytes(buckets), values.map(_.toLong), buf)
+    BinaryHistogram.writeNonIncreasing(HistogramBuckets.cachedBucketBytes(buckets), values.map(_.toLong), buf)
     buf
   }
 

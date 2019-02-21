@@ -38,7 +38,7 @@ object HistogramCompressor extends App {
     // Ingest each histogram, parse and create a BinaryHistogram, then ingest into our histogram column
     chunkLines.foreach { line =>
       val buckets = line.split(",").map(_.trim.toLong)
-      val histSize = BinaryHistogram.writeBinHistogram(bucketDef, buckets, inputBuffer)
+      val histSize = BinaryHistogram.writeNonIncreasing(bucketDef, buckets, inputBuffer)
       numRecords += 1
       binHistBytesMax = Math.max(binHistBytesMax, histSize)
       binHistBytesSum += histSize
