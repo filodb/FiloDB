@@ -224,3 +224,31 @@ case class SqrtImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   override def apply(value: Double): Double = scala.math.sqrt(value)
 
 }
+
+case class LabelReplace(funcParams: Seq[Any]) extends LabelTypeInstantFunction {
+
+  /**
+    * Validate the function before invoking the function.
+    */
+  require(funcParams.size == 4,
+    "Cannot use LabelReplace without function parameters: " +
+      "v instant-vector, dst_label string, replacement string, src_label string,regex string")
+
+  override def apply(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
+    val dstLabel=funcParams(0).asInstanceOf[String]
+    val replacementString = funcParams(1).asInstanceOf[String]
+    val srcLabel=funcParams(2).asInstanceOf[String]
+    val regex=funcParams(3).asInstanceOf[String].r
+
+    val value=rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel))
+
+    if (value.isDefined) {
+
+
+    }
+
+    return rangeVectorKey;
+
+  }
+
+}

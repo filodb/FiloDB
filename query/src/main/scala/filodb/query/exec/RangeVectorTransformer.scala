@@ -1,11 +1,12 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
+import filodb.query.InstantFunctionId.LabelReplace
+import filodb.query.exec.rangefn.DoubleInstantFunction
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn.InstantFunction
@@ -57,12 +58,15 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     s"function=$function, funcParams=$funcParams"
 
   val instantFunction = InstantFunction(function, funcParams)
-
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     source.map { rv =>
+      if (function == LabelReplace) {
+        IteratorBackedRangeVector(rv.key, rv.rows)
+      }
+      else {
       val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
 
         private val rows = rv.rows
@@ -72,13 +76,14 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
         override def next(): RowReader = {
           val next = rows.next()
-          val newValue = instantFunction(next.getDouble(1))
+          val newValue = instantFunction.asInstanceOf[DoubleInstantFunction](next.getDouble(1))
           result.setValues(next.getLong(0), newValue)
           result
         }
       }
       IteratorBackedRangeVector(rv.key, resultIterator)
     }
+  }
   }
 
 }
@@ -111,6 +116,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
         override def next(): RowReader = {
           val next = rows.next()
           val nextVal = next.getDouble(1)
+
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
                          else  operatorFunction.calculate(nextVal, sclrVal)
           result.setValues(next.getLong(0), newValue)
@@ -123,3 +129,5 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   // TODO all operation defs go here and get invoked from mapRangeVector
 }
+
+
