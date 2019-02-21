@@ -108,7 +108,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
       val totalBytes = chunkset.chunks.map(_.limit()).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
       sinkStats.chunksetWrite()
-      logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
+      logger.trace(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
                    s"chunks with $totalBytes bytes")
       chunkset.listener(chunkset.info)
     }

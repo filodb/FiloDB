@@ -136,10 +136,10 @@ object UnsafeUtils {
       var pointer1 = offset1 + minLenAligned
       var pointer2 = offset2 + minLenAligned
       for { i <- minLenAligned until minLen optimized } {
-        val res = getByte(base1, pointer1) - getByte(base2, pointer2)
+        val res = (getByte(base1, pointer1) & 0xff) - (getByte(base2, pointer2) & 0xff)
+        if (res != 0) return res
         pointer1 += 1
         pointer2 += 1
-        if (res != 0) return res
       }
       return numBytes1 - numBytes2
     } else wordComp

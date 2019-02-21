@@ -103,7 +103,7 @@ final class QueryActor(memStore: MemStore,
   private def processIndexValues(g: GetIndexValues, originator: ActorRef): Unit = {
     val localShards = memStore.activeShards(g.dataset)
     if (localShards contains g.shard) {
-      originator ! memStore.indexValues(g.dataset, g.shard, g.indexName, g.limit)
+      originator ! memStore.labelValues(g.dataset, g.shard, g.indexName, g.limit)
                            .map { case TermInfo(term, freq) => (term.toString, freq) }
     } else {
       val destNode = shardMapFunc.coordForShard(g.shard)

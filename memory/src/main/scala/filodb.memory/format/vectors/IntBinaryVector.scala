@@ -297,6 +297,7 @@ trait IntVectorDataReader extends VectorDataReader {
 object OffheapSignedIntVector32 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getInt(vector + 8 + n * 4)
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + 8 + start * 4
     val untilAddr = vector + 8 + end * 4 + 4   // one past the end
     var sum: Long = 0L
@@ -311,6 +312,7 @@ object OffheapSignedIntVector32 extends IntVectorDataReader {
 object OffheapSignedIntVector16 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getShort(vector + 8 + n * 2).toInt
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + 8 + start * 2
     val untilAddr = vector + 8 + end * 2 + 2   // one past the end
     var sum = 0L
@@ -325,6 +327,7 @@ object OffheapSignedIntVector16 extends IntVectorDataReader {
 object OffheapSignedIntVector8 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getByte(vector + 8 + n).toInt
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + 8 + start
     val untilAddr = vector + 8 + end + 1     // one past the end
     var sum = 0L
@@ -340,6 +343,7 @@ object OffheapUnsignedIntVector16 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
     (UnsafeUtils.getShort(vector + 8 + n * 2) & 0x0ffff).toInt
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     val startRoundedUp = (start + 3) & ~3
     var sum = defaultSum(vector, start, Math.min(end, startRoundedUp - 1))
     if (startRoundedUp <= end) {
@@ -362,6 +366,7 @@ object OffheapUnsignedIntVector8 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
     (UnsafeUtils.getByte(vector + 8 + n) & 0x00ff).toInt
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     val startRoundedUp = (start + 7) & ~7
     var sum = defaultSum(vector, start, Math.min(end, startRoundedUp - 1))
     if (startRoundedUp <= end) {
@@ -386,6 +391,7 @@ object OffheapUnsignedIntVector4 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
     (UnsafeUtils.getByte(vector + 8 + n/2) >> ((n & 0x01) * 4)).toInt & 0x0f
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     val startRoundedUp = (start + 7) & ~7
     var sum = defaultSum(vector, start, Math.min(end, startRoundedUp - 1))
     if (startRoundedUp <= end) {
@@ -410,6 +416,7 @@ object OffheapUnsignedIntVector2 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
     (UnsafeUtils.getByte(vector + 8 + n/4) >> ((n & 0x03) * 2)).toInt & 0x03
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     val startRoundedUp = (start + 7) & ~7
     var sum = defaultSum(vector, start, Math.min(end, startRoundedUp - 1))
     if (startRoundedUp <= end) {

@@ -10,6 +10,7 @@ import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
+import kamon.Kamon
 
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
@@ -203,6 +204,10 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   var everybodyLeftSender: Option[ActorRef] = None
   val shardUpdates = new MutableHashSet[DatasetRef]
 
+  // Counter is incremented each time shardmapper snapshot is published.
+  // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
+  val iamShardManager = Kamon.counter("shardmanager-ping")
+
   val publishInterval = settings.ShardMapPublishFrequency
 
   var pubTask: Option[Cancellable] = None
@@ -214,7 +219,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
-    logger.info(s"Attempting to restore previous ingestion state...")
+    logger.info(s"NodeClusterActor starting. Attempting to restore previous ingestion state...")
     metaStore.readIngestionConfigs()
              .map { configs =>
                initDatasets ++= configs.map(_.ref)
@@ -355,6 +360,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: ShardEvent            => handleShardEvent(e)
     case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
     case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+                                     //This counter gets published from ShardManager,
+                                     // > 0 means this node is shardmanager
+                                     iamShardManager.increment()
                                      shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())

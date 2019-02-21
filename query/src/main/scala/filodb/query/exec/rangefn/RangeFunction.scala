@@ -1,6 +1,7 @@
 package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.{QueryConfig, RangeFunctionId}
@@ -99,7 +100,7 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
    */
   def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit
+                startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit
 
   /**
    * Return the computed result in the sampleToEmit
@@ -114,13 +115,14 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
 trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeDoubleChunks(valueVector, valueReader.asDoubleReader, startRowNum, endRowNum)
+    addTimeDoubleChunks(valueVector, valueReader.asDoubleReader,
+                        startRowNum, Math.min(endRowNum, info.numRows - 1))
   }
 
   /**
@@ -137,13 +139,14 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
 trait ChunkedLongRangeFunction extends ChunkedRangeFunction[TransientRow] {
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
-    addTimeLongChunks(valueVector, valueReader.asLongReader, startRowNum, endRowNum)
+    addTimeLongChunks(valueVector, valueReader.asLongReader,
+                      startRowNum, Math.min(endRowNum, info.numRows - 1))
   }
 
   /**
@@ -279,8 +282,9 @@ extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Just in case timestamp vectors are a bit longer than others.
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)

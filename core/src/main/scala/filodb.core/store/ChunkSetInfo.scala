@@ -163,8 +163,10 @@ object ChunkSetInfo extends StrictLogging {
   def getEndTime(infoBytes: Array[Byte]): Long =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
 
-  def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr =
+  def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr = {
+    require(infoPointer != 0, s"ERROR: getVectorPtr on infoPointer==0")
     UnsafeUtils.getLong(infoPointer + OffsetVectors + 8 * colNo)
+  }
   def setVectorPtr(infoPointer: NativePointer, colNo: Int, vector: BinaryVector.BinaryVectorPtr): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetVectors + 8 * colNo, vector)
 
@@ -298,6 +300,7 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
 
   final def nextInfo: ChunkSetInfo = {
     gotNext = false   // reset so we can look for the next item where filter == true
+    require(nextnext.infoAddr != 0, s"nextInfo called before hasNext!!")
     nextnext
   }
 }
@@ -372,8 +375,9 @@ extends Iterator[ChunkQueryInfo] {
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfo
-      // Add if next chunkset is within window.  Otherwise keep going
-      if (curWindowStart <= next.endTime) {
+      require(next.infoAddr != 0, s"NULL nextInfo; curWindowEnd=$curWindowEnd, windowInfos=$windowInfos")
+      // Add if next chunkset is within window and not empty.  Otherwise keep going
+      if (curWindowStart <= next.endTime && next.numRows > 0) {
         val tsVector = next.vectorPtr(tsColID)
         val tsReader = vectors.LongBinaryVector(tsVector)
         val valueVector = next.vectorPtr(rv.valueColID)
@@ -394,6 +398,7 @@ extends Iterator[ChunkQueryInfo] {
    */
   final def next: ChunkQueryInfo = {
     val next = windowInfos(readIndex)
+    require(next.infoPtr != 0, s"ERROR: info==null, windowInfos=$windowInfos readIndex=$readIndex")
     readIndex += 1
     next
   }

@@ -1,13 +1,14 @@
 package filodb.query.exec
 
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
-import filodb.core.store.WindowedChunkIterator
-import filodb.memory.format.RowReader
+import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
+import filodb.memory.format.{vectors => bv, RowReader}
 import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
@@ -51,7 +52,6 @@ final case class PeriodicSamplesMapper(start: Long,
     val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
 
     sampleRangeFunc match {
-      // Chunked: use it and trust it has the right type
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
@@ -96,13 +96,6 @@ final case class PeriodicSamplesMapper(start: Long,
 /**
  * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
  * to compute each window as fast as possible on multiple rows at a time.
- *
- * TODO: we can add a sliding-window version of this as well.  Assuming start2 < end1:
- *  - Calculate initial (first) window  - (start1, end1)
- *  - Subtract non-overlapping portion of initial window start2 - start1
- *  - Add next portion of window beyond overlap:  end2 - end1
- * However, note that sliding window iterators have to do twice as much work, adding and removing, so it would
- * only be worth it if the overlap is more than 50%.
  */
 abstract class ChunkedWindowIterator[R <: MutableRowReader](
     rv: RawDataRangeVector,
@@ -112,9 +105,8 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
     queryConfig: QueryConfig)
-    (windowIt: WindowedChunkIterator =
-      new WindowedChunkIterator(rv, start, step, end, window)
-    ) extends Iterator[R] {
+    (windowIt: WindowedChunkIterator = new WindowedChunkIterator(rv, start, step, end, window))
+extends Iterator[R] with StrictLogging {
   def sampleToEmit: R
 
   override def hasNext: Boolean = windowIt.hasMoreWindows
@@ -126,8 +118,19 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     windowIt.nextWindow()
     while (windowIt.hasNext) {
       val queryInfo = windowIt.next
-      rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
-                              windowIt.curWindowStart, windowIt.curWindowEnd, queryConfig)
+      val nextInfo = ChunkSetInfo(queryInfo.infoPtr)
+      try {
+        rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
+                                windowIt.curWindowStart, windowIt.curWindowEnd, nextInfo, queryConfig)
+      } catch {
+        case e: Exception =>
+          val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
+          val tsReader = bv.LongBinaryVector(timestampVector)
+          logger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
+                       s"info.endTime=${nextInfo.endTime} curWindowEnd=${windowIt.curWindowEnd} " +
+                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
+          throw e
+      }
     }
     rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
     if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively

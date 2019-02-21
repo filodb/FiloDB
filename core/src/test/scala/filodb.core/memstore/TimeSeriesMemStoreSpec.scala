@@ -376,7 +376,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.commitIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
@@ -410,7 +410,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.commitIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
@@ -446,7 +446,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.commitIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
     // Don't mark any partitions for eviction
     // Now, ingest 23 partitions.  Last two partitions cannot be added.  Check numpartitions, stats, index

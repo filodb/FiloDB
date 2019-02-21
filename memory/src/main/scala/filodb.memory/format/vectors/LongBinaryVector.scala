@@ -192,6 +192,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
 
   // end is inclusive
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = 0d
@@ -208,6 +209,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
    */
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
     var len = length(vector)
+    if (len == 0) return 0x80000000
     var first = 0
     var element = 0L
     while (len > 0) {
