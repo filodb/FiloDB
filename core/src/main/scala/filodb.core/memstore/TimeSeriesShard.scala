@@ -25,7 +25,6 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo}
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -269,9 +268,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
-  // Not really one instance of a map; more like an accessor class shared amongst all TSPartition instances
-  private val offheapInfoMap = new OffheapLFSortedIDMapMutator(bufferMemoryManager, classOf[TimeSeriesPartition])
-  // Use 1/4 of max # buckets for initial ChunkInfo map size
+  // Use 1/4 of max # buckets for initial ChunkMap size
   private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
 
   /**
@@ -955,11 +952,10 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initMapSize)
       val partId = nextPartitionID
       incrementPartitionID()
-      val newPart = new TimeSeriesPartition(partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats,
-        infoMapAddr, offheapInfoMap)
+      val newPart = new TimeSeriesPartition(
+        partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
@@ -1068,7 +1064,7 @@ class TimeSeriesShard(val dataset: Dataset,
     } finally {
       partSetLock.unlockWrite(stamp)
     }
-    offheapInfoMap.free(partitionObj)
+    partitionObj.chunkmapFree()
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     partitions.remove(partitionObj.partID)
   }
