@@ -76,6 +76,9 @@ object Column extends StrictLogging {
     case object TimestampColumn extends RichColumnType[Long]("ts")
     case object MapColumn extends RichColumnType[UTF8Map]("map")
     case object BinaryRecordColumn extends RichColumnType[ZeroCopyUTF8String]("br")
+    // TODO: find a way to annotate histograms as rate-based (Prometheus increasing over time) or
+    //       non-increasing over time
+    // These histograms for now are non-increasing over time (but increasing from bucket to bucket)
     case object HistogramColumn extends RichColumnType[bv.Histogram]("hist")
   }
 
