@@ -11,7 +11,6 @@ import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.UnsafeUtils
 
 object TimeSeriesPartitionSpec {
@@ -19,16 +18,15 @@ object TimeSeriesPartitionSpec {
   import BinaryRegion.NativePointer
 
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val offheapInfoMapKlass = new OffheapLFSortedIDMapMutator(memFactory, classOf[TimeSeriesPartition])
+
   val maxChunkSize = 100
   protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
 
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset.ref, 0), infoMapAddr, offheapInfoMapKlass)
+          new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
   }
 }
 
@@ -294,7 +292,17 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).numChunks shouldEqual 1
       partitions(i).appendingChunkLen shouldEqual 10
+      val infos = partitions(i).infos(AllChunkScan)
+      infos.hasNext shouldEqual true
+      val writeBufInfo = infos.nextInfo
+      writeBufInfo.numRows shouldEqual 10
+
+      // Have to give up read lock
+      infos.close()
       partitions(i).switchBuffers(ingestBlockHolder, true)
+
+      // After switchBuffers, write buffer is recycled, and numRows should be reset
+      writeBufInfo.numRows shouldEqual 0
     }
 
     myBufferPool.poolSize shouldEqual origPoolSize
