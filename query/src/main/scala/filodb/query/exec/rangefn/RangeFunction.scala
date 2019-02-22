@@ -240,7 +240,7 @@ object RangeFunction {
     case Some(Rate)             => () => RateFunction
     case Some(Increase)         => () => IncreaseFunction
     case Some(Delta)            => () => DeltaFunction
-    case Some(Resets)           => () => ResetsFunction
+    case Some(Resets)           => () => new ResetsFunction()
     case Some(Irate)            => () => IRateFunction
     case Some(Idelta)           => () => IDeltaFunction
     case Some(Deriv)            => () => DerivFunction
