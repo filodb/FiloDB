@@ -1,5 +1,9 @@
 package filodb.query.exec.rangefn
 
+import java.util.regex.PatternSyntaxException
+
+import filodb.core.query.RangeVectorKey
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
 
@@ -18,6 +22,20 @@ trait DoubleInstantFunction {
   def apply(value: Double): Double
 
 }
+
+trait LabelTypeInstantFunction {
+
+/**
+  * Apply the required instant function against the given value.
+  *
+  * @param value RangeVectorKey against which the function will be applied
+  * @return Calculated RangeVectorKey
+  */
+def apply(value: RangeVectorKey): RangeVectorKey
+
+}
+
+
 
 trait EmptyParamsInstantFunction extends DoubleInstantFunction {
 
@@ -39,19 +57,21 @@ object InstantFunction {
     * @param funcParams - Additional required function parameters
     * @return the function
     */
-  def apply(function: InstantFunctionId, funcParams: Seq[Any]): DoubleInstantFunction = {
+  def apply(function: InstantFunctionId, funcParams: Seq[Any]): Either[DoubleInstantFunction,LabelTypeInstantFunction] =
+  {
     function match {
-      case Abs                => AbsImpl(funcParams)
-      case Ceil               => CeilImpl(funcParams)
-      case ClampMax           => ClampMaxImpl(funcParams)
-      case ClampMin           => ClampMinImpl(funcParams)
-      case Exp                => ExpImpl(funcParams)
-      case Floor              => FloorImpl(funcParams)
-      case Ln                 => LnImpl(funcParams)
-      case Log10              => Log10Impl(funcParams)
-      case Log2               => Log2Impl(funcParams)
-      case Round              => RoundImpl(funcParams)
-      case Sqrt               => SqrtImpl(funcParams)
+      case Abs                => Left(AbsImpl(funcParams))
+      case Ceil               => Left(CeilImpl(funcParams))
+      case ClampMax           => Left(ClampMaxImpl(funcParams))
+      case ClampMin           => Left(ClampMinImpl(funcParams))
+      case Exp                => Left(ExpImpl(funcParams))
+      case Floor              => Left(FloorImpl(funcParams))
+      case Ln                 => Left(LnImpl(funcParams))
+      case Log10              => Left(Log10Impl(funcParams))
+      case Log2               => Left(Log2Impl(funcParams))
+      case Round              => Left(RoundImpl(funcParams))
+      case Sqrt               => Left(SqrtImpl(funcParams))
+      case LabelReplace       => Right(LabelReplaceImpl(funcParams))
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
@@ -225,7 +245,7 @@ case class SqrtImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
 
 }
 
-case class LabelReplace(funcParams: Seq[Any]) extends LabelTypeInstantFunction {
+case class LabelReplaceImpl(funcParams: Seq[Any]) extends LabelTypeInstantFunction {
 
   /**
     * Validate the function before invoking the function.
@@ -235,16 +255,27 @@ case class LabelReplace(funcParams: Seq[Any]) extends LabelTypeInstantFunction {
       "v instant-vector, dst_label string, replacement string, src_label string,regex string")
 
   override def apply(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
-    val dstLabel=funcParams(0).asInstanceOf[String]
+    val dstLabel = funcParams(0).asInstanceOf[String]
     val replacementString = funcParams(1).asInstanceOf[String]
-    val srcLabel=funcParams(2).asInstanceOf[String]
-    val regex=funcParams(3).asInstanceOf[String].r
+    val srcLabel = funcParams(2).asInstanceOf[String]
+    try {
+      val regex = funcParams(3).asInstanceOf[String].r
 
-    val value=rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel))
+      val value = rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel))
 
-    if (value.isDefined) {
+      if (value.isDefined) {
+        val labelReplaceValue = regex.replaceAllIn(value.get.toString, replacementString)
+        if (!labelReplaceValue.equals(value.get.toString)) {
+          rangeVectorKey.labelValues += (ZeroCopyUTF8String(dstLabel) -> ZeroCopyUTF8String(labelReplaceValue))
 
-
+        }
+      }
+    }
+    catch {
+      case ex: PatternSyntaxException => {
+        require(false, "Invalid Regular Expression")
+        ex.printStackTrace()
+      }
     }
 
     return rangeVectorKey;
