@@ -617,6 +617,10 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
       next
     }
 
+    final def lock(): Unit = chunkmapAcquireShared()
+
+    final def unlock(): Unit = chunkmapReleaseShared()
+
     final def getNextElem: NativePointer = nextElem
 
     /**

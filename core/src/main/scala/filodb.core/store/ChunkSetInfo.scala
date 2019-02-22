@@ -226,6 +226,12 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
   def nextInfo: ChunkSetInfo
 
   /**
+   * Explicit locking to guard access to native memory. See ElementIterator.
+   */
+  def lock(): Unit
+  def unlock(): Unit
+
+  /**
    * Returns a new ChunkInfoIterator which filters items from this iterator
    */
   def filter(func: ChunkSetInfo => Boolean): ChunkInfoIterator =
@@ -267,6 +273,8 @@ object ChunkInfoIterator {
     def close(): Unit = {}
     def hasNext: Boolean = false
     def nextInfo: ChunkSetInfo = ChunkSetInfo(0)
+    def lock(): Unit = {}
+    def unlock(): Unit = {}
   }
 }
 
@@ -274,6 +282,8 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
   def close(): Unit = elIt.close()
   final def hasNext: Boolean = elIt.hasNext
   final def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
+  final def lock(): Unit = elIt.lock()
+  final def unlock(): Unit = elIt.unlock()
 }
 
 class FilteredChunkInfoIterator(base: ChunkInfoIterator,
@@ -302,6 +312,9 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
     require(nextnext.infoAddr != 0, s"nextInfo called before hasNext!!")
     nextnext
   }
+
+  final def lock(): Unit = base.lock()
+  final def unlock(): Unit = base.unlock()
 }
 
 /**
@@ -378,6 +391,9 @@ extends ChunkInfoIterator {
     readIndex += 1
     ChunkSetInfo(next)
   }
+
+  final def lock(): Unit = infos.lock()
+  final def unlock(): Unit = infos.unlock()
 }
 
 /**

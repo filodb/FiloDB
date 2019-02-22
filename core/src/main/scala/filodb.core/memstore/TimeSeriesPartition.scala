@@ -308,6 +308,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       }
       return info
     }
+
+    def lock(): Unit = chunkmapAcquireShared()
+    def unlock(): Unit = chunkmapReleaseShared()
   }
 
   final def earliestTime: Long = {

@@ -57,7 +57,7 @@ final case class PeriodicSamplesMapper(start: Long,
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
                                       windowLength, rangeFuncGen().asInstanceOf[ChunkedRangeFunction],
-                                      queryConfig)())
+                                      queryConfig))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -99,23 +99,26 @@ final case class PeriodicSamplesMapper(start: Long,
  * However, note that sliding window iterators have to do twice as much work, adding and removing, so it would
  * only be worth it if the overlap is more than 50%.
  */
+//scalastyle:off null
 class ChunkedWindowIterator(rv: RawDataRangeVector,
                             start: Long,
                             step: Long,
                             end: Long,
                             window: Long,
                             rangeFunction: ChunkedRangeFunction,
-                            queryConfig: QueryConfig)
-                           (windowIt: WindowedChunkIterator =
-                              new WindowedChunkIterator(rv.chunkInfos(start - window, end), start, step, end, window)
-                           ) extends Iterator[TransientRow] with StrictLogging {
+                            queryConfig: QueryConfig) extends Iterator[TransientRow] with StrictLogging {
+  private var windowIt: WindowedChunkIterator = null
+
   private val sampleToEmit = new TransientRow()
 
-  override def hasNext: Boolean = windowIt.hasMoreWindows
+  override def hasNext: Boolean = openWindowIt().hasMoreWindows
+
   override def next: TransientRow = {
     rangeFunction.reset()
     // TODO: detect if rangeFunction needs items completely sorted.  For example, it is possible
     // to do rate if only each chunk is sorted.  Also check for counter correction here
+
+    val windowIt = openWindowIt()
 
     windowIt.nextWindow()
     while (windowIt.hasNext) {
@@ -134,10 +137,30 @@ class ChunkedWindowIterator(rv: RawDataRangeVector,
       }
     }
     rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
-    if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively
+
+    if (!windowIt.hasMoreWindows) {
+      // Release the shared lock and close the iterator, in case it also holds a lock.
+      windowIt.unlock()
+      windowIt.close()
+    }
+
     sampleToEmit
   }
+
+  private def openWindowIt(): WindowedChunkIterator = {
+    // Lazily open the iterator and obtain the lock. This allows one thread to create the
+    // iterator, but the lock is owned by the thread actually performing the iteration.
+    if (windowIt == null) {
+      windowIt = new WindowedChunkIterator(rv.chunkInfos(start - window, end), start, step, end, window)
+      // Need to hold the shared lock explicitly, because the window iterator needs to
+      // pre-fetch chunks to determine the window. This pre-fetching can force the internal
+      // iterator to close, which would release the lock too soon.
+      windowIt.lock()
+    }
+    windowIt
+  }
 }
+//scalastyle:on null
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size
