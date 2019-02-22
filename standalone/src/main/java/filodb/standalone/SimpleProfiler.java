@@ -312,10 +312,12 @@ public class SimpleProfiler {
                 return null;
 
             case "java.lang.Thread":
+                /* Track yield, since it's used by the ChunkMap lock.
                 // Reject threads which appeared as doing work only because they yielded.
                 if (elem.getMethodName().equals("yield")) {
                     return null;
                 }
+                */
                 // Sometimes the thread state is runnable for this method. Filter it out.
                 if (elem.getMethodName().equals("sleep")) {
                     return null;
