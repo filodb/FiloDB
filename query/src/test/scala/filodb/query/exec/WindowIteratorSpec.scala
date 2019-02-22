@@ -353,7 +353,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
     val chunkedIt = new ChunkedWindowIterator(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(Some(RangeFunctionId.AvgOverTime), ColumnType.DoubleColumn, useChunked = true)
-        .asInstanceOf[ChunkedRangeFunction], queryConfig)()
+        .asInstanceOf[ChunkedRangeFunction], queryConfig)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
@@ -387,7 +387,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
     val chunkedIt = new ChunkedWindowIterator(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(Some(RangeFunctionId.CountOverTime), ColumnType.DoubleColumn, useChunked = true)
-        .asInstanceOf[ChunkedRangeFunction], queryConfig)()
+        .asInstanceOf[ChunkedRangeFunction], queryConfig)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
@@ -420,7 +420,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
     val chunkedIt = new ChunkedWindowIterator(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(Some(RangeFunctionId.MinOverTime), ColumnType.DoubleColumn, useChunked = true)
-        .asInstanceOf[ChunkedRangeFunction], queryConfig)()
+        .asInstanceOf[ChunkedRangeFunction], queryConfig)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
 
   }
@@ -454,7 +454,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
     val chunkedIt = new ChunkedWindowIterator(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(Some(RangeFunctionId.MaxOverTime), ColumnType.DoubleColumn, useChunked = true)
-        .asInstanceOf[ChunkedRangeFunction], queryConfig)()
+        .asInstanceOf[ChunkedRangeFunction], queryConfig)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 }
