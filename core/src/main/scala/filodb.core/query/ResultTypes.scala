@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.binaryrecord2.{RecordSchema}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column
 import filodb.core.store.ChunkScanMethod
 import filodb.memory.format.RowReader
@@ -36,8 +36,10 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType)
 /**
  * Describes the full schema of Vectors and Tuples, including how many initial columns are for row keys.
  * The first ColumnInfo in the schema describes the first vector in Vectors and first field in Tuples, etc.
+ * @param brSchemas if any of the columns is a binary record, thsi
  */
-final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int) {
+final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
+                              brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty) {
   import Column.ColumnType._
 
   def length: Int = columns.length

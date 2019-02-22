@@ -13,16 +13,16 @@ object RateFunctions {
                        endTimestamp: Long,
                        window: Window,
                        isCounter: Boolean,
-                       isRate: Boolean): Option[Double] = {
+                       isRate: Boolean): Double = {
     if (window.size < 2) {
-      None  // cannot calculate result without 2 samples
+      Double.NaN  // cannot calculate result without 2 samples
     } else {
       require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
       require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
       var durationToStart = (window.head.timestamp - startTimestamp).toDouble / 1000
       val durationToEnd = (endTimestamp - window.last.timestamp).toDouble / 1000
       val sampledInterval = (window.last.timestamp - window.head.timestamp).toDouble / 1000
-      val averageDurationBetweenSamples = sampledInterval / window.size.toDouble
+      val averageDurationBetweenSamples = sampledInterval / (window.size.toDouble - 1)
       val delta = window.last.value - window.head.value
 
       if (isCounter && delta > 0 && window.head.value >= 0) {
@@ -46,7 +46,7 @@ object RateFunctions {
       val scaledDelta = delta * (extrapolateToInterval / sampledInterval)
       // for rate, we need rate as a per-second value
       val result = if (isRate) (scaledDelta / (endTimestamp - startTimestamp) * 1000) else scaledDelta
-      Some(result)
+      result
     }
   }
 }
@@ -54,8 +54,8 @@ object RateFunctions {
 object IncreaseFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -64,15 +64,15 @@ object IncreaseFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, false)
-    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
   }
 }
 
 object RateFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -81,14 +81,14 @@ object RateFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, true)
-    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result) // TODO need to use a NA instead of NaN
   }
 }
 
 object DeltaFunction extends RangeFunction {
 
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -97,6 +97,8 @@ object DeltaFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, false, false)
-    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result)
   }
 }
+
+

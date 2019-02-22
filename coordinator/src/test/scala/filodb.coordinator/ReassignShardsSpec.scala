@@ -2,6 +2,7 @@ package filodb.coordinator
 
 import akka.actor.{ActorRef, Address}
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 
 import filodb.coordinator.NodeClusterActor._
 import filodb.coordinator.client.IngestionCommands.DatasetSetup
@@ -19,7 +20,8 @@ class ReassignShardsSpec extends AkkaSpec {
 
   protected val resources1 = DatasetResourceSpec(8, 3)
 
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  val settings = new FilodbSettings(ConfigFactory.load("application_test.conf"))
+  protected val shardManager = new ShardManager(settings, DefaultShardAssignmentStrategy)
 
   val coord1 = TestProbe("coordinator1")
   val coord1Address = uniqueAddress(coord1.ref)

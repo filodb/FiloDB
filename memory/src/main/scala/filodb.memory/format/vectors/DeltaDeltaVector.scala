@@ -141,6 +141,8 @@ object DeltaDeltaVector {
  * Thus overall header for DDV = 28 bytes
  */
 object DeltaDeltaDataReader extends LongVectorDataReader {
+  import BinaryRegion._
+
   val InnerVectorOffset = 20
   override def length(vector: BinaryVectorPtr): Int =
     IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
@@ -155,7 +157,8 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
     val _slope = slope(vector)
     val _len   = length(vector)
-    var elemNo = ((item - initValue(vector) + (_slope - 1)) / _slope).toInt
+    var elemNo = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
+                 else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
     if (elemNo < 0) elemNo = 0
     if (elemNo >= _len) elemNo = _len - 1
     var curBase = initValue(vector) + _slope * elemNo
@@ -168,7 +171,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
       curBase -= _slope
     }
 
-    if (item == (curBase + inReader(inner, elemNo))) return elemNo
+    if (elemNo >= 0 && item == (curBase + inReader(inner, elemNo))) return elemNo
 
     elemNo += 1
     curBase += _slope
@@ -182,16 +185,25 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     if (item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
   }
 
-  // Efficient iterate as we keep track of current value and inner iterator
-  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     val inner = vector + InnerVectorOffset
-    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
-    private final var curBase = initValue(vector) + startElement * slope(vector)
+    DeltaDeltaConstDataReader.slopeSum(initValue(vector), slope(vector), start, end) +
+      IntBinaryVector.simple(inner).sum(inner, start, end)
+  }
+
+  // Efficient iterator as we keep track of current value and inner iterator
+  class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: NativePointer) extends LongIterator {
     final def next: Long = {
       val out: Long = curBase + innerIt.next
-      curBase += slope(vector)
+      curBase += slope
       out
     }
+  }
+
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = {
+    val inner = vector + InnerVectorOffset
+    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
+    new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector))
   }
 }
 
@@ -209,11 +221,27 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
 
   // This is O(1) since we can find exactly where on line it is
   final def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val guess = ((item - initValue(vector) + (slope(vector) - 1)) / slope(vector)).toInt
+    val _slope = slope(vector)
+    val guess = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
+                else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
     if (guess < 0)                         { 0x80000000 }
     else if (guess >= length(vector))      { 0x80000000 | length(vector) }
     else if (item != apply(vector, guess)) { 0x80000000 | guess }
     else                                   { guess }
+  }
+
+  // Formula for sum of items on a sloped line:
+  // let len = end - start + 1
+  //   = initVal + start*slope + initVal + (start+1)*slope + .... + initVal + end*slope
+  //   = len * initVal + len*start*slope + ((end-start)*len/2) * slope
+  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    slopeSum(initValue(vector), slope(vector), start, end)
+  }
+
+  private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
+    val len = end - start + 1
+    len.toDouble * (initVal + start * slope) + ((end-start)*len/2) * slope
   }
 
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {

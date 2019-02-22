@@ -333,6 +333,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
       val j = i & mask
       val status = buckets(j)
       if (status == 3 && items(j) == item) {
+        items(j) = null // allow item to be garbage collected
         buckets(j) = 2
         len -= 1
         true
@@ -403,7 +404,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   }
 
   /**
-   * Grow the underlying array to best accomodate the set's size.
+   * Grow the underlying array to best accommodate the set's size.
    *
    * To preserve hashing access speed, the set's size should never be
    * more than 66% of the underlying array's size. When this size is
@@ -513,6 +514,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     if (lhs.size <= rhs.size) {
       cfor(0)(_ < buckets.length, _ + 1) { i =>
         if (buckets(i) == 3 && !rhs(items(i))) {
+          items(i) = null // allow item to be garbage collected
           buckets(i) = 2
           len -= 1
         }
@@ -561,6 +563,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     } else {
       cfor(0)(_ < buckets.length, _ + 1) { i =>
         if (buckets(i) == 3 && rhs(items(i))) {
+          items(i) = null // allow item to be garbage collected
           buckets(i) = 2
           len -= 1
         }
@@ -592,7 +595,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     fold(0)((n, a) => if (p(a)) n + 1 else n)
 
   /**
-   * Determine if every member of the set satisifes the predicate p.
+   * Determine if every member of the set satisfies the predicate p.
    *
    * This is an O(n) operation, where n is the size of the
    * set. However, it will return as soon as a false result is
@@ -606,7 +609,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   }
 
   /**
-   * Determine if any member of the set satisifes the predicate p.
+   * Determine if any member of the set satisfies the predicate p.
    *
    * This is an O(n) operation, where n is the size of the
    * set. However, it will return as soon as a true result is
@@ -665,6 +668,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   def filterSelf(p: FiloPartition => Boolean): Unit =
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3 && !p(items(i))) {
+        items(i) = null // allow item to be garbage collected
         buckets(i) = 2
         len -= 1
       }

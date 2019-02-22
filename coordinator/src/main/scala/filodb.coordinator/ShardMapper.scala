@@ -183,19 +183,22 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
     case e if statusMap.length < e.shard || e.shard < 0 =>
-      Failure(ShardError(e, s"Invalid shard ${e.shard}, unable to update status."))
+      Failure(ShardError(e, s"Invalid shard=${e.shard}, unable to update status."))
     case ShardAssignmentStarted(_, shard, node) =>
       statusMap(shard) = ShardStatusAssigned
       registerNode(Seq(shard), node)
     case IngestionStarted(_, shard, node) =>
       statusMap(shard) = ShardStatusActive
       registerNode(Seq(shard), node)
+    case RecoveryStarted(_, shard, node, progress) =>
+      statusMap(shard) = ShardStatusRecovery(progress)
+      registerNode(Seq(shard), node)
     case RecoveryInProgress(_, shard, node, progress) =>
       statusMap(shard) = ShardStatusRecovery(progress)
       registerNode(Seq(shard), node)
     case IngestionError(_, shard, _) =>
       statusMap(shard) = ShardStatusError
-      Success(())
+      unassignShard(shard)
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
       Success(())
@@ -226,7 +229,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
         //But functional tests uncovered that sometimes the member down event is not
         //received and hence assignments were not removed first.
         val oldCoord = shardMap(shard)
-        log.debug(s"Unassigned coordinator $oldCoord  for shard $shard - Reassigning to $coordinator")
+        log.debug(s"Unassigned coordinator $oldCoord  for shard=$shard - Reassigning to $coordinator")
         shardMap(shard) = coordinator
     }
     Success(())

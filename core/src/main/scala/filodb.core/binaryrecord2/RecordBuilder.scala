@@ -4,7 +4,9 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Dataset}
-import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
+import filodb.core.query.ColumnInfo
+import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 
@@ -132,6 +134,63 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
+  /**
+    * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
+    * If this method is used, then caller needs to also update the partitionHash manually.
+    */
+  private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
+    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
+    checkFieldAndMemory(numBytes + 4)
+    UnsafeUtils.setInt(curBase, curRecEndOffset, numBytes) // length of blob
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 4, numBytes)
+    updateFieldPointerAndLens(numBytes + 4)
+    fieldNo += 1
+  }
+
+  private def addBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    val blobDataOffset = schema.blobOffset(base, offset, col)
+    val blobNumBytes = schema.blobNumBytes(base, offset, col)
+    addBlob(base, blobDataOffset, blobNumBytes)
+  }
+
+  /**
+    * IMPORTANT: Internal method, does not update hash values for the data.
+    * If this method is used, then caller needs to also update the partitionHash manually.
+    */
+  private def addLargeBlobFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    val strDataOffset = schema.utf8StringOffset(base, offset, col)
+    addMap(base, strDataOffset + 4, BinaryRegionLarge.numBytes(base, strDataOffset))
+  }
+
+  private def addLongFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    addLong(schema.getLong(base, offset, col))
+  }
+
+  private def addDoubleFromBr(base: Any, offset: Long, col: Int, schema: RecordSchema): Unit = {
+    addDouble(schema.getDouble(base, offset, col))
+  }
+
+  /**
+    * Adds fields of a Partition Key Binary Record into the record builder as column values in
+    * the same order. Typically used for the downsampling use case where we copy partition key from
+    * the TimeSeriesPartition into the ingest record for the downsample data.
+    *
+    * This also updates the hash for this record. OK since partKeys are added at the very end
+    * of the record.
+    */
+  final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
+    var id = 0
+    partKeySchema.columns.foreach {
+      case ColumnInfo(_, MapColumn) => addLargeBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
+      case _ => ???
+    }
+    // finally copy the partition hash over
+    recHash = partKeySchema.partitionHash(base, offset)
+  }
+
   final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
 
   import Column.ColumnType._
@@ -164,7 +223,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * Adds an entire record from a RowReader, with no boxing, using builderAdders
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
    */
-  def addFromReader(row: RowReader): Long = {
+  final def addFromReader(row: RowReader): Long = {
     startNewRecord()
     for { pos <- 0 until schema.numFields optimized } {
       schema.builderAdders(pos)(row, this)
@@ -264,7 +323,7 @@ final class RecordBuilder(memFactory: MemFactory,
   /**
    * Ends creation of a map field
    */
-  def endMap(): Unit = {
+  final def endMap(): Unit = {
     mapOffset = -1L
     fieldNo += 1
   }
@@ -279,7 +338,7 @@ final class RecordBuilder(memFactory: MemFactory,
   final def endRecord(writeHash: Boolean = true): Long = {
     val recordOffset = curRecordOffset
 
-    if (writeHash && schema.partitionFieldStart.isDefined) setInt(curBase, curRecordOffset + hashOffset, recHash)
+    if (writeHash && firstPartField < Int.MaxValue) setInt(curBase, curRecordOffset + hashOffset, recHash)
 
     // Bring RecordOffset up to endOffset w/ align.  Now the state is complete at end of a record again.
     curRecEndOffset = align(curRecEndOffset)
@@ -287,7 +346,9 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo = -1
 
     // Update container length.  This is atomic so it is updated only when the record is complete.
-    containers.last.updateLengthWithOffset(curRecEndOffset)
+    val lastContainer = containers.last
+    lastContainer.updateLengthWithOffset(curRecEndOffset)
+    lastContainer.numRecords += 1
 
     recordOffset
   }
@@ -434,8 +495,6 @@ final class RecordBuilder(memFactory: MemFactory,
 }
 
 object RecordBuilder {
-  import collection.JavaConverters._
-
   val DefaultContainerSize = 256 * 1024
   val MinContainerSize = 2048
   val HASH_INIT = 7
@@ -512,40 +571,19 @@ object RecordBuilder {
   }
 
   /**
-    * Combines the hashes from sortAndComputeHashes, only including certain keys, into an overall hash value.
-    * All the keys from includeKeys must be present.  Usually used to compute the shard key hash.
-    * @param pairs sorted pairs of byte key values, from sortAndComputeHashes
-    * @param hashes the output from sortAndComputeHashes
-    * @param includeKeys the keys to include
-    * @return Some(hash) if all the keys in includeKeys were present, or None
-    */
-  final def combineHashIncluding(pairs: java.util.ArrayList[(String, String)],
-                                 hashes: Array[Int],
-                                 includeKeys: Set[String]): Option[Int] = {
+   * Computes a shard key hash from the metric name and the values of the non-metric shard key columns
+   * @param shardKeyValues the non-metric shard key values (such as the job/exporter/app), sorted in order of
+   *        the key name.  For example, it should be Seq(exporter, job).
+   * @param metric the metric value to use in the calculation.
+   */
+  final def shardKeyHash(shardKeyValues: Seq[Array[Byte]], metric: Array[Byte]): Int = {
     var hash = 7
-    var numIncluded = 0
-    var index = 0
-    while (index < pairs.size && numIncluded < includeKeys.size) {
-      if (includeKeys contains pairs.get(index)._1) {
-        hash = combineHash(hash, hashes(index))
-        numIncluded += 1
-      }
-      index += 1
-    }
-    if (numIncluded == includeKeys.size) Some(hash) else None
+    shardKeyValues.foreach { value => hash = combineHash(hash, BinaryRegion.hash32(value)) }
+    combineHash(hash, BinaryRegion.hash32(metric))
   }
 
-  /**
-   * A convenience function to compute the shard key hash given a list of shard key columns
-   * and their corresponding values.  The list must contain all the shard key columns and only those.
-   * @param shardKeyColumns the names of shard key columns
-   * @param shardKeyValues the values for each shard key column
-   */
-  final def shardKeyHash(shardKeyColumns: Seq[String], shardKeyValues: Seq[String]): Int = {
-    val jList = new java.util.ArrayList(shardKeyColumns.zip(shardKeyValues).asJava)
-    val hashes = sortAndComputeHashes(jList)
-    combineHashIncluding(jList, hashes, shardKeyColumns.toSet).get
-  }
+  final def shardKeyHash(shardKeyValues: Seq[String], metric: String): Int =
+    shardKeyHash(shardKeyValues.map(_.getBytes), metric.getBytes)
 
   /**
     * Removes the ignoreShardKeyColumnSuffixes from LabelPair as configured in DataSet.

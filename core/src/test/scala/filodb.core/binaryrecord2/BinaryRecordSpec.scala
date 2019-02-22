@@ -6,7 +6,8 @@ import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
-import filodb.memory.{BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
+import filodb.core.query.ColumnInfo
+import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
@@ -15,7 +16,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   val schema1 = RecordSchema.ingestion(dataset1)
   val schema2 = RecordSchema.ingestion(dataset2)
-  val longStrSchema = new RecordSchema(Seq(ColumnType.LongColumn, ColumnType.StringColumn))
+  val longStrSchema = new RecordSchema(Seq(ColumnInfo("lc", ColumnType.LongColumn),
+                                           ColumnInfo("sc", ColumnType.StringColumn)))
 
   val records = new collection.mutable.ArrayBuffer[(Any, Long)]
 
@@ -50,7 +52,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
       builder.addString("Series 1")   // series (partition key)
 
       intercept[IllegalArgumentException] {
@@ -66,7 +68,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
 
       intercept[IllegalArgumentException] {
         builder.addString("ABCDEfghij" * 7000)
@@ -262,7 +264,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.addDouble(1.0)  // min
       builder.addDouble(2.5)  // avg
       builder.addDouble(10.1) // max
-      builder.addDouble(9.4)  // p90
+      builder.addLong(123456L)  // count
       builder.addString("Series 1")   // series (partition key)
       val offset1 = builder.endRecord()
 
@@ -278,13 +280,13 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       schema1.getDouble(recordAddr, 1) shouldEqual 1.0
       schema1.getDouble(recordAddr, 2) shouldEqual 2.5
       schema1.getDouble(recordAddr, 3) shouldEqual 10.1
-      schema1.getDouble(recordAddr, 4) shouldEqual 9.4
+      schema1.getLong(recordAddr, 4) shouldEqual 123456L
       schema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
     }
 
     it("should hash correctly with different ways of adding UTF8 fields") {
       // schema for part key with only a string
-      val stringSchema = new RecordSchema(Seq(ColumnType.StringColumn), Some(0))
+      val stringSchema = new RecordSchema(Seq(ColumnInfo("sc", ColumnType.StringColumn)), Some(0))
       val builder = new RecordBuilder(nativeMem, stringSchema)
 
       val str = "Serie zero"
@@ -386,7 +388,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
         builder.addDouble(1.0)  // min
         builder.addDouble(2.5)  // avg
         builder.addDouble(10.1) // max
-        builder.addDouble(9.4)  // p90
+        builder.addLong(123456L)  // count
         builder.addString(s"Series $n")   // series (partition key)
         builder.addSortedPairsAsMap(pairs, hashes)
         builder.endRecord()
@@ -539,24 +541,15 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       hashes.toSet.size shouldEqual 4
     }
 
-    it("should combine hash but only if required keys included") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
-      val pairs = new java.util.ArrayList(labels.toSeq.asJava)
-      val hashes = RecordBuilder.sortAndComputeHashes(pairs)
+    it("should compute shard key correctly") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes)
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes)
 
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job")) shouldEqual Some(7*31 + hashes.last)
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "dc")) shouldEqual Some((7*31 + hashes(1))*31 + hashes.last)
-      RecordBuilder.shardKeyHash(Seq("job", "dc"), Seq("prometheus", "AWS-USE")) shouldEqual ((7*31 + hashes(1))*31 + hashes.last)
-
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "rack")) shouldEqual None
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("__name_")) shouldEqual None
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("instances", "job")) shouldEqual None
-
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set.empty) shouldEqual Some(7)
+      RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
     }
 
     it("should combine hash excluding certain keys") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
       val hashes = RecordBuilder.sortAndComputeHashes(pairs)
 
@@ -588,6 +581,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       Seq("tags:map"),
       Seq("timestamp:ts", "value:double"),
       Seq("timestamp"),
+      Seq.empty,
       DatasetOptions(Seq("__name__", "job"), "__name__", "value", Map("dummy" -> Seq("_bucket")))).get
     val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset, "__name__", "heap_usage_bucket")
     metricName4 shouldEqual "heap_usage_bucket"

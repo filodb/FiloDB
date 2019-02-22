@@ -1,6 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
@@ -56,7 +57,9 @@ object IngestionCommands {
    */
   private[coordinator] final case class DatasetSetup(compactDatasetStr: String,
                                                      storeConfig: StoreConfig,
-                                                     source: IngestionSource = noOpSource) extends NodeCommand
+                                                     source: IngestionSource = noOpSource,
+                                                     downsampleConfig: DownsampleConfig = DownsampleConfig.disabled)
+              extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.
@@ -77,7 +80,7 @@ object IngestionCommands {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
-   * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
+   * @return Flushed when the flush cycle has finished successfully, committing data to columnstore.
    */
   final case class Flush(dataset: DatasetRef) extends NodeCommand
   case object Flushed extends NodeResponse

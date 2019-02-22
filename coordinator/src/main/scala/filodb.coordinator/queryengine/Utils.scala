@@ -41,23 +41,6 @@ object Utils extends StrictLogging {
            }
 
   /**
-   * Validate and translate a DataQuery from LogicalPlan into a ChunkScanMethod used in physical plan
-   */
-  def validateDataQuery(dataset: Dataset, dataQuery: DataQuery): ChunkScanMethod Or ErrorResponse = {
-    Try(dataQuery match {
-      case AllPartitionData                => AllChunkScan
-      case KeyRangeQuery(startKey, endKey) => RowKeyChunkScan(dataset, startKey, endKey)
-      case MostRecentTime(lastMillis) =>
-        val timeNow = System.currentTimeMillis
-        RowKeyChunkScan(dataset, Seq(timeNow - lastMillis), Seq(timeNow))
-      case MostRecentSample => LastSampleChunkScan
-    }).toOr.badMap {
-      case m: MatchError => BadQuery(s"Could not parse $dataQuery: ${m.getMessage}")
-      case e: Exception => BadArgument(e.getMessage)
-    }
-  }
-
-  /**
    * Validates a PartitionQuery, returning a set of PartitionScanMethods with shard numbers.
    * @param dataset the Dataset to query
    * @param shardMap a ShardMapper containing the routing from shards to nodes/coordinators
@@ -90,7 +73,7 @@ object Utils extends StrictLogging {
         val shards = options.shardOverrides.getOrElse {
           val shardCols = dataset.options.shardKeyColumns
           if (shardCols.length > 0) {
-            shardHashFromFilters(filters, shardCols) match {
+            shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash, options.spreadFunc(filters))
               case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
@@ -105,11 +88,13 @@ object Utils extends StrictLogging {
       case e: Exception => BadArgument(e.getMessage)
     }
 
-  private def shardHashFromFilters(filters: Seq[ColumnFilter], shardColumns: Seq[String]): Option[Int] = {
-    val shardColValues = shardColumns.map { shardCol =>
+  private def shardHashFromFilters(filters: Seq[ColumnFilter],
+                                   shardColumns: Seq[String],
+                                   dataset: Dataset): Option[Int] = {
+    val shardValMap = shardColumns.map { shardCol =>
       // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
       filters.find(f => f.column == shardCol) match {
-        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => filtVal
+        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => shardCol -> filtVal
         case Some(ColumnFilter(_, filter)) =>
           logger.debug(s"Found filter for shard column $shardCol but $filter cannot be used for shard key routing")
           return None
@@ -117,9 +102,10 @@ object Utils extends StrictLogging {
           logger.debug(s"Could not find filter for shard key column $shardCol, shard key hashing disabled")
           return None
       }
-    }
-    logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
-    Some(RecordBuilder.shardKeyHash(shardColumns, shardColValues))
+    }.toMap
+    val metricColumn = dataset.options.metricColumn
+    val metric = shardValMap(metricColumn)
+    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metric))
   }
 
   /**

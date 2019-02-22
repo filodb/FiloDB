@@ -1,8 +1,8 @@
 package filodb.coordinator
 
 import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import akka.actor._
 import akka.cluster.{Cluster, Member, MemberStatus}
@@ -10,8 +10,10 @@ import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
+import kamon.Kamon
 
 import filodb.core._
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
@@ -56,22 +58,25 @@ object NodeClusterActor {
   final case class SetupDataset(ref: DatasetRef,
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource,
-                                storeConfig: StoreConfig) {
+                                storeConfig: StoreConfig,
+                                downsampleConfig: DownsampleConfig = DownsampleConfig.disabled) {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
     val config = IngestionConfig(ref, resourceConfig,
                                  source.streamFactoryClass,
                                  source.config,
-                                 storeConfig)
+                                 storeConfig,
+                                 downsampleConfig)
   }
 
   object SetupDataset {
     def apply(source: IngestionConfig): SetupDataset =
       SetupDataset(source.ref,
                    DatasetResourceSpec(source.numShards, source.minNumNodes),
-                   IngestionSource(source.streamFactoryClass, source.streamConfig),
-                   source.storeConfig)
+                   IngestionSource(source.streamFactoryClass, source.sourceConfig),
+                   source.storeConfig,
+                   source.downsampleConfig)
   }
 
   // A dummy source to use for tests and when you just want to push new records in
@@ -180,10 +185,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        actors: NodeClusterActor.ActorArgs
                                       ) extends NamingAwareBaseActor {
 
-  import ActorName._, NodeClusterActor._, ShardSubscriptions._
   import actors._
-  import settings._
   import context.dispatcher
+  import settings._
+
+  import ActorName._
+  import NodeClusterActor._
+  import ShardSubscriptions._
 
   val cluster = Cluster(context.system)
 
@@ -191,10 +199,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val roleToCoords = new MutableHashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
   val datasets = new MutableHashMap[DatasetRef, Dataset]
   val sources = new MutableHashMap[DatasetRef, IngestionSource]
-  val shardManager = new ShardManager(assignmentStrategy)
+  val shardManager = new ShardManager(settings, assignmentStrategy)
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
   val shardUpdates = new MutableHashSet[DatasetRef]
+
+  // Counter is incremented each time shardmapper snapshot is published.
+  // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
+  val iamShardManager = Kamon.counter("shardmanager-ping")
 
   val publishInterval = settings.ShardMapPublishFrequency
 
@@ -207,7 +219,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
-    logger.info(s"Attempting to restore previous ingestion state...")
+    logger.info(s"NodeClusterActor starting. Attempting to restore previous ingestion state...")
     metaStore.readIngestionConfigs()
              .map { configs =>
                initDatasets ++= configs.map(_.ref)
@@ -216,6 +228,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
              }.recover {
                case e: Exception =>
                  logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
+                 // Continue the protocol, so that the singleton can come up
+                 initiateShardStateRecovery()
              }
   }
 
@@ -346,6 +360,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: ShardEvent            => handleShardEvent(e)
     case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
     case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+                                     //This counter gets published from ShardManager,
+                                     // > 0 means this node is shardmanager
+                                     iamShardManager.increment()
                                      shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
@@ -355,7 +372,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   private def handleShardEvent(e: ShardEvent) = {
     logger.debug(s"Received ShardEvent $e from $sender")
     shardUpdates += e.ref
-    shardManager.updateFromShardEvent(e)
+    shardManager.updateFromExternalShardEvent(sender(), e)
   }
 
   // TODO: Save acks for when snapshots are published?

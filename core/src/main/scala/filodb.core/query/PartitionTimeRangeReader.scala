@@ -69,24 +69,24 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     endRowNo = if (endTime >= info.endTime) {
                  info.numRows - 1
                } else {
-                 val result = timeReader.binarySearch(timeVector, endTime)
-                 // no match - binarySearch returns the row # _after_ the searched key.
-                 // So if key is less than the first item then 0 is returned since 0 is after the key.
-                 // Since this is the ending row inclusive we need to decrease row # - cannot include next row
-                 if (result < 0) (result & 0x7fffffff) - 1 else result
+                 timeReader.ceilingIndex(timeVector, endTime)
                }
   }
 
   final def hasNext: Boolean = {
-    // Fetch the next chunk if no chunk yet, or we're at end of current chunk
-    while (curChunkID == Long.MinValue || rowNo > endRowNo) {
-      // No more chunksets
-      if (!infos.hasNext) return false
-      val nextInfo = infos.nextInfo
-      curChunkID = nextInfo.id
-      populateIterators(nextInfo)
+    try {
+      // Fetch the next chunk if no chunk yet, or we're at end of current chunk
+      while (curChunkID == Long.MinValue || rowNo > endRowNo) {
+        // No more chunksets
+        if (!infos.hasNext) return false
+        val nextInfo = infos.nextInfo
+        curChunkID = nextInfo.id
+        populateIterators(nextInfo)
+      }
+      true
+    } catch {
+      case e: Throwable => infos.close(); throw e;
     }
-    true
   }
 
   final def next: RowReader = {

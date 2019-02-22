@@ -32,7 +32,7 @@ object WriteBufferPool {
  * TODO: Use MemoryManager etc. and allocate memory from a fixed block instead of specifying max # partitions
  */
 class WriteBufferPool(memFactory: MemFactory,
-                      dataset: Dataset,
+                      val dataset: Dataset,
                       maxChunkSize: Int,
                       allocationStepSize: Int = WriteBufferPool.DefaultAllocStepSize) extends StrictLogging {
   import TimeSeriesPartition._
@@ -75,6 +75,9 @@ class WriteBufferPool(memFactory: MemFactory,
    * The state of the appenders are reset.
    */
   def release(metaAddr: NativePointer, appenders: AppenderArray): Unit = {
+    // IMPORTANT: reset size in ChunkSetInfo metadata so there won't be an inconsistency between appenders and metadata
+    // (in case some reader is still hanging on to this old info)
+    ChunkSetInfo.resetNumRows(metaAddr)
     appenders.foreach(_.reset())
     queue.enqueue((metaAddr, appenders))
     // TODO: check number of buffers in queue, and release baack to free memory.

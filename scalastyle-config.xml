@@ -85,7 +85,7 @@
  <check level="error" class="org.scalastyle.scalariform.ReturnChecker" enabled="false"/>
  <check level="error" class="org.scalastyle.scalariform.NullChecker" enabled="true"/>
  <check level="error" class="org.scalastyle.scalariform.NoCloneChecker" enabled="true"/>
- <check level="error" class="org.scalastyle.scalariform.NoFinalizeChecker" enabled="true"/>
+ <check level="error" class="org.scalastyle.scalariform.NoFinalizeChecker" enabled="false"/>
  <check level="error" class="org.scalastyle.scalariform.CovariantEqualsChecker" enabled="true"/>
  <check level="error" class="org.scalastyle.scalariform.StructuralTypeChecker" enabled="true"/>
  <check level="error" class="org.scalastyle.file.RegexChecker" enabled="true">
@@ -100,7 +100,7 @@
  </check>
  <check level="error" class="org.scalastyle.scalariform.CyclomaticComplexityChecker" enabled="true">
   <parameters>
-   <parameter name="maximum"><![CDATA[13]]></parameter>
+   <parameter name="maximum"><![CDATA[20]]></parameter>
   </parameters>
  </check>
  <check level="error" class="org.scalastyle.scalariform.UppercaseLChecker" enabled="true"/>

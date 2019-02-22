@@ -141,6 +141,16 @@ def receive: Actor.Receive = {
     // via the `ShardMapper` API
 }
 ```
+##### Automatic Reassignment of Shards
+The Cluster Singleton assumes that the IngestionActor and the Ingest stream handles all recoverable errors.
+If an exception is thrown, the error is not recoverable.
+
+When an unrecoverable exception occurs in the ingestion stream, the IngestionActor releases resources
+for the shard, and an IngestionError event is sent to the singleton.
+
+The ShardManager then attempts to reassign the shard to another node. This reassignment is done only if
+the shard was not previously reassigned within 2 hours (configurable). This is to prevent errors arising from
+data or load causing shard to be continuously reassigned.
 
 #### Unsubscribe to Shard Status Events
 A subscriber can unsubscribe at any time by sending the `NodeClusterActor` a `Unsubscribe(self)` command,

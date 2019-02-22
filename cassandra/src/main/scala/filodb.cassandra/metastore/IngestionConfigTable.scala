@@ -2,11 +2,11 @@ package filodb.cassandra.metastore
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.Row
+import com.datastax.driver.core.{ConsistencyLevel, Row}
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 
 import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
-import filodb.core.IngestionKeys
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.store.{IngestionConfig, StoreConfig}
 
 /**
@@ -38,7 +38,8 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
                     ConfigFactory.parseString(row.getString(IngestionKeys.Resources)),
                     row.getString("factoryclass"),
                     sourceConf,
-                    StoreConfig(sourceConf.getConfig("store")))
+                    StoreConfig(sourceConf.getConfig("store")),
+                    DownsampleConfig.downsampleConfigFromSource(sourceConf))
   }
 
   def initialize(): Future[Response] = execCql(createCql)
@@ -54,10 +55,17 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
     execStmt(insertCql.bind(state.ref.dataset, state.ref.database.getOrElse(""),
                             state.resources.root.render(ConfigRenderOptions.concise),
                             state.streamFactoryClass,
-                            state.streamStoreConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
+                            state.sourceStoreConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
+
+  // SELECT * with consistency ONE to let it succeed more often.  This is a temporary workaround to rearranging
+  // the schema so we don't need to do a full table scan.  It is justified because the ingestion config table
+  // almost never changes, this read is done only on new cluster startup, and the table is only written to with
+  // the setup command (which always runs well after cluster startup).
+  lazy val readAllCql = session.prepare(s"SELECT * FROM $tableString")
+                          .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readAllConfigs(): Future[Seq[IngestionConfig]] =
-    session.executeAsync(s"SELECT * FROM $tableString")
+    session.executeAsync(readAllCql.bind())
            .toIterator.map(_.map(fromRow).toSeq)
 
   def deleteIngestionConfig(dataset: DatasetRef): Future[Response] =

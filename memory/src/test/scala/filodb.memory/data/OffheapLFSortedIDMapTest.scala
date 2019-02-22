@@ -151,10 +151,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map.length shouldEqual 2
 
     val elemIt = map.iterate
-    elemIt.hasNext shouldEqual true
-    elemIt.next shouldEqual elems(0)
-    elemIt.hasNext shouldEqual true
-    elemIt.next shouldEqual elems(3)
+    try {
+      elemIt.hasNext shouldEqual true
+      elemIt.next shouldEqual elems(0)
+      elemIt.hasNext shouldEqual true
+      elemIt.next shouldEqual elems(3)
+    } finally {
+      elemIt.close()
+    }
 
     // TODO: add concurrency tests...
   }
@@ -188,14 +192,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map(4L) shouldEqual elems(2)
 
     // remove at tail.  No resizing should occur.
-    map.remove(2L) shouldEqual elems(0)
+    map.remove(2L)
     map.first shouldEqual elems(1)
     map.length shouldEqual 8
     map.maxElements(map) shouldEqual 16
     checkElems((3 to 10).map(_.toLong), map.iterate.toBuffer)
 
     // remove in middle.  Resizing because 8 -> 7?
-    map.remove(6L) shouldEqual elems(4)
+    map.remove(6L)
     map.length shouldEqual 7
     map.maxElements(map) shouldEqual 8
     checkElems(Seq(3L, 4L, 5L, 7L, 8L, 9L, 10L), map.iterate.toBuffer)
@@ -216,14 +220,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val headThread = Future {
       headElems.foreach { elem =>
-        map.put(elem)
-        // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
+        map.withExclusive(map.put(elem))
+        map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
     val midThread = Future {
       midElems.foreach { elem =>
-        map.put(elem)
-        // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
+        map.withExclusive(map.put(elem))
+        map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
     Future.sequence(Seq(headThread, midThread)).futureValue
@@ -240,7 +244,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val insertThread = Future {
       Random.shuffle(elems).foreach { elem =>
-        map.put(elem)
+        map.withExclusive(map.put(elem))
         map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
@@ -271,7 +275,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = SingleOffheapLFSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 99).map(_.toLong))
     elems.foreach { elem =>
-      map.put(elem)
+      map.withExclusive(map.put(elem))
     }
     map.length shouldEqual elems.length
 
@@ -281,14 +285,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     // Now, have one thread deleting 0-99, while second one inserts 100-199
     val deleteThread = Future {
       toDelete.foreach { n =>
-        map.remove(n)
+        map.withExclusive(map.remove(n))
         map.contains(n) shouldEqual false
       }
     }
 
     val insertThread = Future {
       moreElems.foreach { elem =>
-        map.put(elem)
+        map.withExclusive(map.put(elem))
         // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true   // once in a while this could fail
       }
     }
@@ -358,8 +362,280 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     intercept[IndexOutOfBoundsException] { map.last }
     map.iterate.toBuffer shouldEqual Buffer.empty[Long]
     map.sliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
-    map.put(elems(0))
     map.length shouldEqual 0
-    map.remove(6L) shouldEqual 0
+    map.remove(6L)
+  }
+
+  it("should support uncontended locking behavior") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+    map.releaseExclusive()
+
+    map.acquireShared()
+    map.releaseShared()
+
+    // Shouldn't stall.
+    map.acquireExclusive()
+    map.releaseExclusive()
+
+    // Re-entrant shared lock.
+    map.acquireShared()
+    map.acquireShared()
+    map.releaseShared()
+    map.releaseShared()
+
+    // Shouldn't stall.
+    map.acquireExclusive()
+    map.releaseExclusive()
+  }
+
+  it("should support exclusive lock") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    val durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Now let the second lock request complete.
+    map.releaseExclusive()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should block exclusive lock when shared lock is held") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    map.releaseShared()
+
+    stuck.join(500)
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L * 2
+
+    acquired shouldBe false
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should block shared lock when exclusive lock is held") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireShared()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Now let the shared lock request complete.
+    map.releaseExclusive()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+
+    // Can acquire more shared locks.
+    map.acquireShared()
+    map.acquireShared()
+
+    // Release all shared locks.
+    for (i <- 1 to 3) map.releaseShared
+
+    // Exclusive can be acquired again.
+    map.acquireExclusive()
+  }
+
+  it("should delay shared lock when exclusive lock is waiting") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    var startNanos = System.nanoTime()
+    stuck.join(1000)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 1000000000L
+
+    acquired shouldBe false
+
+    startNanos = System.nanoTime()
+    for (i <- 1 to 2) {
+      map.acquireShared()
+      map.releaseShared()
+      Thread.sleep(100)
+    }
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be > 1000000000L
+    acquired shouldBe false
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should release all shared locks held by the current thread") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Releasing all shared locks allows the exclusive lock request to complete.
+    OffheapLFSortedIDMap.releaseAllSharedLocks()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should release all shared locks held for only the current thread") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    // Acquire another share, in another thread.
+    val shareThread = new Thread {
+      override def run(): Unit = map.acquireShared()
+    }
+
+    shareThread.start()
+    shareThread.join()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    var startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Releasing one thread shared locks isn't sufficient.
+    OffheapLFSortedIDMap.releaseAllSharedLocks()
+    Thread.`yield`
+
+    startNanos = System.nanoTime()
+    stuck.join(500)
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
   }
 }

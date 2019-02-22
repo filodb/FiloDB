@@ -45,8 +45,6 @@ object GatewayServer extends StrictLogging {
   // Get global configuration using universal FiloDB/Akka-based config
   val config = GlobalConfig.systemConfig
 
-  Kamon.loadReportersFromConfig()
-
   // ==== Metrics ====
   val numInfluxMessages = Kamon.counter("num-influx-messages")
   val numInfluxParseErrors = Kamon.counter("num-influx-parse-errors")
@@ -55,6 +53,8 @@ object GatewayServer extends StrictLogging {
   val containersSize = Kamon.histogram("containers-size-bytes")
 
   def main(args: Array[String]): Unit = {
+    Kamon.loadReportersFromConfig()
+
     if (args.length < 1) {
       //scalastyle:off
       println("Arguments: [path/to/source-config.conf]")
@@ -85,7 +85,7 @@ object GatewayServer extends StrictLogging {
         val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(record)) {
           // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
-          logger.warn(s"Queue for shard $shard is full.  Dropping data.")
+          logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
           numDroppedMessages.increment
           // Thread sleep queueFullWait
         }

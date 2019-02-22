@@ -147,7 +147,7 @@ object FiloBuild extends Build {
   lazy val gateway = project
     .in(file("gateway"))
     .settings(commonSettings: _*)
-    .settings(name := "gateway")
+    .settings(name := "filodb-gateway")
     .settings(libraryDependencies ++= gatewayDeps)
     .settings(gatewayAssemblySettings: _*)
     .dependsOn(coordinator % "compile->compile; test->test",
@@ -210,6 +210,7 @@ object FiloBuild extends Build {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
+    "io.kamon"             %% "kamon-zipkin"      % "1.0.0",
     "org.slf4j"             % "slf4j-api"         % "1.7.10",
     "com.beachape"         %% "enumeratum"        % "1.5.10",
     "io.monix"             %% "monix"             % "2.3.0",
@@ -243,6 +244,7 @@ object FiloBuild extends Build {
     // Redirect minlog logs to SLF4J
      "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
     "com.opencsv"          % "opencsv"            % "3.3",
+    "com.github.TanUkkii007" %% "akka-cluster-custom-downing" % "0.0.12",
     "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % Test,
     "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
   )

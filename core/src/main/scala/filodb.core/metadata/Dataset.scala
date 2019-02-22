@@ -8,6 +8,7 @@ import org.scalactic._
 
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2, _}
+import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.{BinaryRegion, MemFactory}
@@ -35,6 +36,7 @@ final case class Dataset(name: String,
                          partitionColumns: Seq[Column],
                          dataColumns: Seq[Column],
                          rowKeyIDs: Seq[Int],
+                         downsamplers: Seq[ChunkDownsampler],
                          database: Option[String] = None,
                          options: DatasetOptions = DatasetOptions.DefaultOptions) {
   require(rowKeyIDs.nonEmpty)
@@ -61,6 +63,7 @@ final case class Dataset(name: String,
   val blockMetaSize    = chunkSetInfoSize + 4
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
+
   /**
    * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
    */
@@ -134,6 +137,7 @@ final case class Dataset(name: String,
           partitionColumns.map(_.toString).mkString(":"),
           dataColumns.map(_.toString).mkString(":"),
           rowKeyIDs.mkString(":"),
+          downsamplers.map(_.encoded).mkString(":"),
           options.toString).mkString("\u0001")
 }
 
@@ -147,7 +151,9 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
-                          ignoreTagsOnPartitionKeyHash: Seq[String] = Nil) {
+                          ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
+                          // For each key, copy the tag to the value if the value is absent
+                          copyTags: Map[String, String] = Map.empty) {
   override def toString: String = {
     val map: Map[String, Any] = Map(
                    "shardKeyColumns" -> shardKeyColumns.asJava,
@@ -155,14 +161,16 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                    "valueColumn" -> valueColumn,
                    "ignoreShardKeyColumnSuffixes" ->
                      ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
-                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava)
+                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
+                   "copyTags" -> copyTags.asJava)
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
 
-  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn)
+  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
   val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
   val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
+  val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 
   val metricBytes = metricColumn.getBytes
   val metricHash = BinaryRegion.hash32(metricBytes)
@@ -172,6 +180,7 @@ object DatasetOptions {
   val DefaultOptions = DatasetOptions(shardKeyColumns = Nil,
                                       metricColumn = "__name__",
                                       valueColumn = "value",
+                                      // defaults that work well for Prometheus
                                       ignoreShardKeyColumnSuffixes =
                                         Map("__name__" -> Seq("_bucket", "_count", "_sum")),
                                       ignoreTagsOnPartitionKeyHash = Seq("le"))
@@ -186,7 +195,8 @@ object DatasetOptions {
                    valueColumn = config.getString("valueColumn"),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
-                   ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"))
+                   ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
+                   copyTags = config.as[Map[String, String]]("copyTags"))
 }
 
 /**
@@ -197,13 +207,15 @@ object Dataset {
    * Re-creates a Dataset from the output of `asCompactString`
    */
   def fromCompactString(compactStr: String): Dataset = {
-    val Array(database, name, partColStr, dataColStr, rowKeyIndices, optStr) = compactStr.split('\u0001')
+    val Array(database, name, partColStr, dataColStr, rowKeyIndices, downsamplersStr, optStr) =
+      compactStr.split('\u0001')
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val rowKeyIDs = rowKeyIndices.split(':').toSeq.map(_.toInt)
+    val downsamplers = downsamplersStr.split(':').filterNot(_.isEmpty).toSeq.map(ChunkDownsampler.downsampler(_))
     val databaseOption = if (database == "") None else Some(database)
     val options = DatasetOptions.fromString(optStr)
-    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, databaseOption, options)
+    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, downsamplers, databaseOption, options)
   }
 
   /**
@@ -219,13 +231,20 @@ object Dataset {
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumns: Seq[String]): Dataset =
-    make(name, partitionColumns, dataColumns, keyColumns).badMap(BadSchemaError).toTry.get
+    apply(name, partitionColumns, dataColumns, keyColumns, Nil)
+
+  def apply(name: String,
+            partitionColumns: Seq[String],
+            dataColumns: Seq[String],
+            keyColumns: Seq[String],
+            downsamplers: Seq[String]): Dataset =
+    make(name, partitionColumns, dataColumns, keyColumns, downsamplers).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumn: String): Dataset =
-    apply(name, partitionColumns, dataColumns, Seq(keyColumn))
+    apply(name, partitionColumns, dataColumns, Seq(keyColumn), Nil)
 
   def apply(name: String,
             partitionColumns: Seq[String],
@@ -233,6 +252,7 @@ object Dataset {
     apply(name, partitionColumns, dataColumns, "timestamp")
 
   sealed trait BadSchema
+  case class BadDownsampler(msg: String) extends BadSchema
   case class BadColumnType(colType: String) extends BadSchema
   case class BadColumnName(colName: String, reason: String) extends BadSchema
   case class NotNameColonType(nameTypeString: String) extends BadSchema
@@ -291,6 +311,14 @@ object Dataset {
       case other: Column.ColumnType          => Bad(NoTimestampRowKey(dataColumns(rowKeyIDs.head).name, other.toString))
     }
 
+  def validateDownsamplers(downsamplers: Seq[String]): Seq[ChunkDownsampler] Or BadSchema = {
+    try {
+      Good(ChunkDownsampler.downsamplers(downsamplers))
+    } catch {
+      case e: IllegalArgumentException => Bad(BadDownsampler(e.getMessage))
+    }
+  }
+
   // Partition columns have a column ID starting with this number.  This implies there cannot be
   // any more data columns than this number.
   val PartColStartIndex = 0x010000
@@ -309,13 +337,19 @@ object Dataset {
            partitionColNameTypes: Seq[String],
            dataColNameTypes: Seq[String],
            keyColumnNames: Seq[String],
-           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema =
-    for { partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
-          dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
-          _           <- validateMapColumn(partColumns, dataColumns)
-          rowKeyIDs   <- getRowKeyIDs(dataColumns, keyColumnNames)
-          _           <- validateTimeSeries(dataColumns, rowKeyIDs) }
-    yield {
-      Dataset(name, partColumns, dataColumns, rowKeyIDs, None, options)
-    }
+           downsamplerNames: Seq[String] = Seq.empty,
+           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema = {
+
+    for {partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
+         dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
+         _ <- validateMapColumn(partColumns, dataColumns)
+         rowKeyIDs <- getRowKeyIDs(dataColumns, keyColumnNames)
+         downsamplers <- validateDownsamplers(downsamplerNames)
+         _ <- validateTimeSeries(dataColumns, rowKeyIDs)}
+      yield {
+        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, None, options)
+      }
+  }
+
+
 }

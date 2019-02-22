@@ -2,7 +2,6 @@ package filodb.cli
 
 import java.io.OutputStream
 import java.sql.Timestamp
-import javax.activation.UnsupportedDataTypeException
 
 import scala.concurrent.duration._
 import scala.util.{Failure, Success => SSuccess, Try}
@@ -18,11 +17,9 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryResult => QueryResult2}
-import filodb.query.{QueryError => QueryError2}
-import filodb.query.{LogicalPlan => LogicalPlan2}
+import filodb.query._
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -33,11 +30,12 @@ class Arguments extends FieldArgs {
   var configPath: Option[String] = None
   var dataColumns: Seq[String] = Nil
   var partitionColumns: Seq[String] = Nil
+  var downsamplers: Seq[String] = Nil
   var rowKeys: Seq[String] = Seq("timestamp")
   var partitionKeys: Seq[String] = Nil
   var select: Option[Seq[String]] = None
   // max # query items (vectors or tuples) returned. Don't make it too high.
-  var limit: Int = 100
+  var limit: Int = 1000
   var sampleLimit: Int = 200
   var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
@@ -45,11 +43,15 @@ class Arguments extends FieldArgs {
   var indexName: Option[String] = None
   var host: Option[String] = None
   var port: Int = 2552
-  var promql0: Option[String] = None
   var promql: Option[String] = None
+  var matcher: Option[String] = None
+  var labelNames: Seq[String] = Seq.empty
+  var labelFilter: Map[String, String] = Map.empty
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var minutes: Option[String] = None
   var step: Long = 10 // in seconds
+  var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
@@ -85,6 +87,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command timeseriesMetadata --matcher <matcher-query> --dataset <dataset> --start <start> --end <end>")
+    println("  --host <hostname/IP> [--port ...] --command labelValues --labelName <lable-names> --labelFilter <label-filter> --dataset <dataset>")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -98,6 +102,18 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     val remote = Client.standaloneClient(system, args.host.get, args.port)
     (remote, DatasetRef(args.dataset.get))
   }
+
+  def getQueryRange(args: Arguments): TimeRangeParams =
+    args.chunks.filter { cOpt => cOpt == "memory" || cOpt == "buffers" }
+      .map {
+        case "memory"  => InMemoryParam(args.step)
+        case "buffers" => WriteBuffersParam(args.step)
+      }.getOrElse {
+      args.minutes.map { minArg =>
+        val end = System.currentTimeMillis() / 1000
+        TimeStepParams(end - minArg.toInt * 60, args.step, end)
+      }.getOrElse(TimeStepParams(args.start, args.step, args.end))
+    }
 
   def main(args: Arguments): Unit = {
     val spread = config.getInt("default-spread")
@@ -127,11 +143,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.dataset.isDefined &&
                   args.dataColumns.nonEmpty &&
                   args.partitionColumns.nonEmpty, "Need to specify dataset and partition/dataColumns")
-          val datasetName = args.dataset.get
           createDataset(getRef(args),
                         args.dataColumns,
                         args.partitionColumns,
                         args.rowKeys,
+                        args.downsamplers,
                         args.metricColumn,
                         args.shardKeyColumns,
                         args.ignoreShardKeyColumnSuffixes,
@@ -178,6 +194,21 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               println("Either --filename or --configPath must be specified for setup")
               exitCode = 1
           }
+        case Some("timeseriesMetadata") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+            timeout, args.shards.map(_.map(_.toInt)), spread)
+          parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
+            getQueryRange(args), options)
+
+        case Some("labelValues") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelNames.nonEmpty, "--host, --dataset and --labelName must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+            timeout, args.shards.map(_.map(_.toInt)), spread)
+          parseLabelValuesQuery(remote, args.labelNames, args.labelFilter, args.dataset.get,
+            getQueryRange(args), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -186,8 +217,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), spread)
-            parsePromQuery2(remote, query, args.dataset.get,
-              QueryParams(args.start, args.step, args.end), options)
+            parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -203,7 +233,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         e.printStackTrace()
         exitCode = 2
     } finally {
-      shutdown()
+      // No need to shutdown, just exit.  This ensures things like C* client are not started by accident and
+      // ensures a much quicker exit, which is important for CLI.
       sys.exit(exitCode)
     }
   }
@@ -229,13 +260,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                     dataColumns: Seq[String],
                     partitionColumns: Seq[String],
                     rowKeys: Seq[String],
+                    downsamplers: Seq[String],
                     metricColumn: String,
                     shardKeyColumns: Seq[String],
                     ignoreShardKeyColumnSuffixes: Map[String, Seq[String]],
                     ignoreTagsOnPartitionKeyHash: Seq[String],
                     timeout: FiniteDuration): Unit = {
     try {
-      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys)
+      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys, downsamplers)
       val options = DatasetOptions.DefaultOptions.copy(metricColumn = metricColumn,
                                                        shardKeyColumns = shardKeyColumns,
                                                        ignoreShardKeyColumnSuffixes = ignoreShardKeyColumnSuffixes,
@@ -309,14 +341,28 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             shardOverrides: Option[Seq[Int]],
                             spread: Int)
 
-  def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      queryParams: QueryParams,
-                      options: QOptions): Unit = {
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
+  def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
+                                   timeParams: TimeRangeParams,
+                                   options: QOptions): Unit = {
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
-  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan2, options: QOptions): Unit = {
+  def parseLabelValuesQuery(client: LocalClient, labelNames: Seq[String], constraints: Map[String, String], dataset: String,
+                            timeParams: TimeRangeParams,
+                            options: QOptions): Unit = {
+    val logicalPlan = LabelValues(labelNames, constraints, 3.days.toMillis)
+    executeQuery2(client, dataset, logicalPlan, options)
+  }
+
+  def parsePromQuery2(client: LocalClient, query: String, dataset: String,
+                      timeParams: TimeRangeParams,
+                      options: QOptions): Unit = {
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
+    executeQuery2(client, dataset, logicalPlan, options)
+  }
+
+  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
     val qOpts = QueryCommands.QueryOptions(options.spread, options.limit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
@@ -327,8 +373,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
-            case err: QueryError2                => throw new ClientException(err)
+            case QueryResult(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
+            case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
           case e: ClientException => println(s"ERROR: ${e.getMessage}")
@@ -338,14 +384,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult2(_, schema, result) => {
-              println(s"Number of Range Vectors: ${result.size}")
-              result.foreach(rv => println(rv.prettyPrint(schema)))
-            }
-            case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")
+            case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
+                                                   result.foreach(rv => println(rv.prettyPrint()))
+            case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }
         } catch {
-          case e: ClientException =>  println(s"ERROR: ${e.getMessage}")
+          case e: ClientException =>  println(s"ClientException: ${e.getMessage}")
                                       exitCode = 2
         }
     }
@@ -366,7 +410,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case StringColumn => rowReader.filoUTF8String(position).toString
         case BitmapColumn => rowReader.getBoolean(position).toString
         case TimestampColumn => rowReader.as[Timestamp](position).toString
-        case _ => throw new UnsupportedDataTypeException
+        case _ => throw new UnsupportedOperationException("Unsupported type: " + columns(position).columnType)
       }
       content.update(position,value)
       position += 1

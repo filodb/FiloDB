@@ -37,7 +37,6 @@ trait InfluxRecord extends InputRecord {
             nonMetricShardValues += new String(bytes, valueIndex, valueLen)
 
             // calculate hash too
-            tagsShardHash = RecordBuilder.combineHash(tagsShardHash, dsOptions.nonMetricShardKeyHash(nonMetricIndex))
             nonMetricIndex += 1
             val valueHash = BinaryRegion.hasher32.hash(bytes, valueIndex, valueLen, BinaryRegion.Seed)
             tagsShardHash = RecordBuilder.combineHash(tagsShardHash, valueHash)
