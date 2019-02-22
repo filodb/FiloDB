@@ -58,6 +58,9 @@ object ChunkMap extends StrictLogging {
     override def initialValue() = new HashMap[ChunkMap, Int]
   }
 
+  // Returns true if the current thread has acquired the shared lock at least once.
+  private def hasSharedLock(inst: ChunkMap): Boolean = sharedLockCounts.get.contains(inst)
+
   // Updates the shared lock count, for the current thread.
   private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
     val countMap = sharedLockCounts.get
@@ -327,7 +330,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
 
     while (true) {
       lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-      if (lockState < 0) {
+      if (lockState < 0 && !hasSharedLock(this)) {
         // Wait for exclusive lock to be released.
         Thread.`yield`
       } else if (UnsafeUtils.unsafe.compareAndSwapInt(this, lockStateOffset, lockState, lockState + 1)) {
