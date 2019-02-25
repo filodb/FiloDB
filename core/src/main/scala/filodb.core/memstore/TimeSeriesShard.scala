@@ -858,7 +858,7 @@ class TimeSeriesShard(val dataset: Dataset,
         shardStats.flushesFailedChunkWrite.increment
 
         // Release the shared lock held by the chunk map iterator. There's no direct way to do
-        // this because the iterator has been wrapped an the closed method cannot be accessed.
+        // this because the iterator has been wrapped and the closed method cannot be accessed.
         ChunkMap.releaseAllSharedLocks()
 
         // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
