@@ -25,6 +25,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, ColumnInfo}
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -672,6 +673,11 @@ class TimeSeriesShard(val dataset: Dataset,
     val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum).start()
+
+    // Clean up lingering chunk map shared locks, left over from previous failures. The
+    // makeFlushChunks call below is what creates an iterator which holds a shared lock.
+    ChunkMap.validateNoSharedLocks()
+
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
 
@@ -824,6 +830,11 @@ class TimeSeriesShard(val dataset: Dataset,
         logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=${dataset.ref} " +
           s"shard=$shardNum", e)
         shardStats.flushesFailedChunkWrite.increment
+
+        // Release the shared lock held by the chunk map iterator. There's no direct way to do
+        // this because the iterator has been wrapped an the closed method cannot be accessed.
+        ChunkMap.releaseAllSharedLocks()
+
         // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
         // never be freed.
         partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
