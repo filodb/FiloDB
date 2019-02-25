@@ -678,15 +678,11 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   private def isActivelyIngesting(i: Integer): Boolean = {
-    // Access the bitmap optimistically. If nothing acquired the write lock, then
-    // nothing changed, and so the result was safely obtained.
-    var stamp = activelyIngestingLock.tryOptimisticRead()
-    var result = activelyIngesting.get(i)
-    if (!activelyIngestingLock.validate(stamp)) {
-      stamp = activelyIngestingLock.readLock()
-      result = activelyIngesting.get(i)
-      activelyIngestingLock.unlockRead(stamp)
-    }
+    // Obtain full read lock because the behavior of accessing the bitmap without a lock is
+    // undefined. For example, it might throw an exception when being concurrently modified.
+    val stamp = activelyIngestingLock.readLock()
+    val result = activelyIngesting.get(i)
+    activelyIngestingLock.unlockRead(stamp)
     result
   }
 
