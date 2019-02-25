@@ -304,7 +304,6 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     }
 
     Thread.`yield`
-
     return false
   }
 
