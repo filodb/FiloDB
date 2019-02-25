@@ -68,7 +68,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new ChunkedWindowIterator(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)()
+    new ChunkedWindowIterator(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
   }
 
   def slidingWindowIt(data: Seq[Double],

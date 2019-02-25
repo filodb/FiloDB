@@ -29,6 +29,17 @@ trait ElementIterator {
     }
     _count
   }
+
+  /**
+   * ElementIterators obtain a lock to protect access to native memory, and the lock is
+   * released when the iterator is closed. As a convenience (or not), the iterator is
+   * automatically closed when the hasNext method returns true. To protect native memory access
+   * even longer, call the lock method before performing any iteration. When done, call unlock.
+   * The lock method can be called multiple times, but be sure to call unlock the same amount.
+   */
+  def lock(): Unit
+
+  def unlock(): Unit
 }
 
 /**
@@ -47,6 +58,10 @@ class LazyElementIterator(source: () => ElementIterator) extends ElementIterator
   override def hasNext: Boolean = sourceIt().hasNext
 
   override def next: NativePointer = sourceIt().next
+
+  override def lock(): Unit = sourceIt().lock()
+
+  override def unlock(): Unit = sourceIt().unlock()
 
   private def sourceIt(): ElementIterator = {
     if (it == null) it = source()
