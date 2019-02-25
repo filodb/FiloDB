@@ -246,6 +246,12 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
       timeoutNanos = Math.min(timeoutNanos << 1, MaxExclusiveRetryTimeoutNanos)
 
       if (!warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
+        if (hasSharedLock(this)) {
+          // Self deadlock. Upgrading the shared lock to an exclusive lock is possible if the
+          // current thread is the only shared lock owner, but this isn't that common. Instead,
+          // this is a bug which needs to be fixed.
+          throw new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
+        }
         exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
         warned = true
@@ -298,6 +304,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     }
 
     Thread.`yield`
+
     return false
   }
 
