@@ -952,8 +952,11 @@ class TimeSeriesShard(val dataset: Dataset,
 
       {
         val stamp = activelyIngestingLock.writeLock()
-        activelyIngesting.set(partId)
-        activelyIngestingLock.unlockWrite(stamp)
+        try {
+          activelyIngesting.set(partId)
+        } finally {
+          activelyIngestingLock.unlockWrite(stamp)
+        }
       }
 
       {
