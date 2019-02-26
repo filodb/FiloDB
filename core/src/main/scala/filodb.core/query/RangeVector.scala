@@ -10,7 +10,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium}
-import filodb.memory.data.OffheapLFSortedIDMap
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
@@ -182,7 +182,7 @@ object SerializableRangeVector extends StrictLogging {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      OffheapLFSortedIDMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks()
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
@@ -190,7 +190,7 @@ object SerializableRangeVector extends StrictLogging {
       }
     } finally {
       // When the query is done, clean up lingering shared locks caused by iterator limit.
-      OffheapLFSortedIDMap.releaseAllSharedLocks()
+      ChunkMap.releaseAllSharedLocks()
     }
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to

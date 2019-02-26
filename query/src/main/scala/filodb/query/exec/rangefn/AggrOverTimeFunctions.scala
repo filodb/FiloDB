@@ -28,8 +28,8 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   }
 }
 
-class MinOverTimeChunkedFunctionD(var min: Double = Double.MaxValue) extends ChunkedDoubleRangeFunction {
-  override final def reset(): Unit = { min = Double.MaxValue }
+class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { min = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, min)
   }
@@ -41,7 +41,7 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.MaxValue) extends Chu
     val it = doubleReader.iterate(doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)  // cannot compare NaN, always < anything else
+      min = if (min.isNaN) nextVal else Math.min(min, nextVal)
       rowNum += 1
     }
   }
@@ -65,8 +65,8 @@ class MinOverTimeChunkedFunctionL(var min: Long = Long.MaxValue) extends Chunked
   }
 }
 
-class MaxOverTimeChunkedFunctionD(var max: Double = Double.MinValue) extends ChunkedDoubleRangeFunction {
-  override final def reset(): Unit = { max = Double.MinValue }
+class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { max = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, max)
   }
@@ -78,7 +78,7 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.MinValue) extends Chu
     val it = doubleReader.iterate(doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
-      if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)  // cannot compare NaN, always < anything else
+      max = if (max.isNaN) nextVal else Math.max(max, nextVal) // cannot compare NaN, always < anything else
       rowNum += 1
     }
   }
@@ -102,13 +102,28 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   }
 }
 
-class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
+class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    sum += row.value
+    if (!JLDouble.isNaN(row.value)) {
+      if (sum.isNaN) {
+        sum = 0d
+      }
+      sum += row.value
+      count += 1
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    sum -= row.value
+    if (!JLDouble.isNaN(row.value)) {
+      if (sum.isNaN) {
+        sum = 0d
+      }
+      sum -= row.value
+      count -= 1
+      if (count == 0) { // There is no value in window
+        sum = Double.NaN
+      }
+    }
   }
 
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
@@ -118,8 +133,8 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   }
 }
 
-abstract class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedRangeFunction {
-  override final def reset(): Unit = { sum = 0d }
+abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN )extends ChunkedRangeFunction {
+  override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
@@ -131,6 +146,9 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     // NaN values are ignored by default in the sum method
+    if (sum.isNaN) {
+      sum = 0d
+    }
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
   }
 }
@@ -140,23 +158,39 @@ class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with Chun
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
+    if (sum.isNaN) {
+      sum = 0d
+    }
     sum += longReader.sum(longVect, startRowNum, endRowNum)
   }
 }
 
-class CountOverTimeFunction(var count: Int = 0) extends RangeFunction {
+class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    count += 1
+    if (!JLDouble.isNaN(row.value)) {
+      if (count.isNaN) {
+        count = 0d
+      }
+      count += 1
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    count -= 1
+    if (!JLDouble.isNaN(row.value)) {
+      if (count.isNaN) {
+        count = 0d
+      }
+      count -= 1
+      if (count==0) { //Reset count as no sample is present
+        count = Double.NaN
+      }
+    }
   }
 
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.setValues(endTimestamp, count.toDouble)
+    sampleToEmit.setValues(endTimestamp, count)
   }
 }
 
@@ -181,28 +215,41 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunct
 // Special count_over_time chunked function for doubles needed to not count NaNs whih are used by
 // Prometheus to mark end of a time series.
 // TODO: handle end of time series a different, better way.  This function shouldn't be needed.
-class CountOverTimeChunkedFunctionD(var count: Int = 0) extends ChunkedDoubleRangeFunction {
-  override final def reset(): Unit = { count = 0 }
+class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { count = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, count.toDouble)
+    sampleToEmit.setValues(endTimestamp, count)
   }
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    if (count.isNaN) {
+      count = 0d
+    }
     count += doubleReader.count(doubleVect, startRowNum, endRowNum)
   }
 }
 
-class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends RangeFunction {
+class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
-    sum += row.value
-    count += 1
+    if (!JLDouble.isNaN(row.value)) {
+      if (sum.isNaN) {
+        sum = 0d;
+      }
+      sum += row.value
+      count += 1
+    }
   }
 
   override def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    sum -= row.value
-    count -= 1
+    if (!JLDouble.isNaN(row.value)) {
+      if (sum.isNaN) {
+        sum = 0d;
+      }
+      sum -= row.value
+      count -= 1
+    }
   }
 
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
@@ -212,10 +259,15 @@ class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends Rang
   }
 }
 
-abstract class AvgOverTimeChunkedFunction(var sum: Double = 0d, var count: Int = 0) extends ChunkedRangeFunction {
-  override final def reset(): Unit = { sum = 0d; count = 0 }
+abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var count: Double = 0)
+  extends ChunkedRangeFunction {
+  override final def reset(): Unit = {
+    sum = Double.NaN;
+    count = 0d
+  }
+
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else 0d)
+    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else if (sum.isNaN()) sum else 0d)
   }
 }
 
@@ -224,6 +276,9 @@ class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with Chun
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    if (sum.isNaN) {
+      sum = 0d
+    }
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
     count += doubleReader.count(doubleVect, startRowNum, endRowNum)
   }

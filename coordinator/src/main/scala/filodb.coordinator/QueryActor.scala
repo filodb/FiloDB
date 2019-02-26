@@ -67,7 +67,9 @@ final class QueryActor(memStore: MemStore,
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}").start()
+    val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
+      .withTag("query-id", q.id)
+      .start()
     implicit val _ = queryConfig.askTimeout
     q.execute(memStore, dataset, queryConfig)
      .foreach { res =>

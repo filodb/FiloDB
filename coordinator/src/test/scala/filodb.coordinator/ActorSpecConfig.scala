@@ -10,6 +10,15 @@ import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
 
 import filodb.core.AbstractSpec
 
+object ActorSpecConfig {
+  def getNewSystem(name: String, config: Config): ActorSystem = {
+    // Delay between each test, to provide some allowance for the port binding to succeed.
+    // Ideally the port binding should automatically retry, but this is a simpler fix.
+    Thread.sleep(5000)
+    ActorSystem(name, config)
+  }
+}
+
 trait ActorSpecConfig {
 
   val defaultConfig = """
@@ -27,8 +36,7 @@ trait ActorSpecConfig {
     .withFallback(ConfigFactory.parseResources("application_test.conf"))
     .withFallback(ConfigFactory.load("filodb-defaults.conf"))
 
-  def getNewSystem = ActorSystem("test", config)
-
+  def getNewSystem = ActorSpecConfig.getNewSystem("test", config)
 }
 
 trait SeedNodeConfig {
@@ -85,8 +93,9 @@ object AkkaSpec extends SeedNodeConfig {
 
   val settings = new FilodbSettings(userConfig.withFallback(serverConfig))
 
-  def getNewSystem(c: Option[Config] = None): ActorSystem =
-    ActorSystem("test", c.map(_.withFallback(settings.allConfig)) getOrElse settings.allConfig)
+  def getNewSystem(c: Option[Config] = None): ActorSystem = {
+    ActorSpecConfig.getNewSystem("test", c.map(_.withFallback(settings.allConfig)) getOrElse settings.allConfig)
+  }
 }
 
 abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
@@ -97,8 +106,9 @@ abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
   with Matchers
   with ScalaFutures {
 
-  def this() = this(ActorSystem("akka-test", AkkaSpec.settings.allConfig))
-  def this(config: Config) = this(ActorSystem("akka-test", config.withFallback(AkkaSpec.settings.allConfig)))
+  def this() = this(ActorSpecConfig.getNewSystem("akka-test", AkkaSpec.settings.allConfig))
+  def this(config: Config) =
+    this(ActorSpecConfig.getNewSystem("akka-test", config.withFallback(AkkaSpec.settings.allConfig)))
 
 }
 
