@@ -121,7 +121,7 @@ object Histogram {
     final def bucketValue(no: Int): Double = ???
     final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
       val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-      BinaryHistogram.writeNonIncreasing(HistogramBuckets.emptyBucketsBytes, Array[Long](), buf)
+      BinaryHistogram.writeNonIncreasing(HistogramBuckets.emptyBuckets, Array[Long](), buf)
       buf
     }
   }
@@ -136,7 +136,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    BinaryHistogram.writeNonIncreasing(HistogramBuckets.cachedBucketBytes(buckets), values.map(_.toLong), buf)
+    BinaryHistogram.writeNonIncreasing(buckets, values.map(_.toLong), buf)
     buf
   }
 
@@ -198,13 +198,8 @@ sealed trait HistogramBuckets {
 }
 
 object HistogramBuckets {
-  val BucketTypeGeometric = 0x01.toByte
-  val BucketTypeGeometric_1 = 0x02.toByte
-  val BucketTypeExplicit  = 0x03.toByte
-
-  val OffsetBucketType = 2
   val OffsetNumBuckets = 0
-  val OffsetBucketDetails = 3
+  val OffsetBucketDetails = 2
 
   /**
    * Creates the right HistogramBuckets from a binary definition.  NOTE: length field not included here
@@ -217,21 +212,16 @@ object HistogramBuckets {
   def apply(bucketsDef: BinaryRegion.NativePointer, numBytes: Int): HistogramBuckets =
     apply(UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]], bucketsDef, numBytes)
 
-  def apply(bucketsDefBase: Array[Byte], bucketsDefOffset: Long, numBytes: Int): HistogramBuckets = {
-    UnsafeUtils.getByte(bucketsDefBase, bucketsDefOffset + OffsetBucketType) match {
-      case BucketTypeGeometric   =>
-        GeometricBuckets(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
-                         UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
-                         UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt)
-      case BucketTypeGeometric_1 =>
-        GeometricBuckets_1(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
-                           UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
-                           UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt)
-      case _ =>
-        // Probably due to empty histogram vector, just return some default
-        binaryBuckets64
-    }
-  }
+  // Create geometric buckets definition
+  def geometric(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets =
+    GeometricBuckets(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
+                     UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
+                     UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt)
+
+  def geometric_1(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): HistogramBuckets =
+    GeometricBuckets_1(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
+                       UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
+                       UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt)
 
   /**
    * Creates a binary bucket definition for a geometric series of histogram buckets.
@@ -240,15 +230,12 @@ object HistogramBuckets {
    * @param firstBucket initial bucket value
    * @param multiplier the geometric multiplier between buckets
    * @param numBuckets the total number of buckets
-   * @param minusOne if true, 1 is subtracted from each geometric bucket from the formula above
    */
   final def geometricBucketDef(firstBucket: Double,
                                multiplier: Double,
-                               numBuckets: Int,
-                               minusOne: Boolean = false): Array[Byte] = {
+                               numBuckets: Int): Array[Byte] = {
     require(numBuckets < 65536, s"Too many buckets: $numBuckets")
-    val bytes = new Array[Byte](19)
-    bytes(OffsetBucketType) = if (minusOne) BucketTypeGeometric_1 else BucketTypeGeometric
+    val bytes = new Array[Byte](18)
     UnsafeUtils.setShort(bytes, UnsafeUtils.arayOffset + OffsetNumBuckets, numBuckets.toShort)
     UnsafeUtils.setDouble(bytes, UnsafeUtils.arayOffset + OffsetBucketDetails, firstBucket)
     UnsafeUtils.setDouble(bytes, UnsafeUtils.arayOffset + OffsetBucketDetails + 8, multiplier)
@@ -276,7 +263,6 @@ object HistogramBuckets {
   val binaryBuckets64Bytes = binaryBuckets64.toByteArray
 
   val emptyBuckets = GeometricBuckets(2.0d, 2.0d, 0)
-  val emptyBucketsBytes = emptyBuckets.toByteArray
 }
 
 /**
@@ -284,7 +270,7 @@ object HistogramBuckets {
  */
 final case class GeometricBuckets(firstBucket: Double, multiplier: Double, numBuckets: Int) extends HistogramBuckets {
   final def bucketTop(no: Int): Double = firstBucket * Math.pow(multiplier, no)
-  def toByteArray: Array[Byte] = HistogramBuckets.geometricBucketDef(firstBucket, multiplier, numBuckets, false)
+  def toByteArray: Array[Byte] = HistogramBuckets.geometricBucketDef(firstBucket, multiplier, numBuckets)
 }
 
 /**
@@ -292,5 +278,5 @@ final case class GeometricBuckets(firstBucket: Double, multiplier: Double, numBu
  */
 final case class GeometricBuckets_1(firstBucket: Double, multiplier: Double, numBuckets: Int) extends HistogramBuckets {
   final def bucketTop(no: Int): Double = (firstBucket * Math.pow(multiplier, no)) - 1
-  def toByteArray: Array[Byte] = HistogramBuckets.geometricBucketDef(firstBucket, multiplier, numBuckets, true)
+  def toByteArray: Array[Byte] = HistogramBuckets.geometricBucketDef(firstBucket, multiplier, numBuckets)
 }

@@ -14,12 +14,15 @@ import filodb.memory.format.Encodings._
  * It fits the BinaryRegionMedium protocol.
  * Format:
  *   +0000  u16  2-byte total length of this BinaryHistogram (excluding this length)
- *   +0002  u16  2-byte length of Histogram bucket definition
- *   +0004  [u8] Histogram bucket definition, see [[HistogramBuckets]]
- *   +(4+n) u8   1-byte histogram values format code:
- *                  0x01   Flat array of 64-bit values
- *                  0x02   NibblePacked - simple delta predictor (increasing Long values)
- *   +(7+n) remaining values according to format above
+ *   +0002  u8   1-byte combined histogram buckets and values format code
+ *                  0x00   Empty/null histogram
+ *                  0x01   geometric + NibblePacked delta Long values
+ *                  0x02   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
+ *
+ *   +0003  u16  2-byte length of Histogram bucket definition
+ *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
+ *                  First two bytes of definition is always the number of buckets, a u16
+ *   +(5+n) remaining values according to format above
  *
  *  NOTE: most of the methods below actually expect a pointer to the +2 hist bucket definition, not the length field
  */
@@ -27,11 +30,11 @@ object BinaryHistogram {
   // Pass in a buffer which includes the length bytes.  Value class - no allocations.
   case class BinHistogram(buf: UnsafeBuffer) extends AnyVal {
     def totalLength: Int = buf.getShort(0).toInt + 2
-    def numBuckets: Int = buf.getShort(4).toInt
-    def bucketDefNumBytes: Int = buf.getShort(2).toInt
-    def bucketDefOffset: Long = buf.addressOffset + 4
-    def valuesIndex: Int = 2 + 2 + bucketDefNumBytes + 1  // pointer to values bytes
-    def valuesFormatCode: Byte = buf.getByte(valuesIndex - 1)
+    def numBuckets: Int = buf.getShort(5).toInt
+    def formatCode: Byte = buf.getByte(2)
+    def bucketDefNumBytes: Int = buf.getShort(3).toInt
+    def bucketDefOffset: Long = buf.addressOffset + 5
+    def valuesIndex: Int = 2 + 3 + bucketDefNumBytes     // pointer to values bytes
     def valuesNumBytes: Int = totalLength - valuesIndex
     def intoValuesBuf(destBuf: UnsafeBuffer): Unit =
       UnsafeUtils.wrapUnsafeBuf(buf.byteArray, buf.addressOffset + valuesIndex, valuesNumBytes, destBuf)
@@ -43,11 +46,15 @@ object BinaryHistogram {
      * by clients.  Materializes/deserializes everything.
      * Ingestion ingests BinHistograms directly without conversion to Histogram first.
      */
-    def toHistogram: Histogram = {
-      val bucketDef = HistogramBuckets(buf.byteArray, bucketDefOffset, totalLength)
-      valuesFormatCode match {
-        case ValuesFormat_Flat => FlatBucketHistogram(bucketDef, this)
-      }
+    def toHistogram: Histogram = formatCode match {
+      case HistFormat_Geometric_Delta =>
+        val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset)
+        // TODO: flat buckets won't be supported anymore.  Fix this
+        FlatBucketHistogram(bucketDef, this)
+      case HistFormat_Geometric1_Delta =>
+        val bucketDef = HistogramBuckets.geometric_1(buf.byteArray, bucketDefOffset)
+        // TODO: flat buckets won't be supported anymore.  Fix this
+        FlatBucketHistogram(bucketDef, this)
     }
   }
 
@@ -68,7 +75,9 @@ object BinaryHistogram {
     case b: UnsafeBuffer         => b
   }
 
-  val ValuesFormat_Flat = 0x01.toByte
+  val HistFormat_Null = 0x00.toByte
+  val HistFormat_Geometric_Delta = 0x01.toByte
+  val HistFormat_Geometric1_Delta = 0x02.toByte
 
   case class FlatBucketValues(buf: UnsafeBuffer) extends AnyVal {
     def bucket(no: Int): Long = buf.getLong(no * 8)
@@ -84,19 +93,28 @@ object BinaryHistogram {
   }
 
   /**
-   * Writes a non-increasing binary histogram including the length prefix into buf.
+   * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
+   * decoded as increasing.  Intended only for specific use cases when the source histogram are non increasing
+   * buckets, ie each bucket has a count that is independent.
    * Buckets are written as-is for now.
    * @return the number of bytes written, including the length prefix
    */
-  def writeNonIncreasing(bucketDef: Array[Byte], values: Array[Long], buf: UnsafeBuffer): Int = {
-    val bytesNeeded = 2 + 2 + bucketDef.size + 1 + 8 * values.size
+  def writeNonIncreasing(buckets: HistogramBuckets, values: Array[Long], buf: UnsafeBuffer): Int = {
+    val formatCode = buckets match {
+      case g: GeometricBuckets   => HistFormat_Geometric_Delta
+      case g: GeometricBuckets_1 => HistFormat_Geometric1_Delta
+      case _  => ???
+    }
+    val bucketDef = buckets.toByteArray
+
+    val bytesNeeded = 2 + 1 + 2 + bucketDef.size + 8 * values.size
     require(bytesNeeded < 65535, s"Histogram data is too large: $bytesNeeded bytes needed")
     require(buf.capacity >= bytesNeeded, s"Buffer only has ${buf.capacity} bytes but we need $bytesNeeded")
 
     buf.putShort(0, (bytesNeeded - 2).toShort)
-    buf.putShort(2, bucketDef.size.toShort)
-    buf.putBytes(4, bucketDef)
-    buf.putByte(4 + bucketDef.size, ValuesFormat_Flat)
+    buf.putByte(2, formatCode)
+    buf.putShort(3, bucketDef.size.toShort)
+    buf.putBytes(5, bucketDef)
     val valuesIndex = 5 + bucketDef.size
     for { b <- 0 until values.size optimized } {
       buf.putLong(valuesIndex + b * 8, values(b))
@@ -104,7 +122,7 @@ object BinaryHistogram {
     bytesNeeded
   }
 
-  def writeNonIncreasing(bucketDef: Array[Byte], values: Array[Long]): Int =
+  def writeNonIncreasing(buckets: HistogramBuckets, values: Array[Long]): Int =
     writeNonIncreasing(bucketDef, values, histBuf)
 }
 
