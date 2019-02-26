@@ -105,8 +105,18 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
     queryConfig: QueryConfig)
-    (windowIt: WindowedChunkIterator = new WindowedChunkIterator(rv, start, step, end, window))
 extends Iterator[R] with StrictLogging {
+  // Lazily open the iterator and obtain the lock. This allows one thread to create the
+  // iterator, but the lock is owned by the thread actually performing the iteration.
+  private lazy val windowIt = {
+    val it = new WindowedChunkIterator(rv, start, step, end, window)
+    // Need to hold the shared lock explicitly, because the window iterator needs to
+    // pre-fetch chunks to determine the window. This pre-fetching can force the internal
+    // iterator to close, which would release the lock too soon.
+    it.lock()
+    it
+  }
+
   def sampleToEmit: R
 
   override def hasNext: Boolean = windowIt.hasMoreWindows
@@ -133,7 +143,13 @@ extends Iterator[R] with StrictLogging {
       }
     }
     rangeFunction.apply(windowIt.curWindowEnd, sampleToEmit)
-    if (!windowIt.hasMoreWindows) windowIt.close()    // release shared lock proactively
+
+    if (!windowIt.hasMoreWindows) {
+      // Release the shared lock and close the iterator, in case it also holds a lock.
+      windowIt.unlock()
+      windowIt.close()
+    }
+
     sampleToEmit
   }
 }
@@ -144,7 +160,7 @@ class ChunkedWindowIteratorD(rv: RawDataRangeVector,
     queryConfig: QueryConfig,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientRow = new TransientRow()) extends
-ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, queryConfig)()
+ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, queryConfig)
 
 class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     start: Long, step: Long, end: Long, window: Long,
@@ -152,7 +168,7 @@ class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     queryConfig: QueryConfig,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
-ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, queryConfig)()
+ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, queryConfig)
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size

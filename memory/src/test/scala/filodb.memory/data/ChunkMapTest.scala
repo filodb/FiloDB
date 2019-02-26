@@ -594,12 +594,20 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
 
     acquired shouldBe false
 
-    startNanos = System.nanoTime()
-    for (i <- 1 to 2) {
-      map.chunkmapAcquireShared()
-      map.chunkmapReleaseShared()
-      Thread.sleep(100)
+    // Need to start in another thread due to reentrancy check.
+    val delayed = new Thread {
+      override def run(): Unit = {
+        for (i <- 1 to 2) {
+          map.chunkmapAcquireShared()
+          map.chunkmapReleaseShared()
+          Thread.sleep(100)
+        }
+      }
     }
+
+    startNanos = System.nanoTime()
+    delayed.start()
+    delayed.join()
     durationNanos = System.nanoTime() - startNanos
 
     durationNanos should be > 1000000000L
@@ -704,6 +712,45 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     stuck.join(10000)
 
     acquired shouldBe true
+
+    map.chunkmapFree()
+  }
+
+  it("should support reentrant shared lock when exclusive lock is requested") {
+    val map = new ChunkMap(memFactory, 32)
+
+    map.chunkmapAcquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.chunkmapAcquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Shared lock is held by current thread, so it can easily acquire more.
+    for (i <- 1 to 100) map.chunkmapAcquireShared()
+
+    acquired shouldBe false
+
+    // Release all shared locks.
+    for (i <- 1 to 101) map.chunkmapReleaseShared()
+
+    stuck.join()
+    acquired shouldBe true
+    map.chunkmapReleaseExclusive()
 
     map.chunkmapFree()
   }

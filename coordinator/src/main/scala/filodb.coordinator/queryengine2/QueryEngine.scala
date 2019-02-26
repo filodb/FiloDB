@@ -39,7 +39,10 @@ class QueryEngine(dataset: Dataset,
   def dispatchExecPlan(execPlan: ExecPlan)
                       (implicit sched: ExecutionContext,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    execPlan.dispatcher.dispatch(execPlan)
+    val currentSpan = Kamon.currentSpan()
+    Kamon.withSpan(currentSpan) {
+      execPlan.dispatcher.dispatch(execPlan)
+    }
   }
 
   /**

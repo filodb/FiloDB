@@ -58,6 +58,9 @@ object ChunkMap extends StrictLogging {
     override def initialValue() = new HashMap[ChunkMap, Int]
   }
 
+  // Returns true if the current thread has acquired the shared lock at least once.
+  private def hasSharedLock(inst: ChunkMap): Boolean = sharedLockCounts.get.contains(inst)
+
   // Updates the shared lock count, for the current thread.
   private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
     val countMap = sharedLockCounts.get
@@ -243,6 +246,12 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
       timeoutNanos = Math.min(timeoutNanos << 1, MaxExclusiveRetryTimeoutNanos)
 
       if (!warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
+        if (hasSharedLock(this)) {
+          // Self deadlock. Upgrading the shared lock to an exclusive lock is possible if the
+          // current thread is the only shared lock owner, but this isn't that common. Instead,
+          // this is a bug which needs to be fixed.
+          throw new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
+        }
         exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
         warned = true
@@ -327,7 +336,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
 
     while (true) {
       lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-      if (lockState < 0) {
+      if (lockState < 0 && !hasSharedLock(this)) {
         // Wait for exclusive lock to be released.
         Thread.`yield`
       } else if (UnsafeUtils.unsafe.compareAndSwapInt(this, lockStateOffset, lockState, lockState + 1)) {
@@ -616,6 +625,10 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
       index += 1
       next
     }
+
+    final def lock(): Unit = chunkmapAcquireShared()
+
+    final def unlock(): Unit = chunkmapReleaseShared()
 
     final def getNextElem: NativePointer = nextElem
 
