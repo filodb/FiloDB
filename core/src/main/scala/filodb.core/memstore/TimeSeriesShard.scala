@@ -468,7 +468,8 @@ class TimeSeriesShard(val dataset: Dataset,
         // upsert into lucene since there can be multiple records for one partKey, and most recent wins.
         partKeyIndex.upsertPartKey(partKeyBaseOnHeap, partId, startTime, endTime,
           PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset))(partKeyNumBytes)
-        timeBucketBitmaps.get(segment.timeBucket).set(partId)
+        val bitmap = timeBucketBitmaps.get(segment.timeBucket)
+        bitmap.synchronized { bitmap.set(partId) }
         activelyIngesting.synchronized {
           if (endTime == Long.MaxValue) activelyIngesting.set(partId) else activelyIngesting.clear(partId)
         }
@@ -770,16 +771,22 @@ class TimeSeriesShard(val dataset: Dataset,
         .withTag("dataset", dataset.name)
         .withTag("shard", shardNum).start()
 
+      var cmdBitmap = timeBucketBitmaps.get(cmd.timeBucket)
+
       /* Add to timeBucketRb partKeys for (earliestTimeBucketBitmap && ~stoppedIngesting).
        These keys are from earliest time bucket that are still ingesting */
       val earliestTimeBucket = cmd.timeBucket - numTimeBucketsToRetain
       if (earliestTimeBucket >= 0) {
         var partIdsToRollOver = timeBucketBitmaps.get(earliestTimeBucket)
         activelyIngesting.synchronized {
-          partIdsToRollOver = partIdsToRollOver.and(activelyIngesting)
+          partIdsToRollOver.synchronized {
+            partIdsToRollOver = partIdsToRollOver.and(activelyIngesting)
+          }
         }
-        val newBitmap = timeBucketBitmaps.get(cmd.timeBucket).or(partIdsToRollOver)
-        timeBucketBitmaps.put(cmd.timeBucket, newBitmap)
+        cmdBitmap.synchronized {
+          cmdBitmap = cmdBitmap.or(partIdsToRollOver)
+        }
+        timeBucketBitmaps.put(cmd.timeBucket, cmdBitmap)
         shardStats.numRolledKeysInLatestTimeBucket.increment(partIdsToRollOver.cardinality())
       }
 
@@ -788,10 +795,19 @@ class TimeSeriesShard(val dataset: Dataset,
 
       /* create time bucket using record builder */
       val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
-      InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
-        addPartKeyToTimebucket(timeBucketRb, p)
+
+      // Need to synchronize early to avoid deadlock. The addPartKeyToTimebucket method calls
+      // isActivelyIngesting, which synchronizes on activelyIngesting. The canonical ordering
+      // is to synchronize on activelyIngesting before synchronizing on the bucket.
+      val numPartKeysInBucket = activelyIngesting.synchronized {
+        cmdBitmap.synchronized {
+          InMemPartitionIterator(cmdBitmap.intIterator).foreach { p =>
+            addPartKeyToTimebucket(timeBucketRb, p)
+          }
+          cmdBitmap.cardinality()
+        }
       }
-      val numPartKeysInBucket = timeBucketBitmaps.get(cmd.timeBucket).cardinality()
+
       logger.debug(s"Number of records in timebucket=${cmd.timeBucket} of " +
         s"dataset=${dataset.ref} shard=$shardNum is $numPartKeysInBucket")
       shardStats.numKeysInLatestTimeBucket.increment(numPartKeysInBucket)
@@ -876,13 +892,15 @@ class TimeSeriesShard(val dataset: Dataset,
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
-        timeBucketBitmaps.get(timeBucket).set(p.partID)
+        val bitmap = timeBucketBitmaps.get(timeBucket)
+        bitmap.synchronized { bitmap.set(p.partID) }
         activelyIngesting.clear(p.partID)
       } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
         // Partition started re-ingesting.
         // TODO: we can do better than this for intermittent time series. Address later.
         updatePartEndTimeInIndex(p, Long.MaxValue)
-        timeBucketBitmaps.get(timeBucket).set(p.partID)
+        val bitmap = timeBucketBitmaps.get(timeBucket)
+        bitmap.synchronized { bitmap.set(p.partID) }
         activelyIngesting.set(p.partID)
       }
     }
@@ -933,7 +951,9 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
+
+      val bitmap = timeBucketBitmaps.get(currentIndexTimeBucket)
+      bitmap.synchronized { bitmap.set(partId) }
 
       activelyIngesting.synchronized { activelyIngesting.set(partId) }
 
