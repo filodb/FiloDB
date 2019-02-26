@@ -23,7 +23,7 @@ object HistogramCompressor extends App {
   val inputBuffer = new UnsafeBuffer(new Array[Byte](8192))
 
   val appender = HistogramVector.appendingColumnar(memFactory, 64, chunkLength)
-  val bucketDef = HistogramBuckets.binaryBuckets64Bytes
+  val bucketDef = HistogramBuckets.binaryBuckets64
 
   var binHistBytesSum = 0
   var binHistBytesMax = 0

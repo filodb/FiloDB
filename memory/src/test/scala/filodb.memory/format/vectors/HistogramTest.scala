@@ -18,6 +18,8 @@ object HistogramTest {
   val quantile50Result = Seq(37.333333333333336, 10.8, 8.666666666666666, 28.75)
 }
 
+import BinaryHistogram._
+
 class HistogramTest extends NativeVectorTest {
   describe("HistogramBuckets") {
     it("can list out bucket definition LE values properly for Geometric and Geometric_1") {
@@ -30,10 +32,10 @@ class HistogramTest extends NativeVectorTest {
 
     it("can serialize and deserialize properly") {
       val buckets1 = GeometricBuckets(5.0, 2.0, 4)
-      HistogramBuckets(buckets1.toByteArray) shouldEqual buckets1
+      HistogramBuckets(buckets1.toByteArray, HistFormat_Geometric_Delta) shouldEqual buckets1
 
       val buckets2 = GeometricBuckets_1(2.0, 2.0, 8)
-      HistogramBuckets(buckets2.toByteArray) shouldEqual buckets2
+      HistogramBuckets(buckets2.toByteArray, HistFormat_Geometric1_Delta) shouldEqual buckets2
     }
   }
 

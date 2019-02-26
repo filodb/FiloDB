@@ -52,7 +52,7 @@ object BinaryHistogram {
         // TODO: flat buckets won't be supported anymore.  Fix this
         FlatBucketHistogram(bucketDef, this)
       case HistFormat_Geometric1_Delta =>
-        val bucketDef = HistogramBuckets.geometric_1(buf.byteArray, bucketDefOffset)
+        val bucketDef = HistogramBuckets.geometric1(buf.byteArray, bucketDefOffset)
         // TODO: flat buckets won't be supported anymore.  Fix this
         FlatBucketHistogram(bucketDef, this)
     }
@@ -123,17 +123,17 @@ object BinaryHistogram {
   }
 
   def writeNonIncreasing(buckets: HistogramBuckets, values: Array[Long]): Int =
-    writeNonIncreasing(bucketDef, values, histBuf)
+    writeNonIncreasing(buckets, values, histBuf)
 }
 
 object HistogramVector {
   type HistIterator = Iterator[Histogram] with TypedIterator
 
   val OffsetNumHistograms = 6
-  val OffsetBucketDefSize = 8  // # of bytes of bucket definition, including bucket def type
-  val OffsetBucketDef  = 10    // Start of bucket definition
-  val OffsetNumBuckets = 10
-  val OffsetBucketDefType = 12  // u8: bucket definition types
+  val OffsetFormatCode = 8     // u8: BinHistogram format code/bucket type
+  val OffsetBucketDefSize = 9  // # of bytes of bucket definition, including bucket def type
+  val OffsetBucketDef  = 11    // Start of bucket definition
+  val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
 
   final def getNumBuckets(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetNumBuckets).toInt
@@ -144,6 +144,7 @@ object HistogramVector {
   final def incrNumHistograms(addr: BinaryVectorPtr): Unit =
     UnsafeUtils.setShort(addr + OffsetNumHistograms, (getNumHistograms(addr) + 1).toShort)
 
+  final def formatCode(addr: BinaryVectorPtr): Byte = UnsafeUtils.getByte(addr + OffsetFormatCode)
   final def afterBucketDefAddr(addr: BinaryVectorPtr): BinaryRegion.NativePointer =
     addr + OffsetBucketDef + bucketDefNumBytes(addr)
   final def bucketDefNumBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetBucketDefSize).toInt
@@ -151,6 +152,7 @@ object HistogramVector {
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, addr: BinaryVectorPtr): Boolean =
+    (hist.formatCode == formatCode(addr)) &&
     (hist.bucketDefNumBytes == bucketDefNumBytes(addr)) && {
       UnsafeUtils.equate(UnsafeUtils.ZeroPointer, addr + OffsetBucketDef, hist.buf.byteArray, hist.bucketDefOffset,
                          hist.bucketDefNumBytes)
@@ -224,8 +226,9 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-                                    UnsafeUtils.ZeroPointer, addr + OffsetBucketDef, h.bucketDefNumBytes)
+                                    UnsafeUtils.ZeroPointer, bucketDefAddr(addr), h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
+      UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
       // initialize the buckets
       initBuckets(numBuckets)
@@ -327,7 +330,7 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader
   }
   val readers = if (length > 0) bucketAddrs.map(LongBinaryVector.apply) else Array.empty[LongVectorDataReader]
 
-  val buckets = HistogramBuckets(bucketDefAddr(histVect), bucketDefNumBytes(histVect))
+  val buckets = HistogramBuckets(bucketDefAddr(histVect), formatCode(histVect))
   val returnHist = MutableHistogram.empty(buckets)
 
   /**

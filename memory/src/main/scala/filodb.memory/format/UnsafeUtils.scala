@@ -12,6 +12,7 @@ object UnsafeUtils {
 
   // scalastyle:off
   val ZeroPointer: Any = null
+  val ZeroArray = null.asInstanceOf[Array[Byte]]
   // scalastyle:on
 
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
