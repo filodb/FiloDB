@@ -266,8 +266,6 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
   private final val activelyIngesting = new EWAHCompressedBitmap
-  // All access to the activelyIngesting bitmap should use this lock.
-  private final val activelyIngestingLock = new StampedLock
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
@@ -471,9 +469,9 @@ class TimeSeriesShard(val dataset: Dataset,
         partKeyIndex.upsertPartKey(partKeyBaseOnHeap, partId, startTime, endTime,
           PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset))(partKeyNumBytes)
         timeBucketBitmaps.get(segment.timeBucket).set(partId)
-        val stamp = activelyIngestingLock.writeLock()
-        if (endTime == Long.MaxValue) activelyIngesting.set(partId) else activelyIngesting.clear(partId)
-        activelyIngestingLock.unlockWrite(stamp)
+        activelyIngesting.synchronized {
+          if (endTime == Long.MaxValue) activelyIngesting.set(partId) else activelyIngesting.clear(partId)
+        }
       }
       numRecordsProcessed += 1
     }
@@ -649,12 +647,7 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.indexEntries.set(partKeyIndex.indexNumEntries)
     shardStats.indexBytes.set(partKeyIndex.indexRamBytes)
     shardStats.numPartitions.set(numActivePartitions)
-
-    // Obtain full read lock instead of an optimistic lock because cardinality() isn't O(1).
-    val stamp = activelyIngestingLock.readLock()
-    val cardinality = activelyIngesting.cardinality()
-    activelyIngestingLock.unlockRead(stamp)
-
+    val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
     shardStats.numActivelyIngestingParts.set(cardinality)
   }
 
@@ -678,12 +671,7 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   private def isActivelyIngesting(i: Integer): Boolean = {
-    // Obtain full read lock because the behavior of accessing the bitmap without a lock is
-    // undefined. For example, it might throw an exception when being concurrently modified.
-    val stamp = activelyIngestingLock.readLock()
-    val result = activelyIngesting.get(i)
-    activelyIngestingLock.unlockRead(stamp)
-    result
+    activelyIngesting.synchronized { activelyIngesting.get(i) }
   }
 
   // scalastyle:off method.length
@@ -786,10 +774,10 @@ class TimeSeriesShard(val dataset: Dataset,
        These keys are from earliest time bucket that are still ingesting */
       val earliestTimeBucket = cmd.timeBucket - numTimeBucketsToRetain
       if (earliestTimeBucket >= 0) {
-        val bitmap = timeBucketBitmaps.get(earliestTimeBucket)
-        val stamp = activelyIngestingLock.readLock()
-        val partIdsToRollOver = bitmap.and(activelyIngesting)
-        activelyIngestingLock.unlockRead(stamp)
+        var partIdsToRollOver = timeBucketBitmaps.get(earliestTimeBucket)
+        activelyIngesting.synchronized {
+          partIdsToRollOver = partIdsToRollOver.and(activelyIngesting)
+        }
         val newBitmap = timeBucketBitmaps.get(cmd.timeBucket).or(partIdsToRollOver)
         timeBucketBitmaps.put(cmd.timeBucket, newBitmap)
         shardStats.numRolledKeysInLatestTimeBucket.increment(partIdsToRollOver.cardinality())
@@ -882,9 +870,8 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    // Need writeLock for safe read-modify-write behavior.
-    val stamp = activelyIngestingLock.writeLock()
-    try {
+    // Synchronize for safe read-modify-write behavior.
+    activelyIngesting.synchronized {
       if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
@@ -898,8 +885,6 @@ class TimeSeriesShard(val dataset: Dataset,
         timeBucketBitmaps.get(timeBucket).set(p.partID)
         activelyIngesting.set(p.partID)
       }
-    } finally {
-      activelyIngestingLock.unlockWrite(stamp)
     }
   }
 
@@ -950,14 +935,7 @@ class TimeSeriesShard(val dataset: Dataset,
       partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
 
-      {
-        val stamp = activelyIngestingLock.writeLock()
-        try {
-          activelyIngesting.set(partId)
-        } finally {
-          activelyIngestingLock.unlockWrite(stamp)
-        }
-      }
+      activelyIngesting.synchronized { activelyIngesting.set(partId) }
 
       {
         val stamp = partSetLock.writeLock()
