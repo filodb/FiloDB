@@ -957,13 +957,11 @@ class TimeSeriesShard(val dataset: Dataset,
 
       activelyIngesting.synchronized { activelyIngesting.set(partId) }
 
-      {
-        val stamp = partSetLock.writeLock()
-        try {
-          partSet.add(newPart)
-        } finally {
-          partSetLock.unlockWrite(stamp)
-        }
+      val stamp = partSetLock.writeLock()
+      try {
+        partSet.add(newPart)
+      } finally {
+        partSetLock.unlockWrite(stamp)
       }
 
       logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
