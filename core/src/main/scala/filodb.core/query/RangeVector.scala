@@ -61,6 +61,11 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extend
   val sourceShards: Seq[Int] = Nil
 }
 
+final case class CustomRangeVectorKeyWithShards(labelValues: Map[UTF8Str, UTF8Str], sourceShards: Seq[Int])
+  extends RangeVectorKey {
+
+}
+
 object CustomRangeVectorKey {
   def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
     CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>

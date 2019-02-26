@@ -33,11 +33,14 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
     })
+
+
+
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val rand = new Random()
   val error = 0.00000001d
 
-  it("should work with instant function mapper") {
+ it("should work with instant function mapper") {
     val ignoreKey = CustomRangeVectorKey(
       Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
@@ -238,4 +241,43 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
+  it("should work for label replace") {
+    val sampleKey = CustomRangeVectorKey(
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("demo.io:9090"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("test")))
+    val sampleWithKey: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = sampleKey
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 3.3d),
+          new TransientRow(2L, 5.1d)).iterator
+      },
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(3L, 3239.3423d),
+          new TransientRow(4L, 94935.1523d)).iterator
+      })
+    sampleWithKey.foreach(x=>println(x))
+    //val expectedVal = sampleBaseWithKey.map(_.la.map(v => scala.math.floor(v.getDouble(1))))
+    val funcParams = Seq("test-metric", "instanceNew", "$1 new Label Value $2", "instance", "(.*):90(.*)")
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.LabelReplace, funcParams)
+    val resultObs = instantVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
+    val result = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
+    //result.
+    result.foreach(x=>println(x))
+
+    /* resultObs.toListL.runAsync.futureValue.map(_.key.map(_.getDouble(1)))
+    expectedVal.zip(result).foreach {
+      case (ex, res) =>  {
+        ex.zip(res).foreach {
+          case (val1, val2) =>
+            val1 should not equal val2
+        }
+      }
+    }
+  }*/
+  }
 }

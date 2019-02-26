@@ -6,7 +6,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.InstantFunctionId.{LabelJoin, LabelReplace}
-import filodb.query.exec.rangefn.{DoubleInstantFunction, InstantFunction, LabelTypeInstantFunction}
+import filodb.query.exec.rangefn.InstantFunction
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
@@ -63,7 +63,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     source.map { rv =>
       if (function == LabelReplace || function == LabelJoin) {
-        val newLabel = instantFunction.asInstanceOf[LabelTypeInstantFunction](rv.key)
+        val newLabel = instantFunction.right.get(rv.key)
         IteratorBackedRangeVector(newLabel, rv.rows)
       }
       else {
@@ -76,7 +76,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
         override def next(): RowReader = {
           val next = rows.next()
-          val newValue = instantFunction.asInstanceOf[DoubleInstantFunction](next.getDouble(1))
+          val newValue = instantFunction.left.get (next.getDouble(1))
           result.setValues(next.getLong(0), newValue)
           result
         }

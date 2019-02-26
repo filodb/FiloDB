@@ -2,10 +2,11 @@ package filodb.query.exec.rangefn
 
 import java.util.regex.PatternSyntaxException
 
-import filodb.core.query.RangeVectorKey
+import filodb.core.query.{CustomRangeVectorKeyWithShards, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
+
 
 /**
   * All Instant Functions are implementation of this trait.
@@ -252,7 +253,7 @@ case class LabelReplaceImpl(funcParams: Seq[Any]) extends LabelTypeInstantFuncti
     */
   require(funcParams.size == 4,
     "Cannot use LabelReplace without function parameters: " +
-      "v instant-vector, dst_label string, replacement string, src_label string,regex string")
+      "instant-vector, dst_label string, replacement string, src_label string,regex string")
 
   override def apply(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
     val dstLabel = funcParams(0).asInstanceOf[String]
@@ -260,13 +261,13 @@ case class LabelReplaceImpl(funcParams: Seq[Any]) extends LabelTypeInstantFuncti
     val srcLabel = funcParams(2).asInstanceOf[String]
     try {
       val regex = funcParams(3).asInstanceOf[String].r
-
       val value = rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel))
 
       if (value.isDefined) {
         val labelReplaceValue = regex.replaceAllIn(value.get.toString, replacementString)
         if (!labelReplaceValue.equals(value.get.toString)) {
-          rangeVectorKey.labelValues += (ZeroCopyUTF8String(dstLabel) -> ZeroCopyUTF8String(labelReplaceValue))
+          return CustomRangeVectorKeyWithShards(rangeVectorKey.labelValues.
+            updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelReplaceValue)), rangeVectorKey.sourceShards)
 
         }
       }
