@@ -5,6 +5,7 @@ import scala.concurrent.ExecutionContext
 
 import debox.Buffer
 import kamon.Kamon
+import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
@@ -38,6 +39,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
+  private def startODPSpan: Span = Kamon.buildSpan(s"odp-cassandra-latency")
+    .withTag("dataset", dataset.name)
+    .withTag("shard", shardNum)
+    .start()
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
   //  2. Determine, one at a time, what chunks are missing and could be fetched from disk
@@ -84,10 +89,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
-            val span = Kamon.buildSpan(s"odp-cassandra-latency")
-              .withTag("dataset", dataset.name)
-              .withTag("shard", shardNum)
-              .start()
+            val span = startODPSpan
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
@@ -100,18 +102,19 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       } else {
         Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
-          Observable.fromIterable(partKeyBytesToPage.zip(methods))
-            .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
-              val span = Kamon.buildSpan(s"odp-cassandra-latency")
-                .withTag("dataset", dataset.name)
-                .withTag("shard", shardNum)
-                .start()
-              rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-                .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
-                .doOnComplete(() => span.finish())
-                .defaultIfEmpty(getPartition(partBytes).get)
-                .headL
-            }
+          if (partKeyBytesToPage.nonEmpty) {
+            val span = startODPSpan
+            Observable.fromIterable(partKeyBytesToPage.zip(methods))
+              .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
+                rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
+                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .defaultIfEmpty(getPartition(partBytes).get)
+                  .headL
+              }
+              .doOnComplete(() => span.finish())
+          } else {
+            Observable.empty
+          }
         }
       }
     }
