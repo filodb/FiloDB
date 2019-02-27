@@ -1,7 +1,7 @@
 package filodb.core.binaryrecord2
 
 import com.typesafe.scalalogging.StrictLogging
-import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.DirectBuffer
 import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Dataset}
@@ -140,7 +140,7 @@ final class RecordBuilder(memFactory: MemFactory,
 
   // Adds a blob from another buffer which already has the length bytes as the first two bytes
   // For example: buffers created by BinaryHistograms.  OR, a UTF8String medium.
-  final def addBlob(buf: UnsafeBuffer): Unit = {
+  final def addBlob(buf: DirectBuffer): Unit = {
     val numBytes = buf.getShort(0).toInt
     require(numBytes < buf.capacity)
     addBlob(buf.byteArray, buf.addressOffset + 2, numBytes)

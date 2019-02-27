@@ -32,7 +32,7 @@ class HistogramVectorTest extends NativeVectorTest {
   it("should accept BinaryHistograms of the same schema and be able to query them") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
     rawLongBuckets.foreach { rawBuckets =>
-      BinaryHistogram.writeNonIncreasing(bucketScheme, rawBuckets, buffer)
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 
@@ -53,7 +53,7 @@ class HistogramVectorTest extends NativeVectorTest {
   it("should optimize histograms and be able to query optimized vectors") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
     rawLongBuckets.foreach { rawBuckets =>
-      BinaryHistogram.writeNonIncreasing(bucketScheme, rawBuckets, buffer)
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 
@@ -86,21 +86,21 @@ class HistogramVectorTest extends NativeVectorTest {
   it("should reject BinaryHistograms of schema different from first schema ingested") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
     rawLongBuckets.foreach { rawBuckets =>
-      BinaryHistogram.writeNonIncreasing(bucketScheme, rawBuckets, buffer)
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 
     appender.length shouldEqual rawHistBuckets.length
 
     // A record using a different schema
-    BinaryHistogram.writeNonIncreasing(HistogramBuckets.binaryBuckets64, Array[Long](0, 1, 2, 0), buffer)
+    BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array[Long](0, 1, 2, 0), buffer)
     appender.addData(buffer) shouldEqual BucketSchemaMismatch
   }
 
   it("should reject new adds when vector is full") {
     val appender = HistogramVector.appendingColumnar(memFactory, 8, 4)
     rawLongBuckets.foreach { rawBuckets =>
-      BinaryHistogram.writeNonIncreasing(bucketScheme, rawBuckets, buffer)
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 

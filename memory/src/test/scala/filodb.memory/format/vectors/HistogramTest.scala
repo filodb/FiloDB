@@ -1,6 +1,6 @@
 package filodb.memory.format.vectors
 
-import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.ExpandableArrayBuffer
 
 object HistogramTest {
   val bucketScheme = GeometricBuckets(1.0, 2.0, 8)
@@ -21,21 +21,25 @@ object HistogramTest {
 import BinaryHistogram._
 
 class HistogramTest extends NativeVectorTest {
+  val writeBuf = new ExpandableArrayBuffer()
+
   describe("HistogramBuckets") {
     it("can list out bucket definition LE values properly for Geometric and Geometric_1") {
       val buckets1 = GeometricBuckets(5.0, 3.0, 4)
       buckets1.allBucketTops shouldEqual Array(5.0, 15.0, 45.0, 135.0)
 
-      val buckets2 = GeometricBuckets_1(2.0, 2.0, 8)
+      val buckets2 = GeometricBuckets(2.0, 2.0, 8, minusOne = true)
       buckets2.allBucketTops shouldEqual Array(1.0, 3.0, 7.0, 15.0, 31.0, 63.0, 127.0, 255.0)
     }
 
     it("can serialize and deserialize properly") {
       val buckets1 = GeometricBuckets(5.0, 2.0, 4)
-      HistogramBuckets(buckets1.toByteArray, HistFormat_Geometric_Delta) shouldEqual buckets1
+      buckets1.serialize(writeBuf, 0) shouldEqual 2+2+8+8
+      HistogramBuckets(writeBuf, HistFormat_Geometric_Delta) shouldEqual buckets1
 
-      val buckets2 = GeometricBuckets_1(2.0, 2.0, 8)
-      HistogramBuckets(buckets2.toByteArray, HistFormat_Geometric1_Delta) shouldEqual buckets2
+      val buckets2 = GeometricBuckets(2.0, 2.0, 8, minusOne = true)
+      buckets2.serialize(writeBuf, 0) shouldEqual 2+2+8+8
+      HistogramBuckets(writeBuf, HistFormat_Geometric1_Delta) shouldEqual buckets2
     }
   }
 
@@ -52,7 +56,7 @@ class HistogramTest extends NativeVectorTest {
 
     it("should serialize to and from BinaryHistograms and compare correctly") {
       val binHistograms = mutableHistograms.map { h =>
-        val buf = new UnsafeBuffer(new Array[Byte](2048))
+        val buf = new ExpandableArrayBuffer()
         h.serialize(Some(buf))
       }
 

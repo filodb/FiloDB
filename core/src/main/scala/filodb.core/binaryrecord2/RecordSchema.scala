@@ -434,7 +434,7 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   val buf = new UnsafeBuffer(Array.empty[Byte])
   // NOTE: this method reuses the same buffer to avoid allocations.
   override def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
-    UnsafeUtils.wrapUnsafeBuf(recordBase, schema.utf8StringOffset(recordBase, recordOffset, columnNo),
+    UnsafeUtils.wrapDirectBuf(recordBase, schema.utf8StringOffset(recordBase, recordOffset, columnNo),
                               getBlobNumBytes(columnNo) + 2, buf)
     buf
   }
