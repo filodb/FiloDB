@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -233,10 +234,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                 queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
+    val spanFromHelper = Kamon.currentSpan()
     val childTasks = Observable.fromIterable(children).mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-        QueryError(id, ex)
+      Kamon.withSpan(spanFromHelper) {
+        plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+          qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
+          QueryError(id, ex)
+        }
       }
     }
     compose(childTasks, queryConfig)
