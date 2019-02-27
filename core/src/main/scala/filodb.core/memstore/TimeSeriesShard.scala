@@ -468,7 +468,9 @@ class TimeSeriesShard(val dataset: Dataset,
         partKeyIndex.upsertPartKey(partKeyBaseOnHeap, partId, startTime, endTime,
           PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset))(partKeyNumBytes)
         timeBucketBitmaps.get(segment.timeBucket).set(partId)
-        if (endTime == Long.MaxValue) activelyIngesting.set(partId) else activelyIngesting.clear(partId)
+        activelyIngesting.synchronized {
+          if (endTime == Long.MaxValue) activelyIngesting.set(partId) else activelyIngesting.clear(partId)
+        }
       }
       numRecordsProcessed += 1
     }
@@ -644,13 +646,14 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.indexEntries.set(partKeyIndex.indexNumEntries)
     shardStats.indexBytes.set(partKeyIndex.indexRamBytes)
     shardStats.numPartitions.set(numActivePartitions)
-    shardStats.numActivelyIngestingParts.set(activelyIngesting.cardinality())
+    val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
+    shardStats.numActivelyIngestingParts.set(cardinality)
   }
 
   private def addPartKeyToTimebucket(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime// can remotely happen since lucene reads are eventually consistent
-    val endTime = if (activelyIngesting.get(p.partID)) {
+    val endTime = if (isActivelyIngesting(p.partID)) {
       Long.MaxValue
     } else {
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
@@ -666,12 +669,17 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
+  private def isActivelyIngesting(partID: Integer): Boolean = {
+    activelyIngesting.synchronized { activelyIngesting.get(partID) }
+  }
+
   // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum).start()
+
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
 
@@ -757,11 +765,24 @@ class TimeSeriesShard(val dataset: Dataset,
         .withTag("dataset", dataset.name)
         .withTag("shard", shardNum).start()
 
+      /* Note regarding thread safety of accessing time bucket bitmaps:
+
+         Every flush task reads bits on the earliest time bucket bitmap and sets bits on the
+         latest timeBucket, both of which are uniquely associated with the flush group. Since
+         each flush group is associated with different latest and earliest time buckets,
+         concurrent threads should not be reading or writing to same time bucket bitmaps, or
+         even setting the same time bucket in the collection. This can in theory happen only if
+         a flush task lasts more than the retention period (not possible).
+      */
+
       /* Add to timeBucketRb partKeys for (earliestTimeBucketBitmap && ~stoppedIngesting).
        These keys are from earliest time bucket that are still ingesting */
       val earliestTimeBucket = cmd.timeBucket - numTimeBucketsToRetain
       if (earliestTimeBucket >= 0) {
-        val partIdsToRollOver = timeBucketBitmaps.get(earliestTimeBucket).and(activelyIngesting)
+        var partIdsToRollOver = timeBucketBitmaps.get(earliestTimeBucket)
+        activelyIngesting.synchronized {
+          partIdsToRollOver = partIdsToRollOver.and(activelyIngesting)
+        }
         val newBitmap = timeBucketBitmaps.get(cmd.timeBucket).or(partIdsToRollOver)
         timeBucketBitmaps.put(cmd.timeBucket, newBitmap)
         shardStats.numRolledKeysInLatestTimeBucket.increment(partIdsToRollOver.cardinality())
@@ -824,6 +845,7 @@ class TimeSeriesShard(val dataset: Dataset,
         logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=${dataset.ref} " +
           s"shard=$shardNum", e)
         shardStats.flushesFailedChunkWrite.increment
+
         // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
         // never be freed.
         partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
@@ -849,18 +871,21 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
-      var endTime = p.timestampOfLatestSample
-      if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
-      updatePartEndTimeInIndex(p, endTime)
-      timeBucketBitmaps.get(timeBucket).set(p.partID)
-      activelyIngesting.clear(p.partID)
-    } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
-      // Partition started re-ingesting.
-      // TODO: we can do better than this for intermittent time series. Address later.
-      updatePartEndTimeInIndex(p, Long.MaxValue)
-      timeBucketBitmaps.get(timeBucket).set(p.partID)
-      activelyIngesting.set(p.partID)
+    // Synchronize for safe read-modify-write behavior.
+    activelyIngesting.synchronized {
+      if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
+        var endTime = p.timestampOfLatestSample
+        if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
+        updatePartEndTimeInIndex(p, endTime)
+        timeBucketBitmaps.get(timeBucket).set(p.partID)
+        activelyIngesting.clear(p.partID)
+      } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
+        // Partition started re-ingesting.
+        // TODO: we can do better than this for intermittent time series. Address later.
+        updatePartEndTimeInIndex(p, Long.MaxValue)
+        timeBucketBitmaps.get(timeBucket).set(p.partID)
+        activelyIngesting.set(p.partID)
+      }
     }
   }
 
@@ -910,13 +935,16 @@ class TimeSeriesShard(val dataset: Dataset,
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-      activelyIngesting.set(partId)
+
+      activelyIngesting.synchronized { activelyIngesting.set(partId) }
+
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
       } finally {
         partSetLock.unlockWrite(stamp)
       }
+
       logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
         s"shard $shardNum at offset $ingestOffset")
     }
@@ -1027,7 +1055,7 @@ class TimeSeriesShard(val dataset: Dataset,
           if (partitionObj != UnsafeUtils.ZeroPointer) {
             // TODO we can optimize fetching of endTime by getting them along with top-k query
             val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-            if (activelyIngesting.get(partitionObj.partID))
+            if (isActivelyIngesting(partitionObj.partID))
               logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
             if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
               logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
