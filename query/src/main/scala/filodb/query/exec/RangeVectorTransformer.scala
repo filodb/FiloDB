@@ -58,6 +58,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     s"function=$function, funcParams=$funcParams"
 
   val instantFunction = InstantFunction(function, funcParams)
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,

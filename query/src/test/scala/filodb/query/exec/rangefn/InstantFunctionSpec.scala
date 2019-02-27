@@ -37,7 +37,7 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   val rand = new Random()
   val error = 0.00000001d
 
- it("should work with instant function mapper") {
+  it("should work with instant function mapper") {
     val ignoreKey = CustomRangeVectorKey(
       Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
