@@ -1,6 +1,5 @@
 package filodb.core.memstore
 
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.StampedLock
 
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -279,7 +278,8 @@ class TimeSeriesShard(val dataset: Dataset,
     *
     * This value is mutated only from the ingestion thread, but read from both flush and ingestion threads.
     */
-  private val currentIndexTimeBucket = new AtomicInteger(0)
+  @volatile
+  private var currentIndexTimeBucket = 0
 
   /**
     * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
@@ -351,9 +351,9 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private[memstore] def initTimeBuckets() = {
     val highestIndexTimeBucket = Await.result(metastore.readHighestIndexTimeBucket(dataset.ref, shardNum), 1.minute)
-    currentIndexTimeBucket.set(highestIndexTimeBucket.map(_ + 1).getOrElse(0))
-    val earliestTimeBucket = Math.max(0, currentIndexTimeBucket.get - numTimeBucketsToRetain)
-    for { i <- currentIndexTimeBucket.get to earliestTimeBucket by -1 optimized } {
+    currentIndexTimeBucket = highestIndexTimeBucket.map(_ + 1).getOrElse(0)
+    val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
+    for { i <- currentIndexTimeBucket to earliestTimeBucket by -1 optimized } {
       timeBucketBitmaps.put(i, new EWAHCompressedBitmap())
     }
   }
@@ -413,10 +413,10 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum).start()
 
-    val earliestTimeBucket = Math.max(0, currentIndexTimeBucket.get - numTimeBucketsToRetain)
-    logger.info(s"Recovering timebuckets $earliestTimeBucket until ${currentIndexTimeBucket.get} " +
+    val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
+    logger.info(s"Recovering timebuckets $earliestTimeBucket until $currentIndexTimeBucket " +
       s"for dataset=${dataset.ref} shard=$shardNum ")
-    val timeBuckets = for { tb <- earliestTimeBucket until currentIndexTimeBucket.get } yield {
+    val timeBuckets = for { tb <- earliestTimeBucket until currentIndexTimeBucket } yield {
       colStore.getPartKeyTimeBucket(dataset, shardNum, tb).map { b =>
         new IndexData(tb, b.segmentId, RecordContainer(b.segment.array()))
       }
@@ -614,13 +614,13 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   def prepareIndexTimeBucketForFlush(group: Int): Option[FlushIndexTimeBuckets] = {
     if (group == indexTimeBucketFlushGroup) {
-      logger.debug(s"Switching timebucket=${currentIndexTimeBucket.get} in dataset=${dataset.ref}" +
+      logger.debug(s"Switching timebucket=$currentIndexTimeBucket in dataset=${dataset.ref}" +
         s"shard=$shardNum out for flush. ")
-      val currBucket = currentIndexTimeBucket.incrementAndGet()
-      shardStats.currentIndexTimeBucket.set(currBucket)
-      timeBucketBitmaps.put(currBucket, new EWAHCompressedBitmap())
+      currentIndexTimeBucket += 1
+      shardStats.currentIndexTimeBucket.set(currentIndexTimeBucket)
+      timeBucketBitmaps.put(currentIndexTimeBucket, new EWAHCompressedBitmap())
       purgeExpiredPartitions()
-      Some(FlushIndexTimeBuckets(currBucket - 1)) // flush the last time bucket
+      Some(FlushIndexTimeBuckets(currentIndexTimeBucket-1))
     } else {
       None
     }
@@ -704,8 +704,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
       /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
-      updateIndexWithEndTime(p, chunks,
-        flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket.get))
+      updateIndexWithEndTime(p, chunks, flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket))
       chunks
     }
 
@@ -939,7 +938,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-      timeBucketBitmaps.get(currentIndexTimeBucket.get).set(partId)
+      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
       activelyIngesting.synchronized { activelyIngesting.set(partId) }
       val stamp = partSetLock.writeLock()
       try {
