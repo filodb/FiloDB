@@ -30,13 +30,11 @@ trait LabelTypeInstantFunction {
   * Apply the required instant function against the given value.
   *
   * @param value RangeVectorKey against which the function will be applied
-  * @return Calculated RangeVectorKey
+  * @return Updated RangeVectorKey
   */
 def apply(value: RangeVectorKey): RangeVectorKey
 
 }
-
-
 
 trait EmptyParamsInstantFunction extends DoubleInstantFunction {
 

@@ -1,14 +1,15 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.InstantFunctionId.{LabelJoin, LabelReplace}
-import filodb.query.exec.rangefn.InstantFunction
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
+import filodb.query.InstantFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
+import filodb.query.exec.rangefn.InstantFunction
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -76,7 +77,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
         override def next(): RowReader = {
           val next = rows.next()
-          val newValue = instantFunction.left.get (next.getDouble(1))
+          val newValue = instantFunction.left.get(next.getDouble(1))
           result.setValues(next.getLong(0), newValue)
           result
         }
@@ -116,7 +117,6 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
         override def next(): RowReader = {
           val next = rows.next()
           val nextVal = next.getDouble(1)
-
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
                          else  operatorFunction.calculate(nextVal, sclrVal)
           result.setValues(next.getLong(0), newValue)
@@ -129,5 +129,3 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   // TODO all operation defs go here and get invoked from mapRangeVector
 }
-
-

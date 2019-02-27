@@ -33,9 +33,6 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
     })
-
-
-
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val rand = new Random()
   val error = 0.00000001d
