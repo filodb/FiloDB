@@ -4,12 +4,10 @@ import java.util.{SplittableRandom, UUID}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
 import filodb.core.Types
@@ -19,7 +17,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
-import filodb.query.InstantFunctionId.HistogramQuantile
+import filodb.query.InstantFunctionId.{HistogramQuantile, LabelReplace}
 import filodb.query.exec._
 
 /**
@@ -168,6 +166,8 @@ class QueryEngine(dataset: Dataset,
     lp.function match {
       case HistogramQuantile =>
         vectors.foreach(_.addRangeVectorTransformer(HistogramQuantileMapper(lp.functionArgs)))
+      case LabelReplace =>
+        vectors.foreach(_.addRangeVectorTransformer(exec.LabelFunctionMapper(lp.function,lp.functionArgs)))
       case _ =>
         vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
     }

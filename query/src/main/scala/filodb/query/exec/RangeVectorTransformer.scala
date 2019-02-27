@@ -7,9 +7,9 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
-import filodb.query.InstantFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn.InstantFunction
+import filodb.query.exec.rangefn.LabelFunction
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -64,11 +64,6 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     source.map { rv =>
-      if (function == LabelReplace || function == LabelJoin) {
-        val newLabel = instantFunction.right.get(rv.key)
-        IteratorBackedRangeVector(newLabel, rv.rows)
-      }
-      else {
       val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
 
         private val rows = rv.rows
@@ -78,14 +73,13 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
         override def next(): RowReader = {
           val next = rows.next()
-          val newValue = instantFunction.left.get(next.getDouble(1))
+          val newValue = instantFunction(next.getDouble(1))
           result.setValues(next.getLong(0), newValue)
           result
         }
       }
       IteratorBackedRangeVector(rv.key, resultIterator)
     }
-  }
   }
 
 }
@@ -129,4 +123,22 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   }
 
   // TODO all operation defs go here and get invoked from mapRangeVector
+}
+
+final case class LabelFunctionMapper(function: InstantFunctionId,
+                                     funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"function=$function, funcParams=$funcParams"
+
+  val labelFunction = LabelFunction(function, funcParams)
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    source.map { rv =>
+      val newLabel = labelFunction(rv.key)
+      IteratorBackedRangeVector(newLabel, rv.rows)
+    }
+  }
 }
