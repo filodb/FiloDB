@@ -770,6 +770,16 @@ class TimeSeriesShard(val dataset: Dataset,
         .withTag("dataset", dataset.name)
         .withTag("shard", shardNum).start()
 
+      /* Note regarding thread safety of accessing time bucket bitmaps:
+
+         Every flush task reads bits on the earliest time bucket bitmap and sets bits on the
+         latest timeBucket, both of which are uniquely associated with the flush group. Since
+         each flush group is associated with different latest and earliest time buckets,
+         concurrent threads should not be reading or writing to same time bucket bitmaps, or
+         even setting the same time bucket in the collection. This can in theory happen only if
+         a flush task lasts more than the retention period (not possible).
+      */
+
       /* Add to timeBucketRb partKeys for (earliestTimeBucketBitmap && ~stoppedIngesting).
        These keys are from earliest time bucket that are still ingesting */
       val earliestTimeBucket = cmd.timeBucket - numTimeBucketsToRetain
