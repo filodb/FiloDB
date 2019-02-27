@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.util.concurrent.locks.StampedLock
+
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -7,7 +9,6 @@ import scala.util.{Random, Try}
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
-import java.util.concurrent.locks.StampedLock
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
@@ -273,9 +274,12 @@ class TimeSeriesShard(val dataset: Dataset,
 
   /**
     * Current time bucket number. Time bucket number is initialized from last value stored in metastore
-    * and is incremented each time a new bucket is prepared for flush
+    * and is incremented each time a new bucket is prepared for flush.
+    *
+    * This value is mutated only from the ingestion thread, but read from both flush and ingestion threads.
     */
-  private var currentIndexTimeBucket: Int = _
+  @volatile
+  private var currentIndexTimeBucket = 0
 
   /**
     * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
@@ -603,7 +607,7 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   /**
-    * Prepare to flush current index records, switch current currentIndexTimeBucketPartIds with new one.
+    * Prepare to flush current index records, switch current currentIndexTimeBucket partId bitmap with new one.
     * Return Some if part keys need to be flushed (happens for last flush group). Otherwise, None.
     *
     * NEEDS TO RUN ON INGESTION THREAD since it removes entries from the partition data structures.
@@ -935,9 +939,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-
       activelyIngesting.synchronized { activelyIngesting.set(partId) }
-
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
