@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.ExpandableArrayBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
@@ -119,23 +120,42 @@ class HistogramIngestBenchmark {
     containerNo += 1
   }
 
-  val inputs = Array(0L, 0x003322110000L, 0x004433220000L, 0x005544330000L,
-                     0x006655440000L, 0L, 0L, 0L)
-  val inputs2 = Array(0L, 0x003322100000L, 0x004433200000L, 0x005544300000L,
-                      0x006655400000L, 0L, 0L, 0L)
-  val buf = new UnsafeBuffer(new Array[Byte](1024))
-
-  @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
-  @OutputTimeUnit(TimeUnit.SECONDS)
-  def nibblePack8Even(): Int = {
-    NibblePack.pack8(inputs, 0, buf)
+  def nonzeroLongInputs(numNonZeroes: Int): Array[Long] = {
+    val longs = new Array[Long](64)
+    (1 to numNonZeroes).foreach { i =>
+      longs(i) = (Math.sin(i * Math.PI / numNonZeroes) * 1000.0).toLong
+    }
+    longs
   }
 
+  def increasingNonzeroes(numNonZeroes: Int): Array[Long] = {
+    val longs = nonzeroLongInputs(numNonZeroes)
+    for { i <- 1 until 64 } {
+      longs(i) = longs(i - 1) + longs(i)
+    }
+    longs
+  }
+
+  val inputs = increasingNonzeroes(16)
+  val buf = new ExpandableArrayBuffer()
+
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def nibblePack8Odd(): Int = {
-    NibblePack.pack8(inputs2, 0, buf)
+  def nibblePackDelta64(): Int = {
+    NibblePack.packDelta(inputs, buf, 0)
+  }
+
+  val bytesWritten = NibblePack.packDelta(inputs, buf, 0)
+  val sink = NibblePack.DeltaSink(new Array[Long](inputs.size))
+  val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nibbleUnpackDelta64(): Unit = {
+    bufSlice.wrap(buf, 0, bytesWritten)
+    val res = NibblePack.unpackToSink(bufSlice, sink, inputs.size)
+    require(res == NibblePack.Ok)
   }
 }

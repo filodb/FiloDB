@@ -41,7 +41,7 @@ trait RowReader {
    */
   def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
     val buf = new UnsafeBuffer(Array.empty[Byte])
-    UnsafeUtils.wrapUnsafeBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
+    UnsafeUtils.wrapDirectBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
     buf
   }
 

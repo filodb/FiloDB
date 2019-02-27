@@ -1,6 +1,8 @@
 package filodb.memory.format.vectors
 
+import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
+import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
 import org.agrona.concurrent.UnsafeBuffer
 import scalaxy.loops._
 
@@ -16,8 +18,8 @@ import filodb.memory.format.Encodings._
  *   +0000  u16  2-byte total length of this BinaryHistogram (excluding this length)
  *   +0002  u8   1-byte combined histogram buckets and values format code
  *                  0x00   Empty/null histogram
- *                  0x01   geometric + NibblePacked delta Long values
- *                  0x02   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
+ *                  0x03   geometric   + NibblePacked delta Long values
+ *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -26,9 +28,9 @@ import filodb.memory.format.Encodings._
  *
  *  NOTE: most of the methods below actually expect a pointer to the +2 hist bucket definition, not the length field
  */
-object BinaryHistogram {
+object BinaryHistogram extends StrictLogging {
   // Pass in a buffer which includes the length bytes.  Value class - no allocations.
-  case class BinHistogram(buf: UnsafeBuffer) extends AnyVal {
+  case class BinHistogram(buf: DirectBuffer) extends AnyVal {
     def totalLength: Int = buf.getShort(0).toInt + 2
     def numBuckets: Int = buf.getShort(5).toInt
     def formatCode: Byte = buf.getByte(2)
@@ -36,8 +38,10 @@ object BinaryHistogram {
     def bucketDefOffset: Long = buf.addressOffset + 5
     def valuesIndex: Int = 2 + 3 + bucketDefNumBytes     // pointer to values bytes
     def valuesNumBytes: Int = totalLength - valuesIndex
-    def intoValuesBuf(destBuf: UnsafeBuffer): Unit =
-      UnsafeUtils.wrapUnsafeBuf(buf.byteArray, buf.addressOffset + valuesIndex, valuesNumBytes, destBuf)
+    def valuesByteSlice: DirectBuffer = {
+      UnsafeUtils.wrapDirectBuf(buf.byteArray, buf.addressOffset + valuesIndex, valuesNumBytes, valuesBuf)
+      valuesBuf
+    }
     override def toString: String = s"<BinHistogram: ${toHistogram}>"
 
     /**
@@ -48,82 +52,81 @@ object BinaryHistogram {
      */
     def toHistogram: Histogram = formatCode match {
       case HistFormat_Geometric_Delta =>
-        val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset)
-        // TODO: flat buckets won't be supported anymore.  Fix this
-        FlatBucketHistogram(bucketDef, this)
+        val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case HistFormat_Geometric1_Delta =>
-        val bucketDef = HistogramBuckets.geometric1(buf.byteArray, bucketDefOffset)
-        // TODO: flat buckets won't be supported anymore.  Fix this
-        FlatBucketHistogram(bucketDef, this)
+        val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
+        LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case x =>
+        logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
+        Histogram.empty
     }
   }
 
-  private val tlValuesBuf = new ThreadLocal[UnsafeBuffer]()
-  def valuesBuf: UnsafeBuffer = tlValuesBuf.get match {
-    case UnsafeUtils.ZeroPointer => val buf = new UnsafeBuffer(new Array[Byte](4096))
+  // Thread local buffer used as read-only byte slice
+  private val tlValuesBuf = new ThreadLocal[DirectBuffer]()
+  def valuesBuf: DirectBuffer = tlValuesBuf.get match {
+    case UnsafeUtils.ZeroPointer => val buf = new UnsafeBuffer(Array.empty[Byte])
                                     tlValuesBuf.set(buf)
                                     buf
-    case b: UnsafeBuffer         => b
+    case b: DirectBuffer         => b
   }
 
   // Thread local buffer used as temp buffer for writing binary histograms
-  private val tlHistBuf = new ThreadLocal[UnsafeBuffer]()
-  def histBuf: UnsafeBuffer = tlHistBuf.get match {
-    case UnsafeUtils.ZeroPointer => val buf = new UnsafeBuffer(new Array[Byte](8192))
+  private val tlHistBuf = new ThreadLocal[MutableDirectBuffer]()
+  def histBuf: MutableDirectBuffer = tlHistBuf.get match {
+    case UnsafeUtils.ZeroPointer => val buf = new ExpandableArrayBuffer(4096)
                                     tlHistBuf.set(buf)
                                     buf
-    case b: UnsafeBuffer         => b
+    case b: MutableDirectBuffer         => b
   }
 
   val HistFormat_Null = 0x00.toByte
-  val HistFormat_Geometric_Delta = 0x01.toByte
-  val HistFormat_Geometric1_Delta = 0x02.toByte
-
-  case class FlatBucketValues(buf: UnsafeBuffer) extends AnyVal {
-    def bucket(no: Int): Long = buf.getLong(no * 8)
-  }
-
-  private case class FlatBucketHistogram(buckets: HistogramBuckets, binHist: BinHistogram) extends Histogram {
-    binHist.intoValuesBuf(valuesBuf)
-    final def numBuckets: Int = buckets.numBuckets
-    final def bucketTop(no: Int): Double = buckets.bucketTop(no)
-    final def bucketValue(no: Int): Double = FlatBucketValues(valuesBuf).bucket(no)
-    final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer =
-      intoBuf.map { x => x.wrap(binHist.buf); x }.getOrElse(binHist.buf)
-  }
+  val HistFormat_Geometric_Delta = 0x03.toByte
+  val HistFormat_Geometric1_Delta = 0x04.toByte
 
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
    * decoded as increasing.  Intended only for specific use cases when the source histogram are non increasing
    * buckets, ie each bucket has a count that is independent.
-   * Buckets are written as-is for now.
+   * @param buf the buffer to write the histogram to.  Highly recommended this be an ExpandableArrayBuffer or equiv.
+   *            so it can grow.
    * @return the number of bytes written, including the length prefix
    */
-  def writeNonIncreasing(buckets: HistogramBuckets, values: Array[Long], buf: UnsafeBuffer): Int = {
-    val formatCode = buckets match {
-      case g: GeometricBuckets   => HistFormat_Geometric_Delta
-      case g: GeometricBuckets_1 => HistFormat_Geometric1_Delta
-      case _  => ???
-    }
-    val bucketDef = buckets.toByteArray
+  def writeNonIncreasing(buckets: GeometricBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
+    val formatCode = if (buckets.minusOne) HistFormat_Geometric1_Delta else HistFormat_Geometric_Delta
 
-    val bytesNeeded = 2 + 1 + 2 + bucketDef.size + 8 * values.size
-    require(bytesNeeded < 65535, s"Histogram data is too large: $bytesNeeded bytes needed")
-    require(buf.capacity >= bytesNeeded, s"Buffer only has ${buf.capacity} bytes but we need $bytesNeeded")
-
-    buf.putShort(0, (bytesNeeded - 2).toShort)
     buf.putByte(2, formatCode)
-    buf.putShort(3, bucketDef.size.toShort)
-    buf.putBytes(5, bucketDef)
-    val valuesIndex = 5 + bucketDef.size
-    for { b <- 0 until values.size optimized } {
-      buf.putLong(valuesIndex + b * 8, values(b))
-    }
-    bytesNeeded
+    val valuesIndex = buckets.serialize(buf, 3)
+    val finalPos = NibblePack.packNonIncreasing(values, buf, valuesIndex)
+
+    require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
+    buf.putShort(0, (finalPos - 2).toShort)
+    finalPos
   }
 
-  def writeNonIncreasing(buckets: HistogramBuckets, values: Array[Long]): Int =
+  def writeDelta(buckets: GeometricBuckets, values: Array[Long]): Int =
     writeNonIncreasing(buckets, values, histBuf)
+
+  /**
+   * Encodes binary histogram with geometric bucket definition and data which is strictly increasing and positive.
+   * All histograms after ingestion are expected to be increasing.
+   * Delta encoding is applied for compression.
+   * @param buf the buffer to write the histogram to.  Highly recommended this be an ExpandableArrayBuffer or equiv.
+   *            so it can grow.
+   * @return the number of bytes written, including the length prefix
+   */
+  def writeDelta(buckets: GeometricBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
+    val formatCode = if (buckets.minusOne) HistFormat_Geometric1_Delta else HistFormat_Geometric_Delta
+
+    buf.putByte(2, formatCode)
+    val valuesIndex = buckets.serialize(buf, 3)
+    val finalPos = NibblePack.packDelta(values, buf, valuesIndex)
+
+    require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
+    buf.putShort(0, (finalPos - 2).toShort)
+    finalPos
+  }
 }
 
 object HistogramVector {
@@ -145,10 +148,10 @@ object HistogramVector {
     UnsafeUtils.setShort(addr + OffsetNumHistograms, (getNumHistograms(addr) + 1).toShort)
 
   final def formatCode(addr: BinaryVectorPtr): Byte = UnsafeUtils.getByte(addr + OffsetFormatCode)
-  final def afterBucketDefAddr(addr: BinaryVectorPtr): BinaryRegion.NativePointer =
-    addr + OffsetBucketDef + bucketDefNumBytes(addr)
+  final def afterBucketDefAddr(addr: BinaryVectorPtr): Ptr.U8 =
+    Ptr.U8(addr) + OffsetBucketDef + bucketDefNumBytes(addr)
   final def bucketDefNumBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetBucketDefSize).toInt
-  final def bucketDefAddr(addr: BinaryVectorPtr): BinaryRegion.NativePointer = addr + OffsetBucketDef
+  final def bucketDefAddr(addr: BinaryVectorPtr): Ptr.U8 = Ptr.U8(addr) + OffsetBucketDef
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, addr: BinaryVectorPtr): Boolean =
@@ -163,7 +166,7 @@ object HistogramVector {
     val bucketAddrPtr = afterBucketDefAddr(addr)
     val headerBytes = UnsafeUtils.getInt(addr)
     headerBytes + (0 until getNumBuckets(addr)).map { b =>
-                    val bucketVectorAddr = UnsafeUtils.getLong(bucketAddrPtr + 8*b)
+                    val bucketVectorAddr = UnsafeUtils.getLong((bucketAddrPtr + 8*b).addr)
                     UnsafeUtils.getInt(bucketVectorAddr) + 4
                   }.sum
   }
@@ -226,7 +229,7 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-                                    UnsafeUtils.ZeroPointer, bucketDefAddr(addr), h.bucketDefNumBytes)
+                                    UnsafeUtils.ZeroPointer, bucketDefAddr(addr).addr, h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
@@ -240,11 +243,10 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
     }
 
     // Now, iterate through the counters and add them to each individual vector
-    h.intoValuesBuf(valueBuf)
-    val values = FlatBucketValues(valueBuf)
+    val hist = h.toHistogram
     bucketAppenders.foreach { appenders =>
       for { b <- 0 until numBuckets optimized } {
-        val resp = appenders(b).addData(values.bucket(b))
+        val resp = appenders(b).addData(hist.bucketValue(b).toLong)
         require(resp == Ack)
       }
     }
@@ -285,7 +287,7 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
 
     val newHeaderAddr = memFactory.allocateOffheap(numBytes)
     // Copy headers including bucket def
-    val bucketPtrOffset = (afterBucketDefAddr(addr) - addr).toInt
+    val bucketPtrOffset = (afterBucketDefAddr(addr).addr - addr).toInt
     UnsafeUtils.copy(addr, newHeaderAddr, bucketPtrOffset)
 
     for { b <- 0 until optimizedBuckets.size optimized } {
@@ -298,7 +300,7 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
   // NOTE: allocating vectors during ingestion is a REALLY BAD idea.  For one if one runs out of memory then
   //   it will fail but ingestion into other vectors might succeed, resulting in undefined switchBuffers behaviors.
   private def initBuckets(numBuckets: Int): Unit = {
-    val bucketPointersAddr = afterBucketDefAddr(addr)
+    val bucketPointersAddr = afterBucketDefAddr(addr).addr
     val appenders = (0 until numBuckets).map { b =>
       val appender = LongBinaryVector.appendingVectorNoNA(factory, maxItems)
       UnsafeUtils.setLong(bucketPointersAddr + 8*b, appender.addr)
@@ -323,14 +325,14 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader
   final def length: Int = getNumHistograms(histVect)
   val numBuckets = if (length > 0) getNumBuckets(histVect) else 0
   val bucketAddrs = if (length > 0) {
-    val bucketAddrBase = afterBucketDefAddr(histVect)
+    val bucketAddrBase = afterBucketDefAddr(histVect).addr
     (0 until numBuckets).map(b => UnsafeUtils.getLong(bucketAddrBase + 8 * b)).toArray
   } else {
     Array.empty[BinaryVectorPtr]
   }
   val readers = if (length > 0) bucketAddrs.map(LongBinaryVector.apply) else Array.empty[LongVectorDataReader]
 
-  val buckets = HistogramBuckets(bucketDefAddr(histVect), formatCode(histVect))
+  val buckets = HistogramBuckets(bucketDefAddr(histVect).add(-2), formatCode(histVect))
   val returnHist = MutableHistogram.empty(buckets)
 
   /**
