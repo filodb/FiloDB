@@ -177,6 +177,8 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    */
   final def add(other: HistogramWithBuckets): Unit =
     if (buckets == other.buckets) {
+      // If it was NaN before, reset to 0 to sum another hist
+      if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
       for { b <- 0 until numBuckets optimized } {
         values(b) += other.bucketValue(b)
       }
@@ -187,7 +189,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
 
 object MutableHistogram {
   def empty(buckets: HistogramBuckets): MutableHistogram =
-    MutableHistogram(buckets, new Array[Double](buckets.numBuckets))
+    MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
 }
 
 /**

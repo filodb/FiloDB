@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 import org.agrona.{DirectBuffer, ExpandableArrayBuffer, MutableDirectBuffer}
@@ -9,7 +11,6 @@ import scalaxy.loops._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.Encodings._
 
 /**
  * BinaryHistogram is the binary format for a histogram binary blob included in BinaryRecords and sent over the wire.
@@ -139,178 +140,129 @@ object HistogramVector {
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
 
-  final def getNumBuckets(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetNumBuckets).toInt
+  final def getNumBuckets(addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16
 
-  final def getNumHistograms(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetNumHistograms).toInt
-  final def resetNumHistograms(addr: BinaryVectorPtr): Unit =
-    UnsafeUtils.setShort(addr + OffsetNumHistograms, 0)
-  final def incrNumHistograms(addr: BinaryVectorPtr): Unit =
-    UnsafeUtils.setShort(addr + OffsetNumHistograms, (getNumHistograms(addr) + 1).toShort)
+  final def getNumHistograms(addr: Ptr.U8): Int = addr.add(OffsetNumHistograms).asU16.getU16
+  final def resetNumHistograms(addr: Ptr.U8): Unit = addr.add(OffsetNumHistograms).asU16.asMut.set(0)
+  final def incrNumHistograms(addr: Ptr.U8): Unit =
+    addr.add(OffsetNumHistograms).asU16.asMut.set(getNumHistograms(addr) + 1)
 
-  final def formatCode(addr: BinaryVectorPtr): Byte = UnsafeUtils.getByte(addr + OffsetFormatCode)
-  final def afterBucketDefAddr(addr: BinaryVectorPtr): Ptr.U8 =
-    Ptr.U8(addr) + OffsetBucketDef + bucketDefNumBytes(addr)
-  final def bucketDefNumBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getShort(addr + OffsetBucketDefSize).toInt
-  final def bucketDefAddr(addr: BinaryVectorPtr): Ptr.U8 = Ptr.U8(addr) + OffsetBucketDef
+  // Note: the format code defines bucket definition format + format of each individual compressed histogram
+  final def formatCode(addr: Ptr.U8): Byte = addr.add(OffsetFormatCode).getU8.toByte
+  final def afterBucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef + bucketDefNumBytes(addr)
+  final def bucketDefNumBytes(addr: Ptr.U8): Int = addr.add(OffsetBucketDefSize).asU16.getU16
+  final def bucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
 
   // Matches the bucket definition whose # bytes is at (base, offset)
-  final def matchBucketDef(hist: BinaryHistogram.BinHistogram, addr: BinaryVectorPtr): Boolean =
+  final def matchBucketDef(hist: BinaryHistogram.BinHistogram, addr: Ptr.U8): Boolean =
     (hist.formatCode == formatCode(addr)) &&
     (hist.bucketDefNumBytes == bucketDefNumBytes(addr)) && {
-      UnsafeUtils.equate(UnsafeUtils.ZeroPointer, addr + OffsetBucketDef, hist.buf.byteArray, hist.bucketDefOffset,
+      UnsafeUtils.equate(UnsafeUtils.ZeroPointer, bucketDefAddr(addr).addr, hist.buf.byteArray, hist.bucketDefOffset,
                          hist.bucketDefNumBytes)
     }
 
-  // Columnar HistogramVectors composed of multiple vectors, this calculates total used size
-  def columnarTotalSize(addr: BinaryVectorPtr): Int = {
-    val bucketAddrPtr = afterBucketDefAddr(addr)
-    val headerBytes = UnsafeUtils.getInt(addr)
-    headerBytes + (0 until getNumBuckets(addr)).map { b =>
-                    val bucketVectorAddr = UnsafeUtils.getLong((bucketAddrPtr + 8*b).addr)
-                    UnsafeUtils.getInt(bucketVectorAddr) + 4
-                  }.sum
+  def appending(factory: MemFactory, maxBytes: Int): AppendableHistogramVector = {
+    val addr = factory.allocateOffheap(maxBytes)
+    new AppendableHistogramVector(factory, Ptr.U8(addr), maxBytes)
   }
 
-  val ReservedBucketDefSize = 256
-  def appendingColumnar(factory: MemFactory, numBuckets: Int, maxItems: Int): ColumnarAppendableHistogramVector = {
-    // Really just an estimate.  TODO: if we really go with columnar, make it more accurate
-    val neededBytes = OffsetBucketDef + ReservedBucketDefSize + 8 * numBuckets
-    val addr = factory.allocateOffheap(neededBytes)
-    new ColumnarAppendableHistogramVector(factory, addr, maxItems)
-  }
+  def apply(buffer: ByteBuffer): HistogramReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
 
-  def apply(p: BinaryVectorPtr): HistogramReader =
-    new ColumnarHistogramReader(p)
+  import WireFormat._
+
+  def apply(p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(p) match {
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(Ptr.U8(p))
+  }
 }
 
 /**
- * A HistogramVector appender composed of individual primitive columns.
- * Just a POC to get started quickly and as a reference.
+ * A HistogramVector appender storing compressed histogram values for less storage space.
+ * This is a Section-based vector - sections of up to 64 histograms are stored at a time.
+ * It stores histograms up to a maximum allowed size (since histograms are variable length)
  * Note that the bucket schema is not set until getting the first item.
- * After the bucket definition:
- * An array [u64] of native pointers to the individual columns
- *
- * TODO: initialize num bytes and vector type stuff
  *
  * Read/Write/Lock semantics: everything is gated by the number of elements.
  * When it is 0, nothing is initialized so the reader guards against that.
  * When it is > 0, then all structures are initialized.
  */
-class ColumnarAppendableHistogramVector(factory: MemFactory,
-                                        val addr: BinaryVectorPtr,
-                                        maxItems: Int) extends BinaryAppendableVector[UnsafeBuffer] {
+class AppendableHistogramVector(factory: MemFactory,
+                                vectPtr: Ptr.U8,
+                                val maxBytes: Int) extends BinaryAppendableVector[DirectBuffer] with SectionWriter {
   import HistogramVector._
   import BinaryHistogram._
-  resetNumHistograms(addr)
 
-  private var bucketAppenders: Option[Array[BinaryAppendableVector[Long]]] = None
+  // Initialize header
+  BinaryVector.writeMajorAndSubType(addr, WireFormat.VECTORTYPE_HISTOGRAM,
+                                          WireFormat.SUBTYPE_H_SIMPLE)
+  reset()
+
+  final def addr: BinaryVectorPtr = vectPtr.addr
+  final def maxElementsPerSection: Int = 64
 
   val dispose = () => {
-    // first, free memory from each appender
-    bucketAppenders.foreach(_.foreach(_.dispose()))
     // free our own memory
     factory.freeMemory(addr)
   }
 
-  final def numBytes: Int = UnsafeUtils.getInt(addr) + 4
-  final def maxBytes: Int = numBytes
-  final def length: Int = getNumHistograms(addr)
+  final def numBytes: Int = vectPtr.asI32.getI32 + 4
+  final def length: Int = getNumHistograms(vectPtr)
   final def isAvailable(index: Int): Boolean = true
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
 
-  private val valueBuf = new UnsafeBuffer(Array.empty[Byte])
+  private def setNumBytes(len: Int): Unit = {
+    require(len >= 0)
+    vectPtr.asI32.asMut.set(len)
+  }
 
-  // NOTE: to eliminate allocations, re-use the UnsafeBuffer and keep passing the same instance to addData
-  final def addData(buf: UnsafeBuffer): AddResponse = {
-    val numItems = getNumHistograms(addr)
+  // NOTE: to eliminate allocations, re-use the DirectBuffer and keep passing the same instance to addData
+  final def addData(buf: DirectBuffer): AddResponse = {
+    val numItems = getNumHistograms(vectPtr)
     val h = BinHistogram(buf)
     val numBuckets = h.numBuckets
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-                                    UnsafeUtils.ZeroPointer, bucketDefAddr(addr).addr, h.bucketDefNumBytes)
+                                    UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr, h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
-      // initialize the buckets
-      initBuckets(numBuckets)
-    } else if (numItems >= maxItems) {
-      return VectorTooSmall(0, 0)
+      // Initialize the first section
+      val firstSectPtr = afterBucketDefAddr(vectPtr)
+      initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     } else {
       // check the bucket schema is identical.  If not, return BucketSchemaMismatch
-      if (!matchBucketDef(h, addr)) return BucketSchemaMismatch
+      if (!matchBucketDef(h, vectPtr)) return BucketSchemaMismatch
     }
 
-    // Now, iterate through the counters and add them to each individual vector
-    val hist = h.toHistogram
-    bucketAppenders.foreach { appenders =>
-      for { b <- 0 until numBuckets optimized } {
-        val resp = appenders(b).addData(hist.bucketValue(b).toLong)
-        require(resp == Ack)
-      }
+    val res = appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
+    if (res == Ack) {
+      // set new number of bytes first
+      setNumBytes(maxBytes - bytesLeft)
+      // Finally, increase # histograms which is the ultimate safe gate for access by readers
+      incrNumHistograms(vectPtr)
     }
-
-    incrNumHistograms(addr)
-    Ack
+    res
   }
 
   final def addNA(): AddResponse = Ack  // TODO: Add a 0 to every appender
 
   def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.blobAsBuffer(col))
-  def copyToBuffer: Buffer[UnsafeBuffer] = ???
-  def apply(index: Int): UnsafeBuffer = ???
+  def copyToBuffer: Buffer[DirectBuffer] = ???
+  def apply(index: Int): DirectBuffer = ???
 
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   // NOTE: do not access reader below unless this vect is nonempty.  TODO: fix this, or don't if we don't use this class
-  lazy val reader: VectorDataReader = new ColumnarHistogramReader(addr)
+  lazy val reader: VectorDataReader = new RowHistogramReader(vectPtr)
 
   def reset(): Unit = {
-    bucketAppenders.foreach(_.foreach(_.dispose()))
-    bucketAppenders = None
-    resetNumHistograms(addr)
+    resetNumHistograms(vectPtr)
+    setNumBytes(OffsetNumBuckets + 2)
   }
 
-  // Optimize each bucket's appenders, then create a new region with the same headers but pointing at the
-  // optimized vectors.
-  // TODO: this is NOT safe for persistence and recovery, as pointers cannot be persisted or recovered.
-  // For us to really make persistence of this work, we would need to pursue one of these strategies:
-  //  1) Change code of each LongAppendingVector to tell us how much optimized bytes take up for each bucket,
-  //     then do a giant allocation including every bucket, and use relative pointers, not absolute, to point
-  //     to each one;  (or possibly a different kind of allocator)
-  //  2) Use BlockIDs and offsets instead of absolute pointers, and persist entire blocks.
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
-    val optimizedBuckets = bucketAppenders.map { appenders =>
-      appenders.map(_.optimize(memFactory, hint))
-    }.getOrElse(Array.empty[BinaryVectorPtr])
-
-    val newHeaderAddr = memFactory.allocateOffheap(numBytes)
-    // Copy headers including bucket def
-    val bucketPtrOffset = (afterBucketDefAddr(addr).addr - addr).toInt
-    UnsafeUtils.copy(addr, newHeaderAddr, bucketPtrOffset)
-
-    for { b <- 0 until optimizedBuckets.size optimized } {
-      UnsafeUtils.setLong(newHeaderAddr + bucketPtrOffset + 8*b, optimizedBuckets(b))
-    }
-
-    newHeaderAddr
-  }
-
-  // NOTE: allocating vectors during ingestion is a REALLY BAD idea.  For one if one runs out of memory then
-  //   it will fail but ingestion into other vectors might succeed, resulting in undefined switchBuffers behaviors.
-  private def initBuckets(numBuckets: Int): Unit = {
-    val bucketPointersAddr = afterBucketDefAddr(addr).addr
-    val appenders = (0 until numBuckets).map { b =>
-      val appender = LongBinaryVector.appendingVectorNoNA(factory, maxItems)
-      UnsafeUtils.setLong(bucketPointersAddr + 8*b, appender.addr)
-      appender
-    }
-    bucketAppenders = Some(appenders.toArray)
-
-    // Initialize number of bytes in this histogram header
-    UnsafeUtils.setInt(addr, (bucketPointersAddr - addr).toInt + 8 * numBuckets)
-  }
+  // We don't optimize -- for now.  Histograms are already stored compressed.
+  // In future, play with other optimization strategies, such as delta encoding.
 }
 
 trait HistogramReader extends VectorDataReader {
@@ -319,21 +271,76 @@ trait HistogramReader extends VectorDataReader {
   def sum(start: Int, end: Int): MutableHistogram
 }
 
-class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader {
+/**
+ * A reader for row-based Histogram vectors.  Mostly contains logic to skip around the vector to find the right
+ * record pointer.
+ */
+class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader {
   import HistogramVector._
 
   final def length: Int = getNumHistograms(histVect)
   val numBuckets = if (length > 0) getNumBuckets(histVect) else 0
-  val bucketAddrs = if (length > 0) {
-    val bucketAddrBase = afterBucketDefAddr(histVect).addr
-    (0 until numBuckets).map(b => UnsafeUtils.getLong(bucketAddrBase + 8 * b)).toArray
-  } else {
-    Array.empty[BinaryVectorPtr]
-  }
-  val readers = if (length > 0) bucketAddrs.map(LongBinaryVector.apply) else Array.empty[LongVectorDataReader]
+  var curSection: Section = _
+  var curElemNo = 0
+  var sectStartingElemNo = 0
+  var curHist: Ptr.U8 = _
+  if (length > 0) setFirstSection()
 
   val buckets = HistogramBuckets(bucketDefAddr(histVect).add(-2), formatCode(histVect))
-  val returnHist = MutableHistogram.empty(buckets)
+  val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  val endAddr = histVect + histVect.asI32.getI32 + 4
+
+  private def setFirstSection(): Unit = {
+    curSection = Section.fromPtr(afterBucketDefAddr(histVect))
+    curHist = curSection.firstElem
+    curElemNo = 0
+    sectStartingElemNo = 0
+  }
+
+  // Assume that most read patterns move the "cursor" or element # forward.  Since we track the current section
+  // moving forward or jumping to next section is easy.  Jumping backwards within current section is not too bad -
+  // we restart at beg of current section.  Going back before current section is expensive, then we start over.
+  // TODO: split this out into a SectionReader trait
+  private def locate(elemNo: Int): Ptr.U8 = {
+    require(elemNo >= 0 && elemNo < length, s"$elemNo is out of vector bounds [0, $length)")
+    if (elemNo == curElemNo) {
+      curHist
+    } else if (elemNo > curElemNo) {
+      // Jump forward to next section until we are in section containing elemNo.  BUT, don't jump beyond cur length
+      while (elemNo >= (sectStartingElemNo + curSection.numElements) && curSection.endAddr.addr < endAddr.addr) {
+        curElemNo = sectStartingElemNo + curSection.numElements
+        curSection = Section.fromPtr(curSection.endAddr)
+        sectStartingElemNo = curElemNo
+        curHist = curSection.firstElem
+      }
+
+      curHist = skipAhead(curHist, elemNo - curElemNo)
+      curElemNo = elemNo
+      curHist
+    } else {  // go backwards then go forwards
+      // Is it still within current section?  If so restart search at beg of section
+      if (elemNo >= sectStartingElemNo) {
+        curElemNo = sectStartingElemNo
+        curHist = curSection.firstElem
+      } else {
+        // Otherwise restart search at beginning
+        setFirstSection()
+      }
+      locate(elemNo)
+    }
+  }
+
+  // Skips ahead numElems elements starting at startPtr and returns the new pointer.  NOTE: numElems might be 0.
+  private def skipAhead(startPtr: Ptr.U8, numElems: Int): Ptr.U8 = {
+    require(numElems >= 0)
+    var togo = numElems
+    var ptr = startPtr
+    while (togo > 0) {
+      ptr += ptr.asU16.getU16 + 2
+      togo -= 1
+    }
+    ptr
+  }
 
   /**
    * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
@@ -355,18 +362,22 @@ class ColumnarHistogramReader(histVect: BinaryVectorPtr) extends HistogramReader
   // WARNING: histogram returned is shared between calls, do not reuse!
   final def apply(index: Int): Histogram = {
     require(length > 0)
-    for { b <- 0 until numBuckets optimized } {
-      returnHist.values(b) = readers(b).apply(bucketAddrs(b), index)
-    }
+    val histPtr = locate(index)
+    val histLen = histPtr.asU16.getU16
+    val buf = BinaryHistogram.valuesBuf
+    buf.wrap(histPtr.add(2).addr, histLen)
+    NibblePack.unpackToSink(buf, NibblePack.DeltaSink(returnHist.values), numBuckets)
     returnHist
   }
 
   // sum_over_time returning a Histogram with sums for each bucket.  Start and end are inclusive row numbers
+  // NOTE: for now this is just a dumb implementation that decompresses each histogram fully
   final def sum(start: Int, end: Int): MutableHistogram = {
     require(length > 0 && start >= 0 && end < length)
-    for { b <- 0 until numBuckets optimized } {
-      returnHist.values(b) = readers(b).sum(bucketAddrs(b), start, end)
+    val summedHist = MutableHistogram.empty(buckets)
+    for { i <- start to end optimized } {
+      summedHist.add(apply(i).asInstanceOf[HistogramWithBuckets])
     }
-    returnHist
+    summedHist
   }
 }

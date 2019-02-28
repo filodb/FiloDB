@@ -8,7 +8,7 @@ package filodb.memory.format
  * Modeled after the equivalent Ptr types in Rust.
  */
 object Ptr {
-  // A read-only pointer to bytes. Equivalent to *const u8 in Rust/C.  No length safety, but much better than
+  // A read-only pointer to unsigned bytes. Equivalent to *const u8 in Rust/C.  No length safety, but much better than
   // type equivalency to Long's.  Use it to prevent type errors where one accidentally substitutes ints or longs.
   final case class U8(addr: Long) extends AnyVal {
     // Simple pointer math, by # of U8 elements (bytes)
@@ -16,6 +16,40 @@ object Ptr {
     //scalastyle:off method.name
     final def +(offset: Int): U8 = U8(addr + offset)
 
-    final def get: Byte = UnsafeUtils.getByte(addr)
+    final def getU8: Int = UnsafeUtils.getByte(addr) & 0x00ff
+
+    final def asU16: U16 = U16(addr)
+    final def asI32: I32 = I32(addr)
+    final def asMut: MutU8 = MutU8(addr)
+  }
+
+  final case class MutU8(addr: Long) extends AnyVal {
+    final def set(num: Int): Unit = UnsafeUtils.setByte(addr, num.toByte)
+  }
+
+  final case class U16(addr: Long) extends AnyVal {
+    final def add(offset: Int): U16 = U16(addr + offset * 2)
+    final def +(offset: Int): U16 = U16(addr + offset * 2)
+
+    final def getU16: Int = UnsafeUtils.getShort(addr) & 0x00ffff
+
+    final def asMut: MutU16 = MutU16(addr)
+  }
+
+  final case class MutU16(addr: Long) extends AnyVal {
+    final def set(num: Int): Unit = UnsafeUtils.setShort(addr, num.toShort)
+  }
+
+  final case class I32(addr: Long) extends AnyVal {
+    final def add(offset: Int): I32 = I32(addr + offset * 4)
+    final def +(offset: Int): I32 = I32(addr + offset * 4)
+
+    final def getI32: Int = UnsafeUtils.getInt(addr)
+
+    final def asMut: MutI32 = MutI32(addr)
+  }
+
+  final case class MutI32(addr: Long) extends AnyVal {
+    final def set(num: Int): Unit = UnsafeUtils.setInt(addr, num)
   }
 }

@@ -45,6 +45,7 @@ object BinaryVector {
     case Classes.Long   => (b => vectors.LongBinaryVector(b))
     case Classes.Double => (b => vectors.DoubleVector(b))
     case Classes.UTF8   => (b => vectors.UTF8Vector(b))
+    case Classes.Histogram => (b => vectors.HistogramVector(b))
   }
 
   type PtrToDataReader = PartialFunction[Class[_], BinaryVectorPtr => VectorDataReader]

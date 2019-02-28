@@ -8,11 +8,11 @@ class HistogramVectorTest extends NativeVectorTest {
   import HistogramTest._
 
   it("should throw exceptions trying to query empty HistogramVector") {
-    val appender = HistogramVector.appendingColumnar(memFactory, 8, 100)
+    val appender = HistogramVector.appending(memFactory, 1024)
 
     appender.length shouldEqual 0
     appender.isAllNA shouldEqual true
-    val reader = appender.reader.asInstanceOf[ColumnarHistogramReader]
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
 
     reader.length(appender.addr) shouldEqual 0
     reader.numBuckets shouldEqual 0
@@ -30,7 +30,7 @@ class HistogramVectorTest extends NativeVectorTest {
   }
 
   it("should accept BinaryHistograms of the same schema and be able to query them") {
-    val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
+    val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
@@ -38,7 +38,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     appender.length shouldEqual rawHistBuckets.length
 
-    val reader = appender.reader.asInstanceOf[ColumnarHistogramReader]
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
     reader.length shouldEqual rawHistBuckets.length
 
     (0 until rawHistBuckets.length).foreach { i =>
@@ -51,7 +51,7 @@ class HistogramVectorTest extends NativeVectorTest {
   }
 
   it("should optimize histograms and be able to query optimized vectors") {
-    val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
+    val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
@@ -59,7 +59,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     appender.length shouldEqual rawHistBuckets.length
 
-    val reader = appender.reader.asInstanceOf[ColumnarHistogramReader]
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
     reader.length shouldEqual rawHistBuckets.length
 
     (0 until rawHistBuckets.length).foreach { i =>
@@ -68,8 +68,8 @@ class HistogramVectorTest extends NativeVectorTest {
     }
 
     val optimized = appender.optimize(memFactory)
-    val optReader = new ColumnarHistogramReader(optimized)
-    optReader.length shouldEqual rawHistBuckets.length
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+    optReader.length(optimized) shouldEqual rawHistBuckets.length
     (0 until rawHistBuckets.length).foreach { i =>
       val h = optReader(i)
       verifyHistogram(h, i)
@@ -84,7 +84,7 @@ class HistogramVectorTest extends NativeVectorTest {
   }
 
   it("should reject BinaryHistograms of schema different from first schema ingested") {
-    val appender = HistogramVector.appendingColumnar(memFactory, 8, 50)
+    val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
@@ -98,7 +98,7 @@ class HistogramVectorTest extends NativeVectorTest {
   }
 
   it("should reject new adds when vector is full") {
-    val appender = HistogramVector.appendingColumnar(memFactory, 8, 4)
+    val appender = HistogramVector.appending(memFactory, 80)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
@@ -106,6 +106,6 @@ class HistogramVectorTest extends NativeVectorTest {
 
     appender.length shouldEqual rawHistBuckets.length
 
-    appender.addData(buffer) shouldEqual VectorTooSmall(0, 0)
+    appender.addData(buffer) shouldBe a[VectorTooSmall]
   }
 }
