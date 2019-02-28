@@ -11,7 +11,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
-import filodb.memory.data.OffheapLFSortedIDMap
+import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.AggregationOperator._
@@ -31,11 +31,11 @@ final case class ReduceAggregateExec(id: String,
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[QueryResponse],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case QueryResult(_, _, result) => Observable.fromIterable(result)
-        case QueryError(_, ex)         => throw ex
+        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+        case (QueryError(_, ex), _)         => throw ex
     }
     RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, results, rv => rv.key)
   }
@@ -531,7 +531,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      OffheapLFSortedIDMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks()
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1
@@ -548,7 +548,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         }
       }
     } finally {
-      OffheapLFSortedIDMap.releaseAllSharedLocks()
+      ChunkMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
