@@ -48,7 +48,7 @@ class LabelFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("demo.io:8080"))) // will not be replaced
 
     val funcParams = Seq("instance", "$1 new Label Value $2", "instance", "(.*):90(.*)")
-    val labelVectorFnMapper = exec.LabelFunctionMapper(InstantFunctionId.LabelReplace, funcParams)
+    val labelVectorFnMapper = exec.LabelFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
@@ -94,7 +94,7 @@ class LabelFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("instanceNew", "$1", "instance", "(.*)\\d")
 
-    val labelVectorFnMapper = exec.LabelFunctionMapper(InstantFunctionId.LabelReplace, funcParams)
+    val labelVectorFnMapper = exec.LabelFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))

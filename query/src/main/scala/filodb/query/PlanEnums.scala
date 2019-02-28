@@ -18,23 +18,11 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object ClampMin extends InstantFunctionId("clamp_min")
 
-  case object DaysInMonth extends InstantFunctionId("days_in_month")
-
-  case object DaysOfMonth extends InstantFunctionId("day_of_month")
-
-  case object DayOfWeek extends InstantFunctionId("day_of_Week")
-
   case object Exp extends InstantFunctionId("exp")
 
   case object Floor extends InstantFunctionId("floor")
 
   case object HistogramQuantile extends InstantFunctionId("histogram_quantile")
-
-  case object Hour extends InstantFunctionId("hour")
-
-  case object LabelReplace extends InstantFunctionId("label_replace")
-
-  case object LabelJoin extends InstantFunctionId("label_join")
 
   case object Ln extends InstantFunctionId("ln")
 
@@ -42,21 +30,9 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object Log2 extends InstantFunctionId("log2")
 
-  case object Minute extends InstantFunctionId("minute")
-
-  case object Month extends InstantFunctionId("month")
-
   case object Round extends InstantFunctionId("round")
 
-  case object Sort extends InstantFunctionId("sort")
-
-  case object SortDesc extends InstantFunctionId("sort_desc")
-
   case object Sqrt extends InstantFunctionId("sqrt")
-
-  case object Timestamp extends InstantFunctionId("timestamp")
-
-  case object Year extends InstantFunctionId("year")
 
   // TODO time, vector, scalar
 }
@@ -201,6 +177,37 @@ object Cardinality extends Enum[Cardinality] {
   case object ManyToOne extends Cardinality
 
   case object ManyToMany extends Cardinality
+
+}
+
+sealed abstract class MiscellaneousFunctionId(override val entryName: String) extends EnumEntry
+
+object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
+  val values = findValues
+
+  case object DaysInMonth extends MiscellaneousFunctionId("days_in_month")
+
+  case object DaysOfMonth extends MiscellaneousFunctionId("day_of_month")
+
+  case object DayOfWeek extends MiscellaneousFunctionId("day_of_Week")
+
+  case object Hour extends MiscellaneousFunctionId("hour")
+
+  case object LabelReplace extends MiscellaneousFunctionId("label_replace")
+
+  case object LabelJoin extends MiscellaneousFunctionId("label_join")
+
+  case object Minute extends MiscellaneousFunctionId("minute")
+
+  case object Month extends MiscellaneousFunctionId("month")
+
+  case object Sort extends MiscellaneousFunctionId("sort")
+
+  case object SortDesc extends MiscellaneousFunctionId("sort_desc")
+
+  case object Timestamp extends MiscellaneousFunctionId("timestamp")
+
+  case object Year extends MiscellaneousFunctionId("year")
 
 }
 

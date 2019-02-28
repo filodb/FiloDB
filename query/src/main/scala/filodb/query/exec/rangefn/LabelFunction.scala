@@ -4,8 +4,8 @@ import java.util.regex.PatternSyntaxException
 
 import filodb.core.query.{CustomRangeVectorKeyWithShards, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query.InstantFunctionId
-import filodb.query.InstantFunctionId.LabelReplace
+import filodb.query.MiscellaneousFunctionId
+import filodb.query.MiscellaneousFunctionId.LabelReplace
 
 trait LabelTypeInstantFunction {
 
@@ -28,7 +28,7 @@ object LabelFunction {
     * @param funcParams - Additional required function parameters
     * @return the function
     */
-  def apply(function: InstantFunctionId, funcParams: Seq[Any]): LabelTypeInstantFunction =
+  def apply(function: MiscellaneousFunctionId, funcParams: Seq[Any]): LabelTypeInstantFunction =
   {
     function match {
       case LabelReplace       => LabelReplaceImpl(funcParams)

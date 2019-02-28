@@ -10,7 +10,8 @@ trait Functions extends Base with Operators with Vectors {
     if (!ignoreChecks &&
       InstantFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
-      FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+      MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
@@ -26,6 +27,7 @@ trait Functions extends Base with Operators with Vectors {
 
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
+      val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
 
       if (instantFunctionIdOpt.isDefined) {
         val instantFunctionId = instantFunctionIdOpt.get
@@ -44,7 +46,13 @@ trait Functions extends Base with Operators with Vectors {
           case FiloFunctionId.ChunkMetaAll =>   // Just get the raw chunk metadata
             RawChunkMeta(rangeSelector, filters, columns.headOption.getOrElse(""))
         }
-      } else {
+      } else if (miscellaneousFunctionIdOpt.isDefined) {
+        val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+
+        ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, otherParams)
+      }
+      else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
 

@@ -6,7 +6,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn.InstantFunction
 import filodb.query.exec.rangefn.LabelFunction
@@ -125,7 +125,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   // TODO all operation defs go here and get invoked from mapRangeVector
 }
 
-final case class LabelFunctionMapper(function: InstantFunctionId,
+final case class LabelFunctionMapper(function: MiscellaneousFunctionId,
                                      funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
