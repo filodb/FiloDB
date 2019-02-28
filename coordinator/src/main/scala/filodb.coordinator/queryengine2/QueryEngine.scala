@@ -20,7 +20,7 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
-import filodb.query.MiscellaneousFunctionId.{LabelJoin,LabelReplace}
+import filodb.query.MiscellaneousFunctionId.LabelReplace
 import filodb.query.exec._
 
 /**
