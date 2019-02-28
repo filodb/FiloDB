@@ -168,62 +168,111 @@ public class SimpleProfiler {
         }
     }
 
-    private void analyze(Map<StackTraceElement, Counter> samples, ThreadInfo[] infos)
+    private void analyze(Map<StackTraceElement, TraceCounter> samples,
+                         Map<String, SummaryCounter> summaries,
+                         ThreadInfo[] infos)
         throws IOException
     {
         for (ThreadInfo info : infos) {
             StackTraceElement[] trace = examine(info);
-            if (trace != null) {
-                StackTraceElement elem = trace[0];
-                Counter c = samples.get(elem);
-                if (c == null) {
-                    c = new Counter(elem);
-                    samples.put(elem, c);
-                }
-                c.mValue++;
+            if (trace == null) {
+                continue;
             }
+
+            StackTraceElement elem = trace[0];
+
+            TraceCounter tc = samples.get(elem);
+            if (tc == null) {
+                tc = new TraceCounter(elem);
+                samples.put(elem, tc);
+            }
+            tc.mValue++;
+
+            // Choose the package name as the summary name.
+            String summaryName;
+            {
+                String className = elem.getClassName();
+                int ix = className.lastIndexOf('.');
+                if (ix <= 0) {
+                    // No package at all, so use the class name instead.
+                    summaryName = className;
+                } else {
+                    summaryName = className.substring(0, ix);
+                }
+            }
+
+            SummaryCounter sc = summaries.get(summaryName);
+            if (sc == null) {
+                sc = new SummaryCounter(summaryName);
+                summaries.put(summaryName, sc);
+            }
+            sc.mValue++;
         }
 
         synchronized (this) {
             long now = System.currentTimeMillis();
             if (now >= mNextReportAtMillis && mSampler == Thread.currentThread()) {
                 mNextReportAtMillis = Math.max(now, mNextReportAtMillis + mReportIntervalMillis);
-                report(samples);
+                report(samples, summaries);
             }
         }
     }
 
-    private void report(Map<StackTraceElement, Counter> samples) throws IOException {
+    private void report(Map<StackTraceElement, TraceCounter> samples,
+                        Map<String, SummaryCounter> summaries)
+        throws IOException
+    {
         int size = samples.size();
         if (size == 0) {
             return;
         }
 
-        Counter[] top = new Counter[size];
-        samples.values().toArray(top);
-        Arrays.sort(top);
+        SummaryCounter[] allSummaries = new SummaryCounter[summaries.size()];
+        summaries.values().toArray(allSummaries);
+        Arrays.sort(allSummaries);
 
-        double sum = 0;
-        for (Counter c : top) {
-            sum += c.mValue;
+        double summarySum = 0;
+        for (SummaryCounter sc : allSummaries) {
+            summarySum += sc.mValue;
+        }
+
+        // Clear for next report.
+        summaries.clear();
+
+        TraceCounter[] topTraces = new TraceCounter[size];
+        samples.values().toArray(topTraces);
+        Arrays.sort(topTraces);
+
+        double traceSum = 0;
+        for (TraceCounter tc : topTraces) {
+            traceSum += tc.mValue;
         }
 
         int limit = Math.min(mTopCount, size);
-        StringBuilder b = new StringBuilder(limit * 80);
+        StringBuilder b = new StringBuilder((allSummaries.length + limit) * 80);
 
         b.append(Instant.now()).append(' ').append(getClass().getName()).append('\n');
 
+        b.append("--- all profiled packages --- \n");
+
+        for (SummaryCounter sc : allSummaries) {
+            String percentStr = String.format("%1$7.3f%%", 100.0 * (sc.mValue / summarySum));
+            b.append(percentStr).append(' ').append(sc.mName).append('\n');
+        }
+
+        b.append("--- top profiled methods --- \n");
+
         for (int i=0; i<limit; i++) {
-            Counter c = top[i];
-            if (c.mValue == 0) {
+            TraceCounter tc = topTraces[i];
+            if (tc.mValue == 0) {
                 // No more to report.
                 break;
             }
 
-            String percentStr = String.format("%1$7.3f%%", 100.0 * (c.mValue / sum));
+            String percentStr = String.format("%1$7.3f%%", 100.0 * (tc.mValue / traceSum));
             b.append(percentStr);
 
-            StackTraceElement elem = c.mElem;
+            StackTraceElement elem = tc.mElem;
             b.append(' ').append(elem.getClassName()).append('.').append(elem.getMethodName());
 
             String fileName = elem.getFileName();
@@ -244,7 +293,7 @@ public class SimpleProfiler {
             b.append('\n');
 
             // Reset for next report.
-            c.mValue = 0;
+            tc.mValue = 0;
         }
 
         report(b.toString());
@@ -303,6 +352,10 @@ public class SimpleProfiler {
                 // Reject threads which appeared as doing work only because they notified
                 // another thread, effectively yielding due to priority boosting.
                 if (elem.getMethodName().startsWith("notify")) {
+                    return null;
+                }
+                // Sometimes the thread state is runnable for this method. Filter it out.
+                if (elem.getMethodName().equals("wait")) {
                     return null;
                 }
                 break;
@@ -403,12 +456,7 @@ public class SimpleProfiler {
     }
 
     private static class Counter implements Comparable<Counter> {
-        final StackTraceElement mElem;
         long mValue;
-
-        Counter(StackTraceElement elem) {
-            mElem = elem;
-        }
 
         @Override
         public int compareTo(Counter other) {
@@ -417,8 +465,25 @@ public class SimpleProfiler {
         }
     }
 
+    private static class TraceCounter extends Counter {
+        final StackTraceElement mElem;
+
+        TraceCounter(StackTraceElement elem) {
+            mElem = elem;
+        }
+    }
+
+    private static class SummaryCounter extends Counter {
+        final String mName;
+
+        SummaryCounter(String name) {
+            mName = name;
+        }
+    }
+
     private class Sampler extends Thread {
-        private final Map<StackTraceElement, Counter> mSamples;
+        private final Map<StackTraceElement, TraceCounter> mSamples;
+        private final Map<String, SummaryCounter> mSummaries;
 
         volatile boolean mShouldStop;
 
@@ -433,6 +498,7 @@ public class SimpleProfiler {
             }
 
             mSamples = new HashMap<>();
+            mSummaries = new HashMap<>();
         }
 
         @Override
@@ -466,15 +532,15 @@ public class SimpleProfiler {
                     ThreadInfo[] infos;
                     if (dumpMethod == null) {
                         // Use the slow version.
-                        // lockMonitors=false, lockedSynchronizers=false
+                        // lockedMonitors=false, lockedSynchronizers=false
                         infos = tb.dumpAllThreads(false, false);
                     } else {
                         // Use the fast version.
-                        // lockMonitors=false, lockedSynchronizers=false, maxDepth=1
+                        // lockedMonitors=false, lockedSynchronizers=false, maxDepth=1
                         infos = (ThreadInfo[]) dumpMethod.invoke(tb, false, false, 1);
                     }
 
-                    analyze(mSamples, infos);
+                    analyze(mSamples, mSummaries, infos);
                 } catch (InterruptedIOException e) {
                     // Probably should stop.
                 } catch (Throwable e) {
