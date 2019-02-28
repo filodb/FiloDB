@@ -19,7 +19,6 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
-import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.exec._
 
 /**
@@ -165,12 +164,7 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction): Seq[ExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    lp.function match {
-      case HistogramQuantile =>
-        vectors.foreach(_.addRangeVectorTransformer(HistogramQuantileMapper(lp.functionArgs)))
-      case _ =>
-        vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
-    }
+    vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }
 

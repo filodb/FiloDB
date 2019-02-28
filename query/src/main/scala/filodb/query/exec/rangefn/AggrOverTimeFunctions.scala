@@ -4,9 +4,10 @@ import java.lang.{Double => JLDouble}
 import java.util
 
 import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector}
+import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
-import filodb.query.exec.TransientRow
+import filodb.query.exec.{TransientHistRow, TransientRow}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -133,7 +134,7 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   }
 }
 
-abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN )extends ChunkedRangeFunction {
+abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
@@ -162,6 +163,28 @@ class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with Chun
       sum = 0d
     }
     sum += longReader.sum(longVect, startRowNum, endRowNum)
+  }
+}
+
+class SumOverTimeChunkedFunctionH(var h: bv.Histogram = bv.Histogram.empty)
+extends ChunkedRangeFunction[TransientHistRow] {
+  override final def reset(): Unit = { h = bv.Histogram.empty }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, h)
+  }
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    val sum = valueReader.asHistReader.sum(startRowNum, endRowNum)
+    h match {
+      // sum is mutable histogram, copy to be sure it's our own copy
+      case hist if hist.numBuckets == 0 => h = sum.copy
+      case hist: bv.MutableHistogram    => hist.add(sum)
+    }
   }
 }
 
@@ -194,19 +217,17 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
   }
 }
 
-class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction {
+class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { count = 0 }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
-  final def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo,
-                startTime: Long, endTime: Long, queryConfig: QueryConfig): Unit = {
-    val timestampVector = info.vectorPtr(tsCol)
-    val tsReader = bv.LongBinaryVector(timestampVector)
-
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(timestampVector, endTime)
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
     val numRows = Math.min(endRowNum, info.numRows - 1) - startRowNum + 1
     count += numRows
   }
@@ -260,7 +281,7 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
 }
 
 abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var count: Double = 0)
-  extends ChunkedRangeFunction {
+  extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = {
     sum = Double.NaN;
     count = 0d

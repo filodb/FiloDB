@@ -1,6 +1,7 @@
 package filodb.core.binaryrecord2
 
 import com.typesafe.scalalogging.StrictLogging
+import org.agrona.concurrent.UnsafeBuffer
 import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Dataset}
@@ -8,6 +9,7 @@ import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColu
 import filodb.core.query.ColumnInfo
 import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.vectors.Histogram
 
 
 // scalastyle:off number.of.methods
@@ -134,6 +136,16 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
+  final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
+
+  // Adds a blob from another buffer which already has the length bytes as the first two bytes
+  // For example: buffers created by BinaryHistograms.  OR, a UTF8String medium.
+  final def addBlob(buf: UnsafeBuffer): Unit = {
+    val numBytes = buf.getShort(0).toInt
+    require(numBytes < buf.capacity)
+    addBlob(buf.byteArray, buf.addressOffset + 2, numBytes)
+  }
+
   /**
     * IMPORTANT: Internal method, does not update hash values for the map key/values individually.
     * If this method is used, then caller needs to also update the partitionHash manually.
@@ -191,8 +203,6 @@ final class RecordBuilder(memFactory: MemFactory,
     recHash = partKeySchema.partitionHash(base, offset)
   }
 
-  final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
-
   import Column.ColumnType._
 
   /**
@@ -209,11 +219,8 @@ final class RecordBuilder(memFactory: MemFactory,
       case (StringColumn, s: String) => addString(s)
       case (StringColumn, a: Array[Byte]) => addString(a)
       case (StringColumn, z: ZCUTF8) => addBlob(z)
-      case (MapColumn, m: Map[ZCUTF8, ZCUTF8] @unchecked) =>
-        val pairs = new java.util.ArrayList[(String, String)]
-        m.toSeq.foreach { case (k, v) => pairs.add((k.toString, v.toString)) }
-        val hashes = sortAndComputeHashes(pairs)
-        addSortedPairsAsMap(pairs, hashes)
+      case (MapColumn, m: Map[ZCUTF8, ZCUTF8] @unchecked) => addMap(m)
+      case (HistogramColumn, h: Histogram) => addBlob(h.serialize())
       case (other: Column.ColumnType, v) =>
         throw new UnsupportedOperationException(s"Column type of $other and value of class ${v.getClass}")
     }
@@ -235,17 +242,12 @@ final class RecordBuilder(memFactory: MemFactory,
   def addFromObjects(parts: Any*): Long = addFromReader(SeqRowReader(parts.toSeq))
 
   /**
-   * High level function to add a sorted list of unique key-value pairs as a map in the BinaryRecord.
-   * @param sortedPairs sorted list of key-value pairs, as modified by sortAndComputeHashes
-   * @param hashes an array of hashes, one for each k-v pair, as returned by sortAndComputeHashes
+   * Sorts and adds keys and values from a map.  The easiest way to add a map to a BinaryRecord.
    */
-  def addSortedPairsAsMap(sortedPairs: java.util.ArrayList[(String, String)],
-                          hashes: Array[Int]): Unit = {
+  def addMap(map: Map[ZCUTF8, ZCUTF8]): Unit = {
     startMap()
-    for { i <- 0 until sortedPairs.size optimized } {
-      val (k, v) = sortedPairs.get(i)
-      addMapKeyValue(k.getBytes, v.getBytes)
-      recHash = combineHash(recHash, hashes(i))
+    map.toSeq.sortBy(_._1).foreach { case (k, v) =>
+      addMapKeyValue(k.bytes, v.bytes)
     }
     endMap()
   }
@@ -312,6 +314,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * An alternative to above for adding a known key with precomputed key hash
    * along with a value, to the map, while updating the hash too.
    * Saves computing the key hash twice.
+   * TODO: deprecate this.  We are switching to computing a hash for all keys at the same time.
    */
   final def addMapKeyValueHash(keyBytes: Array[Byte], keyHash: Int,
                                valueBytes: Array[Byte], valueOffset: Int, valueLen: Int): Unit = {
@@ -321,9 +324,11 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
-   * Ends creation of a map field
+   * Ends creation of a map field.  Recompute the hash for all fields at once.
    */
   final def endMap(): Unit = {
+    val mapHash = BinaryRegion.hash32(curBase, mapOffset, (curRecEndOffset - mapOffset).toInt)
+    updatePartitionHash(mapHash)
     mapOffset = -1L
     fieldNo += 1
   }
@@ -359,7 +364,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * Used only internally by RecordComparator etc. to shortcut create a new BR by copying bytes from an existing BR.
    * You BETTER know what you are doing.
    */
-  private[binaryrecord2] def copyNewRecordFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
     requireBytes(numBytes + 4)
 
@@ -367,6 +372,15 @@ final class RecordBuilder(memFactory: MemFactory,
     setInt(curBase, curRecordOffset, numBytes)
     UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecordOffset + 4, numBytes)
     curRecEndOffset = curRecordOffset + numBytes + 4
+  }
+
+  // Extend current variable area with stuff from somewhere else
+  private[binaryrecord2] def copyVarAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+    requireBytes(numBytes)
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset, numBytes)
+    // Increase length of current BR.  Then bump curRecEndOffset so we are consistent
+    setInt(curBase, curRecordOffset, getInt(curBase, curRecordOffset) + numBytes)
+    curRecEndOffset += numBytes
   }
 
   private[binaryrecord2] def adjustFieldOffset(fieldNo: Int, adjustment: Int): Unit = {
@@ -464,7 +478,7 @@ final class RecordBuilder(memFactory: MemFactory,
       curRecEndOffset = curRecordOffset + recordNumBytes
     }
 
-  private def newContainer(): Unit = {
+  private[filodb] def newContainer(): Unit = {
     val (newBase, newOff, _) = memFactory.allocate(containerSize)
     val container = new RecordContainer(newBase, newOff, containerSize)
     containers += container

@@ -18,6 +18,7 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.{ArrayStringRowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.vectors.MutableHistogram
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   implicit val s = monix.execution.Scheduler.Implicits.global
@@ -86,6 +87,33 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter))).map(_.getDouble(0)).sum
     agg1 shouldEqual (3 + 8 + 13 + 18)
+  }
+
+  it("should ingest histograms and read them back properly") {
+    memStore.setup(histDataset, 0, TestData.storeConf)
+    val data = linearHistSeries().take(40)
+    memStore.ingest(histDataset.ref, 0, records(histDataset, data))
+    memStore.commitIndexForTesting(histDataset.ref)
+
+    memStore.numRowsIngested(histDataset.ref, 0) shouldEqual 40L
+    // Below will catch any partition match errors.  Should only be 10 tsParts.
+    memStore.numPartitions(histDataset.ref, 0) shouldEqual 10
+
+    val split = memStore.getScanSplits(histDataset.ref, 1).head
+    val filter = ColumnFilter("dc", Filter.Equals("1".utf8))
+    // check sums
+    val sums = memStore.scanRows(histDataset, Seq(2), FilteredPartitionScan(split, Seq(filter)))
+                       .map(_.getLong(0)).toList
+    sums shouldEqual Seq(data(1)(2).asInstanceOf[Long],
+                         data(11)(2).asInstanceOf[Long],
+                         data(21)(2).asInstanceOf[Long],
+                         data(31)(2).asInstanceOf[Long])
+
+    val hists = memStore.scanRows(histDataset, Seq(3), FilteredPartitionScan(split, Seq(filter)))
+                        .map(_.getHistogram(0))
+    hists.zipWithIndex.foreach { case (h, i) =>
+      h shouldEqual data(1 + 10*i)(3).asInstanceOf[MutableHistogram]
+    }
   }
 
   it("should be able to handle nonexistent partition keys") {
@@ -264,7 +292,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should recover index from time buckets") {
     import GdeltTestData._
-    val readers = gdeltLines3.map { line => ArrayStringRowReader(line.split(",")) }
+    // NOTE: gdeltLines3 are actually data samples, not part keys. Only take lines which give unique part keys!!
+    val readers = gdeltLines3.take(8).map { line => ArrayStringRowReader(line.split(",")) }
     val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
     indexRecoveryTest(dataset1, partKeys)
   }

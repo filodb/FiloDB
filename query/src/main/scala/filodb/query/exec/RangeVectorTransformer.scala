@@ -8,7 +8,8 @@ import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
-import filodb.query.exec.rangefn.InstantFunction
+import filodb.query.exec.rangefn.{DoubleInstantFunction, HistToDoubleIFunction, InstantFunction}
+import filodb.query.InstantFunctionId.HistogramQuantile
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -56,31 +57,75 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-  val instantFunction = InstantFunction(function, funcParams)
-
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    source.map { rv =>
-      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
-
-        private val rows = rv.rows
-        private val result = new TransientRow()
-
-        override def hasNext: Boolean = rows.hasNext
-
-        override def next(): RowReader = {
-          val next = rows.next()
-          val newValue = instantFunction(next.getDouble(1))
-          result.setValues(next.getLong(0), newValue)
-          result
+    RangeVectorTransformer.valueColumnType(sourceSchema) match {
+      case ColumnType.HistogramColumn =>
+        val instantFunction = InstantFunction.histogram(function, funcParams)
+        if (instantFunction.isHToDoubleFunc) {
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble))
+          }
+        } else {
+          throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
         }
-      }
-      IteratorBackedRangeVector(rv.key, resultIterator)
+      case ColumnType.DoubleColumn =>
+        if (function == HistogramQuantile) {
+          // Special mapper to pull all buckets together from different Prom-schema time series
+          val mapper = HistogramQuantileMapper(funcParams)
+          mapper.apply(source, queryConfig, limit, sourceSchema)
+        } else {
+          val instantFunction = InstantFunction.double(function, funcParams)
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key, new DoubleInstantFuncIterator(rv.rows, instantFunction))
+          }
+        }
+      case cType: ColumnType =>
+        throw new UnsupportedOperationException(s"Column type $cType is not supported for instant functions")
     }
   }
 
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    // if source is histogram, determine what output column type is
+    // otherwise pass along the source
+    RangeVectorTransformer.valueColumnType(source) match {
+      case ColumnType.HistogramColumn =>
+        val instantFunction = InstantFunction.histogram(function, funcParams)
+        if (instantFunction.isHToDoubleFunc) {
+          // Hist to Double function, so output schema is double
+          source.copy(columns = Seq(source.columns.head,
+                                    source.columns(1).copy(colType = ColumnType.DoubleColumn)))
+        } else { source }
+      case cType: ColumnType          =>
+        source
+    }
+  }
+}
+
+private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
+                                        instantFunction: DoubleInstantFunction,
+                                        result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+  final def hasNext: Boolean = rows.hasNext
+  final def next(): RowReader = {
+    val next = rows.next()
+    val newValue = instantFunction(next.getDouble(1))
+    result.setValues(next.getLong(0), newValue)
+    result
+  }
+}
+
+private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
+                                          instantFunction: HistToDoubleIFunction,
+                                          result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+  final def hasNext: Boolean = rows.hasNext
+  final def next(): RowReader = {
+    val next = rows.next()
+    val newValue = instantFunction(next.getHistogram(1))
+    result.setValues(next.getLong(0), newValue)
+    result
+  }
 }
 
 /**

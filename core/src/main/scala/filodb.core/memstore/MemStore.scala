@@ -207,6 +207,7 @@ trait MemStore extends ChunkSource {
 object MemStore {
   // TODO: make the max string vector size configurable.
   val MaxUTF8VectorSize = 8192
+  val MaxHistogramBuckets = 64
 
   /**
    * Figures out the AppendableVectors for each column, depending on type and whether it is a static/
@@ -224,6 +225,7 @@ object MemStore {
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, MaxUTF8VectorSize)
+        case HistogramColumn => bv.HistogramVector.appendingColumnar(memFactory, MaxHistogramBuckets, maxElements)
         case other: Column.ColumnType => ???
       }
     }.toArray

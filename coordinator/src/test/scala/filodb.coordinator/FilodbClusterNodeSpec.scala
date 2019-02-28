@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.net.Socket
+
 import akka.testkit.TestProbe
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.concurrent.ScalaFutures
@@ -7,6 +9,29 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator.client.MiscCommands
 import filodb.core.{AbstractSpec, Success}
+
+trait SocketChecker {
+  def waitSocketOpen(port: Int): Unit = {
+    while (!isPortAvail(port)) {
+      println(s"Port $port is not available, waiting and retrying...")
+      Thread sleep 1000
+    }
+  }
+
+  def isPortAvail(port: Int): Boolean = {
+    var s: Socket = null
+    try {
+      s = new Socket("localhost", port)
+      // If the code makes it this far without an exception it means
+      // something is using the port and has responded.
+      return false
+    } catch {
+      case e: Exception => return true;
+    } finally {
+      if (s != null) s.close()
+    }
+  }
+}
 
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
   // Ensure that CoordinatedShutdown does not shutdown the whole test JVM, otherwise Travis CI/CD fails
@@ -108,8 +133,7 @@ class ClusterNodeServerSpec extends FilodbClusterNodeSpec {
  * Initiates cluster singleton recovery sequence by populating guardian with some initial non-empty
  * shardmap and subscription state, and checking that it is recovered properly on startup
  */
-class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
-
+class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec with SocketChecker {
   import scala.collection.immutable
   import scala.concurrent.duration._
 
@@ -120,6 +144,8 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
   import filodb.core.NamesTestData._
   import NodeClusterActor._
   import NodeProtocol._
+
+  waitSocketOpen(2552)
 
   override val role = ClusterRole.Server
 

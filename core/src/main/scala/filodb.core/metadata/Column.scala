@@ -9,7 +9,7 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.SingleKeyTypes._
 import filodb.core.Types._
-import filodb.memory.format.{VectorInfo, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv, VectorInfo, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader.TypedFieldExtractor
 
 /**
@@ -73,10 +73,13 @@ object Column extends StrictLogging {
     case object LongColumn extends RichColumnType[Long]("long")
     case object DoubleColumn extends RichColumnType[Double]("double")
     case object StringColumn extends RichColumnType[ZeroCopyUTF8String]("string")
-    case object BitmapColumn extends RichColumnType[Boolean]("bitmap")
     case object TimestampColumn extends RichColumnType[Long]("ts")
     case object MapColumn extends RichColumnType[UTF8Map]("map")
     case object BinaryRecordColumn extends RichColumnType[ZeroCopyUTF8String]("br")
+    // TODO: find a way to annotate histograms as rate-based (Prometheus increasing over time) or
+    //       non-increasing over time
+    // These histograms for now are non-increasing over time (but increasing from bucket to bucket)
+    case object HistogramColumn extends RichColumnType[bv.Histogram]("hist")
   }
 
   val typeNameToColType = ColumnType.values.map { colType => colType.typeName -> colType }.toMap

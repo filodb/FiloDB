@@ -54,6 +54,7 @@ object BinaryVector {
     case Classes.Long   => (p => vectors.LongBinaryVector(p))
     case Classes.Double => (p => vectors.DoubleVector(p))
     case Classes.UTF8   => (p => vectors.UTF8Vector(p))
+    case Classes.Histogram => (p => vectors.HistogramVector(p))
   }
 
   /**
@@ -64,6 +65,7 @@ object BinaryVector {
 
 //scalastyle:off
 import BinaryVector.BinaryVectorPtr
+import vectors.HistogramVector.HistIterator
 //scalastyle:on
 
 trait TypedIterator {
@@ -71,6 +73,7 @@ trait TypedIterator {
   final def asLongIt: vectors.LongIterator = this.asInstanceOf[vectors.LongIterator]
   final def asDoubleIt: vectors.DoubleIterator = this.asInstanceOf[vectors.DoubleIterator]
   final def asUTF8It: vectors.UTF8Iterator = this.asInstanceOf[vectors.UTF8Iterator]
+  final def asHistIt: HistIterator = this.asInstanceOf[HistIterator]
 }
 
 trait BooleanIterator extends TypedIterator {
@@ -121,6 +124,7 @@ trait VectorDataReader extends AvailableReader {
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
   def asDoubleReader: vectors.DoubleVectorDataReader = this.asInstanceOf[vectors.DoubleVectorDataReader]
   def asUTF8Reader: vectors.UTF8VectorDataReader = this.asInstanceOf[vectors.UTF8VectorDataReader]
+  def asHistReader: vectors.HistogramReader = this.asInstanceOf[vectors.HistogramReader]
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
@@ -166,6 +170,7 @@ sealed trait AddResponse
 case object Ack extends AddResponse
 final case class VectorTooSmall(bytesNeeded: Int, bytesHave: Int) extends AddResponse
 case object ItemTooLarge extends AddResponse
+case object BucketSchemaMismatch extends AddResponse
 
 /**
  * A BinaryVector that you can append to.  Has some notion of a maximum size (max # of items or bytes)

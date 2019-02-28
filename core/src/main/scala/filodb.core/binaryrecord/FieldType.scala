@@ -64,7 +64,6 @@ object FieldType {
     IntColumn     -> IntFieldType,
     LongColumn    -> LongFieldType,
     StringColumn  -> UTF8StringFieldType,
-    BitmapColumn  -> BooleanFieldType,
     DoubleColumn  -> DoubleFieldType,
     TimestampColumn -> LongFieldType,  // default to long handling due to BinaryRecord
     MapColumn     -> UTF8MapFieldType

@@ -1,10 +1,12 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.{Query, QueryConfig}
+import filodb.memory.format.vectors.Histogram
+import filodb.query.QueryConfig
 
 object HistogramQuantileMapper {
   import ZeroCopyUTF8String._
@@ -101,40 +103,23 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     }
   }
 
+  private case class PromRateHistogram(buckets: Array[Bucket]) extends Histogram {
+    final def numBuckets: Int = buckets.size
+    final def bucketTop(no: Int): Double = buckets(no).le
+    final def bucketValue(no: Int): Double = buckets(no).rate
+    final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = ???
+  }
+
   /**
     * Calculates histogram quantile using the bucket values.
     * Similar to prometheus implementation for consistent results.
     */
   private def histogramQuantile(q: Double, buckets: Array[Bucket]): Double = {
-    val result = if (q < 0) Double.NegativeInfinity
-    else if (q > 1) Double.PositiveInfinity
-    else if (buckets.length < 2) Double.NaN
+    if (!buckets.last.le.isPosInfinity) return Double.NaN
     else {
-      if (!buckets.last.le.isPosInfinity) return Double.NaN
-      else {
-        makeMonotonic(buckets)
-        // find rank for the quantile using total number of occurrences
-        var rank = q * buckets.last.rate
-        // using rank, find the le bucket which would have the identified rank
-        val b = buckets.indexWhere(_.rate >= rank)
-
-        // now calculate quantile
-        if (b == buckets.length-1) return buckets(buckets.length-2).le
-        else if (b == 0 && buckets.head.le <= 0) return buckets.head.le
-        else {
-          // interpolate quantile within le bucket
-          var (bucketStart, bucketEnd, count) = (0d, buckets(b).le, buckets(b).rate)
-          if (b > 0) {
-            bucketStart = buckets(b-1).le
-            count -= buckets(b-1).rate
-            rank -= buckets(b-1).rate
-          }
-          bucketStart + (bucketEnd-bucketStart)*(rank/count)
-        }
-      }
+      makeMonotonic(buckets)
+      PromRateHistogram(buckets).quantile(q)
     }
-    Query.qLogger.debug(s"Quantile $q for buckets $buckets was $result")
-    result
   }
 
   /**
