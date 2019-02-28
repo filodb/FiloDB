@@ -132,10 +132,10 @@ object SimpleComputations {
           case LongColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
           case DoubleColumn => wrap((d: Double) => Math.abs(d % numBuckets).toInt)
           case StringColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
-          case BitmapColumn => wrap((b: Boolean) => (if (b) 1 else 0) % numBuckets)
           case TimestampColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
           case MapColumn => wrap((m: UTF8Map) => Math.abs(m.hashCode % numBuckets))
           case BinaryRecordColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
+          case HistogramColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
         }
         computedColumn(expr, dataset, info, IntColumn, extractor)
       }

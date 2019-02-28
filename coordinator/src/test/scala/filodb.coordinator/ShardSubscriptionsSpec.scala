@@ -4,7 +4,7 @@ import akka.testkit.TestProbe
 
 import filodb.core.DatasetRef
 
-class ShardSubscriptionsSpec extends AkkaSpec {
+class ShardSubscriptionsSpec extends AkkaSpec with SocketChecker {
 
   private val extension = FilodbCluster(system)
 
@@ -12,6 +12,8 @@ class ShardSubscriptionsSpec extends AkkaSpec {
   private val dataset2 = DatasetRef("two")
 
   private val subscribers = Set(TestProbe().ref, TestProbe().ref)
+
+  waitSocketOpen(2552)
 
   "ShardSubscription" must {
     "add unseen subscribers, not add seen subscribers" in {

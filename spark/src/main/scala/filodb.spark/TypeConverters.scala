@@ -10,7 +10,6 @@ object TypeConverters {
     Column.ColumnType.DoubleColumn -> DoubleType,
     Column.ColumnType.LongColumn   -> LongType,
     Column.ColumnType.StringColumn -> StringType,
-    Column.ColumnType.BitmapColumn -> BooleanType,
     Column.ColumnType.TimestampColumn -> TimestampType
   )
 

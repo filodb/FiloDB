@@ -12,6 +12,7 @@
   - [Example](#example)
   - [Execution Detail](#execution-detail)
     - [Periodic Samples and Range Functions](#periodic-samples-and-range-functions)
+    - [ChunkedWindowIterator Details](#chunkedwindowiterator-details)
       - [Alternate Design Approaches to Consider](#alternate-design-approaches-to-consider)
     - [Aggregation across Range Vectors](#aggregation-across-range-vectors)
 
@@ -84,7 +85,7 @@ the result data structure. The query result `QueryResult` is like a mini dataset
 time series, each represented by `RangeVector`. All the `RangeVector`s share the same schema which is included
 in the result object. Each `RangeVector` has an associated key called the `RangeVectorKey` and could be
 seen as the time series key for the result. The `RangeVector` exposes an iterator of rows. Each row within
-the `RangeVector` starts wih the timestamp, followed by the data value, usually a double.
+the `RangeVector` starts wih the timestamp, followed by the data value(s), usually a double.
 
 ## Execution Plan Constructs
 
@@ -244,6 +245,19 @@ There are two categories of `RangeFunction`s.  The chunked range functions have 
 * Include one last sample outside the fixed time window when necessary
 
 Look here for examples of [RangeFunctions](../query/exec/rangefn/RangeFunction.scala) 
+
+### ChunkedWindowIterator Details
+
+The `ChunkedWindowIterator` applies `ChunkedRangeFunctions` to each time window, outputting a computed value for each window.  It works as follows:
+
+![](mermaid/chunked-iteration.png)
+
+1. `ChunkedWindowIterator` advances to the next window
+2. it first calls `reset` on the `ChunkedRangeFunction`
+2. It then loops through each relevant chunk within the window, calling the `addChunk` method of the range function to update its result for each chunk.  The range function is free to use any method from the raw chunk data, usually this is pretty fast compared to row-wise iteration.
+3. Finally, the `apply` method is called on the range function to present result for that time window from all the intermediate results from the chunks.
+
+Note that `ChunkedWindowIterator` support different types of `RowReader` outputs for different types of output columns.  One version is for `TransientRow` which has Double values, and another is for `TransientHistRow` which supports Histogram values as output.
 
 #### Alternate Design Approaches to Consider
 1. With sliding window periodic sample generation can happen as a O(n) time, and O(w) memory where n is number
