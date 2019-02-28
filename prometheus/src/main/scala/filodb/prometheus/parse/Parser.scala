@@ -325,7 +325,9 @@ object Parser extends Expression {
   }
 
   def queryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
-    val defaultQueryParams = TimeStepParams(queryTimestamp, 1, queryTimestamp)
+    // step does not matter here in instant query.
+    // Since we have some min validation on the server, pass Long.MaxValue for step.
+    val defaultQueryParams = TimeStepParams(queryTimestamp, Long.MaxValue, queryTimestamp)
     queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 
