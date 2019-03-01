@@ -237,8 +237,8 @@ class AppendableHistogramVector(factory: MemFactory,
 
     val res = appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
     if (res == Ack) {
-      // set new number of bytes first
-      setNumBytes(maxBytes - bytesLeft)
+      // set new number of bytes first. Remember to exclude initial 4 byte length prefix
+      setNumBytes(maxBytes - bytesLeft - 4)
       // Finally, increase # histograms which is the ultimate safe gate for access by readers
       incrNumHistograms(vectPtr)
     }

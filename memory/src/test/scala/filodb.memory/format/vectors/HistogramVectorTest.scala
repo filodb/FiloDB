@@ -98,14 +98,33 @@ class HistogramVectorTest extends NativeVectorTest {
   }
 
   it("should reject new adds when vector is full") {
-    val appender = HistogramVector.appending(memFactory, 80)
+    val appender = HistogramVector.appending(memFactory, 76)
     rawLongBuckets.foreach { rawBuckets =>
       BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
       appender.addData(buffer) shouldEqual Ack
     }
 
+    appender.numBytes shouldEqual HistogramVector.OffsetBucketDef + 2+8+8 + 4 + (12+11+8+11)
     appender.length shouldEqual rawHistBuckets.length
 
     appender.addData(buffer) shouldBe a[VectorTooSmall]
+  }
+
+  // Test for Section reader code in RowHistogramReader, that we can jump back and forth
+  it("should be able to randomly look up any element in long HistogramVector") {
+    val numElements = 150
+    val appender = HistogramVector.appending(memFactory, numElements * 20)
+    (0 until numElements).foreach { i =>
+      BinaryHistogram.writeDelta(bucketScheme, rawLongBuckets(i % rawLongBuckets.length), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+
+    for { _ <- 0 to 50 } {
+      val elemNo = scala.util.Random.nextInt(numElements)
+      verifyHistogram(optReader(elemNo), elemNo % (rawLongBuckets.length))
+    }
   }
 }
