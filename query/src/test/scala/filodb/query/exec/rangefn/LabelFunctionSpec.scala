@@ -52,6 +52,7 @@ class LabelFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+    println("resultLabelValues:" + resultLabelValues)
 
     resultLabelValues.sameElements(expectedLabels) shouldEqual true
 
@@ -89,10 +90,51 @@ class LabelFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("Instance-100"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("test"),
-      ZeroCopyUTF8String("instanceNew") -> ZeroCopyUTF8String("Instance-10")),
+      ZeroCopyUTF8String("instanceNew") -> ZeroCopyUTF8String("Instance-10-Instance-10")),
       Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-    val funcParams = Seq("instanceNew", "$1", "instance", "(.*)\\d")
+    val funcParams = Seq("instanceNew", "$1-$1", "instance", "(.*)\\d")
+
+    val labelVectorFnMapper = exec.LabelFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
+    val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
+    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
+
+    resultLabelValues.sameElements(expectedLabels) shouldEqual true
+
+    sampleWithKey.map(_.rows.map(_.getDouble(1))).zip(resultRows).foreach {
+      case (ex, res) => {
+        ex.zip(res).foreach {
+          case (val1, val2) =>
+            val1 shouldEqual val2
+        }
+      }
+    }
+  }
+
+  it("should not change sample when entire regex does not match") {
+    val sampleKey1 = CustomRangeVectorKey(
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("Instance-9090"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("test")))
+
+    val sampleWithKey: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = sampleKey1
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 3.3d),
+          new TransientRow(2L, 5.1d)).iterator
+      },
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(3L, 100d),
+          new TransientRow(4L, 200d)).iterator
+      })
+
+    val expectedLabels = sampleWithKey.toList.map(_.key.labelValues)
+    val funcParams = Seq("instance", "$1", "instance", "(.*)9")
 
     val labelVectorFnMapper = exec.LabelFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
     val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)

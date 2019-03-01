@@ -1,6 +1,6 @@
 package filodb.query.exec.rangefn
 
-import java.util.regex.PatternSyntaxException
+import java.util.regex.{Pattern, PatternSyntaxException}
 
 import filodb.core.query.{CustomRangeVectorKeyWithShards, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
@@ -50,16 +50,20 @@ case class LabelReplaceImpl(funcParams: Seq[Any]) extends LabelTypeInstantFuncti
     val dstLabel = funcParams(0).asInstanceOf[String]
     val replacementString = funcParams(1).asInstanceOf[String]
     val srcLabel = funcParams(2).asInstanceOf[String]
+    val regex = funcParams(3).asInstanceOf[String]
     try {
-      val regex = funcParams(3).asInstanceOf[String].r
+      val pattern = Pattern.compile(regex)
       val value = rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel))
 
       if (value.isDefined) {
-        val labelReplaceValue = regex.replaceAllIn(value.get.toString, replacementString)
-        if (!labelReplaceValue.equals(value.get.toString)) {
+        val matcher = pattern.matcher(value.get.toString)
+        if (matcher.matches()) {
+          var labelReplaceValue = replacementString
+          for (index <- 1 to matcher.groupCount()) {
+            labelReplaceValue = labelReplaceValue.replace(s"$$$index", matcher.group(index))
+          }
           return CustomRangeVectorKeyWithShards(rangeVectorKey.labelValues.
             updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelReplaceValue)), rangeVectorKey.sourceShards)
-
         }
       }
     }
