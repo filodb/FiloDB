@@ -38,6 +38,7 @@ object TestData {
   val sourceConf = ConfigFactory.parseString("""
     store {
       max-chunks-size = 100
+      buffer-alloc-step-size = 50
       demand-paged-chunk-retention-period = 10 hours
       shard-mem-size = 50MB
       groups-per-shard = 4

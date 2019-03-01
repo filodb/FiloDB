@@ -23,8 +23,8 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 16)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
-  val maxChunkSize = 200
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, maxChunkSize, 100)
+  val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
@@ -63,7 +63,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
 
   protected val histIngestBH = new BlockMemFactory(blockStore, None, MMD.histDataset.blockMetaSize, true)
-  protected val histBufferPool = new WriteBufferPool(TestData.nativeMem, MMD.histDataset, 100, 10)
+  protected val histBufferPool = new WriteBufferPool(TestData.nativeMem, MMD.histDataset, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(numSamples: Int = 100, numBuckets: Int = 8):

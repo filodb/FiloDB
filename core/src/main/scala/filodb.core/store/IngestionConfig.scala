@@ -13,6 +13,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              diskTTLSeconds: Int,
                              demandPagedRetentionPeriod: FiniteDuration,
                              maxChunksSize: Int,
+                             // Max write buffer size for Histograms, UTF8Strings, other blobs
+                             maxBlobBufferSize: Int,
                              // Number of bytes to allocate to chunk storage in each shard
                              shardMemSize: Long,
                              // Number of bytes to allocate to ingestion write buffers per shard
@@ -36,6 +38,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
                                "demand-paged-chunk-retention-period" -> (demandPagedRetentionPeriod.toSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
+                               "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "buffer-alloc-step-size" -> allocStepSize,
@@ -60,7 +63,8 @@ object StoreConfig {
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
-                                           |max-chunks-size = 500
+                                           |max-chunks-size = 400
+                                           |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |buffer-alloc-step-size = 1000
                                            |num-partitions-to-evict = 1000
@@ -81,6 +85,7 @@ object StoreConfig {
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
+                config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("buffer-alloc-step-size"),
