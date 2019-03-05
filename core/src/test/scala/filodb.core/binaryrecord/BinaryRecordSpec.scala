@@ -18,13 +18,13 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   val schema2_sl = new RecordSchema(Seq(StringColumn, LongColumn))
   val schema2_is = new RecordSchema(Seq(IntColumn, StringColumn))
 
-  val schema3_bdt = new RecordSchema(Seq(BitmapColumn, DoubleColumn, TimestampColumn))
+  val schema3_bdt = new RecordSchema(Seq(IntColumn, DoubleColumn, TimestampColumn))
 
   val schema4 = new RecordSchema(Seq(StringColumn, MapColumn))
 
   val reader1 = TupleRowReader((Some("data"), Some(-15L)))
   val reader2 = TupleRowReader((Some(1234),   Some("one-two-three")))
-  val reader3 = TupleRowReader((Some(true), Some(5.7), Some(new Timestamp(1000000L))))
+  val reader3 = TupleRowReader((Some(1), Some(5.7), Some(new Timestamp(1000000L))))
 
   it("should create and extract individual fields and match when all fields present") {
     BinaryRecord(schema1_i, reader2).getInt(0) should equal (1234)
@@ -47,7 +47,6 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     binRec4.noneNull should equal (true)
 
     val binRec5 = BinaryRecord(schema3_bdt, reader3)
-    binRec5.getBoolean(0) should equal (true)
     binRec5.getDouble(1) should equal (5.7)
     binRec5.getLong(2) should equal (1000000L)
     binRec5.noneNull should equal (true)
@@ -73,7 +72,6 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   it("should get bytes out and get back same BinaryRecord") {
     val bytes = BinaryRecord(schema3_bdt, reader3).bytes
     val binRec = BinaryRecord(schema3_bdt, bytes)
-    binRec.getBoolean(0) should equal (true)
     binRec.getDouble(1) should equal (5.7)
     binRec.getLong(2) should equal (1000000L)
   }

@@ -2,6 +2,7 @@ package filodb.memory.format.vectors
 
 import debox.Buffer
 
+import filodb.memory.{BlockMemFactory, MemoryStats, PageAlignedBlockManager}
 import filodb.memory.format._
 
 class IntBinaryVectorTest extends NativeVectorTest {
@@ -92,6 +93,28 @@ class IntBinaryVectorTest extends NativeVectorTest {
 
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(frozen).toBuffer(frozen).toList shouldEqual orig
+    }
+
+    it("should append correctly when memory has previous values / was not zeroed") {
+      import collection.JavaConverters._
+      val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16) {
+        freeBlocks.asScala.foreach(_.set(0x55))   // initialize blocks to nonzero value
+      }
+      val blockFactory = new BlockMemFactory(blockStore, None, 24, true)
+
+      // original values will get mixed with nonzero contents if append does not overwrite original memory
+      val builder = IntBinaryVector.appendingVectorNoNA(blockFactory, 10, nbits=4, signed=false)
+      val orig = Seq(0, 1, 1, 3, 4)
+      orig.foreach(x => builder.addData(x) shouldEqual Ack)
+      builder.reader.toBuffer(builder.addr).toList shouldEqual orig
+
+      // original values will get mixed with nonzero contents if append does not overwrite original memory
+      val builder2 = IntBinaryVector.appendingVectorNoNA(blockFactory, 10, nbits=2, signed=false)
+      val orig2 = Seq(0, 1, 1, 0, 2)
+      orig2.foreach(x => builder2.addData(x) shouldEqual Ack)
+      builder2.reader.toBuffer(builder2.addr).toList shouldEqual orig2
+
+      blockStore.releaseBlocks()
     }
 
     it("should optimize even with NoNA vectors to less nbits") {

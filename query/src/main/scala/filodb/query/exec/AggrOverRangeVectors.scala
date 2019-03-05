@@ -31,11 +31,11 @@ final case class ReduceAggregateExec(id: String,
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[QueryResponse],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case QueryResult(_, _, result) => Observable.fromIterable(result)
-        case QueryError(_, ex)         => throw ex
+        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+        case (QueryError(_, ex), _)         => throw ex
     }
     RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, results, rv => rv.key)
   }

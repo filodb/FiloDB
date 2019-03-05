@@ -15,6 +15,7 @@ import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.{vectors => bv}
 import filodb.memory.{BinaryRegionLarge, MemFactory, NativeMemoryManager}
 
 object TestData {
@@ -292,6 +293,29 @@ object MachineMetricsData {
   val tagsDiffSameLen = extraTags ++ Map("region".utf8 -> "AWS-USEast".utf8)
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
+
+  val histDataset = Dataset("histogram", Seq("tags:map"),
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist"))
+
+  var histBucketScheme: bv.HistogramBuckets = _
+  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] = {
+    histBucketScheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
+    val buckets = new Array[Double](numBuckets)
+    def updateBuckets(bucketNo: Int): Unit = {
+      for { b <- bucketNo until numBuckets } {
+        buckets(b) += 1
+      }
+    }
+    Stream.from(0).map { n =>
+      updateBuckets(n % numBuckets)
+      Seq(startTs + n * timeStep,
+          (1 + n).toLong,
+          buckets.sum.toLong,
+          bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+    }
+  }
 }
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket
@@ -349,4 +373,25 @@ object MetricsTestData {
     final def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
+  // Takes the output of linearHistSeries and transforms them into Prometheus-schema histograms.
+  // Each bucket becomes its own time series with _bucket appended and an le value
+  def promHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] =
+    MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
+      .flatMap { record =>
+        val timestamp = record(0)
+        val tags = record(4).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metricName = tags("__name__".utf8).toString
+        val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_count").utf8))
+        val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_sum").utf8))
+        val hist = record(3).asInstanceOf[bv.MutableHistogram]
+        val bucketTags = tags + ("__name__".utf8 -> (metricName + "_bucket").utf8)
+        val bucketRecs = (0 until hist.numBuckets).map { b =>
+          Seq(timestamp, hist.bucketValue(b),
+              bucketTags + ("le".utf8 -> hist.bucketTop(b).toString.utf8))
+        }
+        Seq(countRec, sumRec) ++ bucketRecs
+      }
 }

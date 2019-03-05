@@ -408,11 +408,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case LongColumn => rowReader.getLong(position).toString
         case DoubleColumn => rowReader.getDouble(position).toString
         case StringColumn => rowReader.filoUTF8String(position).toString
-        case BitmapColumn => rowReader.getBoolean(position).toString
         case TimestampColumn => rowReader.as[Timestamp](position).toString
+        case HistogramColumn => rowReader.getHistogram(position).toString
         case _ => throw new UnsupportedOperationException("Unsupported type: " + columns(position).columnType)
       }
-      content.update(position,value)
+      content.update(position, value)
       position += 1
     }
     content

@@ -11,6 +11,7 @@
     - [Shard Event Subscriptions](#shard-event-subscriptions)
       - [Subscribe to Shard Status Events](#subscribe-to-shard-status-events)
         - [Shard Status and Shard Status Events](#shard-status-and-shard-status-events)
+        - [Automatic Reassignment of Shards](#automatic-reassignment-of-shards)
       - [Unsubscribe to Shard Status Events](#unsubscribe-to-shard-status-events)
       - [Auto Unsubscribe](#auto-unsubscribe)
   - [Cluster/Shard State Recovery](#clustershard-state-recovery)

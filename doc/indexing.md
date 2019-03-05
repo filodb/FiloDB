@@ -3,12 +3,8 @@
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
 - [Lucene Indexing](#lucene-indexing)
-  - [Time Bucket Creation during NormalIngestion](#time-bucket-creation-during-normalingestion)
+  - [Time Bucket Creation during Normal Ingestion](#time-bucket-creation-during-normal-ingestion)
   - [Index Recovery](#index-recovery)
-  - [Recovery Behavior during Different Shard States](#recovery-behavior-during-different-shard-states)
-    - [Recovering State](#recovering-state)
-    - [onIndexBootstrapped State Transition](#onindexbootstrapped-state-transition)
-    - [NormalIngestion State](#normalingestion-state)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 

@@ -1,14 +1,13 @@
 package filodb.query.exec.rangefn
 
+import filodb.memory.format.vectors.Histogram
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
 
 /**
-  * All Instant Functions are implementation of this trait.
-  * Pass the sample value to `apply` and get the instant function value.
+  * Applies a function transforming a single value into another value, both of type Double.
   */
 trait DoubleInstantFunction {
-
   /**
     * Apply the required instant function against the given value.
     *
@@ -16,30 +15,58 @@ trait DoubleInstantFunction {
     * @return Calculated value
     */
   def apply(value: Double): Double
-
 }
 
 trait EmptyParamsInstantFunction extends DoubleInstantFunction {
-
   def funcParams: Seq[Any]
 
   /**
     * Validate the function before invoking the function.
     */
   require(funcParams.isEmpty, "No additional parameters required for the instant function.")
+}
 
+sealed trait HistogramInstantFunction {
+  def isHToDoubleFunc: Boolean = this.isInstanceOf[HistToDoubleIFunction]
+  def asHToDouble: HistToDoubleIFunction = this.asInstanceOf[HistToDoubleIFunction]
+  def asHToH: HistToHistIFunction = this.asInstanceOf[HistToHistIFunction]
+}
+
+/**
+ * An instant function taking a histogram and returning a Double value
+ */
+trait HistToDoubleIFunction extends HistogramInstantFunction {
+  /**
+    * Apply the required instant function against the given value.
+    *
+    * @param value Sample against which the function will be applied
+    * @return Calculated value
+    */
+  def apply(value: Histogram): Double
+}
+
+/**
+ * An instant function taking a histogram and returning another histogram
+ */
+trait HistToHistIFunction extends HistogramInstantFunction {
+  /**
+    * Apply the required instant function against the given value.
+    *
+    * @param value Sample against which the function will be applied
+    * @return Calculated value
+    */
+  def apply(value: Histogram): Histogram
 }
 
 object InstantFunction {
-
   /**
-    * This function returns a function that can be applied to generate the result.
+    * Returns the DoubleInstantFunction given the function ID and parameters.
     *
     * @param function to be invoked
     * @param funcParams - Additional required function parameters
     * @return the function
     */
-  def apply(function: InstantFunctionId, funcParams: Seq[Any]): DoubleInstantFunction = {
+  def double(function: InstantFunctionId, funcParams: Seq[Any]): DoubleInstantFunction = {
     function match {
       case Abs                => AbsImpl(funcParams)
       case Ceil               => CeilImpl(funcParams)
@@ -55,6 +82,14 @@ object InstantFunction {
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
+
+  /**
+   * Returns the HistogramInstantFunction given the function ID and parameters
+   */
+  def histogram(function: InstantFunctionId, funcParams: Seq[Any]): HistogramInstantFunction = function match {
+    case HistogramQuantile    => HistogramQuantileImpl(funcParams)
+    case _                    => throw new UnsupportedOperationException(s"$function not supported.")
+  }
 }
 
 /**
@@ -63,9 +98,7 @@ object InstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class AbsImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.abs(value)
-
 }
 
 /**
@@ -74,9 +107,7 @@ case class AbsImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class CeilImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.ceil(value)
-
 }
 
 /**
@@ -85,7 +116,6 @@ case class CeilImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class ClampMaxImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
-
   /**
     * Validate the function before invoking the function.
     */
@@ -96,7 +126,6 @@ case class ClampMaxImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
 
   override def apply(value: Double): Double =
     scala.math.min(value, funcParams.head.asInstanceOf[Number].doubleValue())
-
 }
 
 /**
@@ -105,7 +134,6 @@ case class ClampMaxImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class ClampMinImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
-
   /**
     * Validate the function before invoking the function.
     */
@@ -116,7 +144,6 @@ case class ClampMinImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
 
   override def apply(value: Double): Double =
     scala.math.max(value, funcParams.head.asInstanceOf[Number].doubleValue())
-
 }
 
 /**
@@ -125,9 +152,7 @@ case class ClampMinImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class ExpImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.exp(value)
-
 }
 
 /**
@@ -136,9 +161,7 @@ case class ExpImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class FloorImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.floor(value)
-
 }
 
 /**
@@ -147,9 +170,7 @@ case class FloorImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class LnImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.log(value)
-
 }
 
 /**
@@ -158,14 +179,12 @@ case class LnImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class Log10Impl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   /**
     * Validate the function before invoking the function.
     */
   require(funcParams.isEmpty, "No additional parameters required for Log10.")
 
   override def apply(value: Double): Double = scala.math.log10(value)
-
 }
 
 /**
@@ -174,10 +193,8 @@ case class Log10Impl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class Log2Impl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double =
     scala.math.log10(value)/scala.math.log10(2.0)
-
 }
 
 /**
@@ -189,7 +206,6 @@ case class Log2Impl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class RoundImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
-
   /**
     * Validate the function before invoking the function.
     */
@@ -212,7 +228,6 @@ case class RoundImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
     else
       scala.math.floor(value * toNearestInverse + 0.5) / toNearestInverse
   }
-
 }
 
 /**
@@ -220,7 +235,17 @@ case class RoundImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
   * @param funcParams - Additional function parameters
   */
 case class SqrtImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
-
   override def apply(value: Double): Double = scala.math.sqrt(value)
+}
 
+/**
+ * Histogram quantile function for Histogram columns, where all buckets are together.
+ * @param funcParams - a single value between 0 and 1, the quantile to calculate.
+ */
+case class HistogramQuantileImpl(funcParams: Seq[Any]) extends HistToDoubleIFunction {
+  require(funcParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
+  require(funcParams(0).isInstanceOf[Number], "histogram_quantile parameter must be a number")
+  val q = funcParams(0).asInstanceOf[Number].doubleValue()
+
+  final def apply(value: Histogram): Double = value.quantile(q)
 }
