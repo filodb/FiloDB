@@ -100,3 +100,4 @@ Currently, incoming histograms which are cumulative are encoded on the wire usin
 
 Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details about the on-the-wire / BinaryRecord format used for histograms.
 
+TODO: document histogram compression techniques more when done.
