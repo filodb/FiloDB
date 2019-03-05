@@ -88,7 +88,7 @@ class QueryEngine(dataset: Dataset,
               s"$shardCol, shard key hashing disabled")
         }
       }
-      val metric = shardVals.filter(_._1 == dataset.options.metricColumn).headOption
+      val metric = shardVals.find(_._1 == dataset.options.metricColumn)
                             .map(_._2)
                             .getOrElse(throw new BadQueryException(s"Could not find metric value"))
       val shardValues = shardVals.filterNot(_._1 == dataset.options.metricColumn).map(_._2)

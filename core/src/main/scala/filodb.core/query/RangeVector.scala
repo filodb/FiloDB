@@ -14,7 +14,9 @@ import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
-  * Identifier for a single RangeVector
+  * Identifier for a single RangeVector.
+  * Sub-classes must be a case class or override equals/hashcode since this class is used in a
+  * hash table.
   */
 trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Map[UTF8Str, UTF8Str]
