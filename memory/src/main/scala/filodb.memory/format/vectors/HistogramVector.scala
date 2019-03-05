@@ -86,6 +86,9 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
 
+  def isValidFormatCode(code: Byte): Boolean =
+    (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta)
+
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
    * decoded as increasing.  Intended only for specific use cases when the source histogram are non increasing
@@ -223,6 +226,13 @@ class AppendableHistogramVector(factory: MemFactory,
     val h = BinHistogram(buf)
     val numBuckets = h.numBuckets
     if (numItems == 0) {
+      // Validate it's a valid bin histogram
+      if (buf.capacity < 5 || !isValidFormatCode(h.formatCode) ||
+          h.formatCode == HistFormat_Null) {
+        return InvalidHistogram
+      }
+      if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
+
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
                                     UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr, h.bucketDefNumBytes)

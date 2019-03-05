@@ -97,6 +97,22 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.addData(buffer) shouldEqual BucketSchemaMismatch
   }
 
+  it("should reject initially invalid BinaryHistogram") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+
+    // Create some garbage
+    buffer.putStringWithoutLengthAscii(0, "monkeying")
+
+    appender.addData(buffer) shouldEqual InvalidHistogram
+    appender.length shouldEqual 0
+
+    // Reject null histograms also
+    buffer.putShort(0, 1)
+    buffer.putByte(2, 0)
+    appender.addData(buffer) shouldEqual InvalidHistogram
+    appender.length shouldEqual 0
+  }
+
   it("should reject new adds when vector is full") {
     val appender = HistogramVector.appending(memFactory, 76)
     rawLongBuckets.foreach { rawBuckets =>
