@@ -20,7 +20,6 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.InstantFunctionId.HistogramQuantile
-import filodb.query.MiscellaneousFunctionId.LabelReplace
 import filodb.query.exec._
 
 /**
@@ -274,11 +273,7 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyMiscellaneousFunction): Seq[ExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    lp.function match {
-      case LabelReplace =>
-        vectors.foreach(_.addRangeVectorTransformer(exec.LabelFunctionMapper(lp.function,lp.functionArgs)))
-      case _ =>  throw new UnsupportedOperationException(s"$lp.function not supported.")
-    }
+    vectors.foreach(_.addRangeVectorTransformer(exec.MiscellaneousFunctionMapper(lp.function,lp.functionArgs)))
     vectors
   }
 

@@ -189,7 +189,7 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object DaysOfMonth extends MiscellaneousFunctionId("day_of_month")
 
-  case object DayOfWeek extends MiscellaneousFunctionId("day_of_Week")
+  case object DayOfWeek extends MiscellaneousFunctionId("day_of_week")
 
   case object Hour extends MiscellaneousFunctionId("hour")
 

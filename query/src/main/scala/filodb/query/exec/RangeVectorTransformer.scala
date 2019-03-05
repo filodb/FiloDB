@@ -1,15 +1,14 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
+import filodb.query.MiscellaneousFunctionId.LabelReplace
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
-import filodb.query.exec.rangefn.InstantFunction
-import filodb.query.exec.rangefn.LabelFunction
+import filodb.query.exec.rangefn.{InstantFunction, LabelReplaceFunction, MiscellaneousFunction}
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -125,20 +124,25 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   // TODO all operation defs go here and get invoked from mapRangeVector
 }
 
-final case class LabelFunctionMapper(function: MiscellaneousFunctionId,
-                                     funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
+                                             funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
-
-  val labelFunction = LabelFunction(function, funcParams)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    source.map { rv =>
-      val newLabel = labelFunction(rv.key)
-      IteratorBackedRangeVector(newLabel, rv.rows)
+    val miscFunction: MiscellaneousFunction = {
+      function match {
+        case LabelReplace => LabelReplaceFunction(source, funcParams)
+        case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      }
+
+
     }
+    if (miscFunction.validator())
+      return miscFunction.execute()
+    return source
   }
 }

@@ -57,13 +57,8 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
   override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 }
 
-final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {
-  val sourceShards: Seq[Int] = Nil
-}
-
-final case class CustomRangeVectorKeyWithShards(labelValues: Map[UTF8Str, UTF8Str], sourceShards: Seq[Int])
+final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str], sourceShards: Seq[Int] = Nil)
   extends RangeVectorKey {
-
 }
 
 object CustomRangeVectorKey {
