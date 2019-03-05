@@ -10,7 +10,7 @@ import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
 
-object StitchConcatExec {
+object StitchRvsExec {
 
   def merge(vectors: Seq[Iterator[RowReader]]): Iterator[RowReader] = {
     // This is an n-way merge without using a heap.
@@ -56,9 +56,9 @@ object StitchConcatExec {
 /**
   * Use when data for same time series spans multiple shards, or clusters.
   */
-final case class StitchConcatExec(id: String,
-                                dispatcher: PlanDispatcher,
-                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
+final case class StitchRvsExec(id: String,
+                               dispatcher: PlanDispatcher,
+                               children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)
 
   protected def args: String = ""
@@ -67,14 +67,14 @@ final case class StitchConcatExec(id: String,
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
-    qLogger.debug(s"StitchConcatExec: Stitching results:")
+    qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
       case (QueryResult(_, _, result), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map(_.flatten).map { srvs =>
       val groups = srvs.groupBy(_.key)
       groups.mapValues { toMerge =>
-        val rows = StitchConcatExec.merge(toMerge.map(_.rows))
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
         val key = toMerge.head.key
         IteratorBackedRangeVector(key, rows)
       }.values
@@ -83,3 +83,26 @@ final case class StitchConcatExec(id: String,
   }
 }
 
+///**
+//  * Range Vector Transformer version of StitchRvsExec
+//  */
+//final case class StitchRvsMapper() extends RangeVectorTransformer {
+//
+//  def apply(source: Observable[RangeVector],
+//            queryConfig: QueryConfig,
+//            limit: Int,
+//            sourceSchema: ResultSchema): Observable[RangeVector] = {
+//    qLogger.debug(s"StitchRvsMapper: Stitching results:")
+//    val stitched = source.toListL.map { rvs =>
+//      val groups = rvs.groupBy(_.key)
+//      groups.mapValues { toMerge =>
+//        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+//        val key = toMerge.head.key
+//        IteratorBackedRangeVector(key, rows)
+//      }.values
+//    }.map(Observable.fromIterable)
+//    Observable.fromTask(stitched).flatten
+//  }
+//
+//  override protected[query] def args: String = ""
+//}

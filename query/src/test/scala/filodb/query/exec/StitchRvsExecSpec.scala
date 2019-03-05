@@ -5,7 +5,7 @@ import scala.annotation.tailrec
 import org.scalatest.{FunSpec, Matchers}
 
 // scalastyle:off null
-class StitchConcatExecSpec extends FunSpec with Matchers {
+class StitchRvsExecSpec extends FunSpec with Matchers {
   val error = 0.0000001d
 
   it ("should merge with two overlapping RVs correctly") {
@@ -147,7 +147,7 @@ class StitchConcatExecSpec extends FunSpec with Matchers {
 
   def mergeAndValidate(rvs: Seq[Seq[(Long, Double)]], expected: Seq[(Long, Double)]): Unit = {
     val inputSeq = rvs.map { rows => rows.iterator.map(r => new TransientRow(r._1, r._2)) }
-    val result = StitchConcatExec.merge(inputSeq).map(r => (r.getLong(0), r.getDouble(1)))
+    val result = StitchRvsExec.merge(inputSeq).map(r => (r.getLong(0), r.getDouble(1)))
     compareIter(result, expected.toIterator)
   }
 
