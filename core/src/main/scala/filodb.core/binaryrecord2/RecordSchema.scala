@@ -148,12 +148,15 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    * 2-byte length prefix.  Since the UnsafeBuffer is already allocated, this results in no new allocations.
    * Could be used to efficiently retrieve blobs or histograms again and again.
    */
-  def blobAsBuffer(base: Any, offset: Long, index: Int, buf: UnsafeBuffer): Unit = base match {
-    case a: Array[Byte] =>
-      buf.wrap(a, utf8StringOffset(base, offset, index).toInt - UnsafeUtils.arayOffset,
-               blobNumBytes(base, offset, index) + 2)
-    case UnsafeUtils.ZeroPointer =>
-      buf.wrap(utf8StringOffset(base, offset, index), blobNumBytes(base, offset, index) + 2)
+  def blobAsBuffer(base: Any, offset: Long, index: Int, buf: UnsafeBuffer): Unit = {
+    // Number of bytes to give out should not be beyond range of record
+    val blobLen = Math.min(numBytes(base, offset), blobNumBytes(base, offset, index) + 2)
+    base match {
+      case a: Array[Byte] =>
+        buf.wrap(a, utf8StringOffset(base, offset, index).toInt - UnsafeUtils.arayOffset, blobLen)
+      case UnsafeUtils.ZeroPointer =>
+        buf.wrap(utf8StringOffset(base, offset, index), blobLen)
+    }
   }
 
   // Same as above but allocates a new UnsafeBuffer wrapping the blob as a reference

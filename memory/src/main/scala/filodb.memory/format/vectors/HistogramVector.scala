@@ -222,17 +222,17 @@ class AppendableHistogramVector(factory: MemFactory,
 
   // NOTE: to eliminate allocations, re-use the DirectBuffer and keep passing the same instance to addData
   final def addData(buf: DirectBuffer): AddResponse = {
-    val numItems = getNumHistograms(vectPtr)
     val h = BinHistogram(buf)
+    // Validate it's a valid bin histogram
+    if (buf.capacity < 5 || !isValidFormatCode(h.formatCode) ||
+        h.formatCode == HistFormat_Null) {
+      return InvalidHistogram
+    }
+    if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
+
+    val numItems = getNumHistograms(vectPtr)
     val numBuckets = h.numBuckets
     if (numItems == 0) {
-      // Validate it's a valid bin histogram
-      if (buf.capacity < 5 || !isValidFormatCode(h.formatCode) ||
-          h.formatCode == HistFormat_Null) {
-        return InvalidHistogram
-      }
-      if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
-
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
                                     UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr, h.bucketDefNumBytes)
