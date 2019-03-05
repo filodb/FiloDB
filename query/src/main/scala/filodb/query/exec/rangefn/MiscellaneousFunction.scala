@@ -76,7 +76,9 @@ case class LabelReplaceFunction(source: Observable[RangeVector], funcParams: Seq
       for (index <- 1 to matcher.groupCount()) {
         labelReplaceValue = labelReplaceValue.replace(s"$$$index", matcher.group(index))
       }
+      // Remove groups which are not present
       labelReplaceValue = labelReplaceValue.replaceAll("\\$[A-Za-z0-9]+", "")
+
       if (labelReplaceValue.length > 0) {
         return CustomRangeVectorKey(rangeVectorKey.labelValues.
           updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelReplaceValue)), rangeVectorKey.sourceShards)

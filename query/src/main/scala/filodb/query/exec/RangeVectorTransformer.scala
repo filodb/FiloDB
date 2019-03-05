@@ -189,8 +189,6 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
         case LabelReplace => LabelReplaceFunction(source, funcParams)
         case _ => throw new UnsupportedOperationException(s"$function not supported.")
       }
-
-
     }
     if (miscFunction.validator())
       return miscFunction.execute()

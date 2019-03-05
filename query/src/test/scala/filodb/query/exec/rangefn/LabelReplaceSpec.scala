@@ -179,7 +179,6 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should validate invalid function params") {
 
-
     val funcParams = Seq("instance", "$1", "instance", "(.*)9(")
 
     the[IllegalArgumentException] thrownBy {
@@ -204,7 +203,6 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should do a full-string match and replace") {
-
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-10"),
       ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("destination-value-10")),
@@ -256,7 +254,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
-  it("should works with multiple groups and remove groups which do exist from the replacement string") {
+  it("should works with multiple groups and remove groups which do not exist from the replacement string") {
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-10"),
       ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("source-value-10 ")),
