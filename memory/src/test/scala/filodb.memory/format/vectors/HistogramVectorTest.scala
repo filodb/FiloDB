@@ -93,7 +93,7 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.length shouldEqual rawHistBuckets.length
 
     // A record using a different schema
-    BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array[Long](0, 1, 2, 0), buffer)
+    BinaryHistogram.writeDelta(HistogramBuckets.binaryBuckets64, Array.fill(64)(1L), buffer)
     appender.addData(buffer) shouldEqual BucketSchemaMismatch
   }
 

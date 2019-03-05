@@ -95,6 +95,7 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeNonIncreasing(buckets: GeometricBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
+    require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
     val formatCode = if (buckets.minusOne) HistFormat_Geometric1_Delta else HistFormat_Geometric_Delta
 
     buf.putByte(2, formatCode)
@@ -118,6 +119,7 @@ object BinaryHistogram extends StrictLogging {
    * @return the number of bytes written, including the length prefix
    */
   def writeDelta(buckets: GeometricBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
+    require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
     val formatCode = if (buckets.minusOne) HistFormat_Geometric1_Delta else HistFormat_Geometric_Delta
 
     buf.putByte(2, formatCode)
