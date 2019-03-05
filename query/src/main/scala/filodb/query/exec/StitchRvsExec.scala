@@ -83,26 +83,26 @@ final case class StitchRvsExec(id: String,
   }
 }
 
-///**
-//  * Range Vector Transformer version of StitchRvsExec
-//  */
-//final case class StitchRvsMapper() extends RangeVectorTransformer {
-//
-//  def apply(source: Observable[RangeVector],
-//            queryConfig: QueryConfig,
-//            limit: Int,
-//            sourceSchema: ResultSchema): Observable[RangeVector] = {
-//    qLogger.debug(s"StitchRvsMapper: Stitching results:")
-//    val stitched = source.toListL.map { rvs =>
-//      val groups = rvs.groupBy(_.key)
-//      groups.mapValues { toMerge =>
-//        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
-//        val key = toMerge.head.key
-//        IteratorBackedRangeVector(key, rows)
-//      }.values
-//    }.map(Observable.fromIterable)
-//    Observable.fromTask(stitched).flatten
-//  }
-//
-//  override protected[query] def args: String = ""
-//}
+/**
+  * Range Vector Transformer version of StitchRvsExec
+  */
+final case class StitchRvsMapper() extends RangeVectorTransformer {
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    qLogger.debug(s"StitchRvsMapper: Stitching results:")
+    val stitched = source.toListL.map { rvs =>
+      val groups = rvs.groupBy(_.key)
+      groups.mapValues { toMerge =>
+        val rows = StitchRvsExec.merge(toMerge.map(_.rows))
+        val key = toMerge.head.key
+        IteratorBackedRangeVector(key, rows)
+      }.values
+    }.map(Observable.fromIterable)
+    Observable.fromTask(stitched).flatten
+  }
+
+  override protected[query] def args: String = ""
+}

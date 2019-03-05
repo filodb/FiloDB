@@ -32,7 +32,8 @@ object QueryCommands {
                                   limit: Int = 100,
                                   submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
-  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Int = { x => 1 },
+  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Int = { _ => 1 },
+                                spreadIncreased: Seq[ColumnFilter] => Boolean = { _ => false },
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
