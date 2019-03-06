@@ -169,6 +169,8 @@ object NibblePack {
     private var current: Long = 0L
     private var pos: Int = 0
     def process(data: Long): Unit = {
+      // It's necessary to ignore "extra" elements because NibblePack always unpacks in multiples of 8, but the
+      // user might not intuitively allocate output arrays in elements of 8.
       if (pos < outArray.size) {
         current += data
         outArray(pos) = current
