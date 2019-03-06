@@ -35,6 +35,10 @@ object QueryCommands {
 
   final case class SpreadChange(time: Long = 0L, spread: Int = 1)
 
+  /**
+    * This class provides general query processing parameters
+    * @param spreadFunc a function that returns chronologically ordered spread changes for the filter
+    */
   final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) },
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,

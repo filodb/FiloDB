@@ -231,7 +231,12 @@ class QueryEngine(dataset: Dataset,
                                    lp: RawSeries): (Seq[ExecPlan], PlanNotes) = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
-    val planNotes = PlanNotes(options.spreadFunc(renamedFilters).size > 1) // for now stitch if more than one change
+    val spreadChanges = options.spreadFunc(renamedFilters)
+    val needsStitch = lp.rangeSelector match {
+      case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
+      case _                          => false
+    }
+    val planNotes = PlanNotes(stitch = needsStitch)
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
@@ -333,8 +338,8 @@ class QueryEngine(dataset: Dataset,
 
   private def toRowKeyRange(rangeSelector: RangeSelector): RowKeyRange = {
     rangeSelector match {
-      case IntervalSelector(from, to) => RowKeyInterval(BinaryRecord(dataset, from),
-                                                        BinaryRecord(dataset, to))
+      case IntervalSelector(from, to) => RowKeyInterval(BinaryRecord(dataset, Seq(from)),
+                                                        BinaryRecord(dataset, Seq(to)))
       case AllChunksSelector          => AllChunks
       case EncodedChunksSelector      => EncodedChunks
       case WriteBufferSelector        => WriteBuffers
