@@ -5,12 +5,14 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 
+import filodb.coordinator.IngestionStreamFactory
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
+import filodb.core.store.IngestionConfig
 
 /**
- * A simple app which uses the KafkaIngestionStream plus a sourceconfig of your choice to test reading
- * data from Kafka and test reading from certain offsets.
+ * A simple app which uses a sourceconfig of your choice to test reading
+ * data from Kafka (or whatever configured source factory) and test reading from certain offsets.
  *
  * To launch: java -Xmx4G -cp <path>/standalone-assembly-0.7.0.jar filodb.kafka.TestConsumer  \
  *                    my-kafka-sourceconfig.conf
@@ -30,7 +32,13 @@ object TestConsumer extends App {
   // For now, hard code dataset to a Prometheus like dataset
   // TODO: allow specification of dataset, then load from the MetaStore
   val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:long", "value:double"))
-  val stream = new KafkaIngestionStream(sourceConf, dataset, 0, offsetOpt)
+
+  val ingestConf = IngestionConfig(sourceConf, classOf[KafkaIngestionStreamFactory].getClass.getName).get
+  val datasetRef = ingestConf.ref
+  val ctor = Class.forName(ingestConf.streamFactoryClass).getConstructors.head
+  val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
+
+  val stream = streamFactory.create(sourceConf, dataset, 0, offsetOpt)
   val fut = stream.get.take(10)
                   .foreach { case SomeData(container, offset) =>
                     println(s"\n----- Offset $offset -----")
