@@ -34,10 +34,13 @@ trait SocketChecker {
 }
 
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
+  val port = 22552 + util.Random.nextInt(200)
+
   // Ensure that CoordinatedShutdown does not shutdown the whole test JVM, otherwise Travis CI/CD fails
   override protected lazy val roleConfig = ConfigFactory.parseString(
-        """akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+       s"""akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
           |akka.coordinated-shutdown.exit-jvm = off
+          |akka.remote.netty.tcp.port=$port
         """.stripMargin)
 
   implicit abstract override val patienceConfig: PatienceConfig =
@@ -133,7 +136,7 @@ class ClusterNodeServerSpec extends FilodbClusterNodeSpec {
  * Initiates cluster singleton recovery sequence by populating guardian with some initial non-empty
  * shardmap and subscription state, and checking that it is recovered properly on startup
  */
-class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec with SocketChecker {
+class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
   import scala.collection.immutable
   import scala.concurrent.duration._
 
@@ -144,8 +147,6 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec with SocketChecker {
   import filodb.core.NamesTestData._
   import NodeClusterActor._
   import NodeProtocol._
-
-  waitSocketOpen(2552)
 
   override val role = ClusterRole.Server
 
