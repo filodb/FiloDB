@@ -65,12 +65,12 @@ class QueryEngine(dataset: Dataset,
       case (many, planNotes) =>
         val targetActor = pickDispatcher(many)
         many(0) match {
-          case lve: LabelValuesExec =>
-            val topPlan = LabelValuesDistConcatExec(queryId, targetActor, many)
+          case lve: LabelValuesExec =>LabelValuesDistConcatExec(queryId, targetActor, many)
+          case ske: PartKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
+          case ep: ExecPlan =>
+            val topPlan = DistConcatExec(queryId, targetActor, many)
             if (planNotes.stitch) topPlan.addRangeVectorTransformer(new StitchRvsMapper())
             topPlan
-          case ske: PartKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
-          case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +

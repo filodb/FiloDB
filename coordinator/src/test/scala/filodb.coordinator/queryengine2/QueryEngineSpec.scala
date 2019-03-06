@@ -5,9 +5,11 @@ import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.QueryOptions
+import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadChange}
 import filodb.core.MetricsTestData
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
@@ -140,4 +142,48 @@ class QueryEngineSpec extends FunSpec with Matchers {
       reduceAggPlan.children should have length (4)   // spread=2 means 4 shards
     }
   }
+
+  it("should stitch results when spread changes during query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
+    }
+    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
+  }
+
+  it("should not stitch results when spread has not changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
+    }
+    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    execPlan.rangeVectorTransformers.isEmpty shouldEqual true
+  }
+
+  it("should stitch results before binary join when spread changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
+                               TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
+    }
+    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.children.size shouldEqual 2
+    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] shouldEqual true)
+  }
+
+  it("should not stitch results before binary join when spread has not changed in query range") {
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
+      TimeStepParams(20000, 100, 30000))
+    def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
+      Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
+    }
+    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val binaryJoinNode = execPlan.children(0)
+    binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
+    binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
+  }
+
 }
