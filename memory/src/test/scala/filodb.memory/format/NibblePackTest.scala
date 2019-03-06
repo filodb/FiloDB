@@ -4,8 +4,9 @@ import org.agrona.ExpandableArrayBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
 import org.scalatest._
+import org.scalatest.prop.PropertyChecks
 
-class NibblePackTest extends FunSpec with Matchers {
+class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
   it("should NibblePack 8 words partial non-zero even nibbles") {
     // All 8 are nonzero, even # nibbles
     val buf = new ExpandableArrayBuffer()
@@ -81,5 +82,40 @@ class NibblePackTest extends FunSpec with Matchers {
 
     res shouldEqual NibblePack.Ok
     sink.outArray shouldEqual inputs
+
+    val inputs2 = Array(10000, 1032583228027L)
+    val written2 = NibblePack.packDelta(inputs2, buf, 0)
+    val sink2 = NibblePack.DeltaSink(new Array[Long](inputs2.size))
+    bufSlice.wrap(buf, 0, written2)
+    val res2 = NibblePack.unpackToSink(bufSlice, sink2, inputs2.size)
+
+    res2 shouldEqual NibblePack.Ok
+    sink2.outArray shouldEqual inputs2
+  }
+
+  import org.scalacheck._
+
+  // Generate a list of increasing integers, every time bound it slightly differently
+  // (to test different int compression techniques)
+  def increasingLongList: Gen[Seq[Long]] =
+    for {
+      maxVal <- Gen.oneOf(1000, 5000, 30000, Math.pow(2L, 40).toLong)
+      seqList <- Gen.containerOf[Seq, Long](Gen.choose(10, maxVal))
+    } yield { seqList.scanLeft(10000L)(_ + Math.abs(_)) }
+
+  it("should pack and unpack random list of increasing Longs via delta") {
+    val buf = new ExpandableArrayBuffer()
+    forAll(increasingLongList) { longs =>
+
+      val inputs = longs.toArray
+      val bytesWritten = NibblePack.packDelta(inputs, buf, 0)
+
+      val sink = NibblePack.DeltaSink(new Array[Long](inputs.size))
+      val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+      val res = NibblePack.unpackToSink(bufSlice, sink, inputs.size)
+
+      res shouldEqual NibblePack.Ok
+      sink.outArray shouldEqual inputs
+    }
   }
 }
