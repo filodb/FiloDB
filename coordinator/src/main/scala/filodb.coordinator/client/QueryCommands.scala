@@ -32,8 +32,10 @@ object QueryCommands {
                                   limit: Int = 100,
                                   submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
-  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Int = { _ => 1 },
-                                spreadIncreased: Seq[ColumnFilter] => Boolean = { _ => false },
+
+  final case class SpreadChange(time: Long = 0L, spread: Int = 1)
+
+  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) },
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
@@ -41,7 +43,7 @@ object QueryCommands {
 
   object QueryOptions {
     def apply(constSpread: Int, sampleLimit: Int): QueryOptions =
-      QueryOptions(spreadFunc = { x => constSpread}, sampleLimit = sampleLimit)
+      QueryOptions(spreadFunc = { _ => Seq(SpreadChange(spread = constSpread))}, sampleLimit = sampleLimit)
 
     /**
      * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
@@ -49,20 +51,20 @@ object QueryCommands {
      */
     def simpleMapSpreadFunc(keyName: String,
                             spreadMap: collection.Map[String, Int],
-                            defaultSpread: Int): Seq[ColumnFilter] => Int = {
+                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
       filters: Seq[ColumnFilter] =>
-        filters.collect {
+        filters.collectFirst {
           case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
-        }.headOption.map { tagValue =>
-          spreadMap.getOrElse(tagValue, defaultSpread)
-        }.getOrElse(defaultSpread)
+        }.map { tagValue =>
+          Seq(SpreadChange(spread = spreadMap.getOrElse(tagValue, defaultSpread)))
+        }.getOrElse(Seq(SpreadChange(defaultSpread)))
     }
 
     import collection.JavaConverters._
 
     def simpleMapSpreadFunc(keyName: String,
                             spreadMap: java.util.Map[String, Int],
-                            defaultSpread: Int): Seq[ColumnFilter] => Int =
+                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] =
       simpleMapSpreadFunc(keyName, spreadMap.asScala, defaultSpread)
   }
 

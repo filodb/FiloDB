@@ -14,7 +14,7 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions}
+import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions, SpreadChange}
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -29,7 +29,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
-  val queryOptions = QueryOptions(spreadFunc = { _ => settings.queryDefaultSpread },
+  val queryOptions = QueryOptions(spreadFunc = { _ => Seq(SpreadChange(settings.queryDefaultSpread)) },
                                   sampleLimit = settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>

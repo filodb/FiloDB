@@ -105,7 +105,7 @@ class QueryEngine(dataset: Dataset,
       val shardValues = shardVals.filterNot(_._1 == dataset.options.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
       val shardHash = RecordBuilder.shardKeyHash(shardValues, metric)
-      shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters))
+      shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters).last.spread)
     }
   }
 
@@ -231,7 +231,7 @@ class QueryEngine(dataset: Dataset,
                                    lp: RawSeries): (Seq[ExecPlan], PlanNotes) = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
-    val planNotes = PlanNotes(options.spreadIncreased(renamedFilters))
+    val planNotes = PlanNotes(options.spreadFunc(renamedFilters).size > 1) // for now stitch if more than one change
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
