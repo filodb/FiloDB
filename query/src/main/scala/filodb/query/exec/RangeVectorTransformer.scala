@@ -180,18 +180,16 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
+  val miscFunction: MiscellaneousFunction = {
+    function match {
+      case LabelReplace => LabelReplaceFunction(funcParams)
+      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+    }
+  }
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    val miscFunction: MiscellaneousFunction = {
-      function match {
-        case LabelReplace => LabelReplaceFunction(source, funcParams)
-        case _ => throw new UnsupportedOperationException(s"$function not supported.")
-      }
-    }
-    if (miscFunction.validator())
-      return miscFunction.execute()
-    return source
+    miscFunction.execute(source)
   }
 }
