@@ -257,7 +257,8 @@ class ColumnarAppendableHistogramVector(factory: MemFactory,
 
   final def addNA(): AddResponse = Ack  // TODO: Add a 0 to every appender
 
-  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.blobAsBuffer(col))
+  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse =
+    addData(reader.blobAsBuffer(col).asInstanceOf[UnsafeBuffer])
   def copyToBuffer: Buffer[UnsafeBuffer] = ???
   def apply(index: Int): UnsafeBuffer = ???
 
