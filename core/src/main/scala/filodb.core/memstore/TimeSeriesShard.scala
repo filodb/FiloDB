@@ -850,9 +850,19 @@ class TimeSeriesShard(val dataset: Dataset,
           s"shard=$shardNum", e)
         shardStats.flushesFailedChunkWrite.increment
 
-        // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
-        // never be freed.
-        partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
+        // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.
+        // Otherwise they will never be freed.
+        /*
+         NOTE: This step is commented out due to race conditions. The implementation of
+         CassandraColumnStore.write calls mapAsync, which continues running tasks even after a
+         failure has been reported. Iterating over partitionIt here could be running in a
+         different thread, leading to corruption of the iterator state. In addition, calling
+         TimeSeriesPartition.encodeAndReleasebuffers from a thread other than ingestion can
+         cause entries in the appenders list to get lost.
+
+         partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
+        */
+
         // If the above futures fail with ErrorResponse because of DB failures, skip the chunk.
         // Sorry - need to drop the data to keep the ingestion moving
         DataDropped
