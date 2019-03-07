@@ -23,19 +23,19 @@ object StitchRvsExec {
 
       override def next(): RowReader = {
         mins.clear()
-        var minT = Long.MaxValue
+        var minTime = Long.MaxValue
         bVectors.foreach { r =>
           if (r.hasNext) {
             val t = r.head.getLong(0)
             if (mins.size == 0) {
-              minT = t
+              minTime = t
               mins += r
             }
-            else if (t < minT) {
+            else if (t < minTime) {
               mins.clear()
               mins += r
-              minT = t
-            } else if (t == minT) {
+              minTime = t
+            } else if (t == minTime) {
               mins += r
             }
           }
@@ -44,7 +44,7 @@ object StitchRvsExec {
         else if (mins.isEmpty) throw new IllegalStateException("next was called when no element")
         else {
           mins.foreach(it => if (it.hasNext) it.next()) // move iterator forward
-          noResult.timestamp = minT
+          noResult.timestamp = minTime
           noResult.value = Double.NaN // until we have a different indicator for "unable-to-calculate" use NaN
           noResult
         }

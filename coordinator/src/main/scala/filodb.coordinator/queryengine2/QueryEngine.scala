@@ -21,15 +21,6 @@ import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
 
-
-/**
-  * Plan Result includes the result exec plan(s) along with any state to be passed up the
-  * plan building call tree during query planning.
-  *
-  * Not for runtime use.
-  */
-case class PlanResult(exec: Seq[ExecPlan], stitch: Boolean = false)
-
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
@@ -38,6 +29,14 @@ case class PlanResult(exec: Seq[ExecPlan], stitch: Boolean = false)
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
+
+  /**
+    * Intermediate Plan Result includes the exec plan(s) along with any state to be passed up the
+    * plan building call tree during query planning.
+    *
+    * Not for runtime use.
+    */
+  private case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
@@ -144,10 +143,9 @@ class QueryEngine(dataset: Dataset,
                                            submitTime: Long,
                                            options: QueryOptions,
                                            lp: ScalarVectorBinaryOperation): PlanResult = {
-    val planWithNotes = walkLogicalPlanTree(lp.vector, queryId, submitTime, options)
-    planWithNotes.exec
-                 .foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalar, lp.scalarIsLhs)))
-    planWithNotes
+    val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options)
+    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalar, lp.scalarIsLhs)))
+    vectors
   }
 
   private def materializeBinaryJoin(queryId: String,
@@ -155,9 +153,11 @@ class QueryEngine(dataset: Dataset,
                                     options: QueryOptions,
                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, queryId, submitTime, options)
-    val stitchedLhs = if (lhs.stitch) Seq(StitchRvsExec(queryId, pickDispatcher(lhs.exec), lhs.exec)) else lhs.exec
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(lhs.plans), lhs.plans))
+                      else lhs.plans
     val rhs =  walkLogicalPlanTree(lp.rhs, queryId, submitTime, options)
-    val stitchedRhs = if (rhs.stitch) Seq(StitchRvsExec(queryId, pickDispatcher(rhs.exec), rhs.exec)) else rhs.exec
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(rhs.plans), rhs.plans))
+                      else rhs.plans
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
     // and transform child results individually before composing child results together.
@@ -187,10 +187,10 @@ class QueryEngine(dataset: Dataset,
      *
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
-    toReduce.exec.foreach(_.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by)))
+    toReduce.plans.foreach(_.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by)))
     // One could do another level of aggregation per node too. Ignoring for now
-    val reduceDispatcher = pickDispatcher(toReduce.exec)
-    val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduce.exec, lp.operator, lp.params)
+    val reduceDispatcher = pickDispatcher(toReduce.plans)
+    val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduce.plans, lp.operator, lp.params)
     reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
@@ -200,7 +200,7 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    vectors.exec.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }
 
@@ -209,7 +209,7 @@ class QueryEngine(dataset: Dataset,
                                                      options: QueryOptions,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult ={
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
-    rawSeries.exec.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))
     rawSeries
   }
@@ -219,7 +219,7 @@ class QueryEngine(dataset: Dataset,
                                        options: QueryOptions,
                                        lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
-    rawSeries.exec.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
     rawSeries
   }
