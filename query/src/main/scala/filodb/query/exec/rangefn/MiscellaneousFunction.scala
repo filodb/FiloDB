@@ -27,13 +27,13 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
 
   require(dstLabel.matches(labelIdentifier), "Invalid destination label name")
 
-  val pattern: Pattern = try {
+  try {
     Pattern.compile(regexString)
   }
   catch {
     case ex: PatternSyntaxException => {
-     throw new PatternSyntaxException("Invalid Regular Expression for label_replace\n" +
-       ex.getDescription, regexString, ex.getIndex)
+      throw new PatternSyntaxException("Invalid Regular Expression for label_replace\n" +
+        ex.getDescription, regexString, ex.getIndex)
     }
   }
 
@@ -51,9 +51,11 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     }
     else {
       // Assign dummy value as label_replace should overwrite destination label if the source label is empty but matched
-      ZeroCopyUTF8String("")
+      ZeroCopyUTF8String.empty
     }
 
+    // Pattern is not deserialized correctly if it is a data member
+    val pattern = Pattern.compile(regexString)
     val matcher = pattern.matcher(value.toString)
     if (matcher.matches()) {
       var labelReplaceValue = replacementString

@@ -10,10 +10,7 @@ import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId,
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.LabelReplace
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
-import filodb.query.exec.rangefn.{
-  DoubleInstantFunction, HistToDoubleIFunction,
-  InstantFunction, LabelReplaceFunction, MiscellaneousFunction
-}
+import filodb.query.exec.rangefn._
 
 
 
@@ -186,6 +183,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
       case _ => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,

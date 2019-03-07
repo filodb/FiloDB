@@ -267,7 +267,7 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyMiscellaneousFunction): Seq[ExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    vectors.foreach(_.addRangeVectorTransformer(exec.MiscellaneousFunctionMapper(lp.function,lp.functionArgs)))
+    vectors.foreach(_.addRangeVectorTransformer(exec.MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }
 
