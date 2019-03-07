@@ -310,9 +310,9 @@ class QueryEngine(dataset: Dataset,
   private def materializeApplyMiscellaneousFunction(queryId: String,
                                               submitTime: Long,
                                               options: QueryOptions,
-                                              lp: ApplyMiscellaneousFunction): Seq[ExecPlan] = {
+                                              lp: ApplyMiscellaneousFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    vectors.foreach(_.addRangeVectorTransformer(exec.MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }
 
