@@ -13,9 +13,10 @@ import monix.reactive.Observable
 import org.rogach.scallop._
 
 import filodb.coordinator.{GlobalConfig, ShardMapper}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.gateway.GatewayServer
-import filodb.gateway.conversion.PrometheusInputRecord
+import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}
+import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
@@ -138,7 +139,7 @@ object TestTimeseriesProducer extends StrictLogging {
   }
 
   /**
-    * Generate time series data.
+    * Generate Prometheus-schema time series data.
     *
     * @param startTime    Start time stamp
     * @param numShards the number of shards or Kafka partitions
@@ -163,6 +164,55 @@ object TestTimeseriesProducer extends StrictLogging {
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
       DataSample(tags, "heap_usage", timestamp, value)
+    }
+  }
+
+  import ZCUTF8._
+  import Column.ColumnType._
+
+  val dcUTF8 = "dc".utf8
+  val nsUTF8 = "_ns".utf8
+  val partUTF8 = "partition".utf8
+  val hostUTF8 = "host".utf8
+  val instUTF8 = "instance".utf8
+
+  /**
+   * Generate a stream of random Histogram data, with the metric name "http_request_latency"
+   * Schema:  (timestamp:ts, sum:long, count:long, h:hist) for data, plus (metric:string, tags:map)
+   * The dataset must match the above schema
+   */
+  def genHistogramData(startTime: Long, dataset: Dataset, numTimeSeries: Int = 16): Stream[InputRecord] = {
+    require(dataset.dataColumns.map(_.columnType) == Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn))
+    val numBuckets = 10
+
+    val histBucketScheme = bv.GeometricBuckets(2.0, 3.0, numBuckets)
+    val buckets = new Array[Long](numBuckets)
+    def updateBuckets(bucketNo: Int): Unit = {
+      for { b <- bucketNo until numBuckets } {
+        buckets(b) += 1
+      }
+    }
+
+    Stream.from(0).map { n =>
+      val instance = n % numTimeSeries
+      val dc = instance & oneBitMask
+      val partition = (instance >> 1) & twoBitMask
+      val app = (instance >> 3) & twoBitMask
+      val host = (instance >> 4) & twoBitMask
+      val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
+
+      updateBuckets(n % numBuckets)
+      val hist = bv.LongHistogram(histBucketScheme, buckets.map(x => x))
+      val count = util.Random.nextInt(100).toLong
+      val sum = buckets.sum
+
+      val tags = Map(dcUTF8   -> s"DC$dc".utf8,
+                     nsUTF8   -> s"App-$app".utf8,
+                     partUTF8 -> s"partition-$partition".utf8,
+                     hostUTF8 -> s"H$host".utf8,
+                     instUTF8 -> s"Instance-$instance".utf8)
+
+      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, dataset)
     }
   }
 }
