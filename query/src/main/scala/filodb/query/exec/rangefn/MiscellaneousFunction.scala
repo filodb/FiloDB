@@ -32,8 +32,7 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
   }
   catch {
     case ex: PatternSyntaxException => {
-      throw new PatternSyntaxException("Invalid Regular Expression for label_replace\n" +
-        ex.getDescription, regexString, ex.getIndex)
+      throw new IllegalArgumentException("Invalid Regular Expression for label_replace", ex)
     }
   }
 

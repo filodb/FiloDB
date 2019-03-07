@@ -1,7 +1,5 @@
 package filodb.query.exec.rangefn
 
-import java.util.regex.PatternSyntaxException
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
@@ -183,11 +181,11 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("instance", "$1", "instance", "(.*)9(")
 
-    the[PatternSyntaxException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace,
         funcParams)
       miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
-    } should have message "Invalid Regular Expression for label_replace\nUnclosed group near index 6\n(.*)9("
+    } should have message "Invalid Regular Expression for label_replace"
 
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace,
