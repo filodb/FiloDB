@@ -4,8 +4,8 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
@@ -26,12 +26,11 @@ import org.jboss.netty.handler.ssl.SslContext
 import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 
-import filodb.coordinator.{GlobalConfig, ShardMapper}
+import filodb.coordinator.{FilodbSettings, GlobalConfig, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
-import filodb.prometheus.FormatConversion
 
 
 /**
@@ -39,11 +38,12 @@ import filodb.prometheus.FormatConversion
  * built using high performance Netty TCP code
  *
  * It takes exactly one arg: the source config file which contains # Kafka partitions/shards and other config
- * Also pass in -Dconfig.file=.... as usual
+ * Also pass in -Dconfig.file=.... as usual, with a config that points to the dataset metadata.
  */
 object GatewayServer extends StrictLogging {
   // Get global configuration using universal FiloDB/Akka-based config
   val config = GlobalConfig.systemConfig
+  val storeFactory = StoreFactory(new FilodbSettings(config), Scheduler.io())
 
   // ==== Metrics ====
   val numInfluxMessages = Kamon.counter("num-influx-messages")
@@ -65,8 +65,8 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(args.head))
     val numShards = sourceConfig.getInt("num-shards")
 
-    // TODO: get the dataset from source config and read the definition from Metastore
-    val dataset = FormatConversion.dataset
+    val datasetStr = sourceConfig.getString("dataset")
+    val dataset = Await.result(storeFactory.metaStore.getDataset(datasetStr), 30.seconds)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
