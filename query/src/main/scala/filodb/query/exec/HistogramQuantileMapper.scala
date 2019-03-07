@@ -31,7 +31,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * @param le the less-than-equals boundary for histogram bucket
     * @param rate number of occurrences for the bucket per second
     */
-  case class Bucket(val le: Double, var rate: Double) {
+  case class Bucket(le: Double, var rate: Double) {
     override def toString: String = s"$le->$rate"
   }
 
@@ -75,7 +75,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
           val row = new TransientRow()
           override def hasNext: Boolean = samples.forall(_.hasNext)
           override def next(): RowReader = {
-            for { i <- 0 until samples.length } {
+            for { i <- samples.indices } {
               val nxt = samples(i).next()
               buckets(i).rate = nxt.getDouble(1)
               row.timestamp = nxt.getLong(0)
@@ -115,7 +115,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * Similar to prometheus implementation for consistent results.
     */
   private def histogramQuantile(q: Double, buckets: Array[Bucket]): Double = {
-    if (!buckets.last.le.isPosInfinity) return Double.NaN
+    if (!buckets.last.le.isPosInfinity) Double.NaN
     else {
       makeMonotonic(buckets)
       PromRateHistogram(buckets).quantile(q)

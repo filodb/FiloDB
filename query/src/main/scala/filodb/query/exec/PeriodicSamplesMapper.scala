@@ -49,7 +49,7 @@ final case class PeriodicSamplesMapper(start: Long,
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
     // Really, use the stale lookback window size, not 0 which doesn't make sense
-    val windowLength = window.getOrElse(if (functionId == None) queryConfig.staleSampleAfterMs else 0L)
+    val windowLength = window.getOrElse(if (functionId.isEmpty) queryConfig.staleSampleAfterMs else 0L)
 
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
