@@ -68,7 +68,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.initialize()
           rmtResp   <- indexTable.initialize()
-          pitResp   <- partIndexTable.initialize() } yield rmtResp
+          pitResp   <- partIndexTable.initialize() } yield pitResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
@@ -79,7 +79,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.clearAll()
           rmtResp   <- indexTable.clearAll()
-          pitResp   <- partIndexTable.clearAll() } yield rmtResp
+          pitResp   <- partIndexTable.clearAll() } yield pitResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
@@ -94,7 +94,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
       partitionIndexTableCache.remove(dataset)
-      rmtResp
+      pitResp
     }
   }
 

@@ -26,7 +26,7 @@ case object AllChunksSelector extends RangeSelector
 case object WriteBufferSelector extends RangeSelector
 case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
-case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
+case class IntervalSelector(from: Long, to: Long) extends RangeSelector
 
 /**
   * Concrete logical plan to query for raw data in a given range
