@@ -51,7 +51,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * To generate Histogram schema test data, one must create the following dataset:
  *   ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset histogram \
  *      --dataColumns timestamp:ts,sum:long,count:long,h:hist --partitionColumns metric:string,tags:map \
- *      --shardKeyColumns __name__
+ *      --shardKeyColumns metric --metricColumn metric
  * create a Kafka topic:
  *   kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic histogram-dev
  * and use the `conf/histogram-dev-source.conf` config file.
@@ -121,7 +121,6 @@ object GatewayServer extends StrictLogging {
 
     // TODO: allow configurable sinks, maybe multiple sinks for say writing to multiple Kafka clusters/DCs
     setupKafkaProducer(sourceConfig, containerStream)
-    setupTCPService(config, calcShardAndQueueHandler)
 
     val genData = userOpts.genHistData()
     if (genData) {
@@ -140,6 +139,8 @@ object GatewayServer extends StrictLogging {
       Thread sleep 10000
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
+    } else {
+      setupTCPService(config, calcShardAndQueueHandler)
     }
   }
   //scalastyle:on method.length
