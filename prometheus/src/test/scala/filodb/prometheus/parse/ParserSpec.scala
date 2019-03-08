@@ -267,11 +267,11 @@ class ParserSpec extends FunSpec with Matchers {
       "count_values(\"version\", build_version)" ->
         "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(build_version))),List()),1524855988000,1000000,1524855988000),List(\"version\"),List(),List())",
       "label_replace(up{job=\"api-server\",service=\"a:c\"}, \"foo\", \"$1\", \"service\", \"(.*):.*\")" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(service,Equals(a:c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelReplace,List())",
+        "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(service,Equals(a:c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelReplace,List(foo, $1, service, (.*):.*))",
       "sum(http_requests_total)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "label_join(up{job=\"api-server\",src1=\"a\",src2=\"b\",src3=\"c\"}, \"foo\", \",\", \"src1\", \"src2\", \"src3\")" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(src1,Equals(a)), ColumnFilter(src2,Equals(b)), ColumnFilter(src3,Equals(c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelJoin,List())",
+        "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(src1,Equals(a)), ColumnFilter(src2,Equals(b)), ColumnFilter(src3,Equals(c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelJoin,List(foo, ,, src1, src2, src3))",
       "histogram_quantile(0.9, sum(rate(http_request_duration_seconds_bucket[10m])) by (le))" ->
         "ApplyInstantFunction(Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855388000,1524855988000),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988000,1000000,1524855988000,600000,Rate,List()),List(),List(le),List()),HistogramQuantile,List(0.9))",
       "delta(cpu_temp_celsius{host=\"zeus\"}[2h])" ->
@@ -331,7 +331,7 @@ class ParserSpec extends FunSpec with Matchers {
       lp.toString shouldEqual (e)
     }
   }
-
+  
   private def parseSuccessfully(query: String) = {
     Parser.parseQuery(query)
   }

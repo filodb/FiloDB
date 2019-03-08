@@ -129,3 +129,10 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
 case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
                                 functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
+
+/**
+  * Apply Miscellaneous Function to a collection of RangeVectors
+  */
+case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
+                                function: MiscellaneousFunctionId,
+                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan

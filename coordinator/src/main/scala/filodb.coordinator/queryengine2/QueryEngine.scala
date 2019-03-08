@@ -136,6 +136,7 @@ class QueryEngine(dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
       case lp: LabelValues =>                 materializeLabelValues(queryId, submitTime, options, lp)
       case lp: SeriesKeysByFilters =>         materializeSeriesKeysByFilters(queryId, submitTime, options, lp)
+      case lp: ApplyMiscellaneousFunction =>  materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp)
     }
   }
 
@@ -304,6 +305,15 @@ class QueryEngine(dataset: Dataset,
         renamedFilters, toRowKeyRange(lp.rangeSelector), colID)
     }
     PlanResult(metaExec, false)
+  }
+
+  private def materializeApplyMiscellaneousFunction(queryId: String,
+                                              submitTime: Long,
+                                              options: QueryOptions,
+                                              lp: ApplyMiscellaneousFunction): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
+    vectors
   }
 
   /**
