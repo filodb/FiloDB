@@ -17,7 +17,7 @@ import filodb.core.store.IngestionConfig
  *
  * To launch: java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf \
  *                 -cp <path>/standalone-assembly-0.7.0.jar filodb.kafka.TestConsumer  \
- *                    my-kafka-sourceconfig.conf
+ *                    my-kafka-sourceconfig.conf <partition#>
  * It will read 10 records and then quit, printing out the offsets of each record.
  * Optional: pass in a second arg which is the offset to seek to.
  */
@@ -27,10 +27,11 @@ object TestConsumer extends App {
 
   val sourceConfPath = args(0)
   val offsetOpt = args.drop(1).headOption.map(_.toLong)
+  val shard = if (args.length > 1) args(1).toInt else 0
 
   val sourceConf = ConfigFactory.parseFile(new java.io.File(sourceConfPath))
   //scalastyle:off
-  println(s"TestConsumer starting with config $sourceConf\nand offset $offsetOpt")
+  println(s"TestConsumer starting with shard $shard, config $sourceConf\nand offset $offsetOpt")
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -40,7 +41,7 @@ object TestConsumer extends App {
   val ctor = Class.forName(ingestConf.streamFactoryClass).getConstructors.head
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
 
-  val stream = streamFactory.create(sourceConf, dataset, 0, offsetOpt)
+  val stream = streamFactory.create(sourceConf, dataset, shard, offsetOpt)
   val fut = stream.get.take(10)
                   .foreach { case SomeData(container, offset) =>
                     println(s"\n----- Offset $offset -----")
