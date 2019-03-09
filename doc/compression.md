@@ -31,7 +31,7 @@ These all have the capability to redue the number of bits in successive values. 
 
 ## Predictive NibblePacking
 
-This is a storage scheme which takes the output of one of the compression algorithms (really, they are **prediction** algorithms) above, which is a stream of 64-bit numbers with hopefully many zero bits, and encodes them in an efficient way.  This encoding scheme works for the output of any of the integer or floating point compression/prediction schemes.  We make these observations:
+This is a storage scheme which takes the output of one of the compression algorithms (really, they are **prediction** algorithms) above, which is a stream of 64-bit numbers with hopefully many zero bits, and encodes them in an efficient way.  It is loosely based on [this article](https://medium.com/@vaclav.loffelmann/the-worlds-first-middle-out-compression-for-time-series-data-part-2-40c048632911).  This encoding scheme works for the output of any of the integer or floating point compression/prediction schemes.  We make these observations:
 
 1. The 64-bit values may have both leading zeros and trailing zeros (def true for floating point XOR/DFCM output)
 2. Most sequences of these values have very similar numbers of leading and trailing zeros.  
