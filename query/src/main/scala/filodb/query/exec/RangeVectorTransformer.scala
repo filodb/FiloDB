@@ -6,10 +6,13 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
-import filodb.query.exec.binaryOp.BinaryOperatorFunction
-import filodb.query.exec.rangefn.{DoubleInstantFunction, HistToDoubleIFunction, InstantFunction}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.InstantFunctionId.HistogramQuantile
+import filodb.query.MiscellaneousFunctionId.LabelReplace
+import filodb.query.exec.binaryOp.BinaryOperatorFunction
+import filodb.query.exec.rangefn._
+
+
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -167,4 +170,24 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   }
 
   // TODO all operation defs go here and get invoked from mapRangeVector
+}
+
+final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
+                                             funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"function=$function, funcParams=$funcParams"
+
+  val miscFunction: MiscellaneousFunction = {
+    function match {
+      case LabelReplace => LabelReplaceFunction(funcParams)
+      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+    }
+  }
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    miscFunction.execute(source)
+  }
 }

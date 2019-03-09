@@ -94,7 +94,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
-              .doOnComplete(() => span.finish())
+              .doOnTerminate(ex => span.finish())
               // This is needed so future computations happen in a different thread
               .asyncBoundary(strategy)
           } else { Observable.empty }
@@ -111,7 +111,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
-              .doOnComplete(() => span.finish())
+              .doOnTerminate(ex => span.finish())
           } else {
             Observable.empty
           }

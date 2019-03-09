@@ -79,7 +79,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
       builder.addMapKeyValue(k.getBytes, v.getBytes)
       builder.updatePartitionHash(hashes(i))
     }
-    builder.endMap()
+    builder.endMap(bulkHash = false)
 
     builder.endRecord()
   }

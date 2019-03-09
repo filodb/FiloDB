@@ -32,7 +32,7 @@ object PrometheusModel {
   def toFiloDBLogicalPlans(readRequest: ReadRequest): Seq[LogicalPlan] = {
     for { i <- 0 until readRequest.getQueriesCount } yield {
       val q = readRequest.getQueries(i)
-      val interval = IntervalSelector(Seq(q.getStartTimestampMs), Seq(q.getEndTimestampMs))
+      val interval = IntervalSelector(q.getStartTimestampMs, q.getEndTimestampMs)
       val filters = for { j <- 0 until q.getMatchersCount } yield {
         val m = q.getMatchers(j)
         val filter = m.getType match {

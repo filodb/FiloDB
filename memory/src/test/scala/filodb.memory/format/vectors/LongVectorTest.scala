@@ -246,35 +246,34 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
 
     import org.scalacheck._
 
-    // Generate a list of bounded integers, every time bound it slightly differently
+    // Generate a list of increasing integers, every time bound it slightly differently
     // (to test different int compression techniques)
-    def boundedIntList: Gen[Seq[Int]] =
+    def increasingIntList: Gen[Seq[Long]] =
       for {
         maxVal <- Gen.oneOf(1000, 5000, 30000)   // must be greater than 250ms so not within approximation
         seqList <- Gen.containerOf[Seq, Int](Gen.choose(10, maxVal))
-      } yield { seqList }
+      } yield { seqList.scanLeft(10000L)(_ + Math.abs(_)) }
 
     it("should binarySearch Long/DDV vector correctly for random elements and searches") {
       try {
-        forAll(boundedIntList) { s =>
-          val increasingTimes = s.scanLeft(10000L)(_ + Math.abs(_))
-          val builder = LongBinaryVector.appendingVectorNoNA(memFactory, increasingTimes.length)
-          increasingTimes.foreach(builder.addData)
+        forAll(increasingIntList) { longs =>
+          val builder = LongBinaryVector.appendingVectorNoNA(memFactory, longs.length)
+          longs.foreach(builder.addData)
           val optimized = builder.optimize(memFactory)
           val reader = LongBinaryVector(optimized)
-          forAll(Gen.choose(0, increasingTimes.last * 3)) { num =>
+          forAll(Gen.choose(0, longs.last * 3)) { num =>
             val out = reader.binarySearch(optimized, num)
             (out & 0x7fffffff) should be >= 0
-            val posMatch = increasingTimes.indexWhere(_ >= num)
+            val posMatch = longs.indexWhere(_ >= num)
             (out & 0x7fffffff) should be < 100000
             if (posMatch >= 0) {
-              if (increasingTimes(posMatch) == num) {    // exact match, or within 250ms
+              if (longs(posMatch) == num) {    // exact match, or within 250ms
                 out shouldEqual posMatch
               } else {  // not match, but # at pos is first # greater than num.  So insert here.
                 out shouldEqual (posMatch | 0x80000000)
               }
             } else {   // our # is greater than all numbers; ie _ >= num never true.
-              out shouldEqual (0x80000000 | increasingTimes.length)
+              out shouldEqual (0x80000000 | longs.length)
             }
           }
         }

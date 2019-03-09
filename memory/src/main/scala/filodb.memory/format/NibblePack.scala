@@ -117,7 +117,7 @@ object NibblePack {
       val input = inputs(i)
       if (input != 0) {
         val remaining = 64 - bitCursor
-        val shiftedInput = input >> trailingShift
+        val shiftedInput = input >>> trailingShift
 
         // This is least significant portion of input
         outWord |= shiftedInput << bitCursor
@@ -128,7 +128,7 @@ object NibblePack {
           bufpos += 8
           if (remaining < numBits) {
               // Most significant portion left over from previous word
-              outWord = shiftedInput >> remaining
+              outWord = shiftedInput >>> remaining
           } else {
               outWord = 0    // reset for 64-bit input case
           }
@@ -169,6 +169,8 @@ object NibblePack {
     private var current: Long = 0L
     private var pos: Int = 0
     def process(data: Long): Unit = {
+      // It's necessary to ignore "extra" elements because NibblePack always unpacks in multiples of 8, but the
+      // user might not intuitively allocate output arrays in elements of 8.
       if (pos < outArray.size) {
         current += data
         outArray(pos) = current
@@ -208,15 +210,15 @@ object NibblePack {
    * @return an UnpackResult
    */
   final def unpack8(compressed: DirectBuffer, outArray: Array[Long]): UnpackResult = {
-    require(outArray.size >= 8)
     val nonzeroMask = compressed.getByte(0)
     if (nonzeroMask == 0) {
       java.util.Arrays.fill(outArray, 0L)
       subslice(compressed, 1)
       Ok
     } else {
-      val numBits = ((compressed.getByte(1) >> 4) + 1) * 4
-      val trailingZeroes = (compressed.getByte(1) & 0x0f) * 4
+      val numNibblesU8 = compressed.getByte(1) & 0x00ff     // Make sure this is unsigned 8 bits!
+      val numBits = ((numNibblesU8 >>> 4) + 1) * 4
+      val trailingZeroes = (numNibblesU8 & 0x0f) * 4
       val totalBytes = 2 + (numBits * java.lang.Integer.bitCount(nonzeroMask & 0x0ff) + 7) / 8
       val mask = if (numBits >= 64) -1L else (1L << numBits) - 1
       var bufIndex = 2
@@ -230,7 +232,7 @@ object NibblePack {
           val remaining = 64 - bitCursor
 
           // Shift and read in LSB
-          val shiftedIn = inWord >> bitCursor
+          val shiftedIn = inWord >>> bitCursor
           var outWord = shiftedIn & mask
 
           // If remaining bits are in next word, read next word, unless no more space
