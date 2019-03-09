@@ -76,6 +76,7 @@ object GatewayServer extends StrictLogging {
     val numSeries = opt[Int](short='p', default = Some(20), descr="# of total time series")
     val sourceConfigPath = trailArg[String](descr="Path to source config, eg conf/timeseries-dev-source.conf")
     val genHistData = toggle(noshort=true, descrYes="Generate histogram-schema test data and exit")
+    val genPromData = toggle(noshort=true, descrYes="Generate Prometheus-schema test data and exit")
     verify()
   }
 
@@ -122,12 +123,15 @@ object GatewayServer extends StrictLogging {
     // TODO: allow configurable sinks, maybe multiple sinks for say writing to multiple Kafka clusters/DCs
     setupKafkaProducer(sourceConfig, containerStream)
 
-    val genData = userOpts.genHistData()
-    if (genData) {
+    val genHist = userOpts.genHistData.getOrElse(false)
+    val genProm = userOpts.genPromData.getOrElse(false)
+    if (genHist || genProm) {
       val startTime = System.currentTimeMillis
       logger.info(s"Generating $numSamples samples starting at $startTime....")
-      // IF --genHistData
-      val stream = TestTimeseriesProducer.genHistogramData(startTime, dataset, numSeries)
+
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, dataset, numSeries)
+                   else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
+
       stream.take(numSamples).foreach { rec =>
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(rec)) {
@@ -137,6 +141,7 @@ object GatewayServer extends StrictLogging {
         }
       }
       Thread sleep 10000
+      TestTimeseriesProducer.logQueryHelp(numSamples, numSeries, startTime)
       logger.info(s"Waited for containers to be sent, exiting...")
       sys.exit(0)
     } else {

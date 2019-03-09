@@ -100,12 +100,11 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }
 
   private def ingestSamples(noSamples: Int): Future[Unit] = Future {
-    TestTimeseriesProducer.timeSeriesData(startTime, numShards, numSeries)
+    TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
       .take(noSamples * numSeries)
-      .foreach { sample =>
-        val rec = PrometheusInputRecord(sample.tags, sample.metric, dataset, sample.timestamp, sample.value)
+      .foreach { rec =>
         // we shouldn't ingest samples for same timestamps repeatedly. This will also result in out-of-order samples.
-        startTime = Math.max(startTime, sample.timestamp + 10000)
+        startTime = Math.max(startTime, rec.asInstanceOf[PrometheusInputRecord].timestamp + 10000)
         val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
         while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
       }
