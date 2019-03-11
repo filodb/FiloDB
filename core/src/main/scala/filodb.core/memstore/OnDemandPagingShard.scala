@@ -11,7 +11,6 @@ import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.Types
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
@@ -178,7 +177,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       minTime = Math.min(minTime, m.startTime)
       maxTime = Math.max(maxTime, m.endTime)
     }
-    RowKeyChunkScan(minTime, maxTime)
+    TimeRangeChunkScan(minTime, maxTime)
   }
 
   private def chunksToFetch(partition: ReadablePartition,
@@ -192,11 +191,11 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         // Assume initial startKey of first chunk is the earliest - typically true unless we load in historical data
         // Compare desired time range with start key and see if in memory data covers desired range
         // Also assume we have in memory all data since first key.  Just return the missing range of keys.
-        case r: RowKeyChunkScan         =>
+        case r: TimeRangeChunkScan      =>
           if (partition.numChunks > 0) {
             val memStartTime = partition.earliestTime
             val endQuery = memStartTime - 1   // do not include earliestTime, otherwise will pull in first chunk
-            if (r.startTime < memStartTime) { Some(RowKeyChunkScan(r.startkey, BinaryRecord.timestamp(endQuery))) }
+            if (r.startTime < memStartTime) { Some(TimeRangeChunkScan(r.startTime, endQuery)) }
             else                            { None }
           } else {
             Some(r)    // if no chunks ingested yet, read everything from disk

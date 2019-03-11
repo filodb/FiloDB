@@ -4,7 +4,6 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
 
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -143,7 +142,6 @@ final class SerializableRangeVector(val key: RangeVectorKey,
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
       rows.map {
-        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
         case reader =>
           val firstCol = if (formatTime && schema.isTimeSeries) {
             val timeStamp = reader.getLong(0)
