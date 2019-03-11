@@ -210,20 +210,6 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     applyBinaryOperationAndAssertResult(samples, expectedNEQ_BOOL, BinaryOperator.NEQ_BOOL, scalar, true)
   }
 
-
-//    it ("should handle unknown functions") {
-//    // sort_desc
-//    the[UnsupportedOperationException] thrownBy {
-//      val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.EQL, 10, true)
-//      binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-//    } should have message "EQL not supported."
-//
-//    the[UnsupportedOperationException] thrownBy {
-//      val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.GTE, 10, false)
-//      binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-//    } should have message "GTE not supported."
-//  }
-
   it ("should fail with wrong calculation") {
     // ceil
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
