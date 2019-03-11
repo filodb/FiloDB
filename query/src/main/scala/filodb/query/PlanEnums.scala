@@ -158,6 +158,18 @@ object BinaryOperator extends Enum[BinaryOperator] {
 
   case object GTR extends ComparisonOperator
 
+  case object EQL_BOOL extends ComparisonOperator
+
+  case object NEQ_BOOL extends ComparisonOperator
+
+  case object LTE_BOOL extends ComparisonOperator
+
+  case object LSS_BOOL extends ComparisonOperator
+
+  case object GTE_BOOL extends ComparisonOperator
+
+  case object GTR_BOOL extends ComparisonOperator
+
   case object EQLRegex extends BinaryOperator // FIXME when implemented
 
   case object NEQRegex extends BinaryOperator // FIXME when implemented
