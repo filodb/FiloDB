@@ -6,7 +6,7 @@ import org.agrona.{DirectBuffer, MutableDirectBuffer}
 import scalaxy.loops._
 
 /**
- * An implementation of the NibblePack algorithm for efficient encoding, see [[doc/compression.md]]
+ * An implementation of the NibblePack algorithm for efficient encoding, see [compression.md](doc/compression.md).
  * Works with a predictor that maximizes zero bits/words of floating point or integer data.
  */
 object NibblePack {
