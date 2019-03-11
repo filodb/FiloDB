@@ -13,10 +13,10 @@ import monix.eval.Task
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
 import filodb.core.Types
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
@@ -239,7 +239,7 @@ class QueryEngine(dataset: Dataset,
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toRowKeyRange(lp.rangeSelector), colIDs)
+        renamedFilters, toChunkScanMethod(lp.rangeSelector), colIDs)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -302,7 +302,7 @@ class QueryEngine(dataset: Dataset,
     val metaExec = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectChunkInfosExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toRowKeyRange(lp.rangeSelector), colID)
+        renamedFilters, toChunkScanMethod(lp.rangeSelector), colID)
     }
     PlanResult(metaExec, false)
   }
@@ -344,14 +344,13 @@ class QueryEngine(dataset: Dataset,
     else { dataset.rowKeyIDs ++ ids }
   }
 
-  private def toRowKeyRange(rangeSelector: RangeSelector): RowKeyRange = {
+  private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {
     rangeSelector match {
-      case IntervalSelector(from, to) => RowKeyInterval(BinaryRecord(dataset, Seq(from)),
-                                                        BinaryRecord(dataset, Seq(to)))
-      case AllChunksSelector          => AllChunks
-      case EncodedChunksSelector      => EncodedChunks
-      case WriteBufferSelector        => WriteBuffers
-      case InMemoryChunksSelector     => InMemoryChunks
+      case IntervalSelector(from, to) => TimeRangeChunkScan(from, to)
+      case AllChunksSelector          => AllChunkScan
+      case EncodedChunksSelector      => ???
+      case WriteBufferSelector        => WriteBufferChunkScan
+      case InMemoryChunksSelector     => InMemoryChunkScan
       case _ => ???
     }
   }
