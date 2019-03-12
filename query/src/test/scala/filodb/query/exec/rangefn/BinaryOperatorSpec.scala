@@ -52,7 +52,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       override def rows: Iterator[RowReader] = data.iterator
     })
     fireBinaryOperatorTests(samples)
-    fireCompatorOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
 
   }
 
@@ -81,7 +81,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       }
     )
     fireBinaryOperatorTests(samples)
-    fireCompatorOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
 
   }
 
@@ -104,7 +104,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       }
     )
     fireBinaryOperatorTests(samples)
-    fireCompatorOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
   }
 
   private def fireBinaryOperatorTests(samples: Array[RangeVector]): Unit = {
@@ -159,7 +159,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
   }
 
-  private def fireCompatorOperatorTests(samples: Array[RangeVector]): Unit = {
+  private def fireComparatorOperatorTests(samples: Array[RangeVector]): Unit = {
 
     // GTE - prefix
     val expectedGTE = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))

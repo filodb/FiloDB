@@ -17,7 +17,7 @@ object BinaryOperatorFunction {
     */
   //noinspection ScalaStyle
   def factoryMethod(function: BinaryOperator): ScalarFunction = {
-   function match {
+    function match {
 
       case SUB                => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = lhs - rhs }
       case ADD                => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = lhs + rhs }
