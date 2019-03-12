@@ -4,6 +4,8 @@ import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
+import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.ExpandableArrayBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
@@ -11,7 +13,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
 import filodb.memory.MemFactory
-import filodb.memory.format.SeqRowReader
+import filodb.memory.format.{NibblePack, SeqRowReader}
 
 //scalastyle:off regex
 /**
@@ -116,5 +118,44 @@ class HistogramIngestBenchmark {
   def ingestPromHistograms(): Unit = {
     pShard.ingest(promContainers(containerNo), 0)
     containerNo += 1
+  }
+
+  def nonzeroLongInputs(numNonZeroes: Int): Array[Long] = {
+    val longs = new Array[Long](64)
+    (1 to numNonZeroes).foreach { i =>
+      longs(i) = (Math.sin(i * Math.PI / numNonZeroes) * 1000.0).toLong
+    }
+    longs
+  }
+
+  def increasingNonzeroes(numNonZeroes: Int): Array[Long] = {
+    val longs = nonzeroLongInputs(numNonZeroes)
+    for { i <- 1 until 64 } {
+      longs(i) = longs(i - 1) + longs(i)
+    }
+    longs
+  }
+
+  val inputs = increasingNonzeroes(16)
+  val buf = new ExpandableArrayBuffer()
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nibblePackDelta64(): Int = {
+    NibblePack.packDelta(inputs, buf, 0)
+  }
+
+  val bytesWritten = NibblePack.packDelta(inputs, buf, 0)
+  val sink = NibblePack.DeltaSink(new Array[Long](inputs.size))
+  val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nibbleUnpackDelta64(): Unit = {
+    bufSlice.wrap(buf, 0, bytesWritten)
+    val res = NibblePack.unpackToSink(bufSlice, sink, inputs.size)
+    require(res == NibblePack.Ok)
   }
 }

@@ -5,6 +5,7 @@ import java.sql.Timestamp
 
 import scala.reflect.ClassTag
 
+import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 import org.joda.time.DateTime
 import scalaxy.loops._
@@ -39,9 +40,9 @@ trait RowReader {
    * Smart implementations could reuse the same UnsafeBuffer to avoid allocations.
    * This default implementation simply allocates a new one.
    */
-  def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
+  def blobAsBuffer(columnNo: Int): DirectBuffer = {
     val buf = new UnsafeBuffer(Array.empty[Byte])
-    UnsafeUtils.wrapUnsafeBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
+    UnsafeUtils.wrapDirectBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
     buf
   }
 

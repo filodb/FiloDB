@@ -2,6 +2,7 @@ package filodb.core.binaryrecord2
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.core.metadata.{Column, Dataset}
@@ -144,11 +145,11 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
 
   /**
-   * Sets an existing UnsafeBuffer to wrap around the given blob/UTF8/Histogram bytes, including the
-   * 2-byte length prefix.  Since the UnsafeBuffer is already allocated, this results in no new allocations.
+   * Sets an existing DirectBuffer to wrap around the given blob/UTF8/Histogram bytes, including the
+   * 2-byte length prefix.  Since the DirectBuffer is already allocated, this results in no new allocations.
    * Could be used to efficiently retrieve blobs or histograms again and again.
    */
-  def blobAsBuffer(base: Any, offset: Long, index: Int, buf: UnsafeBuffer): Unit = base match {
+  def blobAsBuffer(base: Any, offset: Long, index: Int, buf: DirectBuffer): Unit = base match {
     case a: Array[Byte] =>
       buf.wrap(a, utf8StringOffset(base, offset, index).toInt - UnsafeUtils.arayOffset,
                blobNumBytes(base, offset, index) + 2)
@@ -157,7 +158,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   }
 
   // Same as above but allocates a new UnsafeBuffer wrapping the blob as a reference
-  def blobAsBuffer(base: Any, offset: Long, index: Int): UnsafeBuffer = {
+  def blobAsBuffer(base: Any, offset: Long, index: Int): DirectBuffer = {
     val newBuf = new UnsafeBuffer(Array.empty[Byte])
     blobAsBuffer(base, offset, index, newBuf)
     newBuf
@@ -433,8 +434,8 @@ final class BinaryRecordRowReader(schema: RecordSchema,
 
   val buf = new UnsafeBuffer(Array.empty[Byte])
   // NOTE: this method reuses the same buffer to avoid allocations.
-  override def blobAsBuffer(columnNo: Int): UnsafeBuffer = {
-    UnsafeUtils.wrapUnsafeBuf(recordBase, schema.utf8StringOffset(recordBase, recordOffset, columnNo),
+  override def blobAsBuffer(columnNo: Int): DirectBuffer = {
+    UnsafeUtils.wrapDirectBuf(recordBase, schema.utf8StringOffset(recordBase, recordOffset, columnNo),
                               getBlobNumBytes(columnNo) + 2, buf)
     buf
   }

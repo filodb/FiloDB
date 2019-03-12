@@ -47,7 +47,8 @@ object BinaryRegion {
   def copyArray(source: Array[Byte], dest: Array[Byte], destOffset: Int): Unit =
     System.arraycopy(source, 0, dest, destOffset, source.size)
 
-  // 64-bit pointer to native/offheap memory
+  // 64-bit pointer to native/offheap memory.  NOTE: instead of using this, please use the Ptr*
+  // value classes as they are much more type safe
   type NativePointer = Long
 }
 

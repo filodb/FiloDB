@@ -1,7 +1,7 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
-import org.agrona.concurrent.UnsafeBuffer
+import org.agrona.MutableDirectBuffer
 
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -107,7 +107,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     final def numBuckets: Int = buckets.size
     final def bucketTop(no: Int): Double = buckets(no).le
     final def bucketValue(no: Int): Double = buckets(no).rate
-    final def serialize(intoBuf: Option[UnsafeBuffer] = None): UnsafeBuffer = ???
+    final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
   }
 
   /**
