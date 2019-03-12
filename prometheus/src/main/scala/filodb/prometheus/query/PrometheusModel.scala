@@ -93,8 +93,9 @@ object PrometheusModel {
     */
   def toPromResult(srv: SerializableRangeVector, verbose: Boolean): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-                (if (verbose) Map("shards" -> srv.key.sourceShards.toString(), "partIds" -> srv.key.partIds.toString())
-                else Map())
+                (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
+                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                else Map.empty)
 
     Result(tags,
       // remove NaN in HTTP results
