@@ -281,7 +281,7 @@ final case class GeometricBuckets(firstBucket: Double,
   final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
     require(numBuckets < 65536, s"Too many buckets: $numBuckets")
     val numBucketsPos = pos + 2
-    buf.putShort(pos, 2 + 8 + 8)
+    buf.putShort(pos, (2 + 8 + 8).toShort)
     buf.putShort(numBucketsPos, numBuckets.toShort, LITTLE_ENDIAN)
     buf.putDouble(numBucketsPos + OffsetBucketDetails, firstBucket, LITTLE_ENDIAN)
     buf.putDouble(numBucketsPos + OffsetBucketDetails + 8, multiplier, LITTLE_ENDIAN)
