@@ -94,6 +94,10 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
         }
         println(s"Current statuses = $statuses")
         info(s"Current statuses = $statuses")
+        if (statuses.exists(_ == ShardStatusError)) {
+          info(s"ERROR in status, breaking")
+          throw new RuntimeException(s"Got error in statuses $statuses")
+        }
       } while (statuses.take(2) != Seq(ShardStatusActive, ShardStatusActive))
 
       Get(s"/api/v1/cluster/${dataset6.ref}/status") ~> clusterRoute ~> check {

@@ -189,7 +189,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis()
     val from = to - 50000
 
-    val intervalSelector = IntervalSelector(Seq(from), Seq(to))
+    val intervalSelector = IntervalSelector(from, to)
 
     val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
     val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
