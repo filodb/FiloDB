@@ -15,7 +15,8 @@ object BinaryOperatorFunction {
     * @param function to be invoked
     * @return the function
     */
-  //noinspection ScalaStyle
+
+  // scalastyle:off
   def factoryMethod(function: BinaryOperator): ScalarFunction = {
     function match {
 
