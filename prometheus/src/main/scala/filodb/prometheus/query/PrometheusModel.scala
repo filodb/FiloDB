@@ -76,8 +76,8 @@ object PrometheusModel {
     b.build()
   }
 
-  def toPromSuccessResponse(qr: filodb.query.QueryResult): SuccessResponse = {
-    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_))))
+  def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
+    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_, verbose))))
   }
 
   def toPromResultType(r: QueryResultType): String = {
@@ -91,8 +91,12 @@ object PrometheusModel {
   /**
     * Used to send out HTTP response
     */
-  def toPromResult(srv: SerializableRangeVector): Result = {
-    Result(srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)},
+  def toPromResult(srv: SerializableRangeVector, verbose: Boolean): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+                (if (verbose) Map("shards" -> srv.key.sourceShards.toString(), "partIds" -> srv.key.partIds.toString())
+                else Map())
+
+    Result(tags,
       // remove NaN in HTTP results
       // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
       // in HTTP raw query results.

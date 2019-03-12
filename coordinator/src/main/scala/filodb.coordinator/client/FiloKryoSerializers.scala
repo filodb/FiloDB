@@ -63,7 +63,7 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
     val schema = kryo.readObject(input, classOf[RecordSchema2])
     val keyCols = kryo.readClassAndObject(input)
     PartitionRangeVectorKey(partBytes, UnsafeUtils.arayOffset,
-      schema, keyCols.asInstanceOf[Seq[ColumnInfo]], input.readInt, input.readInt)
+      schema, keyCols.asInstanceOf[Seq[ColumnInfo]], input.readInt, input.readInt, input.readInt)
   }
 
   override def write(kryo: Kryo, output: Output, key: PartitionRangeVectorKey): Unit = {
@@ -72,6 +72,7 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
     kryo.writeClassAndObject(output, key.partKeyCols)
     output.writeInt(key.sourceShard)
     output.writeInt(key.groupNum)
+    output.writeInt(key.partId)
   }
 }
 

@@ -21,6 +21,7 @@ import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Map[UTF8Str, UTF8Str]
   def sourceShards: Seq[Int]
+  def partIds: Seq[Int]
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
 
@@ -41,8 +42,10 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partSchema: RecordSchema,
                                          partKeyCols: Seq[ColumnInfo],
                                          sourceShard: Int,
-                                         groupNum: Int) extends RangeVectorKey {
+                                         groupNum: Int,
+                                         partId: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
+  override def partIds: Seq[Int] = Seq(partId)
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
@@ -59,7 +62,9 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
   override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 }
 
-final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str], sourceShards: Seq[Int] = Nil)
+final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
+                                      sourceShards: Seq[Int] = Nil,
+                                      partIds: Seq[Int] = Nil)
   extends RangeVectorKey {
 }
 

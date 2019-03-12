@@ -1063,6 +1063,7 @@ class TimeSeriesShard(val dataset: Dataset,
             if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
               logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
             } else {
+              logger.debug(s"Evicting partId=${partitionObj.partID} from dataset=${dataset.ref} shard=$shardNum")
               removePartition(partitionObj)
               partsRemoved += 1
               maxEndTime = Math.max(maxEndTime, endTime)
