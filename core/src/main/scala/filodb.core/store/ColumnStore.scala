@@ -3,7 +3,6 @@ package filodb.core.store
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
-import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.BinaryRegionLarge
@@ -41,29 +40,10 @@ trait AllTimeScanMethod {
 }
 
 case object AllChunkScan extends AllTimeScanMethod with ChunkScanMethod
-// NOTE: BinaryRecordWrapper must be used as this case class might be Java Serialized
-final case class RowKeyChunkScan(firstBinKey: BinaryRecordWrapper,
-                                 lastBinKey: BinaryRecordWrapper) extends ChunkScanMethod {
-  def startkey: BinaryRecord = firstBinKey.binRec
-  def endkey: BinaryRecord = lastBinKey.binRec
-  def startTime: Long = startkey.getLong(0)
-  def endTime: Long = endkey.getLong(0)
-}
+final case class TimeRangeChunkScan(startTime: Long, endTime: Long) extends ChunkScanMethod
 case object WriteBufferChunkScan extends AllTimeScanMethod with ChunkScanMethod
 // Only read chunks which are in memory
 case object InMemoryChunkScan extends AllTimeScanMethod with ChunkScanMethod
-
-object RowKeyChunkScan {
-  def apply(startKey: BinaryRecord, endKey: BinaryRecord): RowKeyChunkScan =
-    RowKeyChunkScan(BinaryRecordWrapper(startKey), BinaryRecordWrapper(endKey))
-
-  def apply(dataset: Dataset, startKey: Seq[Any], endKey: Seq[Any]): RowKeyChunkScan =
-    RowKeyChunkScan(BinaryRecord(dataset, startKey), BinaryRecord(dataset, endKey))
-
-  def apply(startTime: Long, endTime: Long): RowKeyChunkScan =
-    RowKeyChunkScan(BinaryRecord.timestamp(startTime), BinaryRecord.timestamp(endTime))
-}
-
 
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split

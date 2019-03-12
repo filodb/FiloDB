@@ -39,7 +39,7 @@ final case class SelectChunkInfosExec(id: String,
                                       dataset: DatasetRef,
                                       shard: Int,
                                       filters: Seq[ColumnFilter],
-                                      rowKeyRange: RowKeyRange,
+                                      chunkMethod: ChunkScanMethod,
                                       column: Types.ColumnId) extends LeafExecPlan {
   import SelectChunkInfosExec._
 
@@ -51,13 +51,6 @@ final case class SelectChunkInfosExec(id: String,
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     val dataColumn = dataset.dataColumns(column)
-    val chunkMethod = rowKeyRange match {
-      case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
-      case AllChunks                => AllChunkScan
-      case WriteBuffers             => WriteBufferChunkScan
-      case InMemoryChunks           => InMemoryChunkScan
-      case EncodedChunks            => ???
-    }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
     val numGroups = source.groupsInDataset(dataset)
@@ -73,6 +66,6 @@ final case class SelectChunkInfosExec(id: String,
           }
   }
 
-  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters, col=$column"
+  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, col=$column"
 }
 
