@@ -1,5 +1,7 @@
 package filodb.query.exec.rangefn
 
+import scalaxy.loops._
+
 import filodb.memory.format.vectors.Histogram
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -88,6 +90,7 @@ object InstantFunction {
    */
   def histogram(function: InstantFunctionId, funcParams: Seq[Any]): HistogramInstantFunction = function match {
     case HistogramQuantile    => HistogramQuantileImpl(funcParams)
+    case HistogramBucket      => HistogramBucketImpl(funcParams)
     case _                    => throw new UnsupportedOperationException(s"$function not supported.")
   }
 }
@@ -248,4 +251,22 @@ case class HistogramQuantileImpl(funcParams: Seq[Any]) extends HistToDoubleIFunc
   val q = funcParams(0).asInstanceOf[Number].doubleValue()
 
   final def apply(value: Histogram): Double = value.quantile(q)
+}
+
+/**
+ * Function to extract one bucket from any histogram (could be computed, not just raw).
+ * @param funcParams - a single value which is the Double bucket or "le" to extract.  If it does not correspond
+ *                     to any existing bucket then NaN is returned.
+ */
+case class HistogramBucketImpl(funcParams: Seq[Any]) extends HistToDoubleIFunction {
+  require(funcParams.length == 1, "Bucket/le required for histogram bucket")
+  require(funcParams(0).isInstanceOf[Number], "histogram_bucket parameter must be a number")
+  val bucket = funcParams(0).asInstanceOf[Number].doubleValue()
+
+  final def apply(value: Histogram): Double = {
+    for { b <- 0 until value.numBuckets optimized } {
+      if (value.bucketTop(b) == bucket) return value.bucketValue(b)
+    }
+    Double.NaN
+  }
 }

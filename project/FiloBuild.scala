@@ -55,6 +55,7 @@ object FiloBuild extends Build {
     .in(file("query"))
     .settings(libraryDependencies ++= queryDeps)
     .settings(commonSettings: _*)
+    .settings(scalacOptions += "-language:postfixOps")
     .settings(name := "filodb-query")
     .dependsOn(core % "compile->compile; test->test")
 
@@ -232,7 +233,8 @@ object FiloBuild extends Build {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
-    "com.tdunning"         % "t-digest"           % "3.1"
+    "com.tdunning"         % "t-digest"           % "3.1",
+    scalaxyDep
   )
 
   lazy val coordDeps = commonDeps ++ Seq(
