@@ -226,12 +226,23 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       }
   }
 
+  private def aliveIngesters: Seq[(DatasetRef, ActorRef)] = {
+    val kids = context.children.toBuffer
+    ingesters.toSeq.filter { case (dsRef, actorRef) => kids contains actorRef }
+  }
+
   private def reset(origin: ActorRef): Unit = {
     ingesters.values.foreach(_ ! PoisonPill)
     queryActors.values.foreach(_ ! PoisonPill)
     ingesters.clear()
     queryActors.clear()
     memStore.reset()
+
+    // Wait for all ingestor children to die
+    while (aliveIngesters.nonEmpty) {
+      logger.info(s"In reset, waiting for children to die.... ingesters=$ingesters children=${context.children}")
+      Thread sleep 250
+    }
     origin ! NodeProtocol.StateReset
   }
 

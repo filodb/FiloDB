@@ -177,6 +177,8 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    */
   final def add(other: HistogramWithBuckets): Unit =
     if (buckets == other.buckets) {
+      // If it was NaN before, reset to 0 to sum another hist
+      if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
       for { b <- 0 until numBuckets optimized } {
         values(b) += other.bucketValue(b)
       }
@@ -187,7 +189,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
 
 object MutableHistogram {
   def empty(buckets: HistogramBuckets): MutableHistogram =
-    MutableHistogram(buckets, new Array[Double](buckets.numBuckets))
+    MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
 }
 
 /**
@@ -279,7 +281,7 @@ final case class GeometricBuckets(firstBucket: Double,
   final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
     require(numBuckets < 65536, s"Too many buckets: $numBuckets")
     val numBucketsPos = pos + 2
-    buf.putShort(pos, 2 + 8 + 8)
+    buf.putShort(pos, (2 + 8 + 8).toShort)
     buf.putShort(numBucketsPos, numBuckets.toShort, LITTLE_ENDIAN)
     buf.putDouble(numBucketsPos + OffsetBucketDetails, firstBucket, LITTLE_ENDIAN)
     buf.putDouble(numBucketsPos + OffsetBucketDetails + 8, multiplier, LITTLE_ENDIAN)

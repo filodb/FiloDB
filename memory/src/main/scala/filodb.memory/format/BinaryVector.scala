@@ -45,6 +45,7 @@ object BinaryVector {
     case Classes.Long   => (b => vectors.LongBinaryVector(b))
     case Classes.Double => (b => vectors.DoubleVector(b))
     case Classes.UTF8   => (b => vectors.UTF8Vector(b))
+    case Classes.Histogram => (b => vectors.HistogramVector(b))
   }
 
   type PtrToDataReader = PartialFunction[Class[_], BinaryVectorPtr => VectorDataReader]
@@ -170,7 +171,8 @@ sealed trait AddResponse
 case object Ack extends AddResponse
 final case class VectorTooSmall(bytesNeeded: Int, bytesHave: Int) extends AddResponse
 case object ItemTooLarge extends AddResponse
-case object BucketSchemaMismatch extends AddResponse
+case object BucketSchemaMismatch extends AddResponse   // Trying to add a histogram with nonmatching schema
+case object InvalidHistogram extends AddResponse
 
 /**
  * A BinaryVector that you can append to.  Has some notion of a maximum size (max # of items or bytes)

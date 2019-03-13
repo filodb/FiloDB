@@ -90,7 +90,13 @@ Or, if the above was viewed in a little-endian system as a 32-bit int, then the 
 
 ## Histograms
 
-FiloDB supports first class histograms as HistogramColumns in schemas.  This means histograms are ingested as single entities and kept together as a single time series.  Compressed histograms (using NibblePacking) are stored in write buffers and may be compressed further.
+FiloDB supports first class histograms as HistogramColumns in schemas.  This means histograms are ingested as single entities and kept together as a single time series.  Histograms are required to have increasing bucket values; that is, the value in each bucket represents the total count of all buckets below that bucket as well -- the buckets are cumulative.  This is based on the histogram bucket scheme used in Prometheus.
+
+Currently, incoming histograms which are cumulative are encoded on the wire using delta encoding of their integer values using the NibblePacking scheme described above.  This leads to pretty efficient encoding of both busy/active histograms and inactive ones.
+- The delta-encoded NibblePack'ed histograms save save in the BinaryRecord ingestion format.  For 64 buckets, for example, this format saves 50x space compared to the traditional Prometheus data model.
+- The encoded histograms are stored as is in write buffers.  This allows us to save a huge amount of space there as well.
+- Since encoded histograms are variable-length, we facilitate fast lookup of histograms within a HistogramVector by grouping histograms into "sections".  Sections have headers to make it easy to skip over entire sections.
+- Currently, the delta-encoded histogram format also serves as the compressed vector format, ie there is no further compression after arrival.
 
 Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details about the on-the-wire / BinaryRecord format used for histograms.
 

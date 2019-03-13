@@ -19,8 +19,8 @@ object TimeSeriesPartitionSpec {
 
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
 
-  val maxChunkSize = 100
-  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
+  val maxChunkSize = TestData.storeConf.maxChunksSize
+  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, TestData.storeConf)
 
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,

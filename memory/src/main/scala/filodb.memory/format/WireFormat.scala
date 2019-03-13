@@ -6,13 +6,15 @@ package filodb.memory.format
  */
 object WireFormat {
   val VECTORTYPE_EMPTY = 0x01
-  val VECTORTYPE_SIMPLE = 0x02
-  val VECTORTYPE_DICT = 0x03
-  val VECTORTYPE_CONST = 0x04
-  val VECTORTYPE_DIFF = 0x05
+  // Deprecated vector types
+  // val VECTORTYPE_SIMPLE = 0x02
+  // val VECTORTYPE_DICT = 0x03
+  // val VECTORTYPE_CONST = 0x04
+  // val VECTORTYPE_DIFF = 0x05
   val VECTORTYPE_BINSIMPLE = 0x06
   val VECTORTYPE_BINDICT = 0x07
   val VECTORTYPE_DELTA2 = 0x08    // Delta-delta encoded
+  val VECTORTYPE_HISTOGRAM = 0x09
 
   def majorVectorType(headerBytes: Int): Int = headerBytes & 0x00ff
   def emptyVectorLen(headerBytes: Int): Int = {
@@ -29,6 +31,8 @@ object WireFormat {
   val SUBTYPE_REPEATED = 0x06        // vectors.ConstVector
   val SUBTYPE_INT = 0x07             // Int gets special type because Longs and Doubles may be encoded as Int
   val SUBTYPE_INT_NOMASK = 0x08
+
+  val SUBTYPE_H_SIMPLE = 0x10         // Histograms, stored as is
 
   def vectorSubType(headerBytes: Int): Int = (headerBytes & 0x00ff00) >> 8
 
