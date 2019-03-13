@@ -265,7 +265,7 @@ case class HistogramBucketImpl(funcParams: Seq[Any]) extends HistToDoubleIFuncti
 
   final def apply(value: Histogram): Double = {
     for { b <- 0 until value.numBuckets optimized } {
-      if (value.bucketTop(b) == bucket) return value.bucketValue(b)
+      if (Math.abs(value.bucketTop(b) - bucket) <= 0.00001) return value.bucketValue(b)
     }
     Double.NaN
   }
