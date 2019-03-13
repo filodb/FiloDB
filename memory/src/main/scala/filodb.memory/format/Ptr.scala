@@ -8,7 +8,7 @@ package filodb.memory.format
  * Modeled after the equivalent Ptr types in Rust.
  */
 object Ptr {
-  // A read-only pointer to unsigned bytes. Equivalent to *const u8 in Rust/C.  No length safety, but much better than
+  // A read-only pointer to bytes. Equivalent to *const u8 in Rust/C.  No length safety, but much better than
   // type equivalency to Long's.  Use it to prevent type errors where one accidentally substitutes ints or longs.
   final case class U8(addr: Long) extends AnyVal {
     // Simple pointer math, by # of U8 elements (bytes)

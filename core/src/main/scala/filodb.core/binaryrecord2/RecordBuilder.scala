@@ -325,10 +325,14 @@ final class RecordBuilder(memFactory: MemFactory,
 
   /**
    * Ends creation of a map field.  Recompute the hash for all fields at once.
+   * @param bulkHash if true (default), computes the hash for all key/values.
+   *                 Some users use the older alternate, sortAndComputeHashes() - then set this to false.
    */
-  final def endMap(): Unit = {
-    val mapHash = BinaryRegion.hash32(curBase, mapOffset, (curRecEndOffset - mapOffset).toInt)
-    updatePartitionHash(mapHash)
+  final def endMap(bulkHash: Boolean = true): Unit = {
+    if (bulkHash) {
+      val mapHash = BinaryRegion.hash32(curBase, mapOffset, (curRecEndOffset - mapOffset).toInt)
+      updatePartitionHash(mapHash)
+    }
     mapOffset = -1L
     fieldNo += 1
   }

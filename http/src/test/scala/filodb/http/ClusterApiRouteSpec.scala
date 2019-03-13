@@ -43,12 +43,11 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
   before {
     probe.send(cluster.coordinatorActor, NodeProtocol.ResetState)
     probe.expectMsg(NodeProtocol.StateReset)
+    // Note: at this point all ingestor actors are shut down
     cluster.metaStore.clearAllData().futureValue
     cluster.metaStore.newDataset(dataset6).futureValue shouldEqual Success
     probe.send(clusterProxy, NodeProtocol.ResetState)
     probe.expectMsg(NodeProtocol.StateReset)
-    // Give enough time for old ingestor/query actors to die
-    Thread sleep 500
   }
 
   describe("get datasets route") {
@@ -94,6 +93,10 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
         }
         println(s"Current statuses = $statuses")
         info(s"Current statuses = $statuses")
+        if (statuses.exists(_ == ShardStatusError)) {
+          info(s"ERROR in status, breaking")
+          throw new RuntimeException(s"Got error in statuses $statuses")
+        }
       } while (statuses.take(2) != Seq(ShardStatusActive, ShardStatusActive))
 
       Get(s"/api/v1/cluster/${dataset6.ref}/status") ~> clusterRoute ~> check {

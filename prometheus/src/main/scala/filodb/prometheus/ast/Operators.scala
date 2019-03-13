@@ -45,27 +45,27 @@ trait Operators {
   }
 
   case class NotEqual(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.NEQ
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.NEQ else BinaryOperator.NEQ_BOOL
   }
 
   case class Eq(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.EQL
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.EQL else BinaryOperator.EQL_BOOL
   }
 
   case class Gt(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.GTR
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.GTR else BinaryOperator.GTR_BOOL
   }
 
   case class Gte(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.GTE
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.GTE else BinaryOperator.GTE_BOOL
   }
 
   case class Lt(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.LSS
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.LSS else BinaryOperator.LSS_BOOL
   }
 
   case class Lte(isBool: Boolean) extends Comparision {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.LTE
+    override def getPlanOperator: BinaryOperator = if (!isBool) BinaryOperator.LTE else BinaryOperator.LTE_BOOL
   }
 
   case class LabelMatch(label: String, labelMatchOp: Operator, value: String) extends PromToken
