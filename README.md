@@ -390,7 +390,8 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 
 * There is no need to append `_bucket` to the metric name.
 * However, you need to select the histogram column like `__col__="hist"`
-* TODO: document ways of selecting the histogram bucket
+* To compute quantiles:  `histogram_quantile(0.7, rate(http_req_latency{app="foo",__col__="hist"}[5m]))`
+* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo",__col__="hist"})`
 
 ### Using the FiloDB HTTP API
 

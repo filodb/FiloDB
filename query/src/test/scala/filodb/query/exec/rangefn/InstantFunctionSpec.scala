@@ -210,6 +210,17 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile, Seq("b012"))
       ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
     } should have message "requirement failed: histogram_quantile parameter must be a number"
+
+    // histogram bucket
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket)
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: Bucket/le required for histogram bucket"
+
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket, Seq("b012"))
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: histogram_bucket parameter must be a number"
   }
 
   it ("should fail with wrong calculation") {
@@ -233,6 +244,17 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val expected = Seq(0.8, 1.6, 2.4, 3.2, 4.0, 5.6, 7.2, 9.6)
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
                                  InstantFunctionId.HistogramQuantile, Seq(0.4), histSchema)
+  }
+
+  it("should compute histogram_bucket on Histogram RV") {
+    val (data, histRV) = histogramRV(numSamples = 10)
+    val expected = Seq(1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0)
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramBucket, Seq(16.0), histSchema)
+
+    // Specifying a nonexistant bucket returns NaN
+    applyFunctionAndAssertResult(Array(histRV), Array(Seq.fill(8)(Double.NaN).toIterator),
+                                 InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
   }
 
   private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
