@@ -35,11 +35,32 @@ object QueryCommands {
 
   final case class SpreadChange(time: Long = 0L, spread: Int = 1)
 
+  trait SpreadProvider {
+    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange]
+  }
+
+  case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
+    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange] = {
+      Seq(spreadChange)
+    }
+  }
+
+  /**
+    * Serialize with care! would be based on the provided function.
+    * @param f
+    */
+  case class FunctionalSpreadProvider(f: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) })
+    extends SpreadProvider {
+    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange] = {
+      f (filter)
+    }
+  }
+
   /**
     * This class provides general query processing parameters
     * @param spreadFunc a function that returns chronologically ordered spread changes for the filter
     */
-  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) },
+  final case class QueryOptions(spreadProvider: SpreadProvider = StaticSpreadProvider(),
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
@@ -47,7 +68,7 @@ object QueryCommands {
 
   object QueryOptions {
     def apply(constSpread: Int, sampleLimit: Int): QueryOptions =
-      QueryOptions(spreadFunc = { _ => Seq(SpreadChange(spread = constSpread))}, sampleLimit = sampleLimit)
+      QueryOptions(spreadProvider = StaticSpreadProvider(SpreadChange(0, constSpread)), sampleLimit = sampleLimit)
 
     /**
      * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
