@@ -256,6 +256,7 @@ object Dataset {
   case class BadColumnType(colType: String) extends BadSchema
   case class BadColumnName(colName: String, reason: String) extends BadSchema
   case class NotNameColonType(nameTypeString: String) extends BadSchema
+  case class BadColumnParams(msg: String) extends BadSchema
   case class ColumnErrors(errs: Seq[BadSchema]) extends BadSchema
   case class UnknownRowKeyColumn(keyColumn: String) extends BadSchema
   case class IllegalMapColumn(reason: String) extends BadSchema
@@ -328,8 +329,8 @@ object Dataset {
   /**
    * Creates and validates a new Dataset
    * @param name The name of the dataset
-   * @param partitionColNameTypes list of partition columns in name:type form
-   * @param dataColNameTypes list of data columns in name:type form
+   * @param partitionColNameTypes list of partition columns in name:type[:params] form
+   * @param dataColNameTypes list of data columns in name:type[:params] form
    * @param keyColumnNames   the key column names, no :type
    * @return Good(Dataset) or Bad(BadSchema)
    */

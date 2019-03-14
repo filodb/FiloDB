@@ -21,6 +21,15 @@ class DatasetSpec extends FunSpec with Matchers {
       }
     }
 
+    it("should return BadColumnParams if name:type:params portion not valid key=value pairs") {
+      val resp1 = Dataset.make("dataset", Seq("part:string"), dataColSpecs :+ "column2:a:b", Seq("age"))
+      resp1.isBad shouldEqual true
+      resp1.swap.get shouldBe a[ColumnErrors]
+      val errors = resp1.swap.get.asInstanceOf[ColumnErrors].errs
+      errors should have length 1
+      errors.head shouldBe a[BadColumnParams]
+    }
+
     it("should return BadColumnName if illegal chars in column name") {
       val resp1 = Dataset.make("dataset", Seq("part:string"), Seq("col, umn1:string"), Seq("age"))
       resp1.isBad shouldEqual true

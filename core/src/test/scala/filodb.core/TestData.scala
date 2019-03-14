@@ -57,7 +57,7 @@ object TestData {
 object NamesTestData {
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
-  val dataColSpecs = Seq("first:string", "last:string", "age:long")
+  val dataColSpecs = Seq("first:string", "last:string", "age:long:interval=10")
   val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age")
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
