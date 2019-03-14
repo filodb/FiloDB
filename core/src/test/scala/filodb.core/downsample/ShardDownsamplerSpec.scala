@@ -25,10 +25,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val customDataset = Dataset.make("custom2",
-    Seq("name:string", "namespace:string","instance:string"),
-    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double"),
+    Seq("name:string", "namespace:string", "instance:string"),
+    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist"),
     Seq("timestamp"),
-    Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)"),
+    Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
     DatasetOptions(Seq("name", "namespace"), "name", "total")).get
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
@@ -83,9 +83,9 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       new TimeSeriesShardStats(customDataset.ref, 0))
     val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "name", "namespace", "instance")
+      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "hSum", "name", "namespace", "instance")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
+      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, HistogramColumn,
         StringColumn, StringColumn, StringColumn)
   }
 
@@ -96,7 +96,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val dsSchema = downsampleOps.downsampleSchema
     val dsRecords = downsampleOps.newEmptyDownsampleRecords
 
-    downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition],chunkInfos, dsRecords)
+    downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
 
     // with resolution 5000
     val downsampledData1 = dsRecords(0).builder.optimalContainerBytes().flatMap { con =>
