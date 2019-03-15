@@ -431,7 +431,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID) shouldEqual Seq(22)    // newly created partitions get a new ID
+    parts.map(_.partID) shouldEqual Seq(0)    // newly created ODP partitions get earlier partId
     dataset1.partKeySchema.asJavaString(parts.head.partKeyBase, parts.head.partKeyOffset, 0) shouldEqual "Series 0"
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21
   }

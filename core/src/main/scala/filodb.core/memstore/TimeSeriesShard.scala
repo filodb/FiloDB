@@ -86,6 +86,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val indexBytes   = Kamon.gauge("memstore-index-ram-bytes").refine(tags)
 
   val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").refine(tags)
+  val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -1126,7 +1127,11 @@ class TimeSeriesShard(val dataset: Dataset,
               logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
             } else {
               logger.debug(s"Evicting partId=${partitionObj.partID} from dataset=${dataset.ref} shard=$shardNum")
+              // add the evicted partKey to a bloom filter so that we are able to quickly
+              // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
               evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
+              shardStats.evictedPkBloomFilterSize.set(evictedPartKeys.approximateElementCount())
+              // The previously created PartKey is just meant for bloom filter and will be GCed
               removePartition(partitionObj)
               partsRemoved += 1
               maxEndTime = Math.max(maxEndTime, endTime)
