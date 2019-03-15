@@ -60,6 +60,7 @@ trait BlockManager {
 class MemoryStats(tags: Map[String, String]) {
   val usedBlocksMetric = Kamon.gauge("blockstore-used-blocks").refine(tags)
   val freeBlocksMetric = Kamon.gauge("blockstore-free-blocks").refine(tags)
+  val requestedBlocksMetric = Kamon.counter("blockstore-blocks-requested").refine(tags)
   val usedBlocksTimeOrderedMetric = Kamon.gauge("blockstore-used-time-ordered-blocks").refine(tags)
   val timeOrderedBlocksReclaimedMetric = Kamon.counter("blockstore-time-ordered-blocks-reclaimed").refine(tags)
   val blocksReclaimedMetric = Kamon.counter("blockstore-blocks-reclaimed").refine(tags)
@@ -126,6 +127,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     lock.lock()
     try {
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
+      stats.requestedBlocksMetric.increment(num)
 
       if (freeBlocks.size < num) tryReclaim(num)
 
@@ -138,6 +140,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         }
         allocated
       } else {
+        logger.warn(s"Out of blocks to allocate!  num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}")
         Seq.empty[Block]
       }
     } finally {
@@ -186,6 +189,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       if (entry.getValue.isEmpty) timeOrderedListIt.remove()
     }
     if (reclaimed < num) reclaimFrom(usedBlocks, stats.blocksReclaimedMetric)
+    if (reclaimed < num) {
+      logger.warn(s"$num blocks to reclaim but only reclaimed $reclaimed.  usedblocks=${usedBlocks.size} " +
+                  s"usedBlocksTimeOrdered=${usedBlocksTimeOrdered.asScala.toList.map{case(n,l) => (n, l.size)}}")
+    }
 
     def reclaimFrom(list: util.LinkedList[Block], reclaimedCounter: Counter): Unit = {
       val entries = list.iterator
