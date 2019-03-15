@@ -12,7 +12,10 @@
     <logger name="filodb.core" level="TRACE" />
     <logger name="filodb.memory" level="DEBUG" />
     <logger name="filodb.query" level="DEBUG" />
-    <logger name="com.esotericsoftware.minlog" level="DEBUG" />
+    <logger name="filodb.coordinator.KamonMetricsLogReporter" level="off" />
+    <logger name="filodb.coordinator.KamonSpanLogReporter" level="off" />
+    <logger name="filodb.core.memstore.LuceneMetricsRouter" level="off" />
+    <!-- <logger name="com.esotericsoftware.minlog" level="DEBUG" /> -->
     <!-- <logger name="com.esotericsoftware.kryo.io" level="TRACE" /> -->
 
     <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="INFO"/>

@@ -418,6 +418,12 @@ class PartKeyLuceneIndex(dataset: Dataset,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): IntIterator = {
+    partIdsFromFilters2(columnFilters, startTime, endTime).intIterator()
+  }
+
+  def partIdsFromFilters2(columnFilters: Seq[ColumnFilter],
+                         startTime: Long,
+                         endTime: Long): PartIdCollector = {
     val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
@@ -435,7 +441,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     val collector = new PartIdCollector() // passing zero for unlimited results
     searcher.search(query, collector)
     partKeySpan.finish()
-    collector.intIterator()
+    collector
   }
 }
 

@@ -15,6 +15,7 @@ import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
+import org.apache.lucene.util.BytesRef
 import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
@@ -23,7 +24,7 @@ import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, ColumnInfo}
+import filodb.core.query.{ColumnFilter, ColumnInfo, Filter}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -447,7 +448,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // We cant look it up in lucene because we havent flushed index yet
       val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
         case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
-          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
+          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, None, 4)
           // In theory, we should not get an OutOfMemPartition here since
           // it should have occurred before node failed too, and with data sropped,
           // index would not be updated. But if for some reason we see it, drop data
@@ -929,9 +930,45 @@ class TimeSeriesShard(val dataset: Dataset,
   }
   // scalastyle:on
 
+  private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Option[Int] = {
+
+    // TODO look up bloom filter
+
+    val filters = dataset.partKeySchema.toStringPairs(partKeyBase, partKeyOffset)
+                         .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
+    val matches = partKeyIndex.partIdsFromFilters2(filters, 0, Long.MaxValue)
+    matches.result.cardinality() match {
+      case 1          =>  val partId = matches.result.intIterator().next()
+                          logger.debug(s"There is already a partId $partId assigned for " +
+                                  s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)}")
+                          Some(partId)
+      case 0          =>  None
+      case c if c > 1 =>  val iter = matches.result.intIterator()
+                          var partId = -1
+                          do {
+                            // find the most specific match for the given ingestion record
+                            val nextPartId = iter.next
+                            partKeyIndex.partKeyFromPartId(nextPartId).foreach { candidate =>
+                              if (partKeyEquals(partKeyBase, partKeyOffset, candidate)) {
+                                partId = nextPartId
+                                logger.debug(s"There is already a partId $partId assigned for " +
+                                  s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)}")
+                              }
+                            }
+                          } while (iter.hasNext && partId != -1)
+                          if (partId == -1) None else Some(partId)
+    }
+  }
+
+  private def partKeyEquals(partKeyBase: Array[Byte], partKeyOffset: Long, partKeyHeap: BytesRef): Boolean = {
+    dataset.partKeySchema.equals(partKeyBase, partKeyOffset,
+      partKeyHeap.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyHeap.offset))
+  }
+
   private def addPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
     val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-    val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
+    val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
+    val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
       // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
@@ -945,9 +982,8 @@ class TimeSeriesShard(val dataset: Dataset,
       } finally {
         partSetLock.unlockWrite(stamp)
       }
-
-      logger.trace(s"Created new partition ${newPart.stringPartition} on dataset=${dataset.ref} " +
-        s"shard $shardNum at offset $ingestOffset")
+      logger.debug(s"Created new partition with partId ${newPart.partID} ${newPart.stringPartition} on " +
+        s"dataset=${dataset.ref} shard $shardNum at offset $ingestOffset")
     }
     newPart
   }
@@ -974,7 +1010,8 @@ class TimeSeriesShard(val dataset: Dataset,
     }
 
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
-                                   group: Int, initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
+                                   group: Int, usePartId: Option[Int],
+                                   initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
   // Check and evict, if after eviction we still don't have enough memory, then don't proceed
     if (addPartitionsDisabled() || !ensureFreeSpace()) { OutOfMemPartition }
     else {
@@ -982,8 +1019,11 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val partId = nextPartitionID
-      incrementPartitionID()
+      val partId = usePartId.getOrElse {
+        val id = nextPartitionID
+        incrementPartitionID()
+        id
+      }
       val newPart = new TimeSeriesPartition(
         partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       partitions.put(partId, newPart)
