@@ -319,16 +319,13 @@ class TimeSeriesShard(val dataset: Dataset,
   private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
     downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
-  /* Items below are used for bloom filter of evicted time series */
   private case class PartKey(base: Any, offset: Long)
-  private val expectedElements = 5000000
-  private val falsePositiveRate = 0.01
-  private val genHash = new CanGenerateHashFrom[PartKey] {
-    override def generateHash(from: PartKey): Long = {
-      dataset.partKeySchema.partitionHash(from.base, from.offset)
-    }
-  }
-  private val evictedTimeSeries = BloomFilter[PartKey](expectedElements, falsePositiveRate)(genHash)
+  private val evictedPartKeys =
+    BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
+      override def generateHash(from: PartKey): Long = {
+        dataset.partKeySchema.partitionHash(from.base, from.offset)
+      }
+    })
 
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -946,7 +943,7 @@ class TimeSeriesShard(val dataset: Dataset,
   // scalastyle:on
 
   private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Option[Int] = {
-    if (evictedTimeSeries.mightContain(PartKey(partKeyBase, partKeyOffset))) {
+    if (evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))) {
       val filters = dataset.partKeySchema.toStringPairs(partKeyBase, partKeyOffset)
         .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
       val matches = partKeyIndex.partIdsFromFilters2(filters, 0, Long.MaxValue)
@@ -963,7 +960,8 @@ class TimeSeriesShard(val dataset: Dataset,
                               // find the most specific match for the given ingestion record
                               val nextPartId = iter.next
                               partKeyIndex.partKeyFromPartId(nextPartId).foreach { candidate =>
-                                if (partKeyEquals(partKeyBase, partKeyOffset, candidate)) {
+                                if (dataset.partKeySchema.equals(partKeyBase, partKeyOffset,
+                                      candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
                                   partId = nextPartId
                                   logger.debug(s"There is already a partId $partId assigned for " +
                                     s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)}")
@@ -976,11 +974,6 @@ class TimeSeriesShard(val dataset: Dataset,
                             } else Some(partId)
       }
     } else None
-  }
-
-  private def partKeyEquals(partKeyBase: Array[Byte], partKeyOffset: Long, partKeyHeap: BytesRef): Boolean = {
-    dataset.partKeySchema.equals(partKeyBase, partKeyOffset,
-      partKeyHeap.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyHeap.offset))
   }
 
   /**
@@ -1134,9 +1127,7 @@ class TimeSeriesShard(val dataset: Dataset,
               logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
             } else {
               logger.debug(s"Evicting partId=${partitionObj.partID} from dataset=${dataset.ref} shard=$shardNum")
-              // IMPORTANT: Below step assumes that partKey in TimeSeriesPartition is off-heap to avoid allocation
-              // of an object.
-              evictedTimeSeries.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
+              evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
               removePartition(partitionObj)
               partsRemoved += 1
               maxEndTime = Math.max(maxEndTime, endTime)

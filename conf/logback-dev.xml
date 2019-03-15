@@ -8,8 +8,8 @@
         </encoder>
     </appender>
 
-    <logger name="filodb.coordinator" level="TRACE" />
-    <logger name="filodb.core" level="TRACE" />
+    <logger name="filodb.coordinator" level="DEBUG" />
+    <logger name="filodb.core" level="DEBUG" />
     <logger name="filodb.memory" level="DEBUG" />
     <logger name="filodb.query" level="DEBUG" />
     <logger name="filodb.coordinator.KamonMetricsLogReporter" level="off" />
