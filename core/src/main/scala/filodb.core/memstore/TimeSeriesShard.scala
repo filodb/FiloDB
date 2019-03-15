@@ -1235,6 +1235,7 @@ class TimeSeriesShard(val dataset: Dataset,
     logger.info(s"Clearing all MemStore state for dataset=${dataset.ref} shard=$shardNum")
     partitions.values.asScala.foreach(removePartition)
     partKeyIndex.reset()
+    // TODO unable to reset/clear bloom filter
     ingested = 0L
     for { group <- 0 until numGroups } {
       partitionGroups(group) = new EWAHCompressedBitmap()
@@ -1243,6 +1244,7 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   def shutdown(): Unit = {
+    evictedPartKeys.dispose()
     reset()   // Not really needed, but clear everything just to be consistent
     logger.info(s"Shutting down dataset=${dataset.ref} shard=$shardNum")
     /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
