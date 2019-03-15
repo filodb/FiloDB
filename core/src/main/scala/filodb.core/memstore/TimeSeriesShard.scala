@@ -654,7 +654,7 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.numActivelyIngestingParts.set(cardinality)
   }
 
-  private def addPartKeyToTimebucket(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
+  private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime// can remotely happen since lucene reads are eventually consistent
     val endTime = if (isActivelyIngesting(p.partID)) {
@@ -668,7 +668,7 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
     indexRb.addBlob(p.partKeyBase, p.partKeyOffset, BinaryRegionLarge.numBytes(p.partKeyBase, p.partKeyOffset) + 4)
-    logger.debug(s"Added into timebucket partId ${p.partID} in dataset=${dataset.ref} shard=$shardNum " +
+    logger.debug(s"Added into timebucket RB partId ${p.partID} in dataset=${dataset.ref} shard=$shardNum " +
       s"partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
     indexRb.endRecord(false)
   }
@@ -798,7 +798,7 @@ class TimeSeriesShard(val dataset: Dataset,
       /* create time bucket using record builder */
       val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
       InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
-        addPartKeyToTimebucket(timeBucketRb, p)
+        addPartKeyToTimebucketRb(timeBucketRb, p)
       }
       val numPartKeysInBucket = timeBucketBitmaps.get(cmd.timeBucket).cardinality()
       logger.debug(s"Number of records in timebucket=${cmd.timeBucket} of " +
@@ -924,7 +924,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff)
     if (part == null) {
-      part = addPartition(recordBase, recordOff, group, ingestOffset)
+      part = addPartition(recordBase, recordOff, group)
     }
     part
   }
@@ -965,7 +965,14 @@ class TimeSeriesShard(val dataset: Dataset,
       partKeyHeap.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyHeap.offset))
   }
 
-  private def addPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
+  /**
+    * Adds new partition with appropriate partId. If it is a newly seen partKey, then new partId is assigned.
+    * If it is a previously seen partKey that is already in index, it reassigns same partId so that indexes
+    * are still valid.
+    *
+    * This method also updates lucene index and time bucket bitmaps properly.
+    */
+  private def addPartition(recordBase: Any, recordOff: Long, group: Int) = {
     val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId)
@@ -973,17 +980,17 @@ class TimeSeriesShard(val dataset: Dataset,
       val partId = newPart.partID
       // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
-      partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-      activelyIngesting.synchronized { activelyIngesting.set(partId) }
+      if (previousPartId.isEmpty) { // add new lucene entry if this partKey was never seen before
+        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+      }
+      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
+      activelyIngesting.synchronized { activelyIngesting.set(partId) } // causes endTime to be set to Long.MaxValue
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
       } finally {
         partSetLock.unlockWrite(stamp)
       }
-      logger.debug(s"Created new partition with partId ${newPart.partID} ${newPart.stringPartition} on " +
-        s"dataset=${dataset.ref} shard $shardNum at offset $ingestOffset")
     }
     newPart
   }
@@ -1009,6 +1016,10 @@ class TimeSeriesShard(val dataset: Dataset,
         s"shard=$shardNum", e); disableAddPartitions()
     }
 
+  /**
+    * Creates new partition and adds them to the shard data structures. DOES NOT update
+    * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
+    */
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
                                    group: Int, usePartId: Option[Int],
                                    initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
@@ -1029,6 +1040,8 @@ class TimeSeriesShard(val dataset: Dataset,
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
+      logger.debug(s"Created new partition with partId ${newPart.partID} ${newPart.stringPartition} on " +
+        s"dataset=${dataset.ref} shard $shardNum")
       newPart
     }
 
