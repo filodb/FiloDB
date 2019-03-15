@@ -17,7 +17,6 @@ import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
-import org.apache.lucene.util.BytesRef
 import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
