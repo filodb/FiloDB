@@ -25,7 +25,7 @@ class ShardManagerSpec extends AkkaSpec {
   private def makeTestProbe(name: String): TestProbe = {
     val tp = TestProbe(name)
     // Ignore these messages for now.
-    tp.ignoreMsg({case m: Any => m.isInstanceOf[ShardMapperSnapshot]})
+    tp.ignoreMsg({case m: Any => m.isInstanceOf[ResyncShardIngestion]})
     tp
   }
 
