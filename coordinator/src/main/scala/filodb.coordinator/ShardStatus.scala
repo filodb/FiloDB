@@ -12,12 +12,24 @@ final case class CurrentShardSnapshot(ref: DatasetRef,
                                       map: ShardMapper) extends ShardAction with Response
 
 /**
+  * Defines actions and commands which should be forwarded to the ingestion actor.
+  */
+sealed trait ShardForwardAction extends ShardAction {
+  def ref: DatasetRef
+}
+
+/**
+  * Full state of all shards, sent to all ingestion actors, and then they start/stop ingestion for
+  * shards they own. This action is intended to replace the start/start ingestion commands.
+  */
+final case class ShardMapperSnapshot(ref: DatasetRef, map: ShardMapper) extends ShardForwardAction
+
+/**
   * These commands are sent by the NodeClusterActor to the right nodes upon events or
   * changes to the cluster. For example a new node joins, StartShardIngestion might be sent.
   * Should start with a verb, since these are commands.
   */
-sealed trait ShardCommand extends ShardAction {
-  def ref: DatasetRef
+sealed trait ShardCommand extends ShardForwardAction {
   def shard: Int
 }
 

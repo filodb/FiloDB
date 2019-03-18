@@ -93,6 +93,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     case e: IngestRows                 => ingest(e)
     case GetStatus                     => status(sender())
     case StopShardIngestion(ds, shard) => stop(ds, shard, sender())
+    case e: ShardMapperSnapshot        => logger.warn(s"snappy $e") // FIXME: testing
   }
 
   /** Guards that only this dataset's commands are acted upon.

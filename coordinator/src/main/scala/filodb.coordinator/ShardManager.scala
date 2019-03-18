@@ -554,10 +554,17 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   /** Publishes a ShardMapper snapshot of given dataset to all subscribers of that dataset. */
   def publishSnapshot(ref: DatasetRef): Unit =
     mapperOpt(ref) match {
-      case Some(snapshot) =>
+      case Some(snapshot) => {
         for {
           subscription <- _subscriptions.subscription(ref)
         } subscription.subscribers foreach (_ ! snapshot)
+
+        // Also send a complete snapshot to all ingestion actors.
+        val mapperSnapshot = ShardMapperSnapshot(snapshot.ref, snapshot.map)
+        for (coord <- coordinators) {
+          coord ! mapperSnapshot
+        }
+      }
       case None =>
         logger.warn(s"Cannot publish snapshot which doesn't exist for ref $ref")
     }
