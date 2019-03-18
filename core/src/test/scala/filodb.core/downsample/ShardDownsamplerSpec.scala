@@ -26,7 +26,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
 
   val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string", "instance:string"),
-    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist"),
+    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
     Seq("timestamp"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
     DatasetOptions(Seq("name", "namespace"), "name", "total")).get
