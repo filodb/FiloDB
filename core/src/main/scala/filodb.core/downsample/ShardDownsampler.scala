@@ -99,6 +99,8 @@ class ShardDownsampler(dataset: Dataset,
                 builder.addLong(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
               case d: DoubleChunkDownsampler =>
                 builder.addDouble(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
+              case h: HistChunkDownsampler =>
+                builder.addBlob(h.downsampleChunk(part, chunkset, startRowNum, endRowNum).serialize())
             }
             // add partKey finally
             builder.addPartKeyRecordFields(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
