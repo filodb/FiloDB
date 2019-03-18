@@ -12,7 +12,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
-import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize}
+import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize, PartKey}
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
@@ -453,7 +453,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     var part0 = shard0Partitions.get(0)
     dataset1.partKeySchema.asJavaString(part0.partKeyBase, part0.partKeyOffset, 0) shouldEqual "Series 0"
     val pkBytes = dataset1.partKeySchema.asByteArray(part0.partKeyBase, part0.partKeyOffset)
-    val pk = shard0.PartKey(pkBytes, UnsafeUtils.arayOffset)
+    val pk = PartKey(pkBytes, UnsafeUtils.arayOffset)
     shard0.evictedPartKeys.mightContain(pk) shouldEqual false
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction

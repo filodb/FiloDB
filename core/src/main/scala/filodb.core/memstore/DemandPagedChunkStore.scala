@@ -80,7 +80,7 @@ extends RawToPartitionMaker with StrictLogging {
         val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
         if (!inserted) {
-          logger.info(s"Chunks not copied to partId ${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
+          logger.info(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
             s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
             s"${ChunkSetInfo.getEndTime(infoBytes)}) partition earliestTime=${tsPart.earliestTime}")
         }

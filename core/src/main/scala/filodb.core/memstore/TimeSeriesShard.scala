@@ -87,6 +87,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").refine(tags)
   val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").refine(tags)
+  val evictedPartIdLookupMultiMatch = Kamon.counter("evicted-partId-lookup-multi-match").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -135,6 +136,9 @@ object TimeSeriesShard {
   def partKeyGroup(schema: RecordSchema, partKeyBase: Any, partKeyOffset: Long, numGroups: Int): Int = {
     Math.abs(schema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
   }
+
+  private[memstore] final case class PartKey(base: Any, offset: Long)
+  private[memstore] final val CREATE_NEW_PARTID = -1
 }
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
@@ -319,7 +323,6 @@ class TimeSeriesShard(val dataset: Dataset,
   private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
     downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
-  private[memstore] case class PartKey(base: Any, offset: Long)
   private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
       override def generateHash(from: PartKey): Long = {
@@ -460,7 +463,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // We cant look it up in lucene because we havent flushed index yet
       val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
         case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
-          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, None, 4)
+          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, CREATE_NEW_PARTID, 4)
           // In theory, we should not get an OutOfMemPartition here since
           // it should have occurred before node failed too, and with data sropped,
           // index would not be updated. But if for some reason we see it, drop data
@@ -942,19 +945,22 @@ class TimeSeriesShard(val dataset: Dataset,
   }
   // scalastyle:on
 
-  private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Option[Int] = {
+  /**
+    * Looks up the previously assigned partId of a possibly evicted partition.
+    * @return partId >=0 if one is found, CREATE_NEW_PARTID (-1) if not found.
+    */
+  private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Int = {
     if (evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))) {
       val filters = dataset.partKeySchema.toStringPairs(partKeyBase, partKeyOffset)
         .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
       val matches = partKeyIndex.partIdsFromFilters2(filters, 0, Long.MaxValue)
       matches.result.cardinality() match {
-        case 1 =>           val partId = matches.result.intIterator().next()
-                            logger.debug(s"There is already a partId $partId assigned for " +
-                              s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)}")
-                            Some(partId)
         case 0 =>           shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-                            None
-        case c if c > 1 =>  val iter = matches.result.intIterator()
+                            CREATE_NEW_PARTID
+        case c if c >= 1 => // NOTE: if we hit one partition, we cannot directly call it out as the result without
+                            // verifying the partKey since the matching partition may have had an additional tag
+                            if (c > 1) shardStats.evictedPartIdLookupMultiMatch.increment()
+                            val iter = matches.result.intIterator()
                             var partId = -1
                             do {
                               // find the most specific match for the given ingestion record
@@ -968,12 +974,11 @@ class TimeSeriesShard(val dataset: Dataset,
                                 }
                               }
                             } while (iter.hasNext && partId != -1)
-                            if (partId == -1) {
+                            if (partId == CREATE_NEW_PARTID)
                               shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-                              None
-                            } else Some(partId)
+                            partId
       }
-    } else None
+    } else CREATE_NEW_PARTID
   }
 
   /**
@@ -991,7 +996,8 @@ class TimeSeriesShard(val dataset: Dataset,
       val partId = newPart.partID
       // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
-      if (previousPartId.isEmpty) { // add new lucene entry if this partKey was never seen before
+      if (previousPartId == CREATE_NEW_PARTID) {
+        // add new lucene entry if this partKey was never seen before
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
       }
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
@@ -1030,9 +1036,11 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * Creates new partition and adds them to the shard data structures. DOES NOT update
     * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
+    *
+    * @param usePartId pass CREATE_NEW_PARTID to force creation of new partId instead of using one that is passed in
     */
   protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
-                                   group: Int, usePartId: Option[Int],
+                                   group: Int, usePartId: Int,
                                    initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
   // Check and evict, if after eviction we still don't have enough memory, then don't proceed
     if (addPartitionsDisabled() || !ensureFreeSpace()) { OutOfMemPartition }
@@ -1041,11 +1049,11 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val partId = usePartId.getOrElse {
+      val partId = if (usePartId == CREATE_NEW_PARTID) {
         val id = nextPartitionID
         incrementPartitionID()
         id
-      }
+      } else usePartId
       val newPart = new TimeSeriesPartition(
         partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       partitions.put(partId, newPart)
@@ -1130,7 +1138,6 @@ class TimeSeriesShard(val dataset: Dataset,
               // add the evicted partKey to a bloom filter so that we are able to quickly
               // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
               evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
-              shardStats.evictedPkBloomFilterSize.set(evictedPartKeys.approximateElementCount())
               // The previously created PartKey is just meant for bloom filter and will be GCed
               removePartition(partitionObj)
               partsRemoved += 1
@@ -1140,6 +1147,7 @@ class TimeSeriesShard(val dataset: Dataset,
             partsSkipped += 1
           }
         }
+        shardStats.evictedPkBloomFilterSize.set(evictedPartKeys.approximateElementCount())
         evictionWatermark = maxEndTime + 1
         // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
         // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
