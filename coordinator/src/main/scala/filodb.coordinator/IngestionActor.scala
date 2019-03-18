@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, HashSet}
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
@@ -82,18 +82,52 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
     logger.info("Cancelling all streams and calling teardown")
-    streamSubscriptions.keys.foreach(stop(dataset.ref, _, ActorRef.noSender))
+    streamSubscriptions.keys.foreach(stopIngestion(_))
   }
 
   /** All [[ShardCommand]] tasks are only started if the dataset
     * and shard are valid for this ingester.
     */
   def receive: Receive = LoggingReceive {
-    case e: StartShardIngestion        => start(e, sender())
-    case e: IngestRows                 => ingest(e)
-    case GetStatus                     => status(sender())
-    case StopShardIngestion(ds, shard) => stop(ds, shard, sender())
-    case e: ShardMapperSnapshot        => logger.warn(s"snappy $e") // FIXME: testing
+    case GetStatus               => status(sender())
+    case e: IngestRows           => ingest(e)
+    case e: ResyncShardIngestion => resync(e, sender())
+    case e: StartShardIngestion  => start(e, sender())
+    case e: StopShardIngestion   => stop(e, sender())
+  }
+
+  /**
+    * Compares the given shard mapper snapshot to the current set of shards being ingested and
+    * reconciles any differences. It does so by stopping ingestion for shards that aren't mapped
+    * to this node, and it starts ingestion for those that are.
+    */
+  private def resync(resync: ResyncShardIngestion, origin: ActorRef): Unit = {
+    if (invalid(resync.ref)) {
+      logger.error(s"$resync is invalid for this ingester '${dataset.ref}'.")
+      return
+    }
+
+    // Start with the full set of all shards being ingested, and remove shards from this set
+    // which must continue being ingested.
+    val shardsToStop = HashSet() ++ streams.keySet
+
+    for (shard <- 0 until resync.map.numShards) {
+      if (resync.map.coordForShard(shard) == context.parent) {
+        // Must be ingesting from the shard.
+        if (shardsToStop.contains(shard)) {
+          // Is aready ingesting, and it must not be stopped.
+          shardsToStop.remove(shard)
+        } else {
+          // Isn't ingesting, so start it.
+          startIngestion(shard)
+        }
+      }
+    }
+
+    // Stop ingesting the rest.
+    for (shard <- shardsToStop) {
+      stopIngestion(shard)
+    }
   }
 
   /** Guards that only this dataset's commands are acted upon.
@@ -101,47 +135,50 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     * Also handles recovery process.
     */
   private def start(e: StartShardIngestion, origin: ActorRef): Unit =
-    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
-      try memStore.setup(dataset, e.shard, storeConfig, downsample) catch {
-        case ShardAlreadySetup(ds, shard) =>
-          logger.warn(s"dataset=$ds shard=$shard already setup, skipping....")
-          return
-      }
+    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else startIngestion(e.shard)
 
-      val ingestion = for {
-        _ <- memStore.recoverIndex(dataset.ref, e.shard)
-        checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, e.shard) }
-      yield {
-        if (checkpoints.isEmpty) {
-          // Start normal ingestion with no recovery checkpoint and flush group 0 first
-          normalIngestion(e.shard, None, 0, storeConfig.diskTTLSeconds)
-        } else {
-          // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
-          // offsets come back from the MemStore for us to report progress.
-          val startRecoveryWatermark = checkpoints.values.min + 1
-          val endRecoveryWatermark = checkpoints.values.max
-          val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
-          val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
-          logger.info(s"Starting recovery for dataset=${dataset.ref} " +
-            s"shard=${e.shard}: from $startRecoveryWatermark to $endRecoveryWatermark; " +
-            s"last flushed group $lastFlushedGroup")
-          logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${e.shard}: $checkpoints")
-          for { lastOffset <- doRecovery(e.shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
-                                         checkpoints) }
-          yield {
-            // Start reading past last offset for normal records; start flushes one group past last group
-            normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % numGroups,
-                            storeConfig.diskTTLSeconds)
-          }
+  private def startIngestion(shard: Int): Unit = {
+    try memStore.setup(dataset, shard, storeConfig, downsample) catch {
+      case ShardAlreadySetup(ds, shard) =>
+        logger.warn(s"dataset=$ds shard=$shard already setup, skipping....")
+        return
+    }
+
+    val ingestion = for {
+      _ <- memStore.recoverIndex(dataset.ref, shard)
+      checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, shard) }
+    yield {
+      if (checkpoints.isEmpty) {
+        // Start normal ingestion with no recovery checkpoint and flush group 0 first
+        normalIngestion(shard, None, 0, storeConfig.diskTTLSeconds)
+      } else {
+        // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
+        // offsets come back from the MemStore for us to report progress.
+        val startRecoveryWatermark = checkpoints.values.min + 1
+        val endRecoveryWatermark = checkpoints.values.max
+        val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
+        val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
+        logger.info(s"Starting recovery for dataset=${dataset.ref} " +
+          s"shard=${shard}: from $startRecoveryWatermark to $endRecoveryWatermark; " +
+          s"last flushed group $lastFlushedGroup")
+        logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard}: $checkpoints")
+        for { lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
+                                       checkpoints) }
+        yield {
+          // Start reading past last offset for normal records; start flushes one group past last group
+          normalIngestion(shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % numGroups,
+                          storeConfig.diskTTLSeconds)
         }
       }
-      ingestion.recover {
-        case NonFatal(t) =>
-          logger.error(s"Error occurred during initialization/execution of ingestion for " +
-            s"dataset=${dataset.ref} shard=${e.shard}", t)
-          handleError(dataset.ref, e.shard, t)
-      }
     }
+
+    ingestion.recover {
+      case NonFatal(t) =>
+        logger.error(s"Error occurred during initialization/execution of ingestion for " +
+          s"dataset=${dataset.ref} shard=${shard}", t)
+        handleError(dataset.ref, shard, t)
+    }
+  }
 
   private def flushStream(startGroupNo: Int = 0): Observable[FlushCommand] = {
     if (source.config.as[Option[Boolean]]("noflush").getOrElse(false)) {
@@ -277,20 +314,22 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
   /** Guards that only this dataset's commands are acted upon. */
-  private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
-    if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
-      streamSubscriptions.get(shard).foreach { s =>
-        s.onComplete {
-          case Success(_) =>
-            // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
-            removeAndReleaseResources(ds, shard)
-            // ingestion stopped event is already handled in the normalIngestion method
-            logger.info(s"Stopped streaming ingestion for dataset=${dataset.ref} shard=$shard and released resources")
-          case Failure(_) =>
-            // release of resources on failure is already handled in the normalIngestion method
-        }
+  private def stop(e: StopShardIngestion, origin: ActorRef): Unit =
+    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else stopIngestion(e.shard)
+
+  private def stopIngestion(shard: Int): Unit = {
+    streamSubscriptions.get(shard).foreach { s =>
+      s.onComplete {
+        case Success(_) =>
+          // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
+          removeAndReleaseResources(dataset.ref, shard)
+          // ingestion stopped event is already handled in the normalIngestion method
+          logger.info(s"Stopped streaming ingestion for dataset=${dataset.ref} shard=$shard and released resources")
+        case Failure(_) =>
+          // release of resources on failure is already handled in the normalIngestion method
       }
-      streamSubscriptions.get(shard).foreach(_.cancel())
+    }
+    streamSubscriptions.get(shard).foreach(_.cancel())
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref

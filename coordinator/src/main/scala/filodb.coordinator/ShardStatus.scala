@@ -20,9 +20,9 @@ sealed trait ShardForwardAction extends ShardAction {
 
 /**
   * Full state of all shards, sent to all ingestion actors, and then they start/stop ingestion for
-  * shards they own. This action is intended to replace the start/start ingestion commands.
+  * the shards they own. This action is intended to replace the start/start ingestion commands.
   */
-final case class ShardMapperSnapshot(ref: DatasetRef, map: ShardMapper) extends ShardForwardAction
+final case class ResyncShardIngestion(ref: DatasetRef, map: ShardMapper) extends ShardForwardAction
 
 /**
   * These commands are sent by the NodeClusterActor to the right nodes upon events or
