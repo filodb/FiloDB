@@ -348,13 +348,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   }
 
   private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {
-    // TODO: Wait for all the queries to stop
-    streamSubscriptions.remove(shard).foreach(_.cancel)
-    streams.remove(shard).foreach(_.teardown())
-    // Release memory for shard in MemStore
-    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
-      .foreach { shard =>
-        shard.shutdown()
-      }
+    if (streamSubscriptions.contains(shard)) {
+      // TODO: Wait for all the queries to stop
+      streamSubscriptions.remove(shard).foreach(_.cancel)
+      streams.remove(shard).foreach(_.teardown())
+      // Release memory for shard in MemStore
+      memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
+        .foreach { shard =>
+          shard.shutdown()
+        }
+    }
   }
 }
