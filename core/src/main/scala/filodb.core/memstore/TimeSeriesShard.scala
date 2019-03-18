@@ -319,8 +319,8 @@ class TimeSeriesShard(val dataset: Dataset,
   private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
     downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
-  private case class PartKey(base: Any, offset: Long)
-  private val evictedPartKeys =
+  private[memstore] case class PartKey(base: Any, offset: Long)
+  private[memstore] val evictedPartKeys =
     BloomFilter[PartKey](storeConfig.evictedPkBfCapacity, falsePositiveRate = 0.01)(new CanGenerateHashFrom[PartKey] {
       override def generateHash(from: PartKey): Long = {
         dataset.partKeySchema.partitionHash(from.base, from.offset)

@@ -436,7 +436,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21
   }
 
-  it("should assign same previously assigned partId when evicted series starts re-ingesting") {
+  it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {
     memStore.setup(dataset1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
@@ -445,12 +445,16 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     memStore.commitIndexForTesting(dataset1.ref)
 
-    val shard0Partitions = memStore.getShard(dataset1.ref, 0).get.partitions
+    val shard0 = memStore.getShard(dataset1.ref, 0).get
+    val shard0Partitions = shard0.partitions
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
     var part0 = shard0Partitions.get(0)
     dataset1.partKeySchema.asJavaString(part0.partKeyBase, part0.partKeyOffset, 0) shouldEqual "Series 0"
+    val pkBytes = dataset1.partKeySchema.asByteArray(part0.partKeyBase, part0.partKeyOffset)
+    val pk = shard0.PartKey(pkBytes, UnsafeUtils.arayOffset)
+    shard0.evictedPartKeys.mightContain(pk) shouldEqual false
 
     // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
@@ -465,6 +469,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // scalastyle:off null
     shard0Partitions.get(0) shouldEqual null // since partId 0 has been evicted
+    shard0.evictedPartKeys.mightContain(pk) shouldEqual true
 
     // now re-ingest data for evicted partition with partKey "Series 0"
     val data3 = records(dataset1, linearMultiSeries().take(1))
