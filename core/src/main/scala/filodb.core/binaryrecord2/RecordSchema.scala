@@ -42,6 +42,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   import RecordSchema._
   import BinaryRegion.NativePointer
 
+  override def toString: String = s"RecordSchema<$columns, $partitionFieldStart>"
+
   val colNames = columns.map(_.name)
   val columnTypes = columns.map(_.colType)
   require(columnTypes.nonEmpty, "columnTypes cannot be empty")

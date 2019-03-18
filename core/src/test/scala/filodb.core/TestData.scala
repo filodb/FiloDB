@@ -8,15 +8,16 @@ import monix.reactive.Observable
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.memstore.SomeData
+import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.{vectors => bv}
-import filodb.memory.{BinaryRegionLarge, MemFactory, NativeMemoryManager}
+import filodb.memory._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -316,6 +317,25 @@ object MachineMetricsData {
           bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
           extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
+  }
+
+  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
+  val histPartKey = histKeyBuilder.addFromObjects(extraTags)
+
+  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
+  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
+
+  // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
+  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
+    val container = records(histDataset, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histDataset, partKey=histPartKey, bufferPool=histBufferPool)
+    container.iterate(histDataset.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
   }
 }
 

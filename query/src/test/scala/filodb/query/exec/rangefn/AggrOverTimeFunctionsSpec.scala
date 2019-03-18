@@ -62,20 +62,9 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   // Call this only after calling histogramRV
   def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
 
-  protected val histIngestBH = new BlockMemFactory(blockStore, None, MMD.histDataset.blockMetaSize, true)
-  protected val histBufferPool = new WriteBufferPool(TestData.nativeMem, MMD.histDataset, TestData.storeConf)
-
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-  def histogramRV(numSamples: Int = 100, numBuckets: Int = 8):
-  (Stream[Seq[Any]], RawDataRangeVector) = {
-    val histData = MMD.linearHistSeries(defaultStartTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
-    val container = MMD.records(MMD.histDataset, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, MMD.histDataset, bufferPool = histBufferPool)
-    container.iterate(MMD.histDataset.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
-    // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histIngestBH, encode = true)
-    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
-  }
+  def histogramRV(numSamples: Int = 100, numBuckets: Int = 8): (Stream[Seq[Any]], RawDataRangeVector) =
+    MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets)
 
   def chunkedWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,
