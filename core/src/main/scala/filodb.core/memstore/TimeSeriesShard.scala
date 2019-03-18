@@ -85,6 +85,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val indexEntries = Kamon.gauge("memstore-index-entries").refine(tags)
   val indexBytes   = Kamon.gauge("memstore-index-ram-bytes").refine(tags)
 
+  val evictedPartKeyBloomFilterQueries = Kamon.counter("evicted-pk-bloom-filter-queries").refine(tags)
   val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").refine(tags)
   val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").refine(tags)
   val evictedPartIdLookupMultiMatch = Kamon.counter("evicted-partId-lookup-multi-match").refine(tags)
@@ -950,6 +951,7 @@ class TimeSeriesShard(val dataset: Dataset,
     * @return partId >=0 if one is found, CREATE_NEW_PARTID (-1) if not found.
     */
   private def lookupPreviouslyAssignedPartId(partKeyBase: Array[Byte], partKeyOffset: Long): Int = {
+    shardStats.evictedPartKeyBloomFilterQueries.increment()
     if (evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))) {
       val filters = dataset.partKeySchema.toStringPairs(partKeyBase, partKeyOffset)
         .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
