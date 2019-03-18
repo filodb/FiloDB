@@ -297,7 +297,7 @@ object MachineMetricsData {
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
   val histDataset = Dataset("histogram", Seq("tags:map"),
-                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist"))
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):

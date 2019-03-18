@@ -61,12 +61,20 @@ object DataColumn {
 }
 
 object Column extends StrictLogging {
+  import Dataset._
+  import TrySugar._
+
   sealed trait ColumnType extends EnumEntry {
     def typeName: String
     // NOTE: due to a Spark serialization bug, this cannot be a val
     // (https://github.com/apache/spark/pull/7122)
     def clazz: Class[_]
     def keyType: SingleKeyTypeBase[_]
+
+    /**
+     * Validates the params found in the column definition.  By default no checking is done.
+     */
+    def validateParams(params: Config): Unit Or One[BadSchema] = Good(())
   }
 
   sealed abstract class RichColumnType[T : ClassTag : SingleKeyTypeBase](val typeName: String)
@@ -85,10 +93,15 @@ object Column extends StrictLogging {
     case object TimestampColumn extends RichColumnType[Long]("ts")
     case object MapColumn extends RichColumnType[UTF8Map]("map")
     case object BinaryRecordColumn extends RichColumnType[ZeroCopyUTF8String]("br")
-    // TODO: find a way to annotate histograms as rate-based (Prometheus increasing over time) or
-    //       non-increasing over time
-    // These histograms for now are non-increasing over time (but increasing from bucket to bucket)
-    case object HistogramColumn extends RichColumnType[bv.Histogram]("hist")
+    // HistogramColumn requires the following params:
+    //    counter=[true,false]    # If true, histogram values increase over time (eg Prometheus histograms)
+    case object HistogramColumn extends RichColumnType[bv.Histogram]("hist") {
+      override def validateParams(params: Config): Unit Or One[BadSchema] =
+        Try({
+          params.getBoolean("counter");
+          ()    // needed to explicitly return Unit
+        }).toOr.badMap(x => One(BadColumnParams(x.toString)))
+    }
   }
 
   val typeNameToColType = ColumnType.values.map { colType => colType.typeName -> colType }.toMap
@@ -117,7 +130,6 @@ object Column extends StrictLogging {
 
   import OptionSugar._
 
-  import Dataset._
   val illicitCharsRegex = "[:() ,\u0001]+"r
 
   /**
@@ -141,10 +153,11 @@ object Column extends StrictLogging {
     yield { DataColumn(nextId, name, colType, params) }
 
   import Accumulation._
-  import TrySugar._
 
   /**
-   * Creates and validates a set of DataColumns from a list of "columnName:columnType:params" strings
+   * Creates and validates a set of DataColumns from a list of "columnName:columnType:params" strings.
+   * Validation errors (in the form of BadSchema) are returned for malformed input, illegal column names,
+   * unknown types, or params that don't parse correctly.  Some column types (such as histogram) have required params.
    * @param nameTypeList a Seq of "columnName:columnType:params" strings. Valid types are in ColumnType
    * @param startingId   column IDs are assigned starting with startingId incrementally
    */
@@ -155,7 +168,8 @@ object Column extends StrictLogging {
             params      <- Try(ConfigFactory.parseString(parts.drop(2).mkString("\n"))).toOr
                                             .badMap(x => One(BadColumnParams(x.toString)))
             (name, colType) = nameAndType
-            col         <- validateColumn(name, colType, startingId + idx, params) }
+            col         <- validateColumn(name, colType, startingId + idx, params)
+            _           <- col.columnType.validateParams(params) }
       yield { col }
     }.combined.badMap { errs => ColumnErrors(errs.toSeq) }
 }
