@@ -28,12 +28,12 @@ final case class DistConcatExec(id: String,
 
   protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 
-  protected def compose(childResponses: Observable[QueryResponse],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {
-      case qr: QueryResult => Observable.fromIterable(qr.result)
-      case qe: QueryError => throw qe.t
+      case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+      case (QueryError(_, ex), _)         => throw ex
     }
   }
 }
