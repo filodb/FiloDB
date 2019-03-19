@@ -21,9 +21,23 @@ import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
+object SelectRawPartitionsExecSpec {
+  val dummyDispatcher = new PlanDispatcher {
+    override def dispatch(plan: ExecPlan)
+                         (implicit sched: ExecutionContext,
+                          timeout: FiniteDuration): Task[QueryResponse] = ???
+  }
+
+  val dataset = timeseriesDataset
+
+  val dummyPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
+                    timeseriesDataset.ref, 0, Nil, AllChunkScan, Seq(0, 1))
+}
+
 class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
+  import SelectRawPartitionsExecSpec._
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
@@ -68,12 +82,6 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
   override def afterAll(): Unit = {
     memStore.shutdown()
-  }
-
-  val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
   it ("should read raw samples from Memstore using AllChunksSelector") {

@@ -4,21 +4,17 @@ import scala.annotation.tailrec
 import scala.util.Random
 
 import com.tdunning.math.stats.TDigest
-import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.{AggregationOperator, QueryConfig}
+import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
+import filodb.query.AggregationOperator
+import filodb.query.exec.rangefn.RawDataWindowingSpec
 
-class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
-
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
+class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val rand = new Random()
   val error = 0.0000001d
 
@@ -38,8 +34,8 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     })
 
     // Sum
-    val resultObs = RangeVectorAggregator.mapReduce(AggregationOperator.Sum,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.DoubleColumn)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
@@ -47,8 +43,8 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result(0).rows.map(_.getDouble(1)), readyToAggr.map(_.map(_.getDouble(1)).sum).iterator)
 
     // Min
-    val resultObs2 = RangeVectorAggregator.mapReduce(AggregationOperator.Min,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg2 = RowAggregator(AggregationOperator.Min, Nil, ColumnType.DoubleColumn)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
     val result2 = resultObs2.toListL.runAsync.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
@@ -56,10 +52,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result2(0).rows.map(_.getDouble(1)), readyToAggr2.map(_.map(_.getDouble(1)).min).iterator)
 
     // Count
-    val resultObs3a = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, true, resultObs3a, rv=>rv.key)
+    val agg3 = RowAggregator(AggregationOperator.Count, Nil, ColumnType.DoubleColumn)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key)
     val result3 = resultObs3.toListL.runAsync.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
@@ -67,10 +62,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result3(0).rows.map(_.getDouble(1)), readyToAggr3.map(_.map(_.getDouble(1)).size.toDouble).iterator)
 
     // Avg
-    val resultObs4a = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, true, resultObs4a, rv=>rv.key)
+    val agg4 = RowAggregator(AggregationOperator.Avg, Nil, ColumnType.DoubleColumn)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -80,10 +74,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     }.iterator)
 
     // BottomK
-    val resultObs5a = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(3.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(3.0), true, resultObs5a, rv=>rv.key)
+    val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(3.0), ColumnType.DoubleColumn)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -94,10 +87,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     }.iterator)
 
     // TopK
-    val resultObs6a = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(3.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(3.0), true, resultObs6a, rv=>rv.key)
+    val agg6 = RowAggregator(AggregationOperator.TopK, Seq(3.0), ColumnType.DoubleColumn)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -108,11 +100,10 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
       }.iterator)
 
     // Quantile
-    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.70), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.70), true, resultObs7a, rv=>rv.key)
-    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.70), resultObs7, 1000)
+    val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.70), ColumnType.DoubleColumn)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
+    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000)
     val result7 = resultObs7b.toListL.runAsync.futureValue
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
@@ -143,47 +134,44 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     )
 
     // Sum
-    val resultObs = RangeVectorAggregator.mapReduce(AggregationOperator.Sum,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.DoubleColumn)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
     compareIter(result(0).rows.map(_.getDouble(1)), Seq(6.7d, 15.4d).iterator)
 
     // Min
-    val resultObs2 = RangeVectorAggregator.mapReduce(AggregationOperator.Min,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg2 = RowAggregator(AggregationOperator.Min, Nil, ColumnType.DoubleColumn)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
     val result2 = resultObs2.toListL.runAsync.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
     compareIter(result2(0).rows.map(_.getDouble(1)), Seq(2.1d, 4.4d).iterator)
 
     // Count
-    val resultObs3a = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, true, resultObs3a, rv=>rv.key)
+    val agg3 = RowAggregator(AggregationOperator.Count, Nil, ColumnType.DoubleColumn)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv=>rv.key)
     val result3 = resultObs3.toListL.runAsync.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
     compareIter(result3(0).rows.map(_.getDouble(1)), Seq(2d, 3d).iterator)
 
     // Avg
-    val resultObs4a = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, true, resultObs4a, rv=>rv.key)
+    val agg4 = RowAggregator(AggregationOperator.Avg, Nil, ColumnType.DoubleColumn)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv=>rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
     compareIter(result4(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.133333333333333d).iterator)
 
     // BottomK
-    val resultObs5a = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(2.0), true, resultObs5a, rv=>rv.key)
-    val resultObs5b = RangeVectorAggregator.present(AggregationOperator.BottomK, Seq(2.0), resultObs5, 1000)
+    val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), ColumnType.DoubleColumn)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000)
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -195,11 +183,10 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(4.6d,2.1d,5.4d,4.4d).iterator)
 
     // TopK
-    val resultObs6a = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(2.0), true, resultObs6a, rv=>rv.key)
-    val resultObs6b = RangeVectorAggregator.present(AggregationOperator.TopK, Seq(2.0), resultObs6, 1000)
+    val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), ColumnType.DoubleColumn)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000)
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -211,11 +198,10 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(2.1d,4.6d,5.4d,5.6d).iterator)
 
     // Quantile
-    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.5), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.5), true, resultObs7a, rv=>rv.key)
-    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.5), resultObs7, 1000)
+    val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), ColumnType.DoubleColumn)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
+    val resultObs7b = RangeVectorAggregator.present(agg7, resultObs7, 1000)
     val result7 = resultObs7b.toListL.runAsync.futureValue
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
@@ -230,10 +216,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     )
 
     // Quantile
-    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.5), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
-      Seq(0.5), true, resultObs7a, rv=>rv.key)
+    val agg7 = RowAggregator(AggregationOperator.Quantile, Seq(0.5), ColumnType.DoubleColumn)
+    val resultObs7a = RangeVectorAggregator.mapReduce(agg7, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(agg7, true, resultObs7a, rv=>rv.key)
     val result7 = resultObs7.toListL.runAsync.futureValue
     result7.size shouldEqual 1
 
@@ -242,7 +227,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     val builder = SerializableRangeVector.toBuilder(recSchema)
     val srv = SerializableRangeVector(result7(0), builder, recSchema)
 
-    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.5), Observable.now(srv), 1000)
+    val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue
     compareIter(finalResult(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
 
@@ -261,14 +246,11 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     val s2 = Seq( (1541190600L, 1.0d), (1541190660L,1.0d), (1541190720L,1.0d),
          (1541190780L,1.0d), (1541190840L,1.0d), (1541190900L,1.0d), (1541190960L,1.0d))
 
-    val mapped1 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, false, Observable.fromIterable(Seq(toRv(s1))), noGrouping)
+    val agg = RowAggregator(AggregationOperator.Avg, Nil, ColumnType.DoubleColumn)
+    val mapped1 = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(Seq(toRv(s1))), noGrouping)
+    val mapped2 = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(Seq(toRv(s2))), noGrouping)
 
-    val mapped2 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, false, Observable.fromIterable(Seq(toRv(s2))), noGrouping)
-
-    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, true, mapped1 ++ mapped2, rv=>rv.key)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped1 ++ mapped2, rv=>rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
@@ -285,47 +267,44 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     )
 
     // Sum
-    val resultObs = RangeVectorAggregator.mapReduce(AggregationOperator.Sum,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.DoubleColumn)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
     compareIter(result(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 15.4d).iterator)
 
     // Min
-    val resultObs2 = RangeVectorAggregator.mapReduce(AggregationOperator.Min,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
+    val agg2 = RowAggregator(AggregationOperator.Min, Nil, ColumnType.DoubleColumn)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
     val result2 = resultObs2.toListL.runAsync.futureValue
     result2.size shouldEqual 1
     result2(0).key shouldEqual noKey
     compareIter(result2(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 4.4d).iterator)
 
     // Count
-    val resultObs3a = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs3 = RangeVectorAggregator.mapReduce(AggregationOperator.Count,
-      Nil, true, resultObs3a, rv => rv.key)
+    val agg3 = RowAggregator(AggregationOperator.Count, Nil, ColumnType.DoubleColumn)
+    val resultObs3a = RangeVectorAggregator.mapReduce(agg3, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs3 = RangeVectorAggregator.mapReduce(agg3, true, resultObs3a, rv => rv.key)
     val result3 = resultObs3.toListL.runAsync.futureValue
     result3.size shouldEqual 1
     result3(0).key shouldEqual noKey
     compareIter(result3(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 3d).iterator)
 
     // Avg
-    val resultObs4a = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs4 = RangeVectorAggregator.mapReduce(AggregationOperator.Avg,
-      Nil, true, resultObs4a, rv => rv.key)
+    val agg4 = RowAggregator(AggregationOperator.Avg, Nil, ColumnType.DoubleColumn)
+    val resultObs4a = RangeVectorAggregator.mapReduce(agg4, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg4, true, resultObs4a, rv => rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue
     result4.size shouldEqual 1
     result4(0).key shouldEqual noKey
     compareIter(result4(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 5.133333333333333d).iterator)
 
     // BottomK
-    val resultObs5a = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs5 = RangeVectorAggregator.mapReduce(AggregationOperator.BottomK,
-      Seq(2.0), true, resultObs5a, rv=>rv.key)
-    val resultObs5b = RangeVectorAggregator.present(AggregationOperator.BottomK, Seq(2.0), resultObs5, 1000)
+    val agg5 = RowAggregator(AggregationOperator.BottomK, Seq(2.0), ColumnType.DoubleColumn)
+    val resultObs5a = RangeVectorAggregator.mapReduce(agg5, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs5 = RangeVectorAggregator.mapReduce(agg5, true, resultObs5a, rv=>rv.key)
+    val resultObs5b = RangeVectorAggregator.present(agg5, resultObs5, 1000)
     val result5 = resultObs5.toListL.runAsync.futureValue
     result5.size shouldEqual 1
     result5(0).key shouldEqual noKey
@@ -339,11 +318,10 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter(result5b(0).rows.map(_.getDouble(1)), Seq(5.4d, 4.4d).iterator)
 
     // TopK
-    val resultObs6a = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(2.0), false, Observable.fromIterable(samples), noGrouping)
-    val resultObs6 = RangeVectorAggregator.mapReduce(AggregationOperator.TopK,
-      Seq(2.0), true, resultObs6a, rv=>rv.key)
-    val resultObs6b = RangeVectorAggregator.present(AggregationOperator.TopK, Seq(2.0), resultObs6, 1000)
+    val agg6 = RowAggregator(AggregationOperator.TopK, Seq(2.0), ColumnType.DoubleColumn)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv.key)
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000)
     val result6 = resultObs6.toListL.runAsync.futureValue
     result6.size shouldEqual 1
     result6(0).key shouldEqual noKey
@@ -353,7 +331,26 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
+  }
 
+  it("should sum histogram RVs") {
+    val (data1, rv1) = histogramRV(numSamples = 5)
+    val (data2, rv2) = histogramRV(numSamples = 5)
+    val samples: Array[RangeVector] = Array(rv1, rv2)
+
+    val agg1 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.HistogramColumn)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+
+    val sums = data1.zip(data2).map { case (row1, row2) =>
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.MutableHistogram])
+      h1.add(row2(3).asInstanceOf[bv.MutableHistogram])
+      h1
+    }.toList
+
+    result(0).rows.map(_.getHistogram(1)).toList shouldEqual sums
   }
 
   @tailrec

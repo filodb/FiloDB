@@ -132,6 +132,13 @@ trait HistogramWithBuckets extends Histogram {
   def buckets: HistogramBuckets
   final def numBuckets: Int = buckets.numBuckets
   final def bucketTop(no: Int): Double = buckets.bucketTop(no)
+  final def valueArray: Array[Double] = {
+    val values = new Array[Double](numBuckets)
+    for { b <- 0 until numBuckets optimized } {
+      values(b) = bucketValue(b)
+    }
+    values
+  }
 }
 
 final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) extends HistogramWithBuckets {
@@ -190,6 +197,11 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
 object MutableHistogram {
   def empty(buckets: HistogramBuckets): MutableHistogram =
     MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
+
+  def apply(h: Histogram): MutableHistogram = h match {
+    case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)
+    case other: Histogram         => ???
+  }
 }
 
 /**

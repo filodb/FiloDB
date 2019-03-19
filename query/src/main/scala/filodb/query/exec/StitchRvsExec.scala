@@ -65,7 +65,8 @@ final case class StitchRvsExec(id: String,
 
   protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
