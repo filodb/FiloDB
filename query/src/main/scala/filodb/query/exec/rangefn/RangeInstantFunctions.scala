@@ -118,7 +118,7 @@ object DerivFunction extends RangeFunction {
   }
 }
 
-object ResetsFunction extends RangeFunction {
+class ResetsFunction extends RangeFunction {
   var resets = 0
 
   def addedToWindow(row: TransientRow, window: Window): Unit = {
@@ -129,7 +129,7 @@ object ResetsFunction extends RangeFunction {
   }
 
   def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    if (row.value > window.head.value) {
+    if (window.size > 0 && row.value > window.head.value) {
       resets -= 1
     }
   }

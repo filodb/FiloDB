@@ -182,7 +182,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
       curBase += _slope
     }
 
-    if (item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
+    if (elemNo < _len && item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
   }
 
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
