@@ -321,6 +321,8 @@ FiloDB is designed to scale to ingest and query millions of discrete time series
 
 The **partition key** differentiates time series and also controls distribution of time series across the cluster.  For more information on sharding, see the sharding section below.  Components of a partition key, including individual key/values of `MapColumn`s, are indexed and used for filtering in queries.
 
+The data points use a configurable schema consisting of multiple columns.  Each column definition consists of `name:columntype`, with optional parameters. For examples, see the examples below, or see the introductory walk-through above where two datasets are created.
+
 ### Prometheus FiloDB Schema for Operational Metrics
 
 * Partition key = `tags:map`

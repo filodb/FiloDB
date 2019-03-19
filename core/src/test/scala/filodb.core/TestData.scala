@@ -57,7 +57,7 @@ object TestData {
 object NamesTestData {
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
-  val dataColSpecs = Seq("first:string", "last:string", "age:long")
+  val dataColSpecs = Seq("first:string", "last:string", "age:long:interval=10")
   val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age")
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
@@ -297,7 +297,7 @@ object MachineMetricsData {
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
   val histDataset = Dataset("histogram", Seq("tags:map"),
-                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist"))
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
