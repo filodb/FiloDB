@@ -731,10 +731,6 @@ class TimeSeriesShard(val dataset: Dataset,
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
         commitCheckpoint(dataset.ref, shardNum, flushGroup)
-      // Even if data is dropped we still mark blocks as reclaimable and flush checkpoints.  We prioritize the
-      // availability of the latest metrics/data for alerting.
-      case DataDropped       => blockHolder.markUsedBlocksReclaimable()
-        commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case er: ErrorResponse => Future.successful(er)
     }.recover { case e =>
       logger.error(s"Internal Error when persisting chunks in dataset=${dataset.ref} shard=$shardNum - should " +

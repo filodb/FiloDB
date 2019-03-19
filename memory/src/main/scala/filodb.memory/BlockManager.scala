@@ -189,6 +189,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       if (entry.getValue.isEmpty) timeOrderedListIt.remove()
     }
     if (reclaimed < num) reclaimFrom(usedBlocks, stats.blocksReclaimedMetric)
+    // if we do not get required blocks even after reclaim call
     if (reclaimed < num) {
       logger.warn(s"$num blocks to reclaim but only reclaimed $reclaimed.  usedblocks=${usedBlocks.size} " +
                   s"usedBlocksTimeOrdered=${usedBlocksTimeOrdered.asScala.toList.map{case(n,l) => (n, l.size)}}")
