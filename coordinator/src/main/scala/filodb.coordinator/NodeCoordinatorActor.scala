@@ -182,7 +182,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case e: ShardCommand              => forward(e, sender())
+    case e: ShardCommand              => forward(e, e.ref, sender())
+    case e: ResyncShardIngestion      => forward(e, e.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
     case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
@@ -206,15 +207,15 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  /** Forwards shard commands to the ingester for the given dataset.
+  /** Forwards shard actions to the ingester for the given dataset.
     * TODO version match if needed, when > 1, currently only 0.
     */
-  private def forward(command: ShardCommand, origin: ActorRef): Unit =
-    ingesters.get(command.ref) match {
+  private def forward(action: ShardAction, ref: DatasetRef, origin: ActorRef): Unit =
+    ingesters.get(ref) match {
       case Some(actor) =>
-        actor.tell(command, origin)
+        actor.tell(action, origin)
       case _ =>
-        logger.warn(s"No IngestionActor for dataset ${command.ref}")
+        logger.warn(s"No IngestionActor for dataset ${ref}")
     }
 
   private def terminated(ingester: ActorRef): Unit = {
