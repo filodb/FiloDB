@@ -3,6 +3,7 @@ package filodb.core.memstore
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import debox.Buffer
 import kamon.Kamon
 import kamon.trace.Span
@@ -67,10 +68,12 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val inMemoryPartitions = new ArrayBuffer[ReadablePartition]()
     val methods = new ArrayBuffer[ChunkScanMethod]
+    val inMemPartIdsToPage = debox.Buffer.empty[Int]
     indexIt.foreach { p =>
       chunksToFetch(p, chunkMethod, pagingEnabled).map { rawChunkMethod =>
-        methods += rawChunkMethod   // TODO: really determine range for all partitions
+        methods += rawChunkMethod
         partKeyBytesToPage += p.partKeyBytes
+        inMemPartIdsToPage += p.partID
       }.getOrElse {
         // add it to partitions which do not need to be ODP'ed, send these directly and first
         inMemoryPartitions += p
@@ -195,7 +198,11 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           if (partition.numChunks > 0) {
             val memStartTime = partition.earliestTime
             val endQuery = memStartTime - 1   // do not include earliestTime, otherwise will pull in first chunk
-            if (r.startTime < memStartTime) { Some(TimeRangeChunkScan(r.startTime, endQuery)) }
+            if (r.startTime < memStartTime) {
+              val partStartTime = partKeyIndex.startTimeFromPartId(partition.partID)
+              if (partStartTime <= r.startTime) Some(TimeRangeChunkScan(r.startTime, endQuery))
+              else None
+            }
             else                            { None }
           } else {
             Some(r)    // if no chunks ingested yet, read everything from disk
