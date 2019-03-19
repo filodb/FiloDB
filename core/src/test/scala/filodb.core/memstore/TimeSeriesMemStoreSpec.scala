@@ -38,6 +38,16 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.metastore.clearAllData()
   }
 
+  it("should detect duplicate setup") {
+    memStore.setup(dataset1, 0, TestData.storeConf)
+    try {
+      memStore.setup(dataset1, 0, TestData.storeConf)
+      fail()
+    } catch {
+      case e: ShardAlreadySetup => { } // expected
+    }
+  }
+
   // Look mama!  Real-time time series ingestion and querying across multiple partitions!
   it("should ingest into multiple series and be able to query across all partitions in real time") {
     memStore.setup(dataset1, 0, TestData.storeConf)
