@@ -333,6 +333,7 @@ object HistSumRowAggregator extends RowAggregator {
       // sum is mutable histogram, copy to be sure it's our own copy
       case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(aggRes.getHistogram(1))
       case hist: bv.MutableHistogram    => hist.add(aggRes.getHistogram(1).asInstanceOf[bv.HistogramWithBuckets])
+                                           hist.makeMonotonic()
     }
     acc
   }

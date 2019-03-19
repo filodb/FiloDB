@@ -184,6 +184,8 @@ extends ChunkedRangeFunction[TransientHistRow] {
       // sum is mutable histogram, copy to be sure it's our own copy
       case hist if hist.numBuckets == 0 => h = sum.copy
       case hist: bv.MutableHistogram    => hist.add(sum)
+                                           // Different chunk, schema may change.  Ensure monotonicity
+                                           hist.makeMonotonic()
     }
   }
 }

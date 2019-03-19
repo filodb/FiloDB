@@ -179,8 +179,10 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def copy: Histogram = MutableHistogram(buckets, values.clone)
 
   /**
-   * Adds the values from another MutableHistogram having the same bucket schema.  If it does not, then
-   * an exception is thrown -- for now.  Modifies itself.
+   * Adds the values from another Histogram.
+   * If the other histogram has the same bucket scheme, then the values are just added per bucket.
+   * If the scheme is different, then an approximation is used so that the resulting histogram has
+   * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
    */
   final def add(other: HistogramWithBuckets): Unit =
     if (buckets == other.buckets) {
@@ -190,8 +192,33 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
         values(b) += other.bucketValue(b)
       }
     } else {
-      throw new UnsupportedOperationException(s"Cannot add other with buckets ${other.buckets} to myself $buckets")
+      // For now, if the bucket does not match, add it to the next highest matching bucket in our scheme.
+      // This should approximately work since buckets contain everything less than or equal.
+      var ourBucketNo = 0
+      for { b <- 0 until other.numBuckets optimized } {
+        // Find our first bucket greater than or equal to their bucket
+        while (ourBucketNo < numBuckets && bucketTop(ourBucketNo) < other.bucketTop(b)) ourBucketNo += 1
+        if (ourBucketNo < numBuckets) {
+          values(ourBucketNo) += other.bucketValue(b)
+        }
+      }
     }
+
+  /**
+    * Fixes any issue with monotonicity of supplied bucket values.
+    * Bucket values should monotonically increase. It may not be the case
+    * if the bucket values are not atomically obtained from the same scrape,
+    * or if bucket le values change over time (esp from aggregation) causing NaN on missing buckets.
+    */
+  final def makeMonotonic(): Unit = {
+    var max = 0d
+    for { b <- 0 until values.size optimized } {
+      // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
+      // newer buckets are introduced and not all instances are updated with that bucket.
+      if (values(b) < max || values(b).isNaN) values(b) = max // assign previous max
+      else if (values(b) > max) max = values(b) // update max
+    }
+  }
 }
 
 object MutableHistogram {
