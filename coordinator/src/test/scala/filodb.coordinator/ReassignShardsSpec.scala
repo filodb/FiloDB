@@ -23,22 +23,29 @@ class ReassignShardsSpec extends AkkaSpec {
   val settings = new FilodbSettings(ConfigFactory.load("application_test.conf"))
   protected val shardManager = new ShardManager(settings, DefaultShardAssignmentStrategy)
 
-  val coord1 = TestProbe("coordinator1")
+  private def makeTestProbe(name: String): TestProbe = {
+    val tp = TestProbe(name)
+    // Ignore these messages for now.
+    tp.ignoreMsg({case m: Any => m.isInstanceOf[ResyncShardIngestion]})
+    tp
+  }
+
+  val coord1 = makeTestProbe("coordinator1")
   val coord1Address = uniqueAddress(coord1.ref)
 
-  val coord2 = TestProbe("coordinator2")
+  val coord2 = makeTestProbe("coordinator2")
   val coord2Address = uniqueAddress(coord2.ref)
 
-  val coord3 = TestProbe("coordinator3")
+  val coord3 = makeTestProbe("coordinator3")
   val coord3Address = uniqueAddress(coord3.ref)
 
-  val coord4 = TestProbe("coordinator4")
+  val coord4 = makeTestProbe("coordinator4")
   val coord4Address = uniqueAddress(coord4.ref)
 
-  val coordInvalid = TestProbe("coordinatorInvalid")
+  val coordInvalid = makeTestProbe("coordinatorInvalid")
   val coordInvalidAddress = uniqueAddress(coordInvalid.ref)
 
-  val subscriber = TestProbe("subscriber")
+  val subscriber = makeTestProbe("subscriber")
 
   val noOpSource1 = IngestionSource(classOf[NoOpStreamFactory].getName)
   val setupDs1 = SetupDataset(dataset1, resources1, noOpSource1, TestData.storeConf)
