@@ -38,7 +38,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
-  private def startODPSpan: Span = Kamon.buildSpan(s"odp-cassandra-latency")
+  private def startODPSpan(): Span = Kamon.buildSpan(s"odp-cassandra-latency")
     .withTag("dataset", dataset.name)
     .withTag("shard", shardNum)
     .start()
@@ -88,7 +88,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
-            val span = startODPSpan
+            val span = startODPSpan()
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
@@ -102,7 +102,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
-            val span = startODPSpan
+            val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(methods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
@@ -151,7 +151,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
                 group = partKeyGroup(dataset.partKeySchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
-                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
+                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, 4)) } yield {
             val stamp = partSetLock.writeLock()
             try {
               partSet.add(part)

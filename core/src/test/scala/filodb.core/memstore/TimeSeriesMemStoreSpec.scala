@@ -12,7 +12,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
-import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize}
+import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize, PartKey}
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
@@ -441,9 +441,53 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID) shouldEqual Seq(22)    // newly created partitions get a new ID
+    parts.map(_.partID) shouldEqual Seq(0)    // newly created ODP partitions get earlier partId
     dataset1.partKeySchema.asJavaString(parts.head.partKeyBase, parts.head.partKeyOffset, 0) shouldEqual "Series 0"
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21
+  }
+
+  it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {
+    memStore.setup(dataset1, 0, TestData.storeConf)
+
+    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
+    val data = records(dataset1, linearMultiSeries().take(10))
+    memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.commitIndexForTesting(dataset1.ref)
+
+    val shard0 = memStore.getShard(dataset1.ref, 0).get
+    val shard0Partitions = shard0.partitions
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
+    memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
+    var part0 = shard0Partitions.get(0)
+    dataset1.partKeySchema.asJavaString(part0.partKeyBase, part0.partKeyOffset, 0) shouldEqual "Series 0"
+    val pkBytes = dataset1.partKeySchema.asByteArray(part0.partKeyBase, part0.partKeyOffset)
+    val pk = PartKey(pkBytes, UnsafeUtils.arayOffset)
+    shard0.evictedPartKeys.mightContain(pk) shouldEqual false
+
+    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
+    // We also need to switch buffers so that internally ingestionEndTime() is accurate
+    markPartitionsForEviction(0 to 1)
+
+    // Now, ingest 20 partitions.  First two partitions ingested should be evicted.
+    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
+    memStore.ingest(dataset1.ref, 0, data2)
+    Thread sleep 1000    // see if this will make things pass sooner
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
+
+    // scalastyle:off null
+    shard0Partitions.get(0) shouldEqual null // since partId 0 has been evicted
+    shard0.evictedPartKeys.mightContain(pk) shouldEqual true
+
+    // now re-ingest data for evicted partition with partKey "Series 0"
+    val data3 = records(dataset1, linearMultiSeries().take(1))
+    memStore.ingest(dataset1.ref, 0, data3)
+
+    // the partId assigned should still be 0
+    part0 = shard0Partitions.get(0)
+    dataset1.partKeySchema.asJavaString(part0.partKeyBase, part0.partKeyOffset, 0) shouldEqual "Series 0"
   }
 
   it("should be able to skip ingestion/add partitions if there is no more space left") {

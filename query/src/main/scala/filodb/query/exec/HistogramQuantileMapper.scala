@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import org.agrona.MutableDirectBuffer
+import scalaxy.loops._
 
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -75,7 +76,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
           val row = new TransientRow()
           override def hasNext: Boolean = samples.forall(_.hasNext)
           override def next(): RowReader = {
-            for { i <- samples.indices } {
+            for { i <- 0 until samples.size optimized } {
               val nxt = samples(i).next()
               buckets(i).rate = nxt.getDouble(1)
               row.timestamp = nxt.getLong(0)

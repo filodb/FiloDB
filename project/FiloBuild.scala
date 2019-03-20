@@ -222,6 +222,7 @@ object FiloBuild extends Build {
     "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
     "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
     "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
+    "com.github.alexandrnikitin" %% "bloom-filter" % "0.11.0",
     scalaxyDep
   )
 
