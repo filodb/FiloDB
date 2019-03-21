@@ -2,13 +2,15 @@ package filodb.core.zipkin
 
 import java.net.InetAddress
 
+import scala.util.Try
+
 import com.typesafe.config.Config
 import kamon.{Kamon, SpanReporter}
 import kamon.trace.Span.{FinishedSpan => KamonSpan, Mark, TagValue}
 import kamon.util.Clock
 import org.slf4j.LoggerFactory
-import scala.util.Try
 import zipkin2.{Endpoint, Span => ZipkinSpan}
+import zipkin2.codec.Encoding
 import zipkin2.reporter.AsyncReporter
 import zipkin2.reporter.okhttp3.OkHttpSender
 
@@ -126,15 +128,19 @@ class ZipkinReporter extends SpanReporter {
     val zipkinHost = Kamon.config().getString(HostConfigKey)
     val zipkinPort = Kamon.config().getInt(PortConfigKey)
 
+    var url = s"$zipkinEndpoint/api/v2/spans"
     if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty) {
-      AsyncReporter.create(
-        OkHttpSender.create(s"http://$zipkinHost:$zipkinPort/api/v2/spans")
-      )
-    } else {
-      AsyncReporter.create(
-        OkHttpSender.create(s"$zipkinEndpoint/api/v2/spans")
-      )
+      url = s"http://$zipkinHost:$zipkinPort/api/v2/spans"
     }
+
+    AsyncReporter.create(
+      OkHttpSender.newBuilder()
+        .encoding(Encoding.JSON)
+        .endpoint(url)
+        .maxRequests(64)
+        .messageMaxBytes(1 * 512)
+        .build()
+    )
   }
   //scalastyle:on null
 
