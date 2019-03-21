@@ -24,7 +24,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[RangeFunctionId],
-                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer with StrictLogging {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
@@ -62,6 +62,7 @@ final case class PeriodicSamplesMapper(start: Long,
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
+          logger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
                                        windowLength, rangeFuncGen().asChunkedD, queryConfig))
