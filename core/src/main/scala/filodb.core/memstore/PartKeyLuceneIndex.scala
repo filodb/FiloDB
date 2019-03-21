@@ -625,7 +625,7 @@ class PartIdStartTimeCollector extends SimpleCollector {
   override def collect(doc: Int): Unit = {
     if (partIdDv.advanceExact(doc) && startTimeDv.advanceExact(doc)) {
       val partId = partIdDv.longValue().toInt
-      val startTime = startTimeDv.longValue().toInt
+      val startTime = startTimeDv.longValue()
       startTimes(partId) = startTime
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")

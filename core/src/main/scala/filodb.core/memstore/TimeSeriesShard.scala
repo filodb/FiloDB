@@ -1232,7 +1232,9 @@ class TimeSeriesShard(val dataset: Dataset,
         val partIdsToPage = InMemPartitionIterator(coll.intIterator())
                            .filter(_.earliestTime > chunkMethod.startTime)
                            .map(_.partID)
-        new InMemPartitionIterator(coll.intIterator(), startTimes = partKeyIndex.startTimeFromPartIds(partIdsToPage))
+        val startTimes = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+        logger.debug(s"QueryStartTime=${chunkMethod.startTime}; StartTimes for relevant partIds: $startTimes")
+        new InMemPartitionIterator(coll.intIterator(), startTimes)
       } else {
         PartitionIterator.fromPartIt(partitions.values.iterator.asScala)
       }
