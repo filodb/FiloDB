@@ -8,7 +8,6 @@ import scala.collection.immutable.HashSet
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
-import debox.Map
 import kamon.Kamon
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
@@ -325,15 +324,14 @@ class PartKeyLuceneIndex(dataset: Dataset,
   /**
     * Called when a document is updated with new endTime
     */
-  def startTimeFromPartIds(partIds: IntIterator): PartIdStartTimeCollector = {
+  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
     val collector = new PartIdStartTimeCollector()
-
     val booleanQuery = new BooleanQuery.Builder
-    while (partIds.hasNext) {
-      booleanQuery.add(new TermQuery(new Term(PART_ID, partIds.next().toString)), Occur.SHOULD)
+    partIds.foreach { pId =>
+      booleanQuery.add(new TermQuery(new Term(PART_ID, pId.toString)), Occur.SHOULD)
     }
     searcherManager.acquire().search(booleanQuery.build(), collector)
-    collector
+    collector.startTimes
   }
 
   /**

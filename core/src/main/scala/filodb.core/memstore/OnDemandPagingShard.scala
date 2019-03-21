@@ -3,7 +3,6 @@ package filodb.core.memstore
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import debox.Buffer
 import kamon.Kamon
 import kamon.trace.Span
@@ -68,12 +67,11 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val inMemoryPartitions = new ArrayBuffer[ReadablePartition]()
     val methods = new ArrayBuffer[ChunkScanMethod]
-    val inMemPartIdsToPage = debox.Buffer.empty[Int]
     indexIt.foreach { p =>
-      chunksToFetch(p, chunkMethod, pagingEnabled).map { rawChunkMethod =>
-        methods += rawChunkMethod
+      val startTime = indexIt.startTime(p)
+      chunksToFetch(p, chunkMethod, pagingEnabled, startTime).map { rawChunkMethod =>
+        methods += rawChunkMethod   // TODO: really determine range for all partitions
         partKeyBytesToPage += p.partKeyBytes
-        inMemPartIdsToPage += p.partID
       }.getOrElse {
         // add it to partitions which do not need to be ODP'ed, send these directly and first
         inMemoryPartitions += p
@@ -184,33 +182,27 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   }
 
   private def chunksToFetch(partition: ReadablePartition,
-                    method: ChunkScanMethod,
-                    enabled: Boolean): Option[ChunkScanMethod] = {
+                            method: ChunkScanMethod,
+                            enabled: Boolean,
+                            partStartTime: Long): Option[ChunkScanMethod] = {
     if (enabled) {
       method match {
         // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have
         // no way of knowing what there is anyways.
-        case AllChunkScan               => Some(AllChunkScan)
+        case AllChunkScan                 =>  Some(AllChunkScan)
         // Assume initial startKey of first chunk is the earliest - typically true unless we load in historical data
         // Compare desired time range with start key and see if in memory data covers desired range
         // Also assume we have in memory all data since first key.  Just return the missing range of keys.
-        case r: TimeRangeChunkScan      =>
-          if (partition.numChunks > 0) {
-            val memStartTime = partition.earliestTime
-            val endQuery = memStartTime - 1   // do not include earliestTime, otherwise will pull in first chunk
-            if (r.startTime < memStartTime) {
-              val partStartTime = partKeyIndex.startTimeFromPartId(partition.partID)
-              if (partStartTime <= r.startTime) Some(TimeRangeChunkScan(r.startTime, endQuery))
-              else None
-            }
-            else                            { None }
-          } else {
-            Some(r)    // if no chunks ingested yet, read everything from disk
-          }
-        // Return only in-memory data - ie return none so we never ODP
-        case InMemoryChunkScan        => None
-        // Write buffers are always in memory only
-        case WriteBufferChunkScan      => None
+        case req: TimeRangeChunkScan      =>  if (partition.numChunks > 0) {
+                                                val memStartTime = partition.earliestTime
+                                                if (req.startTime < memStartTime && partStartTime < memStartTime) {
+                                                  // do not include earliestTime, otherwise will pull in first chunk
+                                                  Some(TimeRangeChunkScan(req.startTime, memStartTime - 1))
+                                                }
+                                                else None
+                                              } else Some(req) // if no chunks ingested yet, read everything from disk
+        case InMemoryChunkScan            =>  None // Return only in-memory data - ie return none so we never ODP
+        case WriteBufferChunkScan         =>  None // Write buffers are always in memory only
       }
     } else {
       None

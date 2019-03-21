@@ -5,6 +5,7 @@ import java.util.concurrent.locks.StampedLock
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
+import scala.util.control.NonFatal
 
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
@@ -144,6 +145,7 @@ object TimeSeriesShard {
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
   def skippedPartIDs: Buffer[Int]
+  def startTime(part: TimeSeriesPartition): Long = 0
 }
 
 object PartitionIterator {
@@ -331,9 +333,19 @@ class TimeSeriesShard(val dataset: Dataset,
       }
     })
 
-  case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
+  case class InMemPartitionIterator(intIt: IntIterator,
+                                    startTimes: debox.Map[Int, Long] = debox.Map.empty) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
+
+    override def startTime(part: TimeSeriesPartition): Long = {
+      try {
+        startTimes(part.partID)
+      } catch { case NonFatal(e) =>
+        part.earliestTime
+      }
+    }
+
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
         val nextPartID = intIt.next
@@ -1215,8 +1227,12 @@ class TimeSeriesShard(val dataset: Dataset,
     case FilteredPartitionScan(split, filters) =>
       // TODO: There are other filters that need to be added and translated to Lucene queries
       if (filters.nonEmpty) {
-        val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-        new InMemPartitionIterator(indexIt)
+        val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
+
+        val partIdsToPage = InMemPartitionIterator(coll.intIterator())
+                           .filter(_.earliestTime > chunkMethod.startTime)
+                           .map(_.partID)
+        new InMemPartitionIterator(coll.intIterator(), startTimes = partKeyIndex.startTimeFromPartIds(partIdsToPage))
       } else {
         PartitionIterator.fromPartIt(partitions.values.iterator.asScala)
       }
