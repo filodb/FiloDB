@@ -138,7 +138,7 @@ class ZipkinReporter extends SpanReporter {
         .encoding(Encoding.JSON)
         .endpoint(url)
         .maxRequests(64)
-        .messageMaxBytes(1 * 512)
+        .messageMaxBytes(1024 * 128)
         .build()
     )
   }
