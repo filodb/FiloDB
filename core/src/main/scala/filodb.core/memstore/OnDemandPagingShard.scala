@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
+import scala.util.control.NonFatal
 
 import debox.Buffer
 import kamon.Kamon
@@ -61,14 +62,14 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     val allDataCols = dataset.dataColumns.map(_.id)
 
     // 1. Fetch partitions from memstore
-    val indexIt = iteratePartitions(partMethod, chunkMethod)
+    val (indexIt, startTimes) = iteratePartitions(partMethod, chunkMethod)
 
     // 2. Determine missing chunks per partition and what to fetch
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val inMemoryPartitions = new ArrayBuffer[ReadablePartition]()
     val methods = new ArrayBuffer[ChunkScanMethod]
     indexIt.foreach { p =>
-      val startTime = indexIt.startTime(p)
+      val startTime = try { startTimes(p.partID) } catch { case NonFatal(_) => 0L }
       chunksToFetch(p, chunkMethod, pagingEnabled, startTime).map { rawChunkMethod =>
         methods += rawChunkMethod   // TODO: really determine range for all partitions
         partKeyBytesToPage += p.partKeyBytes

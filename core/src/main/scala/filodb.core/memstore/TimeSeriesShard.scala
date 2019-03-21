@@ -5,7 +5,6 @@ import java.util.concurrent.locks.StampedLock
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
-import scala.util.control.NonFatal
 
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
@@ -145,7 +144,6 @@ object TimeSeriesShard {
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
   def skippedPartIDs: Buffer[Int]
-  def startTime(part: TimeSeriesPartition): Long = 0
 }
 
 object PartitionIterator {
@@ -333,18 +331,9 @@ class TimeSeriesShard(val dataset: Dataset,
       }
     })
 
-  case class InMemPartitionIterator(intIt: IntIterator,
-                                    startTimes: debox.Map[Int, Long] = debox.Map.empty) extends PartitionIterator {
+  case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
-
-    override def startTime(part: TimeSeriesPartition): Long = {
-      try {
-        startTimes(part.partID)
-      } catch { case NonFatal(e) =>
-        part.earliestTime
-      }
-    }
 
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
@@ -1220,30 +1209,41 @@ class TimeSeriesShard(val dataset: Dataset,
     part.map(_.asInstanceOf[TimeSeriesPartition])
   }
 
+  /**
+    * Returns iterator to iterate partitions identified by the PartitionScanMethod.
+    * Also returns the startTimes for partitions that are not fully in memory
+    * so that caller can make a decision on whether to ODP that partition or not.
+    */
   def iteratePartitions(partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod): PartitionIterator = partMethod match {
-    case SinglePartitionScan(partition, _) => ByteKeysPartitionIterator(Seq(partition))
-    case MultiPartitionScan(partKeys, _)   => ByteKeysPartitionIterator(partKeys)
-    case FilteredPartitionScan(split, filters) =>
-      // TODO: There are other filters that need to be added and translated to Lucene queries
-      if (filters.nonEmpty) {
-        val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
+                        chunkMethod: ChunkScanMethod): (PartitionIterator, debox.Map[Int, Long]) = {
+    partMethod match {
+      case SinglePartitionScan(partition, _) => (ByteKeysPartitionIterator(Seq(partition)), debox.Map.empty)
+      case MultiPartitionScan(partKeys, _)   => (ByteKeysPartitionIterator(partKeys), debox.Map.empty)
+      case FilteredPartitionScan(split, filters) =>
+        // TODO: There are other filters that need to be added and translated to Lucene queries
+        if (filters.nonEmpty) {
+          val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
 
-        val partIdsToPage = InMemPartitionIterator(coll.intIterator())
-                           .filter(_.earliestTime > chunkMethod.startTime)
-                           .map(_.partID)
-        val startTimes = partKeyIndex.startTimeFromPartIds(partIdsToPage)
-        logger.debug(s"QueryStartTime=${chunkMethod.startTime}; StartTimes for relevant partIds: $startTimes")
-        new InMemPartitionIterator(coll.intIterator(), startTimes)
-      } else {
-        PartitionIterator.fromPartIt(partitions.values.iterator.asScala)
-      }
+          // first find out which partitions are being queried for data not in memory
+          val partIdsToPage = InMemPartitionIterator(coll.intIterator())
+            .filter(_.earliestTime > chunkMethod.startTime)
+            .map(_.partID)
+          val startTimes = if (partIdsToPage.nonEmpty) partKeyIndex.startTimeFromPartIds(partIdsToPage)
+                           else debox.Map.empty[Int, Long]
+          logger.debug(s"QueryStartTime=${chunkMethod.startTime}; StartTimes for relevant partIds: $startTimes")
+          // now provide an iterator that additionally supplies the startTimes for
+          // those partitions that may need to be paged
+          (new InMemPartitionIterator(coll.intIterator()), startTimes)
+        } else {
+          (PartitionIterator.fromPartIt(partitions.values.iterator.asScala), debox.Map.empty)
+        }
+    }
   }
 
   def scanPartitions(columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
-    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod).map { p =>
+    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod)._1.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })
