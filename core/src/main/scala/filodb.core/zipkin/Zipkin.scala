@@ -128,10 +128,10 @@ class ZipkinReporter extends SpanReporter {
     val zipkinHost = Kamon.config().getString(HostConfigKey)
     val zipkinPort = Kamon.config().getInt(PortConfigKey)
 
-    var url = s"$zipkinEndpoint/api/v2/spans"
-    if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty) {
-      url = s"http://$zipkinHost:$zipkinPort/api/v2/spans"
-    }
+    val url = if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty)
+                s"http://$zipkinHost:$zipkinPort/api/v2/spans"
+              else
+                s"$zipkinEndpoint/api/v2/spans"
 
     AsyncReporter.create(
       OkHttpSender.newBuilder()
