@@ -31,13 +31,16 @@ final case class ReduceAggregateExec(id: String,
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
         case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, results, rv => rv.key)
+    val valColType = RangeVectorTransformer.valueColumnType(schemaOfCompose(dataset))
+    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
   }
 }
 
@@ -54,12 +57,13 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
-  val aggregator = RowAggregator(aggrOp, aggrParams)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
+    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
         if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
@@ -67,10 +71,12 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         else Map.empty
       CustomRangeVectorKey(groupBy)
     }
-    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = false, source, grouping)
+    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    val valColType = RangeVectorTransformer.valueColumnType(source)
+    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
     // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
     aggregator.reductionSchema(source)
   }
@@ -80,16 +86,19 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any]) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
-  val aggregator = RowAggregator(aggrOp, aggrParams)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorAggregator.present(aggrOp, aggrParams, source, limit)
+    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    RangeVectorAggregator.present(aggregator, source, limit)
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    val valColType = RangeVectorTransformer.valueColumnType(source)
+    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
     aggregator.presentationSchema(source)
   }
 }
@@ -108,12 +117,10 @@ object RangeVectorAggregator {
     * This method is the facade for map and reduce steps of the aggregation.
     * In the reduction-only (non-leaf) phases, skipMapPhase should be true.
     */
-  def mapReduce(aggrOp: AggregationOperator,
-                params: Seq[Any],
+  def mapReduce(rowAgg: RowAggregator,
                 skipMapPhase: Boolean,
                 source: Observable[RangeVector],
                 grouping: RangeVector => RangeVectorKey): Observable[RangeVector] = {
-    val rowAgg = RowAggregator(aggrOp, params) // row aggregator
     // reduce the range vectors using the foldLeft construct. This results in one aggregate per group.
     val task = source.toListL.map { rvs =>
       // now reduce each group and create one result range vector per group
@@ -129,11 +136,9 @@ object RangeVectorAggregator {
   /**
     * This method is the facade for the present step of the aggregation
     */
-  def present(aggrOp: AggregationOperator,
-              params: Seq[Any],
+  def present(aggregator: RowAggregator,
               source: Observable[RangeVector],
               limit: Int): Observable[RangeVector] = {
-    val aggregator = RowAggregator(aggrOp, params)
     source.flatMap(rv => Observable.fromIterable(aggregator.present(rv, limit)))
   }
 
@@ -267,11 +272,12 @@ object RowAggregator {
   /**
     * Factory for RowAggregator
     */
-  def apply(aggrOp: AggregationOperator, params: Seq[Any]): RowAggregator = {
+  def apply(aggrOp: AggregationOperator, params: Seq[Any], dataColType: ColumnType): RowAggregator = {
     aggrOp match {
       case Min      => MinRowAggregator
       case Max      => MaxRowAggregator
-      case Sum      => SumRowAggregator
+      case Sum if dataColType == ColumnType.DoubleColumn => SumRowAggregator
+      case Sum if dataColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count    => CountRowAggregator
       case Avg      => AvgRowAggregator
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
@@ -303,6 +309,32 @@ object SumRowAggregator extends RowAggregator {
     if (!aggRes.getDouble(1).isNaN) {
       if (acc.sum.isNaN) acc.sum = 0
       acc.sum += aggRes.getDouble(1)
+    }
+    acc
+  }
+  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def reductionSchema(source: ResultSchema): ResultSchema = source
+  def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
+}
+
+object HistSumRowAggregator extends RowAggregator {
+  import filodb.memory.format.{vectors => bv}
+
+  class HistSumHolder(var timestamp: Long = 0L, var h: bv.Histogram = bv.Histogram.empty) extends AggregateHolder {
+    val row = new TransientHistRow()
+    def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row }
+    def resetToZero(): Unit = h = bv.Histogram.empty
+  }
+  type AggHolderType = HistSumHolder
+  def zero: HistSumHolder = new HistSumHolder
+  def newRowToMapInto: MutableRowReader = new TransientHistRow()
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
+  def reduceAggregate(acc: HistSumHolder, aggRes: RowReader): HistSumHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    acc.h match {
+      // sum is mutable histogram, copy to be sure it's our own copy
+      case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(aggRes.getHistogram(1))
+      case hist: bv.MutableHistogram    => hist.add(aggRes.getHistogram(1).asInstanceOf[bv.HistogramWithBuckets])
     }
     acc
   }

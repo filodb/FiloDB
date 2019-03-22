@@ -244,7 +244,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }.map((_, i))
       }
     }
-    compose(childTasks, queryConfig)
+    compose(dataset, childTasks, queryConfig)
   }
 
   final protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = schemaOfCompose(dataset)
@@ -258,7 +258,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * Sub-class non-leaf nodes should provide their own implementation of how
     * to compose the sub-query results here.
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector]
 
 }
