@@ -459,7 +459,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Above condition ensures that we respond to shard events only from the node shard is currently assigned to.
         // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
         updateFromShardEvent(event)
-        publishSnapshot(event.ref)
         // reassign shard if IngestionError. Exclude previous node since it had error shards.
         event match {
           case _: IngestionError =>
