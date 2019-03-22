@@ -103,7 +103,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(DatasetVerified)
 
       for (coord <- Seq(coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
@@ -118,7 +118,7 @@ class ReassignShardsSpec extends AkkaSpec {
         ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
 
       for (i <- 1 to 2) {
-        // First is the initial set, the second is generated along with the resync.
+        // First is the initial set, the second is generated along with the state.
         subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
@@ -155,7 +155,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 1
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
@@ -180,7 +180,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
@@ -199,7 +199,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
@@ -275,7 +275,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
@@ -296,7 +296,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
@@ -318,7 +318,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
@@ -339,7 +339,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
@@ -364,7 +364,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Nil
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
@@ -385,7 +385,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Nil
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
@@ -410,7 +410,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 1
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -437,7 +437,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -457,7 +457,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(2, 3, 4)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -480,7 +480,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 0
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Nil
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -512,7 +512,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(DatasetVerified)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -538,7 +538,7 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(Success)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
@@ -563,7 +563,7 @@ class ReassignShardsSpec extends AkkaSpec {
         (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned))
 
       for (coord <- Seq(coord1, coord2, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(5, 6, 7)
           s.map.shardsForCoord(coord3.ref) shouldEqual Nil
