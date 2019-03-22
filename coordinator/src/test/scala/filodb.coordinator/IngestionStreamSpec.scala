@@ -112,14 +112,18 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
   // where we can inject failures?
 
-  /* FIXME: Cannot use start message.
   it("should not start ingestion, raise a IngestionError vs IngestionStopped, " +
     "if incorrect shard is sent for the creation of the stream") {
     setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
-    val invalidShard = -1
-    coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
+    // first it becomes active
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset6.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.head shouldEqual ShardStatusActive
+    }
 
+    // then it becomes stopped
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset6.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
@@ -127,12 +131,18 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     }
 
   }
-   */
 
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
     // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
     setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+
+    // first it becomes active
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset33.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.head shouldEqual ShardStatusActive
+    }
 
     // Wait for all messages to be ingested
     expectMsgPF(within) {
@@ -177,6 +187,21 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     // expectMsg(IngestionStopped(dataset33.ref, 0))
     // Unfortunately since we do not get every message we cannot actually check the progression of recovery
+
+    for { i <- 0 until 3} {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(dataset33.ref, mapper) =>
+          mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+          mapper.statuses.head.isInstanceOf[ShardStatusRecovery] shouldEqual true
+      }
+    }
+
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset33.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.head shouldEqual ShardStatusActive
+    }
+
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset33.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
