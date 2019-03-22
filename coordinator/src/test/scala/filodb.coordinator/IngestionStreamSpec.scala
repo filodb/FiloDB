@@ -112,13 +112,9 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
   // where we can inject failures?
 
-  /* FIXME: Cannot use start message.
   it("should not start ingestion, raise a IngestionError vs IngestionStopped, " +
     "if incorrect shard is sent for the creation of the stream") {
     setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
-
-    val invalidShard = -1
-    coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
 
     // first it becomes active
     expectMsgPF(within) {
@@ -135,7 +131,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     }
 
   }
-   */
 
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
