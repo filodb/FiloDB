@@ -12,7 +12,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.data.ChunkMap
-import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.AggregationOperator._
 
@@ -318,6 +318,8 @@ object SumRowAggregator extends RowAggregator {
 }
 
 object HistSumRowAggregator extends RowAggregator {
+  import filodb.memory.format.{vectors => bv}
+
   class HistSumHolder(var timestamp: Long = 0L, var h: bv.Histogram = bv.Histogram.empty) extends AggregateHolder {
     val row = new TransientHistRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row }
@@ -333,7 +335,6 @@ object HistSumRowAggregator extends RowAggregator {
       // sum is mutable histogram, copy to be sure it's our own copy
       case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(aggRes.getHistogram(1))
       case hist: bv.MutableHistogram    => hist.add(aggRes.getHistogram(1).asInstanceOf[bv.HistogramWithBuckets])
-                                           hist.makeMonotonic()
     }
     acc
   }

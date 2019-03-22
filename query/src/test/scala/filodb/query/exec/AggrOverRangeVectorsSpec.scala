@@ -10,7 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.AggregationOperator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
 
@@ -332,6 +332,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
   }
+
+  import filodb.memory.format.{vectors => bv}
 
   it("should sum histogram RVs") {
     val (data1, rv1) = histogramRV(numSamples = 5)

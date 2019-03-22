@@ -184,7 +184,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
    * If the scheme is different, then an approximation is used so that the resulting histogram has
    * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
    */
-  final def add(other: HistogramWithBuckets): Unit =
+  final def addNoCorrection(other: HistogramWithBuckets): Unit =
     if (buckets == other.buckets) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
@@ -192,17 +192,25 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
         values(b) += other.bucketValue(b)
       }
     } else {
-      // For now, if the bucket does not match, add it to the next highest matching bucket in our scheme.
-      // This should approximately work since buckets contain everything less than or equal.
-      var ourBucketNo = 0
-      for { b <- 0 until other.numBuckets optimized } {
-        // Find our first bucket greater than or equal to their bucket
-        while (ourBucketNo < numBuckets && bucketTop(ourBucketNo) < other.bucketTop(b)) ourBucketNo += 1
-        if (ourBucketNo < numBuckets) {
-          values(ourBucketNo) += other.bucketValue(b)
-        }
-      }
+      throw new UnsupportedOperationException(s"Cannot add histogram of scheme ${other.buckets} to $buckets")
+      // TODO: In the future, support adding buckets of different scheme.  Below is an example
+      // var ourBucketNo = 0
+      // for { b <- 0 until other.numBuckets optimized } {
+      //   // Find our first bucket greater than or equal to their bucket
+      //   while (ourBucketNo < numBuckets && bucketTop(ourBucketNo) < other.bucketTop(b)) ourBucketNo += 1
+      //   if (ourBucketNo < numBuckets) {
+      //     values(ourBucketNo) += other.bucketValue(b)
+      //   }
+      // }
     }
+
+  /**
+   * Adds the values from another Histogram, making a monotonic correction to ensure correctness
+   */
+  final def add(other: HistogramWithBuckets): Unit = {
+    addNoCorrection(other)
+    makeMonotonic()
+  }
 
   /**
     * Fixes any issue with monotonicity of supplied bucket values.

@@ -99,7 +99,6 @@ class HistogramTest extends NativeVectorTest {
       histWNans.values(2) = Double.NaN
 
       hist1.add(histWNans)
-      hist1.makeMonotonic()
       var current = 0d
       hist1.valueArray.foreach { d =>
         d should be >= (current)
@@ -107,7 +106,8 @@ class HistogramTest extends NativeVectorTest {
       }
     }
 
-    it("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
+    // Test this later when different schemas are supported
+    ignore("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
       val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
 
       val scheme2 = GeometricBuckets(2.0, 6.0, 3)
