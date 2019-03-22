@@ -194,6 +194,8 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
     } else {
       throw new UnsupportedOperationException(s"Cannot add histogram of scheme ${other.buckets} to $buckets")
       // TODO: In the future, support adding buckets of different scheme.  Below is an example
+      // NOTE: there are two issues here: below add picks the existing bucket scheme (not commutative)
+      //       and the newer different buckets are lost (one may want more granularity)
       // var ourBucketNo = 0
       // for { b <- 0 until other.numBuckets optimized } {
       //   // Find our first bucket greater than or equal to their bucket
