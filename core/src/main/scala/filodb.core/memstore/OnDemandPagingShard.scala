@@ -86,7 +86,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     // return data that is in memory.  TODO: fix
     Observable.fromIterable(inMemoryPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
-        Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
+        Observable.fromTask(odpPartTask(indexIt.skippedPartIDs, partKeyBytesToPage, methods,
+                                        chunkMethod)).flatMap { odpParts =>
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
@@ -101,7 +102,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           } else { Observable.empty }
         }
       } else {
-        Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
+        Observable.fromTask(odpPartTask(indexIt.skippedPartIDs, partKeyBytesToPage, methods,
+                                        chunkMethod)).flatMap { odpParts =>
           shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
@@ -123,10 +125,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
 
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
-  private def odpPartTask(indexIt: PartitionIterator, partKeyBytesToPage: ArrayBuffer[Array[Byte]],
+  private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
                           methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
-  if (indexIt.skippedPartIDs.nonEmpty) {
-    createODPPartitionsTask(indexIt.skippedPartIDs, { case (bytes, offset) =>
+  if (partIdsNotInMemory.nonEmpty) {
+    createODPPartitionsTask(partIdsNotInMemory, { case (bytes, offset) =>
       val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
       partKeyBytesToPage += partKeyBytes
@@ -142,7 +144,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
-  Task[Seq[TimeSeriesPartition]] = Task {
+                                                                  Task[Seq[TimeSeriesPartition]] = Task {
     require(partIDs.nonEmpty)
     partIDs.map { id =>
       // for each partID: look up in partitions
