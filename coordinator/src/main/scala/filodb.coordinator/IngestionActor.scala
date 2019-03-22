@@ -36,7 +36,7 @@ object IngestionActor {
 
 /**
   * Oversees ingestion and recovery process for a single dataset.  The overall process for a single shard:
-  * 1. StartShardIngestion command is received and start() called
+  * 1. Resync shard command is received and start() called
   * 2. MemStore.setup() is called for that shard
   * 3. IF no checkpoint data is found, THEN normal ingestion is started
   * 4. IF checkpoints are found, then recovery is started from the minimum checkpoint offset
@@ -86,15 +86,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     streamSubscriptions.keys.foreach(stopIngestion(_))
   }
 
-  /** All [[ShardCommand]] tasks are only started if the dataset
-    * and shard are valid for this ingester.
-    */
   def receive: Receive = LoggingReceive {
     case GetStatus               => status(sender())
     case e: IngestRows           => ingest(e)
     case e: ResyncShardIngestion => resync(e, sender())
-    case e: StartShardIngestion  => start(e, sender())
-    case e: StopShardIngestion   => stop(e, sender())
   }
 
   /**
@@ -139,13 +134,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       resyncVersion = resync.version
     }
   }
-
-  /** Guards that only this dataset's commands are acted upon.
-    * Handles initial memstore setup of dataset to shard.
-    * Also handles recovery process.
-    */
-  private def start(e: StartShardIngestion, origin: ActorRef): Unit =
-    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else startIngestion(e.shard)
 
   private def startIngestion(shard: Int): Unit = {
     try memStore.setup(dataset, shard, storeConfig, downsample) catch {
@@ -323,10 +311,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def status(origin: ActorRef): Unit =
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
-  /** Guards that only this dataset's commands are acted upon. */
-  private def stop(e: StopShardIngestion, origin: ActorRef): Unit =
-    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else stopIngestion(e.shard)
-
   private def stopIngestion(shard: Int): Unit = {
     streamSubscriptions.get(shard).foreach { s =>
       s.onComplete {
@@ -350,11 +334,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
     logger.error(s"Stopped dataset=${dataset.ref} shard=$shard after error was thrown")
-  }
-
-  private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {
-    logger.error(s"$command is invalid for this ingester '${dataset.ref}'.")
-    origin foreach(_ ! InvalidIngestionCommand(command.ref, command.shard))
   }
 
   private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {

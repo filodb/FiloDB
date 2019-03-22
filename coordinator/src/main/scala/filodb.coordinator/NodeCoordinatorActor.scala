@@ -111,8 +111,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   /** Creates a new ingestion actor initialized with the shard actor,
-    * and sends it a sequence of `StartShardIngestion` commands created
-    * during dataset setup.
+    * and sends it a shard resync command created.
     *
     * Creates a QueryActor, subscribes it to shard events, keeping
     * it decoupled from the shard actor. The QueryActor will receive an
@@ -161,7 +160,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case DatasetSetup(compactDSString, storeConf, source, downsample) =>
       val dataset = Dataset.fromCompactString(compactDSString)
       if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample, sender()) }
-      else { logger.warn(s"Getting redundant DatasetSetup for dataset ${dataset.ref}") }
 
     case IngestRows(dataset, shard, rows) =>
       withIngester(sender(), dataset) { _ ! IngestionActor.IngestRows(sender(), shard, rows) }
@@ -182,7 +180,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case e: ShardCommand              => forward(e, e.ref, sender())
     case e: ResyncShardIngestion      => forward(e, e.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor

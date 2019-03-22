@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import scala.concurrent.duration._
+
 import akka.actor.{ActorRef, Address}
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
@@ -25,8 +27,8 @@ class ReassignShardsSpec extends AkkaSpec {
 
   private def makeTestProbe(name: String): TestProbe = {
     val tp = TestProbe(name)
-    // Ignore these messages for now.
-    tp.ignoreMsg({case m: Any => m.isInstanceOf[ResyncShardIngestion]})
+    // Uncomment to ignore messages of a specific type.
+    //tp.ignoreMsg({case m: Any => m.isInstanceOf[...]})
     tp
   }
 
@@ -50,6 +52,18 @@ class ReassignShardsSpec extends AkkaSpec {
   val noOpSource1 = IngestionSource(classOf[NoOpStreamFactory].getName)
   val setupDs1 = SetupDataset(dataset1, resources1, noOpSource1, TestData.storeConf)
 
+  private def expectDataset(coord: TestProbe, dataset: Dataset): TestProbe = {
+    coord.expectMsgPF() { case ds: DatasetSetup =>
+      ds.compactDatasetStr shouldEqual dataset.asCompactString
+      ds.source shouldEqual noOpSource1
+    }
+    coord
+  }
+
+  private def expectNoMessage(coord: TestProbe): Unit = {
+    coord.expectNoMessage(100.milliseconds)
+  }
+
   def uniqueAddress(probe: ActorRef): Address =
     probe.path.address.copy(system = s"${probe.path.address.system}-${probe.path.name}")
 
@@ -59,17 +73,17 @@ class ReassignShardsSpec extends AkkaSpec {
     "fail with no datasets" in {
       shardManager.subscribeAll(subscriber.ref)
       subscriber.expectMsg(ShardSubscriptions(Set.empty, Set(subscriber.ref)))
-      subscriber.expectNoMessage() // should not get a CurrentShardSnapshot since there isnt a dataset yet
+      expectNoMessage(subscriber) // should not get a CurrentShardSnapshot since there isnt a dataset yet
 
       shardManager.addMember(coord3Address, coord3.ref)
       shardManager.coordinators shouldBe Seq(coord3.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord3.expectNoMessage() // since there are no datasets, there should be no assignments
+      expectNoMessage(coord3) // since there are no datasets, there should be no assignments
 
       shardManager.addMember(coord4Address, coord4.ref)
       shardManager.coordinators shouldBe Seq(coord3.ref, coord4.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord4.expectNoMessage() // since there are no more shards left to assign
+      expectNoMessage(coord4) // since there are no more shards left to assign
 
       val shardAssign1 = AssignShardConfig(coord1Address.toString, Seq(0,1))
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
@@ -87,50 +101,45 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 1
       assignments shouldEqual Map(coord4.ref -> Seq(0, 1, 2), coord3.ref -> Seq(3, 4, 5))
       expectMsg(DatasetVerified)
-      coord4.expectMsgPF() { case ds: DatasetSetup =>
-        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
-        ds.source shouldEqual noOpSource1
-      }
-      // assignments first go to the most recently deployed node
-      coord4.expectMsgAllOf(
-        StartShardIngestion(dataset1, 0, None),
-        StartShardIngestion(dataset1, 1, None),
-        StartShardIngestion(dataset1, 2, None))
 
-      coord3.expectMsgPF() { case ds: DatasetSetup =>
-        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
-        ds.source shouldEqual noOpSource1
+      for (coord <- Seq(coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
+        }
+        expectNoMessage(coord)
       }
-      // assignments first go to the most recently deployed node
-      coord3.expectMsgAllOf(
-        StartShardIngestion(dataset1, 3, None),
-        StartShardIngestion(dataset1, 4, None),
-        StartShardIngestion(dataset1, 5, None))
 
-      // NOTE: because subscriptions do not kick in right away, we don't get new snapshots unitl after
-      // ShardSubscriptions message
+      // NOTE: because subscriptions do not kick in right away, we don't get new snapshots until
+      // after ShardSubscriptions message
+
       subscriber.expectMsg(ShardSubscriptions(Set(
         ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
-        s.ref shouldEqual dataset1
-        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
-        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
-//        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
-//        s.map.shardsForCoord(coord1.ref) shouldEqual Seq()
+
+      for (i <- 1 to 2) {
+        // First is the initial set, the second is generated along with the resync.
+        subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+        }
       }
-      subscriber.expectNoMessage()
+      expectNoMessage(subscriber)
 
       val shardAssign1 = AssignShardConfig(coord4Address.toString, Seq(5))
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsgPF() { case s: BadSchema =>
         s.message should startWith(s"Can not start")
       }
-      subscriber.expectNoMessage()
+      expectNoMessage(subscriber)
 
       val shardAssign2 = AssignShardConfig(coord2Address.toString, Seq(0))
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(BadData(s"${coord2Address.toString} not found"))
-      subscriber.expectNoMessage()
+      expectNoMessage(subscriber)
     }
 
     "fail with invalid node" in {
@@ -145,13 +154,21 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.coordinators shouldBe Seq(coord3.ref, coord4.ref, coord2.ref)
       shardManager.datasetInfo.size shouldBe 1
 
-      coord2.expectMsgPF() { case ds: DatasetSetup =>
-        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
-        ds.source shouldEqual noOpSource1
+      for (coord <- Seq(coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+        }
+        expectNoMessage(coord)
       }
-      coord2.expectMsgAllOf(
-        StartShardIngestion(dataset1, 6, None),
-        StartShardIngestion(dataset1, 7, None))
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+      }
 
       val assignments = shardManager.shardMappers(dataset1).shardValues
       assignments shouldEqual Array((coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned),
@@ -161,14 +178,43 @@ class ReassignShardsSpec extends AkkaSpec {
       val shardAssign1 = AssignShardConfig(coord2Address.toString, Seq(5))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign1.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+        }
+        expectNoMessage(coord)
+      }
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
         s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
       }
+
+      expectNoMessage(subscriber)
     }
 
     "not change after adding spare node" in {
@@ -176,13 +222,17 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.addMember(coord1Address, coord1.ref)
       shardManager.coordinators shouldBe Seq(coord3.ref, coord4.ref, coord2.ref, coord1.ref)
       shardManager.datasetInfo.size shouldBe 1
-      coord1.expectNoMessage() // since there are no datasets, there should be no assignments
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectNoMessage(coord) // since there are no datasets, there should be no assignments
+      }
 
       val assignments = shardManager.shardMappers(dataset1).shardValues
       assignments shouldEqual Array((coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned),
         (coord4.ref, ShardStatusAssigned), (coord3.ref, ShardStatusAssigned), (coord3.ref, ShardStatusAssigned),
         (coord2.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned))
 
+      expectNoMessage(subscriber)
     }
 
     "fail with invalid datasets" in {
@@ -190,11 +240,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign, dataset2), self)
       expectMsg(DatasetUnknown(dataset2))
 
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
-        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
-        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
-        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
-      }
+      expectNoMessage(subscriber)
     }
 
     "fail with invalid shardNum" in {
@@ -203,12 +249,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(BadSchema(s"Invalid shards found List(8). Valid shards are List()"))
 
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
-        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
-        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
-        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
-      }
-
+      expectNoMessage(subscriber)
     }
 
     "fail when assigned to same node" in {
@@ -232,8 +273,38 @@ class ReassignShardsSpec extends AkkaSpec {
       val shardAssign1 = AssignShardConfig(coord1Address.toString, Seq(2))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign1.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+        }
+        expectNoMessage(coord)
+      }
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1)
@@ -245,8 +316,38 @@ class ReassignShardsSpec extends AkkaSpec {
       val shardAssign2 = AssignShardConfig(coord3Address.toString, Seq(1))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign2.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6, 7)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+        }
+        expectNoMessage(coord)
+      }
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0)
@@ -261,11 +362,41 @@ class ReassignShardsSpec extends AkkaSpec {
       val shardAssign2 = AssignShardConfig(coord1Address.toString, Seq(0, 7))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign2.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(2)
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
 
+      for (coord <- Seq(coord1, coord2, coord3, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 2, 7)
+        }
+        expectNoMessage(coord)
+      }
+
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
-        s.map.shardsForCoord(coord4.ref) shouldEqual Seq()
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 3, 4)
         s.map.shardsForCoord(coord2.ref) shouldEqual Seq(5, 6)
         s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 2, 7)
@@ -277,6 +408,19 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.removeMember(coord3Address)
       shardManager.coordinators shouldBe Seq(coord4.ref, coord2.ref, coord1.ref)
       shardManager.datasetInfo.size shouldBe 1
+
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(1, 5, 6)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 2, 7)
+        }
+        expectNoMessage(coord)
+      }
+
+      expectNoMessage(coord3)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
@@ -291,8 +435,37 @@ class ReassignShardsSpec extends AkkaSpec {
       val shardAssign2 = AssignShardConfig(coord4Address.toString, Seq(2))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign2.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(1, 5, 6)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 7)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(1, 5, 6)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 7)
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(2, 3, 4)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(1, 5, 6)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 7)
+        }
+        expectNoMessage(coord)
+      }
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(2, 3, 4)
@@ -306,10 +479,28 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.removeDataset(dataset1)
       shardManager.datasetInfo.size shouldBe 0
 
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord2.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+      }
+
       val shardAssign1 = AssignShardConfig(coord1Address.toString, Seq(0,1))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign1.shardList), dataset1), self)
       expectMsg(DatasetUnknown(dataset1)) // since there are no datasets
 
+      expectNoMessage(subscriber)
     }
 
     "succeed after adding dataset back" in {
@@ -320,9 +511,49 @@ class ReassignShardsSpec extends AkkaSpec {
       assignments shouldEqual Map(coord1.ref -> Seq(0, 1, 2), coord2.ref -> Seq(3, 4, 5), coord4.ref -> Seq(6, 7))
       expectMsg(DatasetVerified)
 
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4, 5)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsg(ShardSubscriptions(Set(
+        ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
+
+      for (i <- 1 to 2) {
+        subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4, 5)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        }
+      }
+
       val shardAssign1 = AssignShardConfig(coord4Address.toString, Seq(5))
       shardManager.stopShards(NodeClusterActor.StopShards(UnassignShardConfig(shardAssign1.shardList), dataset1), self)
       expectMsg(Success)
+
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(6, 7)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+      }
+
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
 
@@ -331,6 +562,24 @@ class ReassignShardsSpec extends AkkaSpec {
         (coord1.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned),
         (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned))
 
+      for (coord <- Seq(coord1, coord2, coord4)) {
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+          s.ref shouldEqual dataset1
+          s.map.shardsForCoord(coord4.ref) shouldEqual Seq(5, 6, 7)
+          s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+          s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4)
+          s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        }
+        expectNoMessage(coord)
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(5, 6, 7)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 4)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+      }
+
+      expectNoMessage(subscriber)
     }
   }
 }
