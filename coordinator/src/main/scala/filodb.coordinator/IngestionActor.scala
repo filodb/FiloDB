@@ -36,7 +36,7 @@ object IngestionActor {
 
 /**
   * Oversees ingestion and recovery process for a single dataset.  The overall process for a single shard:
-  * 1. Resync shard command is received and start() called
+  * 1. Shard state command is received and start() called
   * 2. MemStore.setup() is called for that shard
   * 3. IF no checkpoint data is found, THEN normal ingestion is started
   * 4. IF checkpoints are found, then recovery is started from the minimum checkpoint offset
@@ -60,7 +60,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
   final val streams = new HashMap[Int, IngestionStream]
-  private var resyncVersion: Long = 0
+  private var shardStateVersion: Long = 0
 
   // Params for creating the default memStore flush scheduler
   private final val numGroups = storeConfig.groupsPerShard
@@ -89,7 +89,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   def receive: Receive = LoggingReceive {
     case GetStatus               => status(sender())
     case e: IngestRows           => ingest(e)
-    case e: ResyncShardIngestion => resync(e, sender())
+    case e: ShardIngestionState  => resync(e, sender())
   }
 
   /**
@@ -97,14 +97,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     * reconciles any differences. It does so by stopping ingestion for shards that aren't mapped
     * to this node, and it starts ingestion for those that are.
     */
-  private def resync(resync: ResyncShardIngestion, origin: ActorRef): Unit = {
-    if (invalid(resync.ref)) {
-      logger.error(s"$resync is invalid for this ingester '${dataset.ref}'.")
+  private def resync(state: ShardIngestionState, origin: ActorRef): Unit = {
+    if (invalid(state.ref)) {
+      logger.error(s"$state is invalid for this ingester '${dataset.ref}'.")
       return
     }
 
-    if (resync.version != 0 && resync.version <= resyncVersion) {
-      logger.info(s"Ignoring old ResyncShardIngestion version: ${resync.version} <= $resyncVersion")
+    if (state.version != 0 && state.version <= shardStateVersion) {
+      logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion")
       return
     }
 
@@ -112,8 +112,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     // which must continue being ingested.
     val shardsToStop = HashSet() ++ streams.keySet
 
-    for (shard <- 0 until resync.map.numShards) {
-      if (resync.map.coordForShard(shard) == context.parent) {
+    for (shard <- 0 until state.map.numShards) {
+      if (state.map.coordForShard(shard) == context.parent) {
         // Must be ingesting from the shard.
         if (shardsToStop.contains(shard)) {
           // Is aready ingesting, and it must not be stopped.
@@ -130,8 +130,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       stopIngestion(shard)
     }
 
-    if (resync.version != 0) {
-      resyncVersion = resync.version
+    if (state.version != 0) {
+      shardStateVersion = state.version
     }
   }
 

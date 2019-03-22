@@ -111,7 +111,7 @@ class ShardManagerSpec extends AkkaSpec {
       expectMsg(DatasetVerified)
 
       for (coord <- Seq(coord1, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -128,7 +128,7 @@ class ShardManagerSpec extends AkkaSpec {
       subscriber.expectMsg(ShardSubscriptions(Set(
         ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
       for (i <- 1 to 2) {
-        // First is the initial set, the second is generated along with the resync.
+        // First is the initial set, the second is generated along with the state.
         subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
@@ -151,7 +151,7 @@ class ShardManagerSpec extends AkkaSpec {
 
       // All should see the changes.
       for (coord <- Seq(coord1, coord2, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -178,9 +178,9 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
       shardManager.datasetInfo.size shouldBe 1
 
-      // All coordinators should see a resync message, even the removed one.
+      // All coordinators should see a state message, even the removed one.
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil          // coord1 is gone
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -207,7 +207,7 @@ class ShardManagerSpec extends AkkaSpec {
 
       // Ingestion should be stopped on downed node, and one shard reassigned.
       for (coord <- Seq(coord2, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -237,7 +237,7 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -262,7 +262,7 @@ class ShardManagerSpec extends AkkaSpec {
                                                 IngestionError(dataset1, 0, new IllegalStateException("simulated")))
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -302,7 +302,7 @@ class ShardManagerSpec extends AkkaSpec {
       // Shard 0 is "bad" and so it's unassigned now.
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -326,7 +326,7 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 0
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -357,7 +357,7 @@ class ShardManagerSpec extends AkkaSpec {
         coord4.ref -> Seq(3, 4, 5))
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -371,7 +371,7 @@ class ShardManagerSpec extends AkkaSpec {
       subscriber.expectMsg(
         ShardSubscriptions(Set(ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
       for (i <- 1 to 2) {
-        // First is the initial set, the second is generated along with the resync.
+        // First is the initial set, the second is generated along with the state.
         subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -393,7 +393,7 @@ class ShardManagerSpec extends AkkaSpec {
         coord3.ref -> Seq.empty)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj2).expectMsgPF() { case s: ResyncShardIngestion =>
+        expectDataset(coord, datasetObj2).expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset2
           s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -410,7 +410,7 @@ class ShardManagerSpec extends AkkaSpec {
           Set(subscriber.ref)))
 
       for (i <- 1 to 2) {
-        // First is the initial set, the second is generated along with the resync.
+        // First is the initial set, the second is generated along with the state.
         subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset2 =>
           s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq.empty
@@ -472,7 +472,7 @@ class ShardManagerSpec extends AkkaSpec {
           case ds: DatasetSetup if ds.compactDatasetStr == datasetObj2.asCompactString =>
             ds.source shouldEqual noOpSource2
             coord.expectMsgPF() {
-              case s: ResyncShardIngestion =>
+              case s: ShardIngestionState =>
                 s.ref shouldEqual dataset2
                 s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
                 s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
@@ -485,7 +485,7 @@ class ShardManagerSpec extends AkkaSpec {
           case ds: DatasetSetup if ds.compactDatasetStr == datasetObj1.asCompactString =>
             ds.source shouldEqual noOpSource1
             coord.expectMsgPF() {
-              case s: ResyncShardIngestion =>
+              case s: ShardIngestionState =>
                 s.ref shouldEqual dataset1
                 s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
                 s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)

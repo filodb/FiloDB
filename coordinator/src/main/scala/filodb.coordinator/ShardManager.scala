@@ -558,7 +558,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
           subscription <- _subscriptions.subscription(ref)
         } subscription.subscribers foreach (_ ! snapshot)
 
-        // Also send a complete resync command to all ingestion actors. Most are expected to
+        // Also send a complete state command to all ingestion actors. Most are expected to
         // actually be ingesting something, so also send the dataset info. This might be
         // redundant, but sending it again is harmless.
 
@@ -566,9 +566,9 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
           state.storeConfig, state.source, state.downsample)
 
-        // TODO: Need a provide a globally consistent version, incremented when anything changes,
-        //       for any dataset.
-        val resync = ResyncShardIngestion(0, snapshot.ref, snapshot.map)
+        // TODO: Need to provide a globally consistent version, incremented when anything
+        //       changes, for any dataset.
+        val resync = ShardIngestionState(0, snapshot.ref, snapshot.map)
 
         for (coord <- coordinators) {
           coord ! setupMsg

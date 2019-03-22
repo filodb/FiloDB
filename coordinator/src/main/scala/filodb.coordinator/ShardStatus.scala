@@ -12,12 +12,12 @@ final case class CurrentShardSnapshot(ref: DatasetRef,
                                       map: ShardMapper) extends ShardAction with Response
 
 /**
-  * Full state of all shards, sent to all ingestion actors, and then they start/stop ingestion for
-  * the shards they own. This action is intended to replace the start/start ingestion commands.
-  * The version is expected to be global and monotonically increasing. If the version is 0, then the
-  * receiver should skip the version check and blindly apply the resync action.
+  * Full state of all shards, sent to all ingestion actors. They react by starting/stopping
+  * ingestion for the shards they own or no longer own. The version is expected to be global
+  * and monotonically increasing, but if the version is 0, then the actor should skip the
+  * version check and blindly apply the resync action.
   */
-final case class ResyncShardIngestion(version: Long, ref: DatasetRef, map: ShardMapper) extends ShardAction
+final case class ShardIngestionState(version: Long, ref: DatasetRef, map: ShardMapper) extends ShardAction
 
 /**
   * The events are sent by the IngestionActor on a node when the actual ingestion stream
