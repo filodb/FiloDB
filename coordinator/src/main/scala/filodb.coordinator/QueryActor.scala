@@ -8,6 +8,7 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
+import monix.execution.Scheduler
 
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
@@ -52,11 +53,12 @@ final class QueryActor(memStore: MemStore,
   import QueryActor._
   import client.QueryCommands._
 
-  implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   val config = context.system.settings.config
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  val numSchedThreads = config.getInt("filodb.query.num-threads")
+  implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads)
 
   private val tags = Map("dataset" -> dataset.ref.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)

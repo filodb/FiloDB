@@ -98,7 +98,10 @@ trait ExecPlan extends QueryCommand {
                     queryConfig: QueryConfig)
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
-    try {
+    // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
+    // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
+    // we don't want these to happen in a single thread.
+    Task {
       qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
@@ -148,9 +151,10 @@ trait ExecPlan extends QueryCommand {
           qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
-    } catch { case NonFatal(ex) =>
+    }.flatten
+    .onErrorRecover { case NonFatal(ex) =>
       qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
-      Task(QueryError(id, ex))
+      QueryError(id, ex)
     }
   }
 
