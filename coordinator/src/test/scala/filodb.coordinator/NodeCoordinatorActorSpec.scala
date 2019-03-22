@@ -99,8 +99,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
     shardManager.addDataset(sd, dataset, self)
     shardManager.subscribe(probe.ref, dataset.ref)
-    probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
-      shardMap = mapper
+    probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => } // for subscription
+    for { i <- 0 until numShards } { // for each shard assignment
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
+        shardMap = mapper
+      }
     }
   }
 
@@ -264,6 +267,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should concatenate raw series from multiple shards") {
       val ref = setupTimeSeries(2)
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       // Same series is ingested into two shards.  I know, this should not happen in real life.
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))

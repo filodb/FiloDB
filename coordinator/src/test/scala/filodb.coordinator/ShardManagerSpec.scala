@@ -263,6 +263,19 @@ class ShardManagerSpec extends AkkaSpec {
       coord4.expectMsgAllOf(
         StartShardIngestion(dataset1, 0, None))
 
+      // We are asserting two snapshot messages of same type below.
+      // The first one should have been one where shard 0 is unassigned and in error state.
+      // Subsequently, the reassignment should have caused it to change.
+      // However, we are forced to assert on the final state because the mutation
+      // of the shard map object has already happened by the time updateFromExternalShardEvent returns
+      // and we are able to only validate the final state here on both objects.
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 4, 5)
+        s.map.unassignedShards shouldEqual Nil
+      }
+
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 2)
         s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -279,6 +292,12 @@ class ShardManagerSpec extends AkkaSpec {
       coord3.expectNoMessage()
       coord2.expectNoMessage()
       coord4.expectNoMessage()
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(4, 5)
+        s.map.unassignedShards shouldEqual Seq(0)
+      }
       subscriber.expectNoMessage()
     }
 
