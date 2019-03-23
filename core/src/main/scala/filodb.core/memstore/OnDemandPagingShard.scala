@@ -220,8 +220,6 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
 
   override def iteratePartitions(partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod): IterationResult = {
-    import collection.JavaConverters._
-
     partMethod match {
       case SinglePartitionScan(partition, _) =>
         IterationResult(ByteKeysPartitionIterator(Seq(partition)), debox.Map.empty, debox.Buffer.empty)
@@ -229,24 +227,27 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         IterationResult(ByteKeysPartitionIterator(partKeys), debox.Map.empty, debox.Buffer.empty)
       case FilteredPartitionScan(split, filters) =>
         // TODO: There are other filters that need to be added and translated to Lucene queries
-        if (filters.nonEmpty) {
-          val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
+        val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
 
-          // first find out which partitions are being queried for data not in memory
-          val it1 = InMemPartitionIterator(coll.intIterator())
-          val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
-          val partIdsNotInMem = it1.skippedPartIDs
-          val startTimes = if (partIdsToPage.nonEmpty) partKeyIndex.startTimeFromPartIds(partIdsToPage)
-          else debox.Map.empty[Int, Long]
-          logger.debug(s"startTime lookup for query in dataset=${dataset.ref} shard=$shardNum " +
-            s"queryStartTime=${chunkMethod.startTime} resulted in startTimes=$startTimes")
-          // now provide an iterator that additionally supplies the startTimes for
-          // those partitions that may need to be paged
-          IterationResult(new InMemPartitionIterator(coll.intIterator()), startTimes, partIdsNotInMem)
-        } else {
-          IterationResult(PartitionIterator.fromPartIt(partitions.values.iterator.asScala),
-            debox.Map.empty, debox.Buffer.empty)
+        // first find out which partitions are being queried for data not in memory
+        val it1 = InMemPartitionIterator(coll.intIterator())
+        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+        val partIdsNotInMem = it1.skippedPartIDs
+        val startTimes = if (partIdsToPage.nonEmpty) {
+          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
+            s"startTime lookup for query in dataset=${dataset.ref} shard=$shardNum " +
+            s"resulted in startTimes=$st")
+          st
         }
+        else {
+          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=${dataset.ref} " +
+            s"shard=$shardNum are in memory")
+          debox.Map.empty[Int, Long]
+        }
+        // now provide an iterator that additionally supplies the startTimes for
+        // those partitions that may need to be paged
+        IterationResult(new InMemPartitionIterator(coll.intIterator()), startTimes, partIdsNotInMem)
     }
   }
 }
