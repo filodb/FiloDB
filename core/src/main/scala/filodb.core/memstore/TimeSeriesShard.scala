@@ -334,7 +334,6 @@ class TimeSeriesShard(val dataset: Dataset,
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
-
     private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
         val nextPartID = intIt.next
@@ -673,8 +672,8 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
-    if (startTime == -1) startTime = p.earliestTime// can remotely happen since lucene reads are eventually consistent
-    if (startTime == Long.MaxValue) startTime = 0
+    if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
+    if (startTime == Long.MaxValue) startTime = 0 // if for any reason we cant find the startTime, use 0
     val endTime = if (isActivelyIngesting(p.partID)) {
       Long.MaxValue
     } else {
@@ -958,13 +957,13 @@ class TimeSeriesShard(val dataset: Dataset,
       val filters = dataset.partKeySchema.toStringPairs(partKeyBase, partKeyOffset)
         .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
       val matches = partKeyIndex.partIdsFromFilters2(filters, 0, Long.MaxValue)
-      matches.result.cardinality() match {
+      matches.cardinality() match {
         case 0 =>           shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
                             CREATE_NEW_PARTID
         case c if c >= 1 => // NOTE: if we hit one partition, we cannot directly call it out as the result without
                             // verifying the partKey since the matching partition may have had an additional tag
                             if (c > 1) shardStats.evictedPartIdLookupMultiMatch.increment()
-                            val iter = matches.result.intIterator()
+                            val iter = matches.intIterator()
                             var partId = -1
                             do {
                               // find the most specific match for the given ingestion record
@@ -1211,40 +1210,46 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   /**
-    * Returns iterator to iterate partitions identified by the PartitionScanMethod.
-    * Also returns the startTimes for partitions that are not fully in memory
-    * so that caller can make a decision on whether to ODP that partition or not.
+    * Result of a iteratePartitions method call.
+    *
+    * Note that there is a leak in abstraction here we should not be talking about ODP here.
+    * ODPagingShard really should not have been a sub-class of TimeSeriesShard. Instead
+    * composition should have been used instead of inheritance. Overriding the iteratePartitions()
+    * method is the best I could do to keep the leak minimal and not increase scope.
+    *
+    * TODO: clean this all up in a bigger refactoring effort later.
+    *
+    * @param partsInMemoryIter iterates through the in-Memory partitions, some of which may not need ODP.
+    *                          Caller needs to filter further
+    * @param partIdsInMemoryMayNeedOdp has partIds from partsInMemoryIter in memory that may need chunk ODP. Their
+    *                          startTimes from Lucene are included
+    * @param partIdsNotInMemory is a collection of partIds fully not in memory
+    */
+  case class IterationResult(partsInMemoryIter: PartitionIterator,
+                             partIdsInMemoryMayNeedOdp: debox.Map[Int, Long] = debox.Map.empty,
+                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
+
+  /**
+    * See documentation for IterationResult.
     */
   def iteratePartitions(partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod): (PartitionIterator, debox.Map[Int, Long]) = {
-    partMethod match {
-      case SinglePartitionScan(partition, _) => (ByteKeysPartitionIterator(Seq(partition)), debox.Map.empty)
-      case MultiPartitionScan(partKeys, _)   => (ByteKeysPartitionIterator(partKeys), debox.Map.empty)
-      case FilteredPartitionScan(split, filters) =>
-        // TODO: There are other filters that need to be added and translated to Lucene queries
-        if (filters.nonEmpty) {
-          val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
-
-          // first find out which partitions are being queried for data not in memory
-          val partIdsToPage = InMemPartitionIterator(coll.intIterator())
-            .filter(_.earliestTime > chunkMethod.startTime)
-            .map(_.partID)
-          val startTimes = if (partIdsToPage.nonEmpty) partKeyIndex.startTimeFromPartIds(partIdsToPage)
-                           else debox.Map.empty[Int, Long]
-          logger.debug(s"QueryStartTime=${chunkMethod.startTime}; StartTimes for relevant partIds: $startTimes")
-          // now provide an iterator that additionally supplies the startTimes for
-          // those partitions that may need to be paged
-          (new InMemPartitionIterator(coll.intIterator()), startTimes)
-        } else {
-          (PartitionIterator.fromPartIt(partitions.values.iterator.asScala), debox.Map.empty)
-        }
-    }
+                        chunkMethod: ChunkScanMethod): IterationResult = partMethod match {
+    case SinglePartitionScan(partition, _) => IterationResult(ByteKeysPartitionIterator(Seq(partition)))
+    case MultiPartitionScan(partKeys, _)   => IterationResult(ByteKeysPartitionIterator(partKeys))
+    case FilteredPartitionScan(split, filters) =>
+      // TODO: There are other filters that need to be added and translated to Lucene queries
+      if (filters.nonEmpty) {
+        val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        IterationResult(new InMemPartitionIterator(indexIt))
+      } else {
+        IterationResult(PartitionIterator.fromPartIt(partitions.values.iterator.asScala))
+      }
   }
 
   def scanPartitions(columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
-    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod)._1.map { p =>
+    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod).partsInMemoryIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

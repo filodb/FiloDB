@@ -436,7 +436,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
 
   def partIdsFromFilters2(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
-                         endTime: Long): PartIdCollector = {
+                         endTime: Long): EWAHCompressedBitmap = {
     val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
@@ -454,7 +454,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     val collector = new PartIdCollector() // passing zero for unlimited results
     searcher.search(query, collector)
     partKeySpan.finish()
-    collector
+    collector.result
   }
 }
 

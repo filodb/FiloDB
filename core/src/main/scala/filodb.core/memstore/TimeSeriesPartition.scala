@@ -320,6 +320,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     final def unlock(): Unit = chunkmapReleaseShared()
   }
 
+  /**
+    * startTime of earliest chunk in memory.
+    * Long.MaxValue if no chunk is present
+    */
   final def earliestTime: Long = {
     if (numChunks == 0) {
       Long.MaxValue

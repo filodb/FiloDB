@@ -2,7 +2,6 @@ package filodb.core.memstore
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
-import scala.util.control.NonFatal
 
 import debox.Buffer
 import kamon.Kamon
@@ -62,37 +61,41 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     val allDataCols = dataset.dataColumns.map(_.id)
 
     // 1. Fetch partitions from memstore
-    val (indexIt, startTimes) = iteratePartitions(partMethod, chunkMethod)
-
-    // 2. Determine missing chunks per partition and what to fetch
+    val iterResult = iteratePartitions(partMethod, chunkMethod)
+    val partIdsNotInMemory = iterResult.partIdsNotInMemory
+    // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
-    val inMemoryPartitions = new ArrayBuffer[ReadablePartition]()
-    val methods = new ArrayBuffer[ChunkScanMethod]
-    indexIt.foreach { p =>
-      val startTime = try { startTimes(p.partID) } catch { case NonFatal(_) => 0L }
-      chunksToFetch(p, chunkMethod, pagingEnabled, startTime).map { rawChunkMethod =>
-        methods += rawChunkMethod   // TODO: really determine range for all partitions
-        partKeyBytesToPage += p.partKeyBytes
-      }.getOrElse {
-        // add it to partitions which do not need to be ODP'ed, send these directly and first
-        inMemoryPartitions += p
+    val pagingMethods = new ArrayBuffer[ChunkScanMethod]
+    val inMemOdp = debox.Set.empty[Int]
+
+    iterResult.partIdsInMemoryMayNeedOdp.foreach { case (pId, startTime) =>
+      val p = partitions.get(pId)
+      if (p != null) {
+        checkIfReallyNeedToOdp(p, chunkMethod, pagingEnabled, startTime).map { rawChunkMethod =>
+          pagingMethods += rawChunkMethod // TODO: really determine range for all partitions
+          partKeyBytesToPage += p.partKeyBytes
+          inMemOdp += p.partID
+        }
+      } else { // very rare case that partition literally *just* got evicted
+        partIdsNotInMemory += pId
       }
     }
-    shardStats.partitionsQueried.increment(inMemoryPartitions.length)
-    logger.debug(s"dataset=${dataset.ref} shard=$shardNum Querying ${inMemoryPartitions.length} in memory " +
-      s"partitions, ODPing ${methods.length}")
+    logger.debug(s"Query on dataset=${dataset.ref} shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
+      s"and full ODP of partIds ${iterResult.partIdsNotInMemory}")
+
+    // partitions that do not need ODP are those that are not in the inMemOdp collection
+    val noOdpPartitions = iterResult.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
-    Observable.fromIterable(inMemoryPartitions) ++ {
+    val result = Observable.fromIterator(noOdpPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
-        Observable.fromTask(odpPartTask(indexIt.skippedPartIDs, partKeyBytesToPage, methods,
+        Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         chunkMethod)).flatMap { odpParts =>
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
-          shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
-            rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
+            rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
@@ -102,12 +105,11 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           } else { Observable.empty }
         }
       } else {
-        Observable.fromTask(odpPartTask(indexIt.skippedPartIDs, partKeyBytesToPage, methods,
+        Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         chunkMethod)).flatMap { odpParts =>
-          shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
-            Observable.fromIterable(partKeyBytesToPage.zip(methods))
+            Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
                   .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
@@ -120,6 +122,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           }
         }
       }
+    }
+    result.map { p =>
+      shardStats.partitionsQueried.increment()
+      p
     }
   }
 
@@ -184,7 +190,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     TimeRangeChunkScan(minTime, maxTime)
   }
 
-  private def chunksToFetch(partition: ReadablePartition,
+  private def checkIfReallyNeedToOdp(partition: ReadablePartition,
                             method: ChunkScanMethod,
                             enabled: Boolean,
                             partStartTime: Long): Option[ChunkScanMethod] = {
@@ -210,6 +216,37 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     } else {
       None
     }
+  }
 
+  override def iteratePartitions(partMethod: PartitionScanMethod,
+                        chunkMethod: ChunkScanMethod): IterationResult = {
+    import collection.JavaConverters._
+
+    partMethod match {
+      case SinglePartitionScan(partition, _) =>
+        IterationResult(ByteKeysPartitionIterator(Seq(partition)), debox.Map.empty, debox.Buffer.empty)
+      case MultiPartitionScan(partKeys, _)   =>
+        IterationResult(ByteKeysPartitionIterator(partKeys), debox.Map.empty, debox.Buffer.empty)
+      case FilteredPartitionScan(split, filters) =>
+        // TODO: There are other filters that need to be added and translated to Lucene queries
+        if (filters.nonEmpty) {
+          val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
+
+          // first find out which partitions are being queried for data not in memory
+          val it1 = InMemPartitionIterator(coll.intIterator())
+          val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+          val partIdsNotInMem = it1.skippedPartIDs
+          val startTimes = if (partIdsToPage.nonEmpty) partKeyIndex.startTimeFromPartIds(partIdsToPage)
+          else debox.Map.empty[Int, Long]
+          logger.debug(s"startTime lookup for query in dataset=${dataset.ref} shard=$shardNum " +
+            s"queryStartTime=${chunkMethod.startTime} resulted in startTimes=$startTimes")
+          // now provide an iterator that additionally supplies the startTimes for
+          // those partitions that may need to be paged
+          IterationResult(new InMemPartitionIterator(coll.intIterator()), startTimes, partIdsNotInMem)
+        } else {
+          IterationResult(PartitionIterator.fromPartIt(partitions.values.iterator.asScala),
+            debox.Map.empty, debox.Buffer.empty)
+        }
+    }
   }
 }
