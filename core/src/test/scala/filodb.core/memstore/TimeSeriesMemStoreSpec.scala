@@ -82,6 +82,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       memStore.ingest(dataset1.ref, 0, data)
     }
 
+    memStore.commitIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split)).map(_.getDouble(0)).sum
     agg1 shouldEqual ((1 to 20).map(_.toDouble).sum)
@@ -204,6 +205,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     fut1.futureValue
     fut2.futureValue
 
+    memStore.commitIndexForTesting(dataset1.ref)
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
                        .map(_.getDouble(0)).sum
@@ -242,6 +244,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
@@ -336,6 +339,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // no flushes
     chunksetsWritten shouldEqual initChunksWritten
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Should have less than 50 records ingested
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
@@ -401,13 +405,15 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
 
-    // Check partitions are now 2 to 21, 0 and 1 got evicted
+    memStore.commitIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet
+    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet  ++ Set(0)
+    // Above query will ODP evicted partition 0 back in, but there is no space for evicted part 1,
+    // so it will not be returned as part of query :(
   }
 
   it("should be able to ODP/query partitions evicted from memory structures when doing index/tag query") {
@@ -511,6 +517,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual 0
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Check partitions are now 0 to 20, 21/22 did not get added
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))

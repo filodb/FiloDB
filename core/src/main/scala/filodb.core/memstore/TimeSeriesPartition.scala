@@ -320,9 +320,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     final def unlock(): Unit = chunkmapReleaseShared()
   }
 
+  /**
+    * startTime of earliest chunk in memory.
+    * Long.MaxValue if no chunk is present
+    */
   final def earliestTime: Long = {
     if (numChunks == 0) {
-      Long.MinValue
+      Long.MaxValue
     } else {
       // Acquire shared lock to safely access the native pointer.
       chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst).startTime)
