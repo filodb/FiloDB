@@ -152,12 +152,11 @@ object RangeVectorAggregator extends StrictLogging {
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
-        val rowIterators = rvs.map(_.rows)
-        val rvKeys = rvs.map(_.key)
-        def hasNext: Boolean = rowIterators.forall(_.hasNext)
+        val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
+        def hasNext: Boolean = itsAndKeys.forall(_._1.hasNext)
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
-          rowIterators.zip(rvKeys).foreach { case (rowIter, rvk) =>
+          itsAndKeys.foreach { case (rowIter, rvk) =>
             val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
             acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
           }
