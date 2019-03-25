@@ -71,13 +71,17 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     iterResult.partIdsInMemoryMayNeedOdp.foreach { case (pId, startTime) =>
       val p = partitions.get(pId)
       if (p != null) {
-        checkIfReallyNeedToOdp(p, chunkMethod, pagingEnabled, startTime).map { rawChunkMethod =>
+        val odpChunkScan = chunksToODP(p, chunkMethod, pagingEnabled, startTime)
+        odpChunkScan.foreach { rawChunkMethod =>
           pagingMethods += rawChunkMethod // TODO: really determine range for all partitions
           partKeyBytesToPage += p.partKeyBytes
           inMemOdp += p.partID
         }
-      } else { // very rare case that partition literally *just* got evicted
-        partIdsNotInMemory += pId
+      } else {
+        // in the very rare case that partition literally *just* got evicted
+        // we do not want to thrash by paging this partition back in.
+        logger.warn(s"Skipped ODP of partId $pId in dataset=${dataset.ref} " +
+          s"shard=$shardNum since we are very likely thrashing")
       }
     }
     logger.debug(s"Query on dataset=${dataset.ref} shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
@@ -190,10 +194,14 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     TimeRangeChunkScan(minTime, maxTime)
   }
 
-  private def checkIfReallyNeedToOdp(partition: ReadablePartition,
-                            method: ChunkScanMethod,
-                            enabled: Boolean,
-                            partStartTime: Long): Option[ChunkScanMethod] = {
+  /**
+    * Check if ODP is really needed for this partition which is in memory
+    * @return Some(scanMethodForCass) if ODP is needed, None if ODP is not needed
+    */
+  private def chunksToODP(partition: ReadablePartition,
+                          method: ChunkScanMethod,
+                          enabled: Boolean,
+                          partStartTime: Long): Option[ChunkScanMethod] = {
     if (enabled) {
       method match {
         // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have
