@@ -210,10 +210,14 @@ object RangeVectorAggregator extends StrictLogging {
       }
 
       // Turn aggregates into final result vector
-      new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader))
+      if (rvs.nonEmpty) {
+        Some(new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+      } else {
+        None
+      }
     }
 
-    Observable.fromTask(accsTask)
+    Observable.fromTask(accsTask).filter(_.isDefined).map(_.get)
   }
 }
 
