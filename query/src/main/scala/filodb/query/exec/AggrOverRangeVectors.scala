@@ -179,45 +179,47 @@ object RangeVectorAggregator extends StrictLogging {
    * the previous transformer is a PeriodicSampleMapper with fixed output lengths.
    * It's much faster than mapReduce() since it iterates through each vector first and then from vector to vector.
    * Time wise first iteration also uses less memory for high-cardinality use cases and reduces the
-   * time window of holding chunk map locks.
+   * time window of holding chunk map locks to each time series, instead of the entire query.
    */
   def fastReduce(rowAgg: RowAggregator,
                  skipMapPhase: Boolean,
                  source: Observable[RangeVector],
                  outputLen: Int): Observable[RangeVector] = {
+    // Can't use an Array here because rowAgg.AggHolderType does not have a ClassTag
     val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
-    // TODO: get rid of toListL later
-    val accsTask = source.toListL.map { rvs =>
-      // Aggregate one vector at a time
-      if (skipMapPhase) {
-        rvs.foreach { rv =>
-          val rowIter = rv.rows
-          for { i <- 0 until outputLen optimized } {
-            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
-          }
-          // TODO: explicitly close RV iteration so we can release locks sooner
-        }
-      } else {
-        val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
-        rvs.foreach { rv =>
-          val rowIter = rv.rows
-          for { i <- 0 until outputLen optimized } {
-            val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
-            accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
-          }
-          // TODO: explicitly close RV iteration so we can release locks sooner
-        }
-      }
+    var count = 0
 
-      // Turn aggregates into final result vector
-      if (rvs.nonEmpty) {
-        Some(new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
-      } else {
-        None
+    // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
+    // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
+    val aggObs = if (skipMapPhase) {
+      source.foldLeftF(accs) { case (_, rv) =>
+        count += 1
+        val rowIter = rv.rows
+        for { i <- 0 until outputLen optimized } {
+          accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+        }
+        accs
+      }
+    } else {
+      val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
+      source.foldLeftF(accs) { case (_, rv) =>
+        count += 1
+        val rowIter = rv.rows
+        for { i <- 0 until outputLen optimized } {
+          val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+          accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+        }
+        accs
       }
     }
 
-    Observable.fromTask(accsTask).filter(_.isDefined).map(_.get)
+    aggObs.flatMap { _ =>
+      if (count > 0) {
+        Observable.now(new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+      } else {
+        Observable.empty
+      }
+    }
   }
 }
 
