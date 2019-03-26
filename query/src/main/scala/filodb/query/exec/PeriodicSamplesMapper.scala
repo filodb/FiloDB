@@ -11,6 +11,7 @@ import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
 import filodb.memory.format.{vectors => bv, RowReader}
 import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
+import filodb.query.Query.qLogger
 import filodb.query.util.IndexedArrayQueue
 
 /**
@@ -24,7 +25,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[RangeFunctionId],
-                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer with StrictLogging {
+                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
@@ -62,7 +63,7 @@ final case class PeriodicSamplesMapper(start: Long,
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
-          logger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
+          qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
                                        windowLength, rangeFuncGen().asChunkedD, queryConfig))
@@ -143,7 +144,7 @@ extends Iterator[R] with StrictLogging {
         case e: Exception =>
           val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
           val tsReader = bv.LongBinaryVector(timestampVector)
-          logger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
+          qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
                        s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} " +
                        s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
           throw e
