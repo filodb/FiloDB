@@ -7,6 +7,7 @@ import scala.collection.mutable
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
+import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
@@ -65,6 +66,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
         if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
@@ -72,7 +74,13 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         else Map.empty
       CustomRangeVectorKey(groupBy)
     }
-    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+
+    // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
+    sourceSchema.fixedVectorLen.filter { _ => without.isEmpty && by.isEmpty }.map { fixedLen =>
+      RangeVectorAggregator.fastReduce(aggregator, false, source, fixedLen)
+    }.getOrElse {
+      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+    }
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
@@ -165,6 +173,48 @@ object RangeVectorAggregator extends StrictLogging {
       }
     }
   }
+
+  /**
+   * A fast reduce method intended specifically for the case when no grouping needs to be done AND
+   * the previous transformer is a PeriodicSampleMapper with fixed output lengths.
+   * It's much faster than mapReduce() since it iterates through each vector first and then from vector to vector.
+   * Time wise first iteration also uses less memory for high-cardinality use cases and reduces the
+   * time window of holding chunk map locks.
+   */
+  def fastReduce(rowAgg: RowAggregator,
+                 skipMapPhase: Boolean,
+                 source: Observable[RangeVector],
+                 outputLen: Int): Observable[RangeVector] = {
+    val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
+    // TODO: get rid of toListL later
+    val accsTask = source.toListL.map { rvs =>
+      // Aggregate one vector at a time
+      if (skipMapPhase) {
+        rvs.foreach { rv =>
+          val rowIter = rv.rows
+          for { i <- 0 until outputLen optimized } {
+            accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+          }
+          // TODO: explicitly close RV iteration so we can release locks sooner
+        }
+      } else {
+        val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
+        rvs.foreach { rv =>
+          val rowIter = rv.rows
+          for { i <- 0 until outputLen optimized } {
+            val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+            accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+          }
+          // TODO: explicitly close RV iteration so we can release locks sooner
+        }
+      }
+
+      // Turn aggregates into final result vector
+      new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader))
+    }
+
+    Observable.fromTask(accsTask)
+  }
 }
 
 trait AggregateHolder {
@@ -198,6 +248,7 @@ trait RowAggregator {
     * Note that one object is used per aggregation. The returned object
     * is reused to aggregate each row-key of each RangeVector by resetting
     * before aggregation of next row-key.
+    * Should return a new AggHolder.
     */
   def zero: AggHolderType
 

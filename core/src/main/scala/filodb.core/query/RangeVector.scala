@@ -81,6 +81,8 @@ object CustomRangeVectorKey {
   }
 
   val emptyAsZcUtf8 = toZcUtf8(CustomRangeVectorKey(Map.empty))
+
+  val empty = CustomRangeVectorKey(Map.empty)
 }
 
 /**

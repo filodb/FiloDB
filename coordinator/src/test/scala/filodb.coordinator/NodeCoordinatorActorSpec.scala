@@ -385,7 +385,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>
         schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                            ColumnInfo("AvgTone", DoubleColumn)), 1)
+                                            ColumnInfo("AvgTone", DoubleColumn)), 1, fixedVectorLen = Some(10))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
