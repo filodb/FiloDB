@@ -3,6 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
+import org.agrona.DirectBuffer
 import scalaxy.loops._
 
 // scalastyle:off number.of.methods
@@ -11,6 +12,7 @@ object UnsafeUtils {
 
   // scalastyle:off
   val ZeroPointer: Any = null
+  val ZeroArray = null.asInstanceOf[Array[Byte]]
   // scalastyle:on
 
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
@@ -43,6 +45,14 @@ object UnsafeUtils {
 
   def asDirectBuffer(address: Long, size: Int): ByteBuffer = {
     MemoryIO.getCheckedInstance.newDirectByteBuffer(address, size)
+  }
+
+  def wrapDirectBuf(base: Any, offset: Long, numBytes: Int, buf: DirectBuffer): Unit = {
+    if (base != UnsafeUtils.ZeroPointer) {
+      buf.wrap(base.asInstanceOf[Array[Byte]], offset.toInt - arayOffset, numBytes)
+    } else {
+      buf.wrap(offset, numBytes)
+    }
   }
 
   /**
@@ -127,10 +137,10 @@ object UnsafeUtils {
       var pointer1 = offset1 + minLenAligned
       var pointer2 = offset2 + minLenAligned
       for { i <- minLenAligned until minLen optimized } {
-        val res = getByte(base1, pointer1) - getByte(base2, pointer2)
+        val res = (getByte(base1, pointer1) & 0xff) - (getByte(base2, pointer2) & 0xff)
+        if (res != 0) return res
         pointer1 += 1
         pointer2 += 1
-        if (res != 0) return res
       }
       return numBytes1 - numBytes2
     } else wordComp

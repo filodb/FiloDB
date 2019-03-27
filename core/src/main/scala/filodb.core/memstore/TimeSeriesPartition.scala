@@ -6,8 +6,8 @@ import scalaxy.loops._
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory}
-import filodb.memory.data.{MapHolder, OffheapLFSortedIDMapMutator}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
+import filodb.memory.data.ChunkMap
 import filodb.memory.format._
 
 object TimeSeriesPartition extends StrictLogging {
@@ -16,6 +16,7 @@ object TimeSeriesPartition extends StrictLogging {
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
 
+  // Use global logger so we can save a few fields for each of millions of TSPartitions  :)
   val _log = logger
 
   def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
@@ -44,11 +45,14 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  *     This allows for safe and cheap write buffer churn without losing any data.
  *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
- * The main data structure used is the "infoMap" - an OffheapLFSortedIDMap, an extremely efficient, offheap sorted map
- * Note that other than the variables used in this class, there is NO heap memory used for managing chunks.  Thus
- * the amount of heap memory used for a partition is O(1) constant regardless of the number of chunks in a TSPartition.
- * The partition key and infoMap are both in offheap write buffers, and chunks and chunk metadata are kept in
- * offheap block memory.
+ * The main data structure used is inherited from ChunkMap, an efficient, offheap sorted map.
+ * Note that other than the variables used in this class, there is NO JVM-managed memory used
+ * for managing chunks.  Thus the amount of JVM-managed memory used for a partition is constant
+ * regardless of the number of chunks in a TSPartition. The partition key and infoMap are both
+ * in offheap write buffers, and chunks and chunk metadata are kept in offheap block memory.
+ *
+ * Note: Inheritance is chosen over composition to avoid an extra object allocation, which
+ * speeds up GC and reduces memory overhead a bit.
  */
 class TimeSeriesPartition(val partID: Int,
                           val dataset: Dataset,
@@ -56,13 +60,9 @@ class TimeSeriesPartition(val partID: Int,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
-                          // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
-                          var mapPtr: BinaryRegion.NativePointer,
-                          // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
-                          offheapInfoMap: OffheapLFSortedIDMapMutator,
-                          // Lock state used by OffheapLFSortedIDMap.
-                          var lockState: Int = 0)
-extends ReadablePartition with MapHolder {
+                          memFactory: MemFactory,
+                          initMapSize: Int)
+extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
   require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
@@ -116,16 +116,30 @@ extends ReadablePartition with MapHolder {
       shardStats.outOfOrderDropped.increment
       return
     }
-    if (currentChunks == nullChunks) {
+
+    val newChunk = currentChunks == nullChunks
+    if (newChunk) {
       // First row of a chunk, set the start time to it
-      initNewChunk(ts)
+      val (infoAddr, newAppenders) = bufferPool.obtain()
+      val currentChunkID = newChunkID(ts)
+      ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
+      ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
+      ChunkSetInfo.setStartTime(infoAddr, ts)
+      currentInfo = ChunkSetInfo(infoAddr)
+      currentChunks = newAppenders
+      // Don't publish the new chunk just yet. Wait until it has one row.
     }
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
-          switchBuffers(blockHolder, encode=true)
-          ingest(row, blockHolder)   // re-ingest every element, allocating new WriteBuffers
+          // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
+          // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
+          // So we do not call ingest again unless switcing buffers succeeds.
+          // re-ingest every element, allocating new WriteBuffers
+          if (switchBuffers(blockHolder, encode=true)) { ingest(row, blockHolder) }
+          else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
+                           s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
         case other: AddResponse =>
       }
@@ -134,6 +148,11 @@ extends ReadablePartition with MapHolder {
 
     // Update the end time as well.  For now assume everything arrives in increasing order
     ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
+
+    if (newChunk) {
+      // Publish it now that it has something.
+      infoPut(currentInfo)
+    }
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -146,8 +165,8 @@ extends ReadablePartition with MapHolder {
    * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
    * called from a single thread / single synchronous stream.
    */
-  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Unit =
-    if (nonEmptyWriteBuffers) {
+  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean =
+    nonEmptyWriteBuffers && {
       val oldInfo = currentInfo
       val oldAppenders = currentChunks
 
@@ -158,6 +177,7 @@ extends ReadablePartition with MapHolder {
 
       if (encode) { encodeOneChunkset(oldInfo, oldAppenders, blockHolder) }
       else        { appenders = InfoAppenders(oldInfo, oldAppenders) :: appenders }
+      true
     }
 
   /**
@@ -223,7 +243,7 @@ extends ReadablePartition with MapHolder {
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = offheapInfoMap.length(this)
+  def numChunks: Int = chunkmapSize // inherited from ChunkMap
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**
@@ -231,28 +251,28 @@ extends ReadablePartition with MapHolder {
    * when flushes happen.  Computed dynamically from current infosChunks state.
    * NOTE: since sliceToEnd is inclusive, we need to start just past the newestFlushedID
    */
-  def unflushedChunksets: Int = offheapInfoMap.sliceToEnd(this, newestFlushedID + 1).count
+  def unflushedChunksets: Int = chunkmapSliceToEnd(newestFlushedID + 1).count
 
-  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(offheapInfoMap.iterate(this))
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(chunkmapIterate)
 
   // NOT including currently flushing writeBuffer chunks if there are any
   private[memstore] def infosToBeFlushed: ChunkInfoIterator =
-    new ElementChunkInfoIterator(offheapInfoMap.sliceToEnd(this, newestFlushedID + 1))
+    new ElementChunkInfoIterator(chunkmapSliceToEnd(newestFlushedID + 1))
                .filter(_ != currentInfo)  // filter out the appending chunk
 
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
     case AllChunkScan        => allInfos
     case InMemoryChunkScan   => allInfos
-    case r: RowKeyChunkScan  => allInfos.filter { ic =>
-                                  ic.intersection(r.startTime, r.endTime).isDefined
-                                }
+    case r: TimeRangeChunkScan => allInfos.filter { ic =>
+                                    ic.intersection(r.startTime, r.endTime).isDefined
+                                  }
     case WriteBufferChunkScan => if (currentInfo == nullInfo) ChunkInfoIterator.empty
                                 else {
                                   // Return a single element iterator which holds a shared lock.
                                   try {
                                     new OneChunkInfo(currentInfo)
                                   } catch {
-                                    case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
+                                    case e: Throwable => chunkmapReleaseShared(); throw e;
                                   }
                                 }
   }
@@ -279,7 +299,7 @@ extends ReadablePartition with MapHolder {
 
     private def doClose(): Unit = {
       closed = true
-      offheapInfoMap.releaseShared(TimeSeriesPartition.this)
+      chunkmapReleaseShared()
     }
 
     def hasNext: Boolean = {
@@ -290,19 +310,26 @@ extends ReadablePartition with MapHolder {
     def nextInfo: ChunkSetInfo = {
       if (closed) throw new NoSuchElementException()
       if (!valueSeen) {
-        offheapInfoMap.acquireShared(TimeSeriesPartition.this)
+        chunkmapAcquireShared()
         valueSeen = true
       }
       return info
     }
+
+    final def lock(): Unit = chunkmapAcquireShared()
+    final def unlock(): Unit = chunkmapReleaseShared()
   }
 
+  /**
+    * startTime of earliest chunk in memory.
+    * Long.MaxValue if no chunk is present
+    */
   final def earliestTime: Long = {
     if (numChunks == 0) {
-      Long.MinValue
+      Long.MaxValue
     } else {
       // Acquire shared lock to safely access the native pointer.
-      offheapInfoMap.withShared(this, ChunkSetInfo(offheapInfoMap.first(this)).startTime)
+      chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst).startTime)
     }
   }
 
@@ -317,42 +344,27 @@ extends ReadablePartition with MapHolder {
       currentInfo.endTime
     } else if (numChunks > 0) {
       // Acquire shared lock to safely access the native pointer.
-      offheapInfoMap.withShared(this, infoLast.endTime)
+      chunkmapWithShared(infoLast.endTime)
     } else {
       -1
     }
   }
 
-  // Disabled for now. Requires a shared lock on offheapInfoMap.
+  // Disabled for now. Requires a shared lock on the inherited map.
   //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
 
-  /**
-    * Initializes vectors, chunkIDs for a new chunkset/chunkID.
-    * This is called after switchBuffers() upon the first data that arrives.
-    */
-  private def initNewChunk(startTime: Long): Unit = {
-    val (infoAddr, newAppenders) = bufferPool.obtain()
-    val currentChunkID = newChunkID(startTime)
-    ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
-    ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-    ChunkSetInfo.setStartTime(infoAddr, startTime)
-    currentInfo = ChunkSetInfo(infoAddr)
-    currentChunks = newAppenders
-    infoPut(currentInfo)
-  }
-
   final def removeChunksAt(id: ChunkID): Unit = {
-    offheapInfoMap.withExclusive(this, offheapInfoMap.remove(this, id))
+    chunkmapWithExclusive(chunkmapDoRemove(id))
     shardStats.chunkIdsEvicted.increment()
   }
 
-  final def hasChunksAt(id: ChunkID): Boolean = offheapInfoMap.contains(this, id)
+  final def hasChunksAt(id: ChunkID): Boolean = chunkmapContains(id)
 
   // Used for adding chunksets that are paged in, ie that are already persisted
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
-    offheapInfoMap.withExclusive(this, {
-      val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddr)
+    chunkmapWithExclusive({
+      val inserted = chunkmapDoPutIfAbsent(infoAddr)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
@@ -363,14 +375,20 @@ extends ReadablePartition with MapHolder {
     newestFlushedID = Math.max(newestFlushedID, info.id)
   }
 
-  // Caller must hold lock on offheapInfoMap.
-  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
+  // Caller must hold lock on the inherited map.
+  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(chunkmapDoGet(id))
 
-  // Caller must hold lock on offheapInfoMap.
-  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+  // Caller must hold lock on the inherited map.
+  private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast)
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr))
+  }
+
+  // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
+  def shutdown(): Unit = {
+    chunkmapFree()
+    if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }
 

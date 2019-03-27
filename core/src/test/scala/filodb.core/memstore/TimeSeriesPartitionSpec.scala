@@ -11,7 +11,6 @@ import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.UnsafeUtils
 
 object TimeSeriesPartitionSpec {
@@ -19,16 +18,15 @@ object TimeSeriesPartitionSpec {
   import BinaryRegion.NativePointer
 
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val offheapInfoMapKlass = new OffheapLFSortedIDMapMutator(memFactory, classOf[TimeSeriesPartition])
-  val maxChunkSize = 100
-  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
+
+  val maxChunkSize = TestData.storeConf.maxChunksSize
+  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, TestData.storeConf)
 
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset.ref, 0), infoMapAddr, offheapInfoMapKlass)
+          new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
   }
 }
 
@@ -158,7 +156,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     // Flushed chunk:  initTS -> initTS + 9000 (1000 ms per tick)
     // Read from flushed chunk only
-    val readIt = part.timeRangeRows(RowKeyChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
+    val readIt = part.timeRangeRows(TimeRangeChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
     readIt.toBuffer shouldEqual minData.take(10)
 
     val infos1 = part.infos(initTS, initTS + 9000)
@@ -167,27 +165,29 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     info1.numRows shouldEqual 10
     info1.startTime shouldEqual initTS
 
-    val readIt2 = part.timeRangeRows(RowKeyChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
+    val readIt2 = part.timeRangeRows(TimeRangeChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
     readIt2.toBuffer shouldEqual minData.drop(1).take(7)
 
     // Read from appending chunk only:  initTS + 10000
-    val readIt3 = part.timeRangeRows(RowKeyChunkScan(appendingTS, appendingTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    val readIt3 = part.timeRangeRows(TimeRangeChunkScan(appendingTS, appendingTS + 3000), Array(0, 1))
+                      .map(_.getDouble(1))
     readIt3.toBuffer shouldEqual minData.drop(10)
 
     // Try to read from before flushed to part of flushed chunk
-    val readIt4 = part.timeRangeRows(RowKeyChunkScan(initTS - 7000, initTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    val readIt4 = part.timeRangeRows(TimeRangeChunkScan(initTS - 7000, initTS + 3000), Array(0, 1)).map(_.getDouble(1))
     readIt4.toBuffer shouldEqual minData.take(4)
 
     // both flushed and appending chunk
-    val readIt5 = part.timeRangeRows(RowKeyChunkScan(initTS + 7000, initTS + 14000), Array(0, 1)).map(_.getDouble(1))
+    val readIt5 = part.timeRangeRows(TimeRangeChunkScan(initTS + 7000, initTS + 14000), Array(0, 1)).map(_.getDouble(1))
     readIt5.toBuffer shouldEqual minData.drop(7)
 
     // No data: past appending chunk
-    val readIt6 = part.timeRangeRows(RowKeyChunkScan(initTS + 20000, initTS + 24000), Array(0, 1)).map(_.getDouble(1))
+    val readIt6 = part.timeRangeRows(TimeRangeChunkScan(initTS + 20000, initTS + 24000), Array(0, 1))
+                      .map(_.getDouble(1))
     readIt6.toBuffer shouldEqual Nil
 
     // No data: before initTS
-    val readIt7 = part.timeRangeRows(RowKeyChunkScan(initTS - 9000, initTS - 900), Array(0, 1)).map(_.getDouble(1))
+    val readIt7 = part.timeRangeRows(TimeRangeChunkScan(initTS - 9000, initTS - 900), Array(0, 1)).map(_.getDouble(1))
     readIt7.toBuffer shouldEqual Nil
   }
 
@@ -294,7 +294,17 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
       data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
       partitions(i).numChunks shouldEqual 1
       partitions(i).appendingChunkLen shouldEqual 10
+      val infos = partitions(i).infos(AllChunkScan)
+      infos.hasNext shouldEqual true
+      val writeBufInfo = infos.nextInfo
+      writeBufInfo.numRows shouldEqual 10
+
+      // Have to give up read lock
+      infos.close()
       partitions(i).switchBuffers(ingestBlockHolder, true)
+
+      // After switchBuffers, write buffer is recycled, and numRows should be reset
+      writeBufInfo.numRows shouldEqual 0
     }
 
     myBufferPool.poolSize shouldEqual origPoolSize

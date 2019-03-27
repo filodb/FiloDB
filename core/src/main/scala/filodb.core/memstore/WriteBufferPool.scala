@@ -4,14 +4,9 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store.{ChunkSetInfo, StoreConfig}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
-
-object WriteBufferPool {
-  // The number of partition write buffers to allocate at one time
-  val DefaultAllocStepSize = 1000
-}
 
 /**
  * A WriteBufferPool pre-allocates/creates a pool of WriteBuffers for sharing amongst many MemStore Partitions.
@@ -25,25 +20,22 @@ object WriteBufferPool {
  * 1. Partition gets data - obtains new set of initial buffers
  * 2. End of flush()     - original buffers, now encoded, are released, reset, and can be made available to others
  *
- * @param maxChunkSize the max size of the write buffer in elements.
- * @param allocationStepSize the number of partition write buffers to allocate at a time.
- *                           Smaller=better use of memory; Bigger=more efficient allocation
+ * @param storeConf the StoreConfig containing parameters for configuring write buffers, etc.
  *
  * TODO: Use MemoryManager etc. and allocate memory from a fixed block instead of specifying max # partitions
  */
 class WriteBufferPool(memFactory: MemFactory,
                       val dataset: Dataset,
-                      maxChunkSize: Int,
-                      allocationStepSize: Int = WriteBufferPool.DefaultAllocStepSize) extends StrictLogging {
+                      storeConf: StoreConfig) extends StrictLogging {
   import TimeSeriesPartition._
 
   val queue = new collection.mutable.Queue[(NativePointer, AppenderArray)]
 
   private def allocateBuffers(): Unit = {
-    logger.debug(s"Allocating $allocationStepSize WriteBuffers....")
+    logger.debug(s"Allocating ${storeConf.allocStepSize} WriteBuffers....")
     // Fill queue up
-    (0 until allocationStepSize).foreach { n =>
-      val builders = MemStore.getAppendables(memFactory, dataset, maxChunkSize)
+    (0 until storeConf.allocStepSize).foreach { n =>
+      val builders = MemStore.getAppendables(memFactory, dataset, storeConf)
       val info = ChunkSetInfo(memFactory, dataset, 0, 0, Long.MinValue, Long.MaxValue)
       // Point vectors in chunkset metadata to builders addresses
       for { colNo <- 0 until dataset.numDataColumns optimized } {
@@ -75,6 +67,9 @@ class WriteBufferPool(memFactory: MemFactory,
    * The state of the appenders are reset.
    */
   def release(metaAddr: NativePointer, appenders: AppenderArray): Unit = {
+    // IMPORTANT: reset size in ChunkSetInfo metadata so there won't be an inconsistency between appenders and metadata
+    // (in case some reader is still hanging on to this old info)
+    ChunkSetInfo.resetNumRows(metaAddr)
     appenders.foreach(_.reset())
     queue.enqueue((metaAddr, appenders))
     // TODO: check number of buffers in queue, and release baack to free memory.

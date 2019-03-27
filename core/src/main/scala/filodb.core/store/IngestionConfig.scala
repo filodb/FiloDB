@@ -13,6 +13,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              diskTTLSeconds: Int,
                              demandPagedRetentionPeriod: FiniteDuration,
                              maxChunksSize: Int,
+                             // Max write buffer size for Histograms, UTF8Strings, other blobs
+                             maxBlobBufferSize: Int,
                              // Number of bytes to allocate to chunk storage in each shard
                              shardMemSize: Long,
                              // Number of bytes to allocate to ingestion write buffers per shard
@@ -29,13 +31,15 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // Use a MultiPartitionScan (instead of single partition at a time) for on-demand paging
                              multiPartitionODP: Boolean,
                              demandPagingParallelism: Int,
-                             demandPagingEnabled: Boolean) {
+                             demandPagingEnabled: Boolean,
+                             evictedPkBfCapacity: Int) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
                                "demand-paged-chunk-retention-period" -> (demandPagedRetentionPeriod.toSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
+                               "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "buffer-alloc-step-size" -> allocStepSize,
@@ -48,7 +52,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
-                               "demand-paging-enabled" -> demandPagingEnabled).asJava)
+                               "demand-paging-enabled" -> demandPagingEnabled,
+                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -60,7 +65,8 @@ object StoreConfig {
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
-                                           |max-chunks-size = 500
+                                           |max-chunks-size = 400
+                                           |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |buffer-alloc-step-size = 1000
                                            |num-partitions-to-evict = 1000
@@ -73,6 +79,7 @@ object StoreConfig {
                                            |multi-partition-odp = false
                                            |demand-paging-parallelism = 4
                                            |demand-paging-enabled = true
+                                           |evicted-pk-bloom-filter-capacity = 5000000
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -81,6 +88,7 @@ object StoreConfig {
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
+                config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("buffer-alloc-step-size"),
@@ -93,7 +101,8 @@ object StoreConfig {
                 config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,
                 config.getBoolean("multi-partition-odp"),
                 config.getInt("demand-paging-parallelism"),
-                config.getBoolean("demand-paging-enabled"))
+                config.getBoolean("demand-paging-enabled"),
+                config.getInt("evicted-pk-bloom-filter-capacity"))
   }
 }
 

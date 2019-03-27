@@ -58,15 +58,16 @@ final case class BinaryJoinExec(id: String,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
-  protected[exec] def compose(childResponses: Observable[QueryResponse],
+  protected[exec] def compose(dataset: Dataset,
+                              childResponses: Observable[(QueryResponse, Int)],
                               queryConfig: QueryConfig): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
-      case QueryResult(_, _, result) => result
-      case QueryError(_, ex)         => throw ex
+      case (QueryResult(_, _, result), i) => (result, i)
+      case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
-      val lhsRvs = resp.take(lhs.size).flatten
-      val rhsRvs = resp.drop(lhs.size).flatten
+      val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
+      val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
       // figure out which side is the "one" side
       val (oneSide, otherSide, lhsIsOneSide) =

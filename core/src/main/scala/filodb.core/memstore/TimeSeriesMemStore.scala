@@ -48,7 +48,7 @@ extends MemStore with StrictLogging {
   def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
-    if (shards contains shard) {
+    if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
       val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))

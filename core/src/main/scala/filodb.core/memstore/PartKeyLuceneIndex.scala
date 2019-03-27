@@ -324,6 +324,19 @@ class PartKeyLuceneIndex(dataset: Dataset,
   /**
     * Called when a document is updated with new endTime
     */
+  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
+    val collector = new PartIdStartTimeCollector()
+    val booleanQuery = new BooleanQuery.Builder
+    partIds.foreach { pId =>
+      booleanQuery.add(new TermQuery(new Term(PART_ID, pId.toString)), Occur.SHOULD)
+    }
+    searcherManager.acquire().search(booleanQuery.build(), collector)
+    collector.startTimes
+  }
+
+  /**
+    * Called when a document is updated with new endTime
+    */
   def endTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
     searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
@@ -418,6 +431,12 @@ class PartKeyLuceneIndex(dataset: Dataset,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): IntIterator = {
+    partIdsFromFilters2(columnFilters, startTime, endTime).intIterator()
+  }
+
+  def partIdsFromFilters2(columnFilters: Seq[ColumnFilter],
+                         startTime: Long,
+                         endTime: Long): EWAHCompressedBitmap = {
     val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum)
@@ -435,7 +454,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     val collector = new PartIdCollector() // passing zero for unlimited results
     searcher.search(query, collector)
     partKeySpan.finish()
-    collector.intIterator()
+    collector.result
   }
 }
 
@@ -588,6 +607,30 @@ class PartIdCollector extends SimpleCollector {
   }
 
   def intIterator(): IntIterator = result.intIterator()
+}
+
+class PartIdStartTimeCollector extends SimpleCollector {
+  val startTimes = debox.Map.empty[Int, Long]
+  private var partIdDv: NumericDocValues = _
+  private var startTimeDv: NumericDocValues = _
+
+  override def needsScores(): Boolean = false
+
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    //set the subarray of the numeric values for all documents in the context
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
+  }
+
+  override def collect(doc: Int): Unit = {
+    if (partIdDv.advanceExact(doc) && startTimeDv.advanceExact(doc)) {
+      val partId = partIdDv.longValue().toInt
+      val startTime = startTimeDv.longValue()
+      startTimes(partId) = startTime
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")
+    }
+  }
 }
 
 class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {

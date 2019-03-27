@@ -28,8 +28,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
   // the ingest BR offset of the first partition fixed area field
   private final val ingestPartOffset = ingestSchema.fieldOffset(ingestSchema.partitionFieldStart.get)
 
-  // the offsets of the variable areas for ingest and partition keys (from beginning of BR)
-  private final val ingestVarAreaOffset = ingestSchema.variableAreaStart
+  // the offsets of the variable areas for partition keys (from beginning of BR)
   private final val partVarAreaOffset = partitionKeySchema.variableAreaStart
 
   // The number of bytes of the partition fields fixed area
@@ -53,6 +52,21 @@ final class RecordComparator(ingestSchema: RecordSchema) {
 
   private final val anyPrimitiveFieldsToCompare = compareBitmap != 0
 
+  // Find the fixed area of the first non-primitive (variable area pointer) partition key field
+  private val ingestPartNonPrimOffset =
+    if (!anyPrimitiveFieldsToCompare) ingestPartOffset else {
+      // NOTE: this algorithm fails if the partition key has all primitive fields.  This should not happen.
+      var nonPrimOffset = ingestPartOffset
+      var wordsBitmap = compareBitmap
+      while ((wordsBitmap & 0x01) == 1) { nonPrimOffset += 4; wordsBitmap >>= 1 }
+      nonPrimOffset
+    }
+
+  // Finds the offset from beginning of ingest record to the var area of first partition field.
+  // We have to take into account that data columns might have variable areas too.
+  private def ingestVarOffset(ingestBase: Any, ingestOffset: Long): Int =
+    UnsafeUtils.getInt(ingestBase, ingestOffset + ingestPartNonPrimOffset)
+
   /**
    * Returns true if the partition part of the ingest BinaryRecord matches (all partition fields match identically)
    * to the partition key BR.  Uses optimized byte comparisons which is faster than field by field comparison.
@@ -67,6 +81,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
     val partKeyNumBytes = UnsafeUtils.getInt(partKeyBase, partKeyOffset)
 
     // compare lengths of variable areas (map tags & strings)
+    val ingestVarAreaOffset = ingestVarOffset(ingestBase, ingestOffset)
     val ingestVarSize = ingestNumBytes + 4 - ingestVarAreaOffset
     val partKeyVarSize = partKeyNumBytes + 4 - partVarAreaOffset
     if (ingestVarSize != partKeyVarSize) return false
@@ -103,9 +118,11 @@ final class RecordComparator(ingestSchema: RecordSchema) {
   final def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder): Long = {
     require(builder.schema == partitionKeySchema, s"${builder.schema} is not part key schema $partitionKeySchema")
 
-    // Copy the entire fixed + hash + variable sized areas over
+    // Copy fixed area + hash over, then variable areas
     val ingestNumBytes = UnsafeUtils.getInt(ingestBase, ingestOffset)
-    builder.copyNewRecordFrom(ingestBase, ingestOffset + ingestPartOffset, ingestNumBytes + 4 - ingestPartOffset)
+    val ingestVarAreaOffset = ingestVarOffset(ingestBase, ingestOffset)
+    builder.copyFixedAreasFrom(ingestBase, ingestOffset + ingestPartOffset, fixedAreaNumBytes + 4)
+    builder.copyVarAreasFrom(ingestBase, ingestOffset + ingestVarAreaOffset, ingestNumBytes + 4 - ingestVarAreaOffset)
 
     // adjust offsets to var fields
     val adjustment = partVarAreaOffset - ingestVarAreaOffset

@@ -5,7 +5,7 @@ env:
 scala:
   - 2.11.12
 jdk:
-  - oraclejdk8
+  - openjdk11
 
 # These directories are cached to S3 at the end of the build
 cache:

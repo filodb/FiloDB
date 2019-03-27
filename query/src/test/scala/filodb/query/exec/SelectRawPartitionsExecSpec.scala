@@ -11,20 +11,33 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData._
-import filodb.core.TestData
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.{TestData, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
+object SelectRawPartitionsExecSpec {
+  val dummyDispatcher = new PlanDispatcher {
+    override def dispatch(plan: ExecPlan)
+                         (implicit sched: ExecutionContext,
+                          timeout: FiniteDuration): Task[QueryResponse] = ???
+  }
+
+  val dataset = timeseriesDataset
+
+  val dummyPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
+                    timeseriesDataset.ref, 0, Nil, AllChunkScan, Seq(0, 1))
+}
+
 class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
+  import SelectRawPartitionsExecSpec._
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
@@ -51,6 +64,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory, MMD.dataset1.ingestionSchema)
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
+  val histData = MMD.linearHistSeries().take(100)
 
   implicit val execTimeout = 5.seconds
 
@@ -59,18 +73,15 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.setup(MMD.dataset1, 0, TestData.storeConf)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
+    memStore.setup(MMD.histDataset, 0, TestData.storeConf)
+    memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
     memStore.commitIndexForTesting(timeseriesDataset.ref)
     memStore.commitIndexForTesting(MMD.dataset1.ref)
+    memStore.commitIndexForTesting(MMD.histDataset.ref)
   }
 
   override def afterAll(): Unit = {
     memStore.shutdown()
-  }
-
-  val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
   it ("should read raw samples from Memstore using AllChunksSelector") {
@@ -78,7 +89,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunks, Seq(0, 1))
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -94,11 +105,11 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     // read from an interval of 100000ms, resulting in 11 samples
-    val start: BinaryRecord = BinaryRecord(timeseriesDataset, Seq(now - numRawSamples * reportingInterval))
-    val end: BinaryRecord = BinaryRecord(timeseriesDataset, Seq(now - (numRawSamples-10) * reportingInterval))
+    val startTime = now - numRawSamples * reportingInterval
+    val endTime   = now - (numRawSamples-10) * reportingInterval
 
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, RowKeyInterval(start, end), Seq(0, 1))
+      filters, TimeRangeChunkScan(startTime, endTime), Seq(0, 1))
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -112,12 +123,10 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   it ("should read raw Long samples from Memstore using IntervalSelector") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
-    // read from an interval of 100000ms, resulting in 11 samples
-    val start: BinaryRecord = BinaryRecord(MMD.dataset1, Seq(100000L))
-    val end: BinaryRecord = BinaryRecord(MMD.dataset1, Seq(150000L))
 
+    // read from an interval of 100000ms, resulting in 11 samples
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
-      filters, RowKeyInterval(start, end), Seq(0, 4))
+      filters, TimeRangeChunkScan(100000L, 150000L), Seq(0, 4))
 
     val resp = execPlan.execute(memStore, MMD.dataset1, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -126,12 +135,28 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     dataRead shouldEqual mmdTuples.filter(_(5) == "Series 1").map(r => (r(0), r(4))).take(5)
   }
 
+  it ("should read raw Histogram samples from Memstore using IntervalSelector") {
+    import ZeroCopyUTF8String._
+
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("id1", now, numRawSamples, dummyDispatcher, MMD.histDataset.ref, 0,
+      filters, TimeRangeChunkScan(100000L, 150000L), Seq(0, 3))
+
+    val resp = execPlan.execute(memStore, MMD.histDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
+    val orig = histData.filter(_(4).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
+  }
+
   it ("should read periodic samples from Memstore") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunks, Seq(0, 1))
+      filters, AllChunkScan, Seq(0, 1))
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
@@ -162,7 +187,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
-      filters, AllChunks, Seq(0, 4))
+      filters, AllChunkScan, Seq(0, 4))
 
     // Raw data like 101000, 111000, ....
     val start = 105000L
@@ -176,7 +201,28 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual (start to end by step)
     dataRead.map(_._2) shouldEqual (86 to 166).by(20)
+  }
 
+  it ("should read periodic Histogram samples from Memstore") {
+    import ZeroCopyUTF8String._
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("id1", now, numRawSamples, dummyDispatcher, MMD.histDataset.ref, 0,
+      filters, AllChunkScan, Seq(0, 3))
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+
+    val resp = execPlan.execute(memStore, MMD.histDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
+    val orig = histData.filter(_(4).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+                       .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3)) }
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
   it ("should return correct result schema") {
@@ -184,7 +230,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunks, Seq(0, 1))
+      filters, AllChunkScan, Seq(0, 1))
     val resultSchema = execPlan.schema(timeseriesDataset)
     resultSchema.isTimeSeries shouldEqual true
     resultSchema.numRowKeyColumns shouldEqual 1
@@ -197,7 +243,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectChunkInfosExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunks, 0)
+      timeseriesDataset.ref, 0, filters, AllChunkScan, 0)
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     info(s"resp = $resp")
     val result = resp.asInstanceOf[QueryResult]

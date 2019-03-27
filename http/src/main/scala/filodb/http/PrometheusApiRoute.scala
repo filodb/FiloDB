@@ -14,7 +14,7 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions}
+import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions, SpreadChange}
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -29,7 +29,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
-  val queryOptions = QueryOptions(spreadFunc = { _ => settings.queryDefaultSpread },
+  val queryOptions = QueryOptions(spreadFunc = { _ => Seq(SpreadChange(settings.queryDefaultSpread)) },
                                   sampleLimit = settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
@@ -39,9 +39,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
     path( "api" / "v1" / "query_range") {
       get {
-        parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'step.as[Int]) { (query, start, end, step) =>
+        parameter('query.as[String], 'start.as[Double], 'end.as[Double],
+                  'step.as[Int], 'verbose.as[Boolean].?) { (query, start, end, step, verbose) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan)
+          askQueryAndRespond(dataset, logicalPlan, verbose.getOrElse(false))
         }
       }
     } ~
@@ -51,9 +52,9 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double]) { (query, time) =>
+        parameter('query.as[String], 'time.as[Double], 'verbose.as[Boolean].?) { (query, time, verbose) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan)
+          askQueryAndRespond(dataset, logicalPlan, verbose.getOrElse(false))
         }
       }
     } ~
@@ -99,10 +100,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan) = {
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, verbose: Boolean) = {
     val command = LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
     onSuccess(asyncAsk(nodeCoord, command)) {
-      case qr: QueryResult => complete(toPromSuccessResponse(qr))
+      case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
         ErrorResponse("badQuery", s"Dataset $dataset is not registered"))

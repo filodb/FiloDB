@@ -39,13 +39,13 @@ final case class PartKeysDistConcatExec(id: String,
   /**
     * Compose the sub-query/leaf results here.
     */
-  override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
-      Observable[RangeVector] = {
-
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
+                        queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case QueryResult(_, _, result) => result
-      case QueryError(_, ex)         => throw ex
+      case (QueryResult(_, _, result), _) => result
+      case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
     }
@@ -74,13 +74,13 @@ final case class LabelValuesDistConcatExec(id: String,
   /**
     * Compose the sub-query/leaf results here.
     */
-  override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
-  Observable[RangeVector] = {
-
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
+                        queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case QueryResult(_, _, result) => result
-      case QueryError(_, ex)         => throw ex
+      case (QueryResult(_, _, result), _) => result
+      case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.foreach(rv => {

@@ -82,13 +82,18 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val toEmit = new TransientRow
     val q3 = new IndexedArrayQueue[TransientRow]()
     val gaugeWindowForReset = new QueueBasedWindow(q3)
+    val resetsFunction = new ResetsFunction
+
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
+    assert(toEmit.value.isNaN) // Empty window should return NaN
+
     gaugeSamples.foreach { case (t, v) =>
       val s = new TransientRow(t, v)
       q3.add(s)
-      ResetsFunction.addedToWindow(s, gaugeWindowForReset)
+      resetsFunction.addedToWindow(s, gaugeWindowForReset)
     }
 
-    ResetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
 
     // Window sliding case
@@ -98,9 +103,9 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     // 3 resets at the beginning - so resets count should drop only by 3 (4 - 3 = 1) even though we are removing 5 items
     for (i <- 0 until 5) {
       toEmit2 = q3.remove
-      ResetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)// old items being evicted for new window items
+      resetsFunction.removedFromWindow(toEmit2, gaugeWindowForReset)// old items being evicted for new window items
     }
-    ResetsFunction.apply(startTs, endTs, gaugeWindow, toEmit2, queryConfig)
+    resetsFunction.apply(startTs, endTs, gaugeWindow, toEmit2, queryConfig)
     Math.abs(toEmit2.value - expected2) should be < errorOk
   }
 

@@ -4,10 +4,8 @@ import scala.reflect.runtime.universe._
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
-import monix.reactive.Observable
 import org.joda.time.DateTime
 
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column
 import filodb.core.store.ChunkScanMethod
@@ -22,19 +20,12 @@ final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: 
 }
 
 /**
- * A single element of data described by a fixed schema of types, corresponding to a single key or timestamp.
- * Could be either raw or intermediate data.
- * Ex: a (timestamp, value) tuple.  Or a (Double) scalar.  (count, total) for an average.
- */
-final case class Tuple(info: Option[PartitionInfo], data: BinaryRecord)
-
-/**
  * Describes column/field name and type
  */
 final case class ColumnInfo(name: String, colType: Column.ColumnType)
 
 /**
- * Describes the full schema of Vectors and Tuples, including how many initial columns are for row keys.
+ * Describes the full schema of result types, including how many initial columns are for row keys.
  * The first ColumnInfo in the schema describes the first vector in Vectors and first field in Tuples, etc.
  * @param brSchemas if any of the columns is a binary record, thsi
  */
@@ -72,7 +63,6 @@ sealed trait Result extends java.io.Serializable {
     toRowReaders.map { case (partInfoOpt, rowReaders) =>
       partInfoOpt.map(_.toString).getOrElse("") + "\n\t" +
         rowReaders.take(partitionRowLimit).map {
-          case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
           case reader =>
             val firstCol = if (formatTime && schema.isTimeSeries) {
               val timeStamp = reader.getLong(0)
@@ -84,16 +74,6 @@ sealed trait Result extends java.io.Serializable {
         }.mkString("\n\t") + "\n"
     }
   }
-}
-
-final case class TupleListResult(schema: ResultSchema, tuples: Seq[Tuple]) extends Result {
-  def toRowReaders: Iterator[(Option[PartitionInfo], Seq[RowReader])] =
-    tuples.toIterator.map { case Tuple(info, data) => (info, Seq(data)) }
-}
-
-final case class TupleResult(schema: ResultSchema, tuple: Tuple) extends Result {
-  def toRowReaders: Iterator[(Option[PartitionInfo], Seq[RowReader])] =
-    Iterator.single((tuple.info, Seq(tuple.data)))
 }
 
 /**
@@ -129,21 +109,5 @@ object ResultMaker extends StrictLogging {
                  chunkMethod: ChunkScanMethod,
                  limit: Int = 1000): Task[Result] = ???
     def fromResult(res: Result): Unit = {}
-  }
-
-  implicit object TupleObservableMaker extends ResultMaker[Observable[Tuple]] {
-    def toResult(tuples: Observable[Tuple],
-                 schema: ResultSchema,
-                 chunkMethod: ChunkScanMethod,
-                 limit: Int = 1000): Task[Result] = {
-      tuples.take(limit).toListL.map { tupleList =>
-        TupleListResult(schema, tupleList)
-      }
-    }
-
-    def fromResult(res: Result): Observable[Tuple] = res match {
-      case TupleListResult(_, tuples) => Observable.fromIterable(tuples)
-      case other: Result => throw new RuntimeException(s"Unexpected result $other... possible type/plan error")
-    }
   }
 }

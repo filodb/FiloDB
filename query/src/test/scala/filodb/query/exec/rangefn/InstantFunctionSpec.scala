@@ -2,22 +2,20 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
-import com.typesafe.config.{Config, ConfigFactory}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.MetricsTestData
+import filodb.core.{MachineMetricsData => MMD, MetricsTestData}
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.TransientRow
 
-class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
+class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
-  val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
+  val histSchema = ResultSchema(MMD.histDataset.infosFromIDs(Seq(0, 3)), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
   val sampleBase: Array[RangeVector] = Array(
@@ -33,7 +31,6 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
         new TransientRow(3L, 3239.3423d),
         new TransientRow(4L, 94935.1523d)).iterator
     })
-  val queryConfig = new QueryConfig(config.getConfig("query"))
   val rand = new Random()
   val error = 0.00000001d
 
@@ -162,8 +159,8 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   it ("should handle unknown functions") {
     // sort_desc
     the[UnsupportedOperationException] thrownBy {
-      val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.SortDesc)
-      instantVectorFnMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
+      val miscellaneousVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.SortDesc)
+      miscellaneousVectorFnMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "SortDesc not supported."
   }
 
@@ -203,6 +200,27 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Only one optional parameters allowed for Round."
 
+    // histogram quantile
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile)
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: Quantile (between 0 and 1) required for histogram quantile"
+
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile, Seq("b012"))
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: histogram_quantile parameter must be a number"
+
+    // histogram bucket
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket)
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: Bucket/le required for histogram bucket"
+
+    the[IllegalArgumentException] thrownBy {
+      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket, Seq("b012"))
+      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
+    } should have message "requirement failed: histogram_bucket parameter must be a number"
   }
 
   it ("should fail with wrong calculation") {
@@ -221,10 +239,29 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
-    private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
-                                  instantFunctionId: InstantFunctionId, funcParams: Seq[Any] = Nil): Unit = {
+  it("should compute histogram_quantile on Histogram RV") {
+    val (data, histRV) = histogramRV(numSamples = 10)
+    val expected = Seq(0.8, 1.6, 2.4, 3.2, 4.0, 5.6, 7.2, 9.6)
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramQuantile, Seq(0.4), histSchema)
+  }
+
+  it("should compute histogram_bucket on Histogram RV") {
+    val (data, histRV) = histogramRV(numSamples = 10)
+    val expected = Seq(1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0)
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramBucket, Seq(16.0), histSchema)
+
+    // Specifying a nonexistant bucket returns NaN
+    applyFunctionAndAssertResult(Array(histRV), Array(Seq.fill(8)(Double.NaN).toIterator),
+                                 InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
+  }
+
+  private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
+                                instantFunctionId: InstantFunctionId, funcParams: Seq[Any] = Nil,
+                                schema: ResultSchema = resultSchema): Unit = {
     val instantVectorFnMapper = exec.InstantVectorFunctionMapper(instantFunctionId, funcParams)
-    val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = instantVectorFnMapper(Observable.fromIterable(samples), queryConfig, 1000, schema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -232,10 +269,9 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
           case (val1, val2) =>
             if (val1.isInfinity) val2.isInfinity shouldEqual true
             else if (val1.isNaN) val2.isNaN shouldEqual true
-            else val1 shouldEqual val2
+            else val1 shouldEqual val2 +- 0.0001
         }
       }
     }
   }
-
 }
