@@ -57,8 +57,8 @@ final class QueryActor(memStore: MemStore,
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
-  val numSchedThreads = config.getInt("filodb.query.num-threads")
-  implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads)
+  val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
+  implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads.toInt)
 
   private val tags = Map("dataset" -> dataset.ref.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
