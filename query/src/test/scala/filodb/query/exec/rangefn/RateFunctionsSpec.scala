@@ -83,6 +83,10 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val q3 = new IndexedArrayQueue[TransientRow]()
     val gaugeWindowForReset = new QueueBasedWindow(q3)
     val resetsFunction = new ResetsFunction
+
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
+    assert(toEmit.value.isNaN) // Empty window should return NaN
+
     gaugeSamples.foreach { case (t, v) =>
       val s = new TransientRow(t, v)
       q3.add(s)
