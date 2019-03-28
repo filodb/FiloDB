@@ -238,6 +238,33 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       }
     }
 
+    it("should parse and execute concurrent LogicalPlan queries") {
+      val ref = setupTimeSeries()
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
+      probe.expectMsg(Ack(0L))
+
+      memStore.commitIndexForTesting(dataset1.ref)
+
+      val numQueries = 6
+
+      val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
+      val q2 = LogicalPlan2Query(ref,
+                 Aggregate(AggregationOperator.Avg,
+                   PeriodicSeries(
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
+      (0 until numQueries).foreach { i => probe.send(coordinatorActor, q2) }
+
+      (0 until numQueries).foreach { _ =>
+        probe.expectMsgPF() {
+          case QueryResult(_, schema, vectors) =>
+            schema shouldEqual timeMinSchema
+            vectors should have length (1)
+            vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+        }
+      }
+    }
+
     ignore("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))

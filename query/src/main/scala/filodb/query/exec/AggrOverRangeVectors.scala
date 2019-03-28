@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable
 
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
 import filodb.core.binaryrecord2.RecordBuilder
@@ -111,7 +112,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
   *
   * This singleton is the facade for the above operations.
   */
-object RangeVectorAggregator {
+object RangeVectorAggregator extends StrictLogging {
 
   /**
     * This method is the facade for map and reduce steps of the aggregation.
@@ -146,6 +147,7 @@ object RangeVectorAggregator {
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
                      grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
+    logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>

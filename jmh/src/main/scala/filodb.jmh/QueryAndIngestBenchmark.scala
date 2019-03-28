@@ -41,12 +41,12 @@ class QueryAndIngestBenchmark extends StrictLogging {
   import NodeClusterActor._
 
   val numShards = 2
-  val numSamples = 720   // 2 hours * 3600 / 10 sec interval
-  val numSeries = 100
+  val numSamples = 1080   // 3 hours * 3600 / 10 sec interval
+  val numSeries = 800
   var startTime = System.currentTimeMillis - (3600*1000)
-  val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
-  val queryIntervalMin = 55  // # minutes between start and stop
-  val queryStep = 60         // # of seconds between each query sample "step"
+  val numQueries = 200        // Please make sure this number matches the OperationsPerInvocation below
+  val queryIntervalMin = 180  // # minutes between start and stop
+  val queryStep = 60          // # of seconds between each query sample "step"
   val spread = 1
 
   // TODO: move setup and ingestion to another trait
@@ -122,14 +122,14 @@ class QueryAndIngestBenchmark extends StrictLogging {
    * They are designed to match all the time series (common case) under a particular metric and job
    */
   val queries = Seq("heap_usage{_ns=\"App-2\"}",  // raw time series
-                    """sum(rate(heap_usage{_ns="App-2"}[5m]))""",
+                    """sum(rate(heap_usage{_ns="App-2"}[1m]))""",
                     """quantile(0.75, heap_usage{_ns="App-2"})""",
-                    """sum_over_time(heap_usage{_ns="App-2"}[5m])""")
+                    """sum_over_time(heap_usage{_ns="App-2"}[1m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 20000))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 1000000))
   }
 
   private var testProducingFut: Option[Future[Unit]] = None
@@ -156,7 +156,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(200)
   def parallelQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
