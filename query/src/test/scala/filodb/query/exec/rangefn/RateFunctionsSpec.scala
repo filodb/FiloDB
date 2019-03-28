@@ -75,6 +75,37 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     Math.abs(toEmit.value - expected) should be < errorOk
   }
 
+  it ("resets should work with empty windows and no resets data") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val toEmit = new TransientRow
+    val q3 = new IndexedArrayQueue[TransientRow]()
+    val gaugeWindowForReset = new QueueBasedWindow(q3)
+    val resetsFunction = new ResetsFunction
+
+    val counterSamples = Seq(   8072000L->1419.00,
+      8082100L->2511.00,
+      8092196L->3614.00,
+      8102215L->4724.00,
+      8112223L->5909.00,
+      8122388L->6948.00,
+      8132570L->7000.00,
+      8142822L->8095.00,
+      8152858L->9102.00,
+      8163000L->9201.00)
+
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
+    assert(toEmit.value.isNaN) // Empty window should return NaN
+
+    counterSamples.foreach { case (t, v) =>
+      val s = new TransientRow(t, v)
+      q3.add(s)
+      resetsFunction.addedToWindow(s, gaugeWindowForReset)
+    }
+    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
+    toEmit.value shouldEqual 0
+  }
+
   it ("resets should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
@@ -83,9 +114,6 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val q3 = new IndexedArrayQueue[TransientRow]()
     val gaugeWindowForReset = new QueueBasedWindow(q3)
     val resetsFunction = new ResetsFunction
-
-    resetsFunction.apply(startTs, endTs, gaugeWindowForReset, toEmit, queryConfig)
-    assert(toEmit.value.isNaN) // Empty window should return NaN
 
     gaugeSamples.foreach { case (t, v) =>
       val s = new TransientRow(t, v)
