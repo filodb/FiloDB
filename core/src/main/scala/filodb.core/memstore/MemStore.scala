@@ -205,16 +205,14 @@ trait MemStore extends ChunkSource {
 }
 
 object MemStore {
-  // TODO: make the max string vector size configurable.
-  val MaxUTF8VectorSize = 8192
-
   /**
    * Figures out the AppendableVectors for each column, depending on type and whether it is a static/
    * constant column for each partition.
    */
   def getAppendables(memFactory: MemFactory,
                      dataset: Dataset,
-                     maxElements: Int): Array[BinaryAppendableVector[_]] =
+                     config: StoreConfig): Array[BinaryAppendableVector[_]] = {
+    val maxElements = config.maxChunksSize
     dataset.dataColumns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
         // Time series data doesn't really need the NA/null functionality, so use more optimal vectors
@@ -223,8 +221,10 @@ object MemStore {
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
-        case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, MaxUTF8VectorSize)
+        case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
+        case HistogramColumn => bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
         case other: Column.ColumnType => ???
       }
     }.toArray
+  }
 }

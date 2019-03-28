@@ -29,7 +29,7 @@ and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) goo
 - [Getting Started](#getting-started)
 - [End to End Kafka Developer Setup](#end-to-end-kafka-developer-setup)
   - [Using the Gateway to stream Application Metrics](#using-the-gateway-to-stream-application-metrics)
-    - [Multiple Servers](#multiple-servers)
+    - [Multiple Servers using Consul](#multiple-servers-using-consul)
     - [Local Scale Testing](#local-scale-testing)
 - [Understanding the FiloDB Data Model](#understanding-the-filodb-data-model)
   - [Prometheus FiloDB Schema for Operational Metrics](#prometheus-filodb-schema-for-operational-metrics)
@@ -38,6 +38,7 @@ and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) goo
   - [Sharding](#sharding)
 - [Querying FiloDB](#querying-filodb)
   - [FiloDB PromQL Extensions](#filodb-promql-extensions)
+  - [First-Class Histogram Support](#first-class-histogram-support)
   - [Using the FiloDB HTTP API](#using-the-filodb-http-api)
   - [Grafana setup](#grafana-setup)
   - [Using the CLI](#using-the-cli)
@@ -320,6 +321,8 @@ FiloDB is designed to scale to ingest and query millions of discrete time series
 
 The **partition key** differentiates time series and also controls distribution of time series across the cluster.  For more information on sharding, see the sharding section below.  Components of a partition key, including individual key/values of `MapColumn`s, are indexed and used for filtering in queries.
 
+The data points use a configurable schema consisting of multiple columns.  Each column definition consists of `name:columntype`, with optional parameters. For examples, see the examples below, or see the introductory walk-through above where two datasets are created.
+
 ### Prometheus FiloDB Schema for Operational Metrics
 
 * Partition key = `tags:map`
@@ -382,6 +385,18 @@ Some special functions exist to aid debugging and for other purposes:
 Example of debugging chunk metadata using the CLI:
 
     ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
+
+### First-Class Histogram Support
+
+One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds (up to two orders of magnitude).  There is no "le" tag or individual time series for each bucket.  Here are the differences users need to be aware of when using `HistogramColumn`:
+
+* There is no need to append `_bucket` to the metric name.
+* However, you need to select the histogram column like `__col__="hist"`
+* To compute quantiles:  `histogram_quantile(0.7, sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))`
+* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo",__col__="hist"})`
+* Sum over multiple Histogram time series:  `sum(sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))` - you could then compute quantile over the sum.
+  - NOTE: Do NOT use `group by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
+  - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
 
 ### Using the FiloDB HTTP API
 

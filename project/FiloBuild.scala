@@ -55,6 +55,7 @@ object FiloBuild extends Build {
     .in(file("query"))
     .settings(libraryDependencies ++= queryDeps)
     .settings(commonSettings: _*)
+    .settings(scalacOptions += "-language:postfixOps")
     .settings(name := "filodb-query")
     .dependsOn(core % "compile->compile; test->test")
 
@@ -221,6 +222,7 @@ object FiloBuild extends Build {
     "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
     "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
     "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
+    "com.github.alexandrnikitin" %% "bloom-filter" % "0.11.0",
     scalaxyDep
   )
 
@@ -232,7 +234,8 @@ object FiloBuild extends Build {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
-    "com.tdunning"         % "t-digest"           % "3.1"
+    "com.tdunning"         % "t-digest"           % "3.1",
+    scalaxyDep
   )
 
   lazy val coordDeps = commonDeps ++ Seq(

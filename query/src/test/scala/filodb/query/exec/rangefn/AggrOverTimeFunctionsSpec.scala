@@ -8,11 +8,11 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.memstore.{TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
-import filodb.core.{MetricsTestData, TestData}
+import filodb.core.{MachineMetricsData => MMD, MetricsTestData, TestData}
 import filodb.memory._
-import filodb.memory.format.TupleRowReader
+import filodb.memory.format.{vectors => bv, TupleRowReader}
 import filodb.query.QueryConfig
-import filodb.query.exec.{ChunkedWindowIterator, SlidingWindowIterator}
+import filodb.query.exec._
 
 /**
  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
@@ -23,8 +23,8 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 16)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
-  val maxChunkSize = 200
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, maxChunkSize, 100)
+  val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
@@ -41,7 +41,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   val queryConfig = new QueryConfig(config.getConfig("query"))
 
   // windowSize and step are in number of elements of the data
-  def numWindows(data: Seq[Double], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
+  def numWindows(data: Seq[Any], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
 
   // Creates a RawDataRangeVector using Prometheus time-value schema and a given chunk size etc.
   def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
@@ -59,16 +59,35 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     timeValueRV(tuples)
   }
 
+  // Call this only after calling histogramRV
+  def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
+
+  // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
+  def histogramRV(numSamples: Int = 100, numBuckets: Int = 8): (Stream[Seq[Any]], RawDataRangeVector) =
+    MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets)
+
   def chunkedWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,
-                      func: ChunkedRangeFunction,
+                      func: ChunkedRangeFunction[TransientRow],
                       windowSize: Int,
-                      step: Int): ChunkedWindowIterator = {
+                      step: Int): ChunkedWindowIteratorD = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new ChunkedWindowIterator(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+    new ChunkedWindowIteratorD(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+  }
+
+  def chunkedWindowItHist(data: Seq[Seq[Any]],
+                          rv: RawDataRangeVector,
+                          func: ChunkedRangeFunction[TransientHistRow],
+                          windowSize: Int,
+                          step: Int): ChunkedWindowIteratorH = {
+    val windowTime = (windowSize.toLong - 1) * pubFreq
+    val windowStartTS = defaultStartTS + windowTime
+    val stepTimeMillis = step.toLong * pubFreq
+    val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
+    new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
   }
 
   def slidingWindowIt(data: Seq[Double],
@@ -92,7 +111,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should correctly aggregate sum_over_time using both chunked and sliding iterators") {
     val data = (1 to 240).map(_.toDouble)
-    val chunkSize = 40
     val rv = timeValueRV(data)
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
@@ -107,6 +125,23 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
+    }
+  }
+
+  it("should correctly aggregate sum_over_time for histogram RVs") {
+    val (data, rv) = histogramRV(numSamples = 150)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(50) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val chunkedIt = chunkedWindowItHist(data, rv, new SumOverTimeChunkedFunctionH(), windowSize, step)
+      chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
+        val aggHist = aggRow.getHistogram(1)
+        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.MutableHistogram])
+                                      .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        aggHist shouldEqual sumRawHist
+      }
     }
   }
 

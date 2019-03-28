@@ -8,14 +8,16 @@ import monix.reactive.Observable
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.memstore.SomeData
+import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.{BinaryRegionLarge, MemFactory, NativeMemoryManager}
+import filodb.memory.format.{vectors => bv}
+import filodb.memory._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -37,6 +39,7 @@ object TestData {
   val sourceConf = ConfigFactory.parseString("""
     store {
       max-chunks-size = 100
+      buffer-alloc-step-size = 50
       demand-paged-chunk-retention-period = 10 hours
       shard-mem-size = 50MB
       groups-per-shard = 4
@@ -54,7 +57,7 @@ object TestData {
 object NamesTestData {
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
-  val dataColSpecs = Seq("first:string", "last:string", "age:long")
+  val dataColSpecs = Seq("first:string", "last:string", "age:long:interval=10")
   val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age")
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
@@ -292,6 +295,48 @@ object MachineMetricsData {
   val tagsDiffSameLen = extraTags ++ Map("region".utf8 -> "AWS-USEast".utf8)
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
+
+  val histDataset = Dataset("histogram", Seq("tags:map"),
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
+
+  var histBucketScheme: bv.HistogramBuckets = _
+  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] = {
+    histBucketScheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
+    val buckets = new Array[Double](numBuckets)
+    def updateBuckets(bucketNo: Int): Unit = {
+      for { b <- bucketNo until numBuckets } {
+        buckets(b) += 1
+      }
+    }
+    Stream.from(0).map { n =>
+      updateBuckets(n % numBuckets)
+      Seq(startTs + n * timeStep,
+          (1 + n).toLong,
+          buckets.sum.toLong,
+          bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+    }
+  }
+
+  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
+  val histPartKey = histKeyBuilder.addFromObjects(extraTags)
+
+  val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
+  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
+
+  // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
+  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
+    val container = records(histDataset, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histDataset, partKey=histPartKey, bufferPool=histBufferPool)
+    container.iterate(histDataset.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
+  }
 }
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket
@@ -349,4 +394,25 @@ object MetricsTestData {
     final def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
+  // Takes the output of linearHistSeries and transforms them into Prometheus-schema histograms.
+  // Each bucket becomes its own time series with _bucket appended and an le value
+  def promHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] =
+    MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
+      .flatMap { record =>
+        val timestamp = record(0)
+        val tags = record(4).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metricName = tags("__name__".utf8).toString
+        val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_count").utf8))
+        val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,
+                           tags + ("__name__".utf8 -> (metricName + "_sum").utf8))
+        val hist = record(3).asInstanceOf[bv.MutableHistogram]
+        val bucketTags = tags + ("__name__".utf8 -> (metricName + "_bucket").utf8)
+        val bucketRecs = (0 until hist.numBuckets).map { b =>
+          Seq(timestamp, hist.bucketValue(b),
+              bucketTags + ("le".utf8 -> hist.bucketTop(b).toString.utf8))
+        }
+        Seq(countRec, sumRec) ++ bucketRecs
+      }
 }

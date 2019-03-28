@@ -4,7 +4,7 @@ import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, ReadablePartition}
-import filodb.memory.format.{RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
  * A RowReader iterator which iterates over a time range in the ReadablePartition.  Designed to be relatively memory
@@ -33,6 +33,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     def getDouble(columnNo: Int): Double = vectorIts(columnNo).asDoubleIt.next
     def getFloat(columnNo: Int): Float = ???
     def getString(columnNo: Int): String = ???
+    override def getHistogram(columnNo: Int): bv.Histogram = vectorIts(columnNo).asHistIt.next
     def getAny(columnNo: Int): Any = ???
 
     override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = vectorIts(columnNo).asUTF8It.next

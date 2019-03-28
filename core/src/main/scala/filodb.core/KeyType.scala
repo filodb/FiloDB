@@ -8,7 +8,7 @@ import scala.math.Ordering
 import org.joda.time.DateTime
 import scalaxy.loops._
 
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.RowReader._
 
 /**
@@ -176,5 +176,11 @@ object SingleKeyTypes {
         case e: java.lang.IllegalArgumentException => new Timestamp(str.toLong)
       }
     }
+  }
+
+  // Order histograms by top bucket value
+  implicit val histOrdering = Ordering.by((h: bv.Histogram) => h.bucketValue(h.numBuckets - 1))
+  implicit case object HistogramKeyType extends SingleKeyTypeBase[bv.Histogram] {
+    def fromString(str: String): bv.Histogram = ???
   }
 }
