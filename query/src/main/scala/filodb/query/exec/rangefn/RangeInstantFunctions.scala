@@ -123,8 +123,8 @@ class ResetsFunction extends RangeFunction {
 
   def addedToWindow(row: TransientRow, window: Window): Unit = {
     val size = window.size
+    if (resets.isNaN && size > 0) resets = 0
     if (size > 1 && window(size - 2).value > row.value) {
-      if (resets.isNaN) resets = 0
       resets += 1
     }
   }
