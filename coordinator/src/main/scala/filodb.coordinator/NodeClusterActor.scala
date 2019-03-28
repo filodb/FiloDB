@@ -17,6 +17,7 @@ import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
 import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
+//scalastyle:off number.of.types
 object NodeClusterActor {
 
   sealed trait ClusterActorEvent
@@ -78,6 +79,9 @@ object NodeClusterActor {
                    source.storeConfig,
                    source.downsampleConfig)
   }
+
+  // Only used during initial setup, called during recovery and before calling initiateShardStateRecovery.
+  private final case class SetupDatasetFinished(ref: DatasetRef)
 
   // A dummy source to use for tests and when you just want to push new records in
   val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
@@ -314,10 +318,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   // The initial recovery handler: recover dataset setup/ingestion config first
   def datasetHandler: Receive = LoggingReceive {
     case e: SetupDataset =>
-      setupDataset(e, sender()) map { _ =>
-        initDatasets -= e.ref
-        if (initDatasets.isEmpty) initiateShardStateRecovery()
-      }
+      setupDataset(e, sender()) map { _ => self ! SetupDatasetFinished(e.ref) }
+    case e: SetupDatasetFinished => {
+      initDatasets -= e.ref
+      if (initDatasets.isEmpty) initiateShardStateRecovery()
+    }
     case GetDatasetFromRef(r) => sender() ! datasets(r)
   }
 

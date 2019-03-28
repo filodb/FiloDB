@@ -16,6 +16,7 @@ object TimeSeriesPartition extends StrictLogging {
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
 
+  // Use global logger so we can save a few fields for each of millions of TSPartitions  :)
   val _log = logger
 
   def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
@@ -132,8 +133,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
-          switchBuffers(blockHolder, encode=true)
-          ingest(row, blockHolder)   // re-ingest every element, allocating new WriteBuffers
+          // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
+          // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
+          // So we do not call ingest again unless switcing buffers succeeds.
+          // re-ingest every element, allocating new WriteBuffers
+          if (switchBuffers(blockHolder, encode=true)) { ingest(row, blockHolder) }
+          else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
+                           s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
         case other: AddResponse =>
       }
@@ -159,8 +165,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
    * called from a single thread / single synchronous stream.
    */
-  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Unit =
-    if (nonEmptyWriteBuffers) {
+  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean =
+    nonEmptyWriteBuffers && {
       val oldInfo = currentInfo
       val oldAppenders = currentChunks
 
@@ -171,6 +177,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
       if (encode) { encodeOneChunkset(oldInfo, oldAppenders, blockHolder) }
       else        { appenders = InfoAppenders(oldInfo, oldAppenders) :: appenders }
+      true
     }
 
   /**
@@ -256,9 +263,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
     case AllChunkScan        => allInfos
     case InMemoryChunkScan   => allInfos
-    case r: RowKeyChunkScan  => allInfos.filter { ic =>
-                                  ic.intersection(r.startTime, r.endTime).isDefined
-                                }
+    case r: TimeRangeChunkScan => allInfos.filter { ic =>
+                                    ic.intersection(r.startTime, r.endTime).isDefined
+                                  }
     case WriteBufferChunkScan => if (currentInfo == nullInfo) ChunkInfoIterator.empty
                                 else {
                                   // Return a single element iterator which holds a shared lock.
@@ -313,9 +320,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     final def unlock(): Unit = chunkmapReleaseShared()
   }
 
+  /**
+    * startTime of earliest chunk in memory.
+    * Long.MaxValue if no chunk is present
+    */
   final def earliestTime: Long = {
     if (numChunks == 0) {
-      Long.MinValue
+      Long.MaxValue
     } else {
       // Acquire shared lock to safely access the native pointer.
       chunkmapWithShared(ChunkSetInfo(chunkmapDoGetFirst).startTime)
@@ -372,6 +383,12 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     chunkmapWithExclusive(chunkmapDoPut(info.infoAddr))
+  }
+
+  // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
+  def shutdown(): Unit = {
+    chunkmapFree()
+    if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }
 

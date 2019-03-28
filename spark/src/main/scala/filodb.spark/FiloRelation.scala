@@ -13,7 +13,6 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.coordinator.client.Client.parse
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.{ColumnFilter, Filter => FF, KeyFilter}
 import filodb.core.store._
@@ -149,10 +148,11 @@ object FiloRelation extends StrictLogging {
         }
         AllChunkScan
       } else {
-        val firstKey = BinaryRecord(dataset, ranges.map(_.get._1))
-        val lastKey  = BinaryRecord(dataset, ranges.map(_.get._2))
-        logger.info(s"Pushdown of rowkey scan ($firstKey, $lastKey)")
-        RowKeyChunkScan(firstKey, lastKey)
+        // WARNING: we take the first value from the keys and assume it is the timestamp.
+        val startTime = ranges.head.get._1.asInstanceOf[Long]
+        val endTime = ranges.head.get._2.asInstanceOf[Long]
+        logger.info(s"Pushdown of time range ($startTime, $endTime)")
+        TimeRangeChunkScan(startTime, endTime)
       }
     } else {
       logger.info(s"Filters $groupedFilters skipped some row key columns, must be from row key columns 0..n")

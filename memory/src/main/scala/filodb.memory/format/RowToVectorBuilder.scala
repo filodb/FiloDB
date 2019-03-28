@@ -24,6 +24,7 @@ object Classes {
   val Double = java.lang.Double.TYPE
   val String = classOf[String]
   val UTF8 = classOf[ZeroCopyUTF8String]
+  val Histogram = classOf[vectors.Histogram]
 }
 object RowToVectorBuilder {
   val MaxElements = 1000

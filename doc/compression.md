@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Compression](#compression)
+  - [Long/Integer Compression](#longinteger-compression)
+  - [Floating Point Compression](#floating-point-compression)
+  - [Predictive NibblePacking](#predictive-nibblepacking)
+    - [Example](#example)
+  - [Histograms](#histograms)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Compression
 
 Here we will discuss some of the compression algorithms in FiloDB's underlying chunk format.
@@ -18,7 +31,7 @@ These all have the capability to redue the number of bits in successive values. 
 
 ## Predictive NibblePacking
 
-This is a storage scheme which takes the output of one of the compression algorithms (really, they are **prediction** algorithms) above, which is a stream of 64-bit numbers with hopefully many zero bits, and encodes them in an efficient way.  This encoding scheme works for the output of any of the integer or floating point compression/prediction schemes.  We make these observations:
+This is a storage scheme which takes the output of one of the compression algorithms (really, they are **prediction** algorithms) above, which is a stream of 64-bit numbers with hopefully many zero bits, and encodes them in an efficient way.  It is loosely based on [this article](https://medium.com/@vaclav.loffelmann/the-worlds-first-middle-out-compression-for-time-series-data-part-2-40c048632911).  This encoding scheme works for the output of any of the integer or floating point compression/prediction schemes.  We make these observations:
 
 1. The 64-bit values may have both leading zeros and trailing zeros (def true for floating point XOR/DFCM output)
 2. Most sequences of these values have very similar numbers of leading and trailing zeros.  
@@ -30,7 +43,7 @@ The predictive nibblepacking scheme encodes 8 64-bit values at once, storing the
 | offset | description |
 | ------ | ----------- |
 | +0     | u8: bitmask, 1=nonzero value, 0=zero value  |
-| +1     | u8: bits 0-3 = number of trailing zero nibbles (0-15); 4-7 = number of leading zero nibbles (0-15); skipped if bitmask == 0  |
+| +1     | u8: bits 0-3 = number of trailing zero nibbles (0-15); 4-7 = number of nonzero nibbles - 1 (0-15; 15=all 16 nibbles occupied); skipped if bitmask == 0  |
 | +2     | little-endian nibble storage for each nonzero value in the bitmask; each value has (16 - leading - trailing) nibbles.  Skipped if bitmask = 0 |
 
 The total space required to encode the 8 values can be derived as follows:
@@ -75,5 +88,16 @@ Now here is how they would be stored in memory:
 
 Or, if the above was viewed in a little-endian system as a 32-bit int, then the above would be 0x00456123.
 
+## Histograms
 
+FiloDB supports first class histograms as HistogramColumns in schemas.  This means histograms are ingested as single entities and kept together as a single time series.  Histograms are required to have increasing bucket values; that is, the value in each bucket represents the total count of all buckets below that bucket as well -- the buckets are cumulative.  This is based on the histogram bucket scheme used in Prometheus.
 
+Currently, incoming histograms which are cumulative are encoded on the wire using delta encoding of their integer values using the NibblePacking scheme described above.  This leads to pretty efficient encoding of both busy/active histograms and inactive ones.
+- The delta-encoded NibblePack'ed histograms save save in the BinaryRecord ingestion format.  For 64 buckets, for example, this format saves 50x space compared to the traditional Prometheus data model.
+- The encoded histograms are stored as is in write buffers.  This allows us to save a huge amount of space there as well.
+- Since encoded histograms are variable-length, we facilitate fast lookup of histograms within a HistogramVector by grouping histograms into "sections".  Sections have headers to make it easy to skip over entire sections.
+- Currently, the delta-encoded histogram format also serves as the compressed vector format, ie there is no further compression after arrival.
+
+Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details about the on-the-wire / BinaryRecord format used for histograms.
+
+TODO: document histogram compression techniques more when done.

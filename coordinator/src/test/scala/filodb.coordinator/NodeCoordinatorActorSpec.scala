@@ -99,8 +99,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
     shardManager.addDataset(sd, dataset, self)
     shardManager.subscribe(probe.ref, dataset.ref)
-    probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
-      shardMap = mapper
+    probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => } // for subscription
+    for { i <- 0 until numShards } { // for each shard assignment
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
+        shardMap = mapper
+      }
     }
   }
 
@@ -191,7 +194,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
 
       // Try a filtered partition query
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
@@ -200,6 +202,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
+      memStore.commitIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -264,6 +267,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should concatenate raw series from multiple shards") {
       val ref = setupTimeSeries(2)
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       // Same series is ingested into two shards.  I know, this should not happen in real life.
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
@@ -343,6 +347,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, StatusActor.GetCurrentEvents)
     probe.expectMsg(Map(ref -> Seq(IngestionStarted(ref, 0, coordinatorActor))))
 
+    memStore.commitIndexForTesting(dataset6.ref)
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
     val q2 = LogicalPlan2Query(ref,

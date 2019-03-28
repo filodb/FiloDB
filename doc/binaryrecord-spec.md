@@ -5,10 +5,9 @@
 - [BinaryRecord Specification v2](#binaryrecord-specification-v2)
   - [Motivation](#motivation)
     - [Differences from v1](#differences-from-v1)
-  - [[RecordSchema](../core/src/main/scala/filodb.core/binaryrecord2/RecordSchema.scala)](#recordschemacoresrcmainscalafilodbcorebinaryrecord2recordschemascala)
+  - [RecordSchema](#recordschema)
     - [Field Access](#field-access)
     - [PartitionKey extraction, hash, comparison](#partitionkey-extraction-hash-comparison)
-    - [Shard key calculation](#shard-key-calculation)
     - [BinaryRecord creation](#binaryrecord-creation)
     - [Get all optimal container bytes](#get-all-optimal-container-bytes)
     - [Get all full container bytes excluding current container](#get-all-full-container-bytes-excluding-current-container)
@@ -18,6 +17,7 @@
     - [Hash](#hash)
     - [Variable length fields - UTF8String](#variable-length-fields---utf8string)
     - [Variable length fields - Map field](#variable-length-fields---map-field)
+    - [Variable length fields - Histograms](#variable-length-fields---histograms)
   - [RecordContainer: Container format for multiple BinaryRecords](#recordcontainer-container-format-for-multiple-binaryrecords)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -55,6 +55,7 @@ The `RecordSchema` defines the schema for a `BinaryRecord`, and consists of defi
     - double (64 bits)
     - UTF8String (< 64KB total)
     - map** (< 64KB total, UTF8 string to UTF8 string)
+    - histograms, which are blobs with a special format
 * Data column fields must strictly precede partition key fields
 * map field is only allowed as the last field
     - Map field labels are sorted by key
@@ -111,24 +112,6 @@ An `IngestionRecordSchema` should be able to do the following to help in identif
 
         def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder)
 
-### Shard key calculation
-
-First of all, before we even create the ingestion BinaryRecord, the application gateway probably has to compute the shard from the partition key and incoming tags.  To do that, first call a method to sort the incoming key-value pairs and compute hashes for each pair:
-
-    def sortAndComputeHashes(pairs: List[(String, String)]): Array[Int]
-
-From here, one of two methods can be called to compute the necessary partition/shard hashes:
-
-    def combineHashExcluding(pairs: List[(String, String)],
-                             hashes: Array[Int], excludeKeys: Set[String]): Int
-    def combineHashIncluding(pairs: List[(String, String)],
-                             hashes: Array[Int], includeKeys: Set[String]): Int
-
-Now, when creating the ingestion BinaryRecord, a convenient method can be called to add the map and put the hash in as well:
-
-    def addSortedPairsAsMap(sortedPairs: List[(String, String)],
-                            hashes: Array[Int]): Unit
-
 ### BinaryRecord creation
 
 `BinaryRecord` creation uses an assistant class, [RecordBuilder](../core/src/main/scala/filodb.core/binaryrecord2/RecordBuilder.scala), which takes a [MemFactory](../memory/src/main/scala/filodb.memory/MemFactory.scala) so they can be created on or offheap.  Since creation of `BinaryRecords` takes a variable amount of space per record, the builder allocates blocks ahead of time and carves out memory within the block as new `BinaryRecord`s are being built.  The builder keeps track of block/memory usage as new `BinaryRecords` are being built.
@@ -139,11 +122,7 @@ The builder has add methods that should be called in field order.  The methods w
 builder.startNewRecord()
 builder.addLong(timestamp)
 builder.addDouble(value)
-builder.startMap()
-for { field <- fields } {
-  builder.addMapKeyValue(field.key, field.value)
-}
-builder.endMap()
+builder.addMap(tags)
 val memory = builder.endRecord()
 ```
 
@@ -181,7 +160,8 @@ Returns all the full containers and removes the returned full containers from `R
 * Long - 8 bytes - little-endian Long
 * Double - 8 bytes
 * utf8 - 4 bytes - offset within BR to var-length UTF8 string area
-* map - 4 bytes - offset within BR to map area
+* map - 4 bytes - offset within BR to map area (with 4-byte length prefix)
+* hist - 4 bytes - offset within BR to histogram blob, with 2 byte length prefix
 
 ### Hash
 
@@ -202,6 +182,10 @@ Note that this is called a "Map" field but is actually just a list of key-value 
 * +0004   2-byte Length of key #1, or 0xFzzz for preset key field where zzz = preset number (up to 4K presets)
 * +0006 to +0006+(keylen1 - 1)   UTF8 bytes for key #1
 * +n      2-byte length of value #1, followed by UTF8 bytes of value string #1
+
+### Variable length fields - Histograms
+
+Histograms are stored as blobs with a 2-byte length prefix and includes the historam bucket definition and compressed bucket values.  Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details.
 
 ## RecordContainer: Container format for multiple BinaryRecords
 

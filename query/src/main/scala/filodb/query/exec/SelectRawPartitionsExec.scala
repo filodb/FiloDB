@@ -23,7 +23,7 @@ final case class SelectRawPartitionsExec(id: String,
                                          dataset: DatasetRef,
                                          shard: Int,
                                          filters: Seq[ColumnFilter],
-                                         rowKeyRange: RowKeyRange,
+                                         chunkMethod: ChunkScanMethod,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   require(colIds.nonEmpty)
 
@@ -38,17 +38,10 @@ final case class SelectRawPartitionsExec(id: String,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
 
-    val chunkMethod = rowKeyRange match {
-      case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
-      case AllChunks                => AllChunkScan
-      case WriteBuffers             => WriteBufferChunkScan
-      case InMemoryChunks           => InMemoryChunkScan
-      case EncodedChunks            => ???
-    }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
   }
 
-  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters, colIDs=$colIds"
+  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"
 }
 

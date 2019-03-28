@@ -109,7 +109,8 @@ trait ChunkSource extends RawChunkSource {
         val subgroup = TimeSeriesShard.partKeyGroup(dataset.partKeySchema, partition.partKeyBase,
                                                     partition.partKeyOffset, numGroups)
         val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
-                                              dataset.partKeySchema, partCols, partition.shard, subgroup)
+                                              dataset.partKeySchema, partCols, partition.shard,
+                                              subgroup, partition.partID)
         RawDataRangeVector(key, partition, chunkMethod, ids)
       }
   }

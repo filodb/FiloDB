@@ -8,7 +8,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
-import filodb.memory.format.{SeqRowReader, UnsafeUtils}
+import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
@@ -370,8 +370,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       schemaWithPredefKeys.consumeMapItems(recordBase, recordOff, 6, valuesCheckConsumer)
     }
 
-    it("should add map fields with addSortedPairsAsMap() and populate unique hashes") {
-      import collection.JavaConverters._
+    it("should add map fields with addMap() and populate unique hashes") {
       val labels = Map("job" -> "prometheus",
                        "dc" -> "AWS-USE", "instance" -> "0123892E342342A90",
                        "__name__" -> "host_cpu_load")
@@ -379,8 +378,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
 
       def addRec(n: Int): Long = {
-        val pairs = new java.util.ArrayList((labels + ("n" -> n.toString)).toSeq.asJava)
-        val hashes = RecordBuilder.sortAndComputeHashes(pairs)
+        val pairs = (labels + ("n" -> n.toString)).map { case (k, v) => ZCUTF8(k) -> ZCUTF8(v) }.toMap
 
         builder.startNewRecord()
         val ts = System.currentTimeMillis
@@ -390,7 +388,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
         builder.addDouble(10.1) // max
         builder.addLong(123456L)  // count
         builder.addString(s"Series $n")   // series (partition key)
-        builder.addSortedPairsAsMap(pairs, hashes)
+        builder.addMap(pairs)
         builder.endRecord()
       }
 
@@ -523,6 +521,32 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       lastIndex = -1
       partSchema2.consumeMapItems(recordBase, recordOff, 1, keyCheckConsumer)
       lastIndex shouldEqual 4   // 5 key-value pairs: 0, 1, 2, 3, 4
+    }
+
+    it("should copy ingest BRs to partition key BRs correctly when data columns have a blob/histogram") {
+      val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema)
+      val data = linearHistSeries().take(3)
+      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row)) }
+
+      records.clear()
+      ingestBuilder.allContainers.head.consumeRecords(consumer)
+      val histRecords = records.toSeq.toBuffer   // make a copy
+
+      // Now create partition keys
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.partKeySchema)
+      histRecords.foreach { case (base, off) =>
+        histDataset.comparator.buildPartKeyFromIngest(base, off, partKeyBuilder)
+      }
+
+      records.clear()
+      partKeyBuilder.allContainers.head.consumeRecords(consumer)
+      records should have length (3)
+      (0 to 2).foreach { n =>
+        histDataset.comparator.partitionMatch(histRecords(n)._1, histRecords(n)._2,
+                                              records(n)._1, records(n)._2) shouldEqual true
+        histDataset.ingestionSchema.partitionHash(histRecords(n)._1, histRecords(n)._2) shouldEqual (
+          histDataset.partKeySchema.partitionHash(records(n)._1, records(n)._2))
+      }
     }
   }
 

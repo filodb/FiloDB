@@ -68,7 +68,7 @@ object MemStoreStress extends App {
   // use observables (a stream of queries) to handle queries
   val startTime = DateTime.parse("2013-01-01T00Z").getMillis
   val endTime = DateTime.parse("2013-02-01T00Z").getMillis
-  val interval = IntervalSelector(Seq(startTime), Seq(endTime))
+  val interval = IntervalSelector(startTime, endTime)
   val ref = DatasetRef("nyc_taxi")
   var startMs = 0L
   var endMs = 0L
