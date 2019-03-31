@@ -432,7 +432,8 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
 
     /* We need this map to track partKey->partId because lucene index cannot be looked up
-       using partKey efficiently, and more importantly, it is eventually consistent. */
+       using partKey efficiently, and more importantly, it is eventually consistent.
+        The map and contents will be garbage collected after we are done with recovery */
     val partIdMap = new mutable.HashMap[BytesRef, Int]()
 
     val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
@@ -480,10 +481,10 @@ class TimeSeriesShard(val dataset: Dataset,
           val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
           val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, CREATE_NEW_PARTID, 4)
           // In theory, we should not get an OutOfMemPartition here since
-          // it should have occurred before node failed too, and with data sropped,
+          // it should have occurred before node failed too, and with data stopped,
           // index would not be updated. But if for some reason we see it, drop data
           if (part == OutOfMemPartition) {
-            logger.error("Could not accommodate partKey $while recovering index. " +
+            logger.error("Could not accommodate partKey while recovering index. " +
               "WriteBuffer size may not be configured correctly")
             None
           } else {
@@ -930,7 +931,6 @@ class TimeSeriesShard(val dataset: Dataset,
         activelyIngesting.clear(p.partID)
       } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
         // Partition started re-ingesting.
-        // TODO: we can do better than this for intermittent time series. Address later.
         updatePartEndTimeInIndex(p, Long.MaxValue)
         timeBucketBitmaps.get(timeBucket).set(p.partID)
         activelyIngesting.set(p.partID)
