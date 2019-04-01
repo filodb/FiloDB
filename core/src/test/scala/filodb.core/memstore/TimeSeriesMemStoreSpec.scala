@@ -1,7 +1,6 @@
 package filodb.core.memstore
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
@@ -295,7 +294,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
     tsShard.initTimeBuckets()
 
-    val partIdMap = new mutable.HashMap[BytesRef, Int]()
+    val partIdMap = debox.Map.empty[BytesRef, Int]
 
     timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
       tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)), partIdMap)

@@ -2,7 +2,6 @@ package filodb.core.memstore
 
 import java.util.concurrent.locks.StampedLock
 
-import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -434,7 +433,7 @@ class TimeSeriesShard(val dataset: Dataset,
     /* We need this map to track partKey->partId because lucene index cannot be looked up
        using partKey efficiently, and more importantly, it is eventually consistent.
         The map and contents will be garbage collected after we are done with recovery */
-    val partIdMap = new mutable.HashMap[BytesRef, Int]()
+    val partIdMap = debox.Map.empty[BytesRef, Int]
 
     val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
     logger.info(s"Recovering timebuckets $earliestTimeBucket until $currentIndexTimeBucket " +
@@ -460,7 +459,7 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   // scalastyle:off method.length
-  private[memstore] def extractTimeBucket(segment: IndexData, partIdMap: mutable.HashMap[BytesRef, Int]): Unit = {
+  private[memstore] def extractTimeBucket(segment: IndexData, partIdMap: debox.Map[BytesRef, Int]): Unit = {
     var numRecordsProcessed = 0
     segment.records.iterate(indexTimeBucketSchema).foreach { row =>
       // read binary record and extract the indexable data fields
@@ -506,7 +505,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
         // add newly assigned partId to lucene index
         partId.foreach { partId =>
-          partIdMap.put(partKeyBytesRef, partId)
+          partIdMap(partKeyBytesRef) = partId
           partKeyIndex.addPartKey(partKeyBaseOnHeap, partId, startTime, endTime,
             PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset))(partKeyNumBytes)
           timeBucketBitmaps.get(segment.timeBucket).set(partId)
