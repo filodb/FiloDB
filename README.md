@@ -202,10 +202,10 @@ You can also check the server logs at `logs/filodb-server-N.log`.
 Now run the time series generator. This will ingest 20 time series (the default) with 100 samples each into the Kafka topic with current timestamps.  The required argument is the path to the source config.  Use `--help` for all the options.
 
 ```
-java -cp gateway/target/scala-2.11/gateway-*-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
+./dev-gateway.sh --gen-prom-data conf/timeseries-dev-source.conf
 ```
 
-NOTE: The `TestTimeseriesProducer` logs to logs/gateway-server.log.
+NOTE: Check logs/gateway-server.log for logs.
 
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
 
@@ -220,8 +220,9 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
+1a) Restart Kafka, this is sometimes necessary.
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
-3) Re-run the `TestTimeseriesProducer`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
+3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
 To stop the dev server. Note that this will stop all the FiloDB servers if multiple are running.
 ```
@@ -308,7 +309,7 @@ Now if you curl the cluster status you should see 128 shards which are slowly tu
 Generate records:
 
 ```
-java -cp gateway/target/scala-2.11/gateway-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
+./dev-gateway.sh --gen-prom-data -p 5000 conf/timeseries-128shards-source.conf
 ```
 
 ## Understanding the FiloDB Data Model

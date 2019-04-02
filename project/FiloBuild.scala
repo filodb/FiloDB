@@ -152,7 +152,7 @@ object FiloBuild extends Build {
     .settings(libraryDependencies ++= gatewayDeps)
     .settings(gatewayAssemblySettings: _*)
     .dependsOn(coordinator % "compile->compile; test->test",
-               prometheus)
+               prometheus, cassandra)
 
   // Zookeeper pulls in slf4j-log4j12 which we DON'T want
   val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
