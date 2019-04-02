@@ -60,7 +60,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
   final val streams = new HashMap[Int, IngestionStream]
-  private var shardStateVersion: Long = 0
+  var shardStateVersion: Long = 0
 
   // Params for creating the default memStore flush scheduler
   private final val numGroups = storeConfig.groupsPerShard
@@ -114,13 +114,17 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
-        // Must be ingesting from the shard.
-        if (shardsToStop.contains(shard)) {
-          // Is aready ingesting, and it must not be stopped.
-          shardsToStop.remove(shard)
+        if (state.map.shouldBeIngesting(shard)) {
+          if (shardsToStop.contains(shard)) {
+            // Is aready ingesting, and it must not be stopped.
+            shardsToStop.remove(shard)
+          } else {
+            // Isn't ingesting, so start it.
+            startIngestion(shard)
+          }
         } else {
-          // Isn't ingesting, so start it.
-          startIngestion(shard)
+          val status = state.map.statuses(shard)
+          logger.info(s"Will stop ingestion of shard $shard due to status ${status}")
         }
       }
     }
