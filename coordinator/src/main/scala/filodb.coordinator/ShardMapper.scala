@@ -164,7 +164,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   def numAssignedShards: Int = numShards - unassignedShards.length
 
-  def shouldBeIngesting(shard: Int): Boolean = statusMap(shard) match {
+  def isAnIngestionState(shard: Int): Boolean = statusMap(shard) match {
     case ShardStatusStopped | ShardStatusDown => false
     case _ => true
   }

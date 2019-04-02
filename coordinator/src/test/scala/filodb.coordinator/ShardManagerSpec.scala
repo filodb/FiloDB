@@ -11,7 +11,6 @@ import filodb.core.metadata.Dataset
 
 class ShardManagerSpec extends AkkaSpec {
   import NodeClusterActor.{DatasetResourceSpec, DatasetVerified, IngestionSource, SetupDataset}
-  import client.IngestionCommands.DatasetSetup
 
   protected val dataset1 = DatasetRef("one")
   protected val datasetObj1 = Dataset(dataset1.dataset, Seq("seg:int"), Seq("timestamp:long"))
@@ -50,14 +49,6 @@ class ShardManagerSpec extends AkkaSpec {
 
   val noOpSource2 = IngestionSource(classOf[NoOpStreamFactory].getName)
   val setupDs2 = SetupDataset(dataset2, resources2, noOpSource2, TestData.storeConf)
-
-  private def expectDataset(coord: TestProbe, dataset: Dataset): TestProbe = {
-    coord.expectMsgPF() { case ds: DatasetSetup =>
-      ds.compactDatasetStr shouldEqual dataset.asCompactString
-      ds.source shouldEqual noOpSource1
-    }
-    coord
-  }
 
   private def expectNoMessage(coord: TestProbe): Unit = {
     coord.expectNoMessage(100.milliseconds)
@@ -111,7 +102,7 @@ class ShardManagerSpec extends AkkaSpec {
       expectMsg(DatasetVerified)
 
       for (coord <- Seq(coord1, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -151,7 +142,7 @@ class ShardManagerSpec extends AkkaSpec {
 
       // All should see the changes.
       for (coord <- Seq(coord1, coord2, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -180,7 +171,7 @@ class ShardManagerSpec extends AkkaSpec {
 
       // All coordinators should see a state message, even the removed one.
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil          // coord1 is gone
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -207,7 +198,7 @@ class ShardManagerSpec extends AkkaSpec {
 
       // Ingestion should be stopped on downed node, and one shard reassigned.
       for (coord <- Seq(coord2, coord3)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -237,7 +228,7 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -262,7 +253,7 @@ class ShardManagerSpec extends AkkaSpec {
                                                 IngestionError(dataset1, 0, new IllegalStateException("simulated")))
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -289,7 +280,7 @@ class ShardManagerSpec extends AkkaSpec {
       // Shard 0 is "bad" and so it's unassigned now.
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
@@ -313,7 +304,7 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 0
 
       for (coord <- Seq(coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Nil
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -344,7 +335,7 @@ class ShardManagerSpec extends AkkaSpec {
         coord4.ref -> Seq(3, 4, 5))
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
@@ -380,7 +371,7 @@ class ShardManagerSpec extends AkkaSpec {
         coord3.ref -> Seq.empty)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
-        expectDataset(coord, datasetObj2).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset2
           s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
           s.map.shardsForCoord(coord2.ref) shouldEqual Nil
@@ -456,29 +447,21 @@ class ShardManagerSpec extends AkkaSpec {
 
       for (coord <- Seq(coord1, coord2, coord3)) {
         coord.expectMsgPF() {
-          case ds: DatasetSetup if ds.compactDatasetStr == datasetObj2.asCompactString =>
-            ds.source shouldEqual noOpSource2
-            coord.expectMsgPF() {
-              case s: ShardIngestionState =>
-                s.ref shouldEqual dataset2
-                s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
-                s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
-                s.map.shardsForCoord(coord3.ref) shouldEqual Nil
-                s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-            }
+          case s: ShardIngestionState =>
+            s.ref shouldEqual dataset2
+            s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+            s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+            s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
         }
 
         coord.expectMsgPF() {
-          case ds: DatasetSetup if ds.compactDatasetStr == datasetObj1.asCompactString =>
-            ds.source shouldEqual noOpSource1
-            coord.expectMsgPF() {
-              case s: ShardIngestionState =>
-                s.ref shouldEqual dataset1
-                s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
-                s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
-                s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
-                s.map.shardsForCoord(coord4.ref) shouldEqual Nil
-            }
+          case s: ShardIngestionState =>
+            s.ref shouldEqual dataset1
+            s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+            s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+            s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+            s.map.shardsForCoord(coord4.ref) shouldEqual Nil
         }
 
         expectNoMessage(coord)

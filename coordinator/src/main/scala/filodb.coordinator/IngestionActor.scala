@@ -114,7 +114,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
-        if (state.map.shouldBeIngesting(shard)) {
+        if (state.map.isAnIngestionState(shard)) {
           if (shardsToStop.contains(shard)) {
             // Is aready ingesting, and it must not be stopped.
             shardsToStop.remove(shard)

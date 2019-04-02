@@ -71,7 +71,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * INTERNAL API. Idempotent.
     */
   def subscribe(subscriber: ActorRef, dataset: DatasetRef): Unit =
-    mapperOpt(dataset) match {
+    mapperCopyOpt(dataset) match {
       case Some(current) =>
         logger.info(s"Adding $subscriber as a subscriber for dataset=$dataset")
         _subscriptions = subscriptions.subscribe(subscriber, dataset)
@@ -117,14 +117,24 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * The response is returned directly to the requester.
     */
   def sendSnapshot(ref: DatasetRef, origin: ActorRef): Unit =
-    origin ! mapperOpt(ref).getOrElse(DatasetUnknown(ref))
+    origin ! mapperCopyOpt(ref).getOrElse(DatasetUnknown(ref))
 
-  private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
-    // Although a copy of the ShardMapper isn't typically required, it is required for the
-    // tests to work properly. This is because the TestProbe provides access to the local
-    // ShardMapper instance, and so any observation of the snapshot would expose the latest
-    // mappings instead.
+  /**
+    * Returns a complete copy of the ShardMapper within a CurrentShardSnapshot, if the dataset
+    * exists. Although a copy of the ShardMapper isn't typically required, it is required for
+    * the tests to work properly. This is because the TestProbe provides access to the local
+    * ShardMapper instance, and so any observation of the snapshot would expose the latest
+    * mappings instead. The complete copy also offers a nice safeguard, in case the ShardMapper
+    * is concurrently modified before the message is sent. This isn't really expected, however.
+    */
+  private def mapperCopyOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
     _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m.copy()))
+
+  /**
+    * Same as mapperCopyOpt, except it directly references the ShardMapper instance.
+    */
+  private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
+    _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
 
   /** Called on MemberUp. Handles acquiring assignable shards, if any, assignment,
     * and full setup of new node.
@@ -551,26 +561,20 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
   /** Publishes a ShardMapper snapshot of given dataset to all subscribers of that dataset. */
   def publishSnapshot(ref: DatasetRef): Unit = {
-    mapperOpt(ref) match {
+    mapperCopyOpt(ref) match {
       case Some(snapshot) => {
         for {
           subscription <- _subscriptions.subscription(ref)
         } subscription.subscribers foreach (_ ! snapshot)
 
-        // Also send a complete state command to all ingestion actors. Most are expected to
-        // actually be ingesting something, so also send the dataset info. This might be
-        // redundant, but sending it again is harmless.
-
-        val state = _datasetInfo(snapshot.ref)
-        val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
-          state.storeConfig, state.source, state.downsample)
+        // Also send a complete ingestion state command to all ingestion actors. Without this,
+        // they won't start or stop ingestion.
 
         // TODO: Need to provide a globally consistent version, incremented when anything
         //       changes, for any dataset.
         val resync = ShardIngestionState(0, snapshot.ref, snapshot.map)
 
         for (coord <- coordinators) {
-          coord ! setupMsg
           coord ! resync
         }
       }
