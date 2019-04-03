@@ -219,7 +219,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
         case Success(_) =>
-          // We dont release resources when fitite ingestion ends normally.
+          // We dont release resources when finite ingestion ends normally.
           // Kafka ingestion is usually infinite and does not end unless canceled.
           // Cancel operation is already releasing after cancel is done.
           // We also have some tests that validate after finite ingestion is complete

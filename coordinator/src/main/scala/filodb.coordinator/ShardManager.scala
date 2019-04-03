@@ -531,7 +531,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private def doAssignShards(dataset: DatasetRef,
                              coord: ActorRef,
                              shards: Seq[Int]): Unit = {
-    logger.info(s"Assigning shards for dataset=$dataset to coordinator $coord for shards $shards")
+    val state = _datasetInfo(dataset)
+    logger.info(s"Sending setup message for dataset=${state.dataset.ref} to coordinators $coord.")
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
+      state.storeConfig, state.source, state.downsample)
+    coord ! setupMsg
+
     for { shard <- shards }  {
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEvent(event)
