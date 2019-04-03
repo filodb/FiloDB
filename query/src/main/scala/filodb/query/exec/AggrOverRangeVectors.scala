@@ -77,7 +77,11 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
     // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
     if (without.isEmpty && by.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
-      RangeVectorAggregator.fastReduce(aggregator, false, source, sourceSchema.fixedVectorLen.get)
+      sourceSchema.fixedVectorLen.filter(_ <= queryConfig.fastReduceMaxWindows).map { numWindows =>
+        RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
+      }.getOrElse {
+        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+      }
     } else {
       RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
     }
