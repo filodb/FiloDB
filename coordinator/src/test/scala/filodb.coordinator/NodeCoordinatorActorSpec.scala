@@ -194,7 +194,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
 
       // Try a filtered partition query
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
@@ -203,6 +202,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
+      memStore.commitIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -235,6 +235,33 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         case QueryResult(_, schema, vectors) =>
           schema shouldEqual timeMinSchema
           vectors should have length (0)
+      }
+    }
+
+    it("should parse and execute concurrent LogicalPlan queries") {
+      val ref = setupTimeSeries()
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
+      probe.expectMsg(Ack(0L))
+
+      memStore.commitIndexForTesting(dataset1.ref)
+
+      val numQueries = 6
+
+      val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
+      val q2 = LogicalPlan2Query(ref,
+                 Aggregate(AggregationOperator.Avg,
+                   PeriodicSeries(
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
+      (0 until numQueries).foreach { i => probe.send(coordinatorActor, q2) }
+
+      (0 until numQueries).foreach { _ =>
+        probe.expectMsgPF() {
+          case QueryResult(_, schema, vectors) =>
+            schema shouldEqual timeMinSchema
+            vectors should have length (1)
+            vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
+        }
       }
     }
 
@@ -347,6 +374,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, StatusActor.GetCurrentEvents)
     probe.expectMsg(Map(ref -> Seq(IngestionStarted(ref, 0, coordinatorActor))))
 
+    memStore.commitIndexForTesting(dataset6.ref)
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
     val q2 = LogicalPlan2Query(ref,

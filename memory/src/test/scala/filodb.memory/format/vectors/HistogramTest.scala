@@ -91,5 +91,40 @@ class HistogramTest extends NativeVectorTest {
       hist should not equal (hist2)
       hist.values shouldEqual addedBuckets
     }
+
+    it("should correctly add & makeMonotonic histograms containing NaNs") {
+      val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
+      val histWNans = mutableHistograms(1)
+      histWNans.values(0) = Double.NaN
+      histWNans.values(2) = Double.NaN
+
+      hist1.add(histWNans)
+      var current = 0d
+      hist1.valueArray.foreach { d =>
+        d should be >= (current)
+        current = d
+      }
+    }
+
+    // Test this later when different schemas are supported
+    ignore("should add histogram w/ diff bucket scheme and result in monotonically increasing histogram") {
+      val hist1 = mutableHistograms(0).copy.asInstanceOf[MutableHistogram]
+
+      val scheme2 = GeometricBuckets(2.0, 6.0, 3)
+      val hist2 = LongHistogram(scheme2, Array(10L, 20L, 40L))
+
+      hist1.add(hist2)
+      hist1.makeMonotonic()
+
+      hist1.buckets shouldEqual bucketScheme   // scheme does not change - for now
+
+      // New buckets should be increasing, and values should not be less than before
+      var current = 0d
+      hist1.valueArray.zipWithIndex.foreach { case (d, i) =>
+        d should be >= (current)
+        d should be >= rawHistBuckets(0)(i)
+        current = d
+      }
+    }
   }
 }

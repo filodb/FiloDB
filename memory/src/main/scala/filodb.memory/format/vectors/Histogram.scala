@@ -132,6 +132,13 @@ trait HistogramWithBuckets extends Histogram {
   def buckets: HistogramBuckets
   final def numBuckets: Int = buckets.numBuckets
   final def bucketTop(no: Int): Double = buckets.bucketTop(no)
+  final def valueArray: Array[Double] = {
+    val values = new Array[Double](numBuckets)
+    for { b <- 0 until numBuckets optimized } {
+      values(b) = bucketValue(b)
+    }
+    values
+  }
 }
 
 final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) extends HistogramWithBuckets {
@@ -172,10 +179,12 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def copy: Histogram = MutableHistogram(buckets, values.clone)
 
   /**
-   * Adds the values from another MutableHistogram having the same bucket schema.  If it does not, then
-   * an exception is thrown -- for now.  Modifies itself.
+   * Adds the values from another Histogram.
+   * If the other histogram has the same bucket scheme, then the values are just added per bucket.
+   * If the scheme is different, then an approximation is used so that the resulting histogram has
+   * an approximate sum of the individual distributions, with the original scheme.  Modifies itself.
    */
-  final def add(other: HistogramWithBuckets): Unit =
+  final def addNoCorrection(other: HistogramWithBuckets): Unit =
     if (buckets == other.buckets) {
       // If it was NaN before, reset to 0 to sum another hist
       if (values(0).isNaN) java.util.Arrays.fill(values, 0.0)
@@ -183,13 +192,53 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
         values(b) += other.bucketValue(b)
       }
     } else {
-      throw new UnsupportedOperationException(s"Cannot add other with buckets ${other.buckets} to myself $buckets")
+      throw new UnsupportedOperationException(s"Cannot add histogram of scheme ${other.buckets} to $buckets")
+      // TODO: In the future, support adding buckets of different scheme.  Below is an example
+      // NOTE: there are two issues here: below add picks the existing bucket scheme (not commutative)
+      //       and the newer different buckets are lost (one may want more granularity)
+      // var ourBucketNo = 0
+      // for { b <- 0 until other.numBuckets optimized } {
+      //   // Find our first bucket greater than or equal to their bucket
+      //   while (ourBucketNo < numBuckets && bucketTop(ourBucketNo) < other.bucketTop(b)) ourBucketNo += 1
+      //   if (ourBucketNo < numBuckets) {
+      //     values(ourBucketNo) += other.bucketValue(b)
+      //   }
+      // }
     }
+
+  /**
+   * Adds the values from another Histogram, making a monotonic correction to ensure correctness
+   */
+  final def add(other: HistogramWithBuckets): Unit = {
+    addNoCorrection(other)
+    makeMonotonic()
+  }
+
+  /**
+    * Fixes any issue with monotonicity of supplied bucket values.
+    * Bucket values should monotonically increase. It may not be the case
+    * if the bucket values are not atomically obtained from the same scrape,
+    * or if bucket le values change over time (esp from aggregation) causing NaN on missing buckets.
+    */
+  final def makeMonotonic(): Unit = {
+    var max = 0d
+    for { b <- 0 until values.size optimized } {
+      // When bucket no longer used NaN will be seen. Non-increasing values can be seen when
+      // newer buckets are introduced and not all instances are updated with that bucket.
+      if (values(b) < max || values(b).isNaN) values(b) = max // assign previous max
+      else if (values(b) > max) max = values(b) // update max
+    }
+  }
 }
 
 object MutableHistogram {
   def empty(buckets: HistogramBuckets): MutableHistogram =
     MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
+
+  def apply(h: Histogram): MutableHistogram = h match {
+    case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)
+    case other: Histogram         => ???
+  }
 }
 
 /**

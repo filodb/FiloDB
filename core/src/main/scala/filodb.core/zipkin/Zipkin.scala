@@ -127,6 +127,8 @@ class ZipkinReporter extends SpanReporter {
     val zipkinEndpoint = Kamon.config().getString(ZipkinEndpoint)
     val zipkinHost = Kamon.config().getString(HostConfigKey)
     val zipkinPort = Kamon.config().getInt(PortConfigKey)
+    val maxRequests = Kamon.config().getInt(MaxRequests)
+    val messageMaxBytes = Kamon.config().getInt(MessageMaxBytes)
 
     val url = if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty)
                 s"http://$zipkinHost:$zipkinPort/api/v2/spans"
@@ -137,8 +139,8 @@ class ZipkinReporter extends SpanReporter {
       OkHttpSender.newBuilder()
         .encoding(Encoding.JSON)
         .endpoint(url)
-        .maxRequests(64)
-        .messageMaxBytes(1024 * 128)
+        .maxRequests(if (maxRequests > 0) maxRequests else 128)
+        .messageMaxBytes(if (messageMaxBytes > 0) messageMaxBytes else 1024 * 256)
         .build()
     )
   }
@@ -157,6 +159,8 @@ object ZipkinReporter {
   private val ZipkinEndpoint = "kamon.zipkin.endpoint"
   private val HostConfigKey = "kamon.zipkin.host"
   private val PortConfigKey = "kamon.zipkin.port"
+  private val MaxRequests = "kamon.zipkin.max.requests"
+  private val MessageMaxBytes = "kamon.zipkin.message.max.bytes"
   private val SpanKindTag = "span.kind"
   private val SpanKindServer = "server"
   private val SpanKindClient = "client"

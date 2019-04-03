@@ -495,7 +495,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             }
           case _ =>
         }
-        publishChanges(event.ref)
+        // RecoveryInProgress status results in too many messages that really do not need a publish
+        if (!event.isInstanceOf[RecoveryInProgress]) publishSnapshot(event.ref)
       } else {
         logger.warn(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
           s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")

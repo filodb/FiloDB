@@ -12,7 +12,7 @@ import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.{BinaryRegion, MemFactory}
-import filodb.memory.format.{BinaryVector, RowReader, TypedIterator}
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -169,6 +169,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
 
   val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
   val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
+  val nonMetricShardKeyUTF8 = nonMetricShardColumns.map(ZCUTF8.apply).toArray
   val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
   val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 

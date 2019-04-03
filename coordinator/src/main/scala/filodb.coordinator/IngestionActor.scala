@@ -60,6 +60,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
   final val streams = new HashMap[Int, IngestionStream]
+  final val nodeCoord = context.parent
   var shardStateVersion: Long = 0
 
   // Params for creating the default memStore flush scheduler
@@ -204,7 +205,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
       logger.info(s"Starting normal/active ingestion for dataset=${dataset.ref} shard=$shard at offset $offset")
-      statusActor ! IngestionStarted(dataset.ref, shard, context.parent)
+      statusActor ! IngestionStarted(dataset.ref, shard, nodeCoord)
 
       streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
         shard,
@@ -249,7 +250,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                .withTag("shard", shard.toString)
                                .withTag("dataset", dataset.ref.toString).start()
       val stream = ingestionStream.get
-      statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
+      statusActor ! RecoveryInProgress(dataset.ref, shard, nodeCoord, 0)
 
       val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(dataset.ref, shard)
       val fut = memStore.recoverStream(dataset.ref, shard, stream, checkpoints, interval)
@@ -258,7 +259,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                             else (off - startOffset) * 100 / (endOffset - startOffset)
           logger.info(s"Recovery of dataset=${dataset.ref} shard=$shard at " +
             s"$progressPct % - offset $off (target $endOffset)")
-          statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
+          statusActor ! RecoveryInProgress(dataset.ref, shard, nodeCoord, progressPct.toInt)
           off }
         .until(_ >= endOffset)
         // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread

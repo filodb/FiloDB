@@ -202,10 +202,10 @@ You can also check the server logs at `logs/filodb-server-N.log`.
 Now run the time series generator. This will ingest 20 time series (the default) with 100 samples each into the Kafka topic with current timestamps.  The required argument is the path to the source config.  Use `--help` for all the options.
 
 ```
-java -cp gateway/target/scala-2.11/gateway-*-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
+./dev-gateway.sh --gen-prom-data conf/timeseries-dev-source.conf
 ```
 
-NOTE: The `TestTimeseriesProducer` logs to logs/gateway-server.log.
+NOTE: Check logs/gateway-server.log for logs.
 
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
 
@@ -220,8 +220,9 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
+1a) Restart Kafka, this is sometimes necessary.
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
-3) Re-run the `TestTimeseriesProducer`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
+3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
 To stop the dev server. Note that this will stop all the FiloDB servers if multiple are running.
 ```
@@ -308,7 +309,7 @@ Now if you curl the cluster status you should see 128 shards which are slowly tu
 Generate records:
 
 ```
-java -cp gateway/target/scala-2.11/gateway-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
+./dev-gateway.sh --gen-prom-data -p 5000 conf/timeseries-128shards-source.conf
 ```
 
 ## Understanding the FiloDB Data Model
@@ -388,12 +389,15 @@ Example of debugging chunk metadata using the CLI:
 
 ### First-Class Histogram Support
 
-One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds.  Here are the differences users need to be aware of when using `HistogramColumn`:
+One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds (up to two orders of magnitude).  There is no "le" tag or individual time series for each bucket.  Here are the differences users need to be aware of when using `HistogramColumn`:
 
 * There is no need to append `_bucket` to the metric name.
 * However, you need to select the histogram column like `__col__="hist"`
-* To compute quantiles:  `histogram_quantile(0.7, rate(http_req_latency{app="foo",__col__="hist"}[5m]))`
+* To compute quantiles:  `histogram_quantile(0.7, sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))`
 * To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo",__col__="hist"})`
+* Sum over multiple Histogram time series:  `sum(sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))` - you could then compute quantile over the sum.
+  - NOTE: Do NOT use `group by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
+  - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
 
 ### Using the FiloDB HTTP API
 

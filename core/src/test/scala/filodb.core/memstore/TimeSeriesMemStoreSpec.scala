@@ -6,6 +6,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
+import org.apache.lucene.util.BytesRef
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -82,9 +83,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       memStore.ingest(dataset1.ref, 0, data)
     }
 
+    memStore.commitIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split)).map(_.getDouble(0)).sum
-    agg1 shouldEqual ((1 to 20).map(_.toDouble).sum)
+    agg1 shouldEqual (1 to 20).map(_.toDouble).sum
   }
 
   it("should ingest map/tags column as partition key and aggregate") {
@@ -204,6 +206,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     fut1.futureValue
     fut2.futureValue
 
+    memStore.commitIndexForTesting(dataset1.ref)
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
                        .map(_.getDouble(0)).sum
@@ -242,6 +245,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
@@ -269,6 +273,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
   }
 
+  /**
+    * Tries to write partKeys into time bucket record container and extracts them back into the shard
+    */
   def indexRecoveryTest(dataset: Dataset, partKeys: Seq[Long]): Unit = {
     memStore.metastore.writeHighestIndexTimeBucket(dataset.ref, 0, 0)
     memStore.setup(dataset, 0,
@@ -279,24 +286,33 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     partKeys.zipWithIndex.foreach { case (off, i) =>
       timeBucketRb.startNewRecord()
-      timeBucketRb.addLong(i + 10)
-      timeBucketRb.addLong(i + 20)
+      timeBucketRb.addLong(i + 10) // startTime
+      timeBucketRb.addLong(if (i%2 == 0) Long.MaxValue else i + 20) // endTime
       val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
-      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
+      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4) // partKey
       timeBucketRb.endRecord(false)
     }
     tsShard.initTimeBuckets()
 
+    val partIdMap = debox.Map.empty[BytesRef, Int]
+
     timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
-      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)))
+      tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)), partIdMap)
     }
     tsShard.commitPartKeyIndexBlocking()
+    partIdMap.size shouldEqual partKeys.size
     partKeys.zipWithIndex.foreach { case (off, i) =>
       val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
       val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
-      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
-      tsShard.partitions.get(i).partKeyBytes shouldEqual expectedPartKey
-      tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+      readPartKey.bytes.slice(readPartKey.offset, readPartKey.offset + readPartKey.length) shouldEqual expectedPartKey
+      if (i%2 == 0) {
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+        tsShard.partitions.containsKey(i) shouldEqual true // since partition is ingesting
+      }
+      else {
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off) shouldEqual None
+        tsShard.partitions.containsKey(i) shouldEqual false // since partition is not ingesting
+      }
     }
   }
 
@@ -336,6 +352,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // no flushes
     chunksetsWritten shouldEqual initChunksWritten
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Should have less than 50 records ingested
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
@@ -401,13 +418,15 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
 
-    // Check partitions are now 2 to 21, 0 and 1 got evicted
+    memStore.commitIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet
+    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet  ++ Set(0)
+    // Above query will ODP evicted partition 0 back in, but there is no space for evicted part 1,
+    // so it will not be returned as part of query :(
   }
 
   it("should be able to ODP/query partitions evicted from memory structures when doing index/tag query") {
@@ -511,6 +530,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual 0
 
+    memStore.commitIndexForTesting(dataset1.ref)
     // Check partitions are now 0 to 20, 21/22 did not get added
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
