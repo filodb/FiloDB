@@ -258,7 +258,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
           case QueryResult(_, schema, vectors) =>
-            schema shouldEqual timeMinSchema
+            schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
