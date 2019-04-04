@@ -206,7 +206,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema
+          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
@@ -219,7 +219,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual countSchema
+          schema shouldEqual countSchema.copy(fixedVectorLen = Some(2))
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
@@ -233,7 +233,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema
+          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
           vectors should have length (0)
       }
     }
@@ -258,7 +258,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
           case QueryResult(_, schema, vectors) =>
-            schema shouldEqual timeMinSchema
+            schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
@@ -385,7 +385,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>
         schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                            ColumnInfo("AvgTone", DoubleColumn)), 1)
+                                            ColumnInfo("AvgTone", DoubleColumn)), 1, fixedVectorLen = Some(10))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....

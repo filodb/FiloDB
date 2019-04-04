@@ -27,10 +27,13 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType)
 /**
  * Describes the full schema of result types, including how many initial columns are for row keys.
  * The first ColumnInfo in the schema describes the first vector in Vectors and first field in Tuples, etc.
- * @param brSchemas if any of the columns is a binary record, thsi
+ * @param brSchemas if any of the columns is a BinaryRecord: map of colNo -> inner BinaryRecord schema
+ * @param fixedVectorLen if defined, each vector is guaranteed to have exactly this many output elements.
+ *                       See PeriodicSampleMapper for an example of how this is used.
  */
 final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
-                              brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty) {
+                              brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty,
+                              fixedVectorLen: Option[Int] = None) {
   import Column.ColumnType._
 
   def length: Int = columns.length
