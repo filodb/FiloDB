@@ -344,7 +344,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val samples: Array[RangeVector] = Array(rv1, rv2)
 
     val agg1 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.HistogramColumn)
-    val resultObs = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual 1
     result(0).key shouldEqual noKey
@@ -356,6 +358,14 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     }.toList
 
     result(0).rows.map(_.getHistogram(1)).toList shouldEqual sums
+
+    // Test mapReduce of empty histogram sums
+    val agg2 = RowAggregator(AggregationOperator.Sum, Nil, ColumnType.HistogramColumn)
+    val emptyObs = RangeVectorAggregator.mapReduce(agg2, false, Observable.empty, noGrouping)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, emptyObs ++ resultObs1, rv=>rv.key)
+    val result2 = resultObs2.toListL.runAsync.futureValue
+    result2.size shouldEqual 1
+    result2(0).key shouldEqual noKey
   }
 
   @tailrec
