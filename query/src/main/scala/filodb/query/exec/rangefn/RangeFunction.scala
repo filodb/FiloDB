@@ -315,7 +315,7 @@ extends LastSampleChunkedFunction[TransientRow] {
 }
 
 // LastSample function for Histogram columns
-class LastSampleChunkedFunctionH(var value: bv.Histogram = bv.Histogram.empty)
+class LastSampleChunkedFunctionH(var value: bv.HistogramWithBuckets = bv.Histogram.empty)
 extends LastSampleChunkedFunction[TransientHistRow] {
   override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty }
   final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
