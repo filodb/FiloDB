@@ -56,8 +56,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
 }
 
 final class TransientHistRow(var timestamp: Long = 0L,
-                             var value: bv.Histogram = bv.Histogram.empty) extends MutableRowReader {
-  def setValues(ts: Long, hist: bv.Histogram): Unit = {
+                             var value: bv.HistogramWithBuckets = bv.Histogram.empty) extends MutableRowReader {
+  def setValues(ts: Long, hist: bv.HistogramWithBuckets): Unit = {
     timestamp = ts
     value = hist
   }

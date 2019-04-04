@@ -166,7 +166,7 @@ class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with Chun
   }
 }
 
-class SumOverTimeChunkedFunctionH(var h: bv.Histogram = bv.Histogram.empty)
+class SumOverTimeChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.empty)
 extends ChunkedRangeFunction[TransientHistRow] {
   override final def reset(): Unit = { h = bv.Histogram.empty }
   final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
