@@ -590,7 +590,8 @@ The `filo-cli` accepts arguments and options as key-value pairs, specified like 
 | minutes    | A shortcut to set the start at N minutes ago, and the stop at current time.  Should specify a step also.   |
 | chunks     | Either "memory" or "buffers" to select either all the in-memory chunks or the write buffers only.  Should specify a step also. |
 | database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
-| limit      | The maximum number of samples per time series  |
+| limit      | Limits the number of time series in the output  |
+| sampleLimit | Maximum number of output samples in the query result.  An exception is thrown if the output returns more results than this.  |
 | shards     | (EXPERT) overrides the automatic shard calculation by passing in a comma-separated list of specific shards to query.  Very useful to debug sharding issues.  |
 | everyNSeconds  | Repeats the query every (argument) seconds     |
 | timeoutSeconds | The number of seconds for the network timeout  |
