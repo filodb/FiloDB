@@ -116,9 +116,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     "if incorrect shard is sent for the creation of the stream") {
     setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
-    val invalidShard = -1
-    coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
-
     // first it becomes active
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset6.ref, mapper) =>
@@ -191,6 +188,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     // expectMsg(IngestionStopped(dataset33.ref, 0))
     // Unfortunately since we do not get every message we cannot actually check the progression of recovery
 
+    /* RecoveryInProgress events don't publish snapshots because of the high message load.
     for { i <- 0 until 3} {
       expectMsgPF(within) {
         case CurrentShardSnapshot(dataset33.ref, mapper) =>
@@ -198,6 +196,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
           mapper.statuses.head.isInstanceOf[ShardStatusRecovery] shouldEqual true
       }
     }
+    */
 
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset33.ref, mapper) =>
