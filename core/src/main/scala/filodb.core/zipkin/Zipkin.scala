@@ -139,8 +139,8 @@ class ZipkinReporter extends SpanReporter {
       OkHttpSender.newBuilder()
         .encoding(Encoding.JSON)
         .endpoint(url)
-        .maxRequests(if (maxRequests > 0) maxRequests else 128)
-        .messageMaxBytes(if (messageMaxBytes > 0) messageMaxBytes else 1024 * 256)
+        .maxRequests(maxRequests)
+        .messageMaxBytes(messageMaxBytes)
         .build()
     )
   }

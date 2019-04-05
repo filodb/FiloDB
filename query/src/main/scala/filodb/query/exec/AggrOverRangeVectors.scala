@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable
 
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
 import filodb.core.binaryrecord2.RecordBuilder
@@ -111,7 +112,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
   *
   * This singleton is the facade for the above operations.
   */
-object RangeVectorAggregator {
+object RangeVectorAggregator extends StrictLogging {
 
   /**
     * This method is the facade for map and reduce steps of the aggregation.
@@ -146,6 +147,7 @@ object RangeVectorAggregator {
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
                      grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
+    logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
@@ -320,7 +322,8 @@ object SumRowAggregator extends RowAggregator {
 object HistSumRowAggregator extends RowAggregator {
   import filodb.memory.format.{vectors => bv}
 
-  class HistSumHolder(var timestamp: Long = 0L, var h: bv.Histogram = bv.Histogram.empty) extends AggregateHolder {
+  class HistSumHolder(var timestamp: Long = 0L,
+                      var h: bv.MutableHistogram = bv.Histogram.empty) extends AggregateHolder {
     val row = new TransientHistRow()
     def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row }
     def resetToZero(): Unit = h = bv.Histogram.empty
@@ -331,10 +334,12 @@ object HistSumRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduceAggregate(acc: HistSumHolder, aggRes: RowReader): HistSumHolder = {
     acc.timestamp = aggRes.getLong(0)
+    val newHist = aggRes.getHistogram(1)
     acc.h match {
       // sum is mutable histogram, copy to be sure it's our own copy
-      case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(aggRes.getHistogram(1))
-      case hist: bv.MutableHistogram    => hist.add(aggRes.getHistogram(1).asInstanceOf[bv.HistogramWithBuckets])
+      case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(newHist)
+      case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
+      case h                            =>
     }
     acc
   }

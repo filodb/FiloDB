@@ -279,7 +279,7 @@ class AppendableHistogramVector(factory: MemFactory,
 
 trait HistogramReader extends VectorDataReader {
   def buckets: HistogramBuckets
-  def apply(index: Int): Histogram
+  def apply(index: Int): HistogramWithBuckets
   def sum(start: Int, end: Int): MutableHistogram
 }
 
@@ -372,7 +372,7 @@ class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader {
   def length(addr: BinaryVectorPtr): Int = length
 
   // WARNING: histogram returned is shared between calls, do not reuse!
-  final def apply(index: Int): Histogram = {
+  final def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16

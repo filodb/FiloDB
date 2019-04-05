@@ -116,16 +116,7 @@ trait Histogram extends Ordered[Histogram] {
 }
 
 object Histogram {
-  val empty = new Histogram {
-    final def numBuckets: Int = 0
-    final def bucketTop(no: Int): Double = ???
-    final def bucketValue(no: Int): Double = ???
-    final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
-      val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-      BinaryHistogram.writeNonIncreasing(HistogramBuckets.emptyBuckets, Array[Long](), buf)
-      buf
-    }
-  }
+  val empty = MutableHistogram(HistogramBuckets.emptyBuckets, Array.empty)
 }
 
 trait HistogramWithBuckets extends Histogram {
@@ -176,7 +167,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   /**
    * Copies this histogram as a new copy so it can be used for aggregation or mutation. Allocates new storage.
    */
-  final def copy: Histogram = MutableHistogram(buckets, values.clone)
+  final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
 
   /**
    * Adds the values from another Histogram.

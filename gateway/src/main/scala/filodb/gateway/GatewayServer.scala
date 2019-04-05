@@ -4,8 +4,8 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 import com.typesafe.config.{Config, ConfigFactory}
@@ -25,25 +25,42 @@ import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
 import org.jboss.netty.handler.ssl.SslContext
 import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
+import org.rogach.scallop._
 
-import filodb.coordinator.{GlobalConfig, ShardMapper}
+import filodb.coordinator.{FilodbSettings, GlobalConfig, ShardMapper, StoreFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.gateway.conversion._
 import filodb.memory.MemFactory
-import filodb.prometheus.FormatConversion
+import filodb.timeseries.TestTimeseriesProducer
 
 
 /**
  * Gateway server to ingest source streams of data, shard, batch, and write output to Kafka
  * built using high performance Netty TCP code
  *
- * It takes exactly one arg: the source config file which contains # Kafka partitions/shards and other config
- * Also pass in -Dconfig.file=.... as usual
+ * It usually takes one arg: the source config file which contains # Kafka partitions/shards and other config
+ * Also pass in -Dconfig.file=.... as usual, with a config that points to the dataset metadata.
+ * For local setups, simply run `./dev-gateway.sh`.
+ * For help pass in `--help`.
+ *
+ * NOTE: set `kamon.prometheus.embedded-server.port` to avoid conflicting with FiloDB itself.
+ *
+ * There are options that can be used to generate test data, such as `--gen-hist-data`.  The -n and -p options can
+ * also be used together to control the # of samples per series and # of time series.
+ * To generate Histogram schema test data, one must create the following dataset:
+ *   ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset histogram \
+ *      --dataColumns timestamp:ts,sum:long,count:long,h:hist --partitionColumns metric:string,tags:map \
+ *      --shardKeyColumns metric --metricColumn metric
+ * create a Kafka topic:
+ *   kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic histogram-dev
+ * and use the `conf/histogram-dev-source.conf` config file.
+ * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
   // Get global configuration using universal FiloDB/Akka-based config
   val config = GlobalConfig.systemConfig
+  val storeFactory = StoreFactory(new FilodbSettings(config), Scheduler.io())
 
   // ==== Metrics ====
   val numInfluxMessages = Kamon.counter("num-influx-messages")
@@ -52,21 +69,29 @@ object GatewayServer extends StrictLogging {
   val numContainersSent = Kamon.counter("num-containers-sent")
   val containersSize = Kamon.histogram("containers-size-bytes")
 
+  // Most options are for generating test data
+  class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
+    val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
+                                    descr="# of samples per time series")
+    val numSeries = opt[Int](short='p', default = Some(20), descr="# of total time series")
+    val sourceConfigPath = trailArg[String](descr="Path to source config, eg conf/timeseries-dev-source.conf")
+    val genHistData = toggle(noshort=true, descrYes="Generate histogram-schema test data and exit")
+    val genPromData = toggle(noshort=true, descrYes="Generate Prometheus-schema test data and exit")
+    verify()
+  }
+
+  //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
     Kamon.loadReportersFromConfig()
+    val userOpts = new GatewayOptions(args)
+    val numSamples = userOpts.samplesPerSeries() * userOpts.numSeries()
+    val numSeries = userOpts.numSeries()
 
-    if (args.length < 1) {
-      //scalastyle:off
-      println("Arguments: [path/to/source-config.conf]")
-      //scalastyle:on
-      sys.exit(1)
-    }
-
-    val sourceConfig = ConfigFactory.parseFile(new java.io.File(args.head))
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    // TODO: get the dataset from source config and read the definition from Metastore
-    val dataset = FormatConversion.dataset
+    val datasetStr = sourceConfig.getString("dataset")
+    val dataset = Await.result(storeFactory.metaStore.getDataset(datasetStr), 30.seconds)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
@@ -97,8 +122,33 @@ object GatewayServer extends StrictLogging {
 
     // TODO: allow configurable sinks, maybe multiple sinks for say writing to multiple Kafka clusters/DCs
     setupKafkaProducer(sourceConfig, containerStream)
-    setupTCPService(config, calcShardAndQueueHandler)
+
+    val genHist = userOpts.genHistData.getOrElse(false)
+    val genProm = userOpts.genPromData.getOrElse(false)
+    if (genHist || genProm) {
+      val startTime = System.currentTimeMillis
+      logger.info(s"Generating $numSamples samples starting at $startTime....")
+
+      val stream = if (genHist) TestTimeseriesProducer.genHistogramData(startTime, dataset, numSeries)
+                   else         TestTimeseriesProducer.timeSeriesData(startTime, numSeries)
+
+      stream.take(numSamples).foreach { rec =>
+        val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
+        if (!shardQueues(shard).offer(rec)) {
+          // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
+          logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
+          numDroppedMessages.increment
+        }
+      }
+      Thread sleep 10000
+      TestTimeseriesProducer.logQueryHelp(numSamples, numSeries, startTime)
+      logger.info(s"Waited for containers to be sent, exiting...")
+      sys.exit(0)
+    } else {
+      setupTCPService(config, calcShardAndQueueHandler)
+    }
   }
+  //scalastyle:on method.length
 
   def setupTCPService(config: Config, handler: ChannelBuffer => Unit): Unit = {
     val influxPort = config.getInt("gateway.influx-port")

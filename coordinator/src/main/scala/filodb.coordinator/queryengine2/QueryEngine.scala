@@ -1,6 +1,7 @@
 package filodb.coordinator.queryengine2
 
-import java.util.{SplittableRandom, UUID}
+import java.util.UUID
+import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
@@ -362,10 +363,7 @@ class QueryEngine(dataset: Dataset,
     val childTargets = children.map(_.dispatcher)
     // Above list can contain duplicate dispatchers, and we don't make them distinct.
     // Those with more shards must be weighed higher
-    childTargets.iterator.drop(QueryEngine.random.nextInt(childTargets.size)).next
+    val rnd = ThreadLocalRandom.current()
+    childTargets.iterator.drop(rnd.nextInt(childTargets.size)).next
   }
-}
-
-object QueryEngine {
-  val random = new SplittableRandom()
 }
