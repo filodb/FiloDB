@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 
@@ -57,7 +59,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   val ingesters = new HashMap[DatasetRef, ActorRef]
   val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
-  val shardMaps = new HashMap[DatasetRef, ShardMapper]
+  val shardMaps = new ConcurrentHashMap[DatasetRef, ShardMapper]
   var statusActor: Option[ActorRef] = None
 
   private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
@@ -137,7 +139,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         ingesters(ref) = ingester
 
         logger.info(s"Creating QueryActor for dataset $ref")
-        val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps(ref)), s"$Query-$ref")
+        val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
         nca.tell(SubscribeShardUpdates(ref), self)
         queryActors(ref) = queryRef
 
@@ -190,7 +192,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case NodeProtocol.ResetState      => reset(sender())
     case CurrentShardSnapshot(ds, mapper) =>
       logger.debug(s"Received ShardSnapshot $mapper")
-      shardMaps(ds) = mapper
+      shardMaps.put(ds, mapper)
       // NOTE: QueryActor has AtomicRef so no need to forward message to it
   }
 
