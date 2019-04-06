@@ -114,21 +114,23 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * appending a set of labels to match in curly braces ({}).
     */
 
-  case class InstantExpression(metricName: String,
+  case class InstantExpression(metricName: Option[String],
                                labelSelection: Seq[LabelMatch],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
+
     val staleDataLookbackSeconds = 5 * 60 // 5 minutes
 
-    private val nameLabels = labelSelection.filter(_.label == PromMetricLabel)
-
-    if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
+    private val nameLabelValue = labelSelection.find(_.label == PromMetricLabel).map(_.value)
+    if (nameLabelValue.nonEmpty && metricName.nonEmpty) {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
+    val realMetricName = metricName.orElse(nameLabelValue)
+      .getOrElse(throw new IllegalArgumentException("Metric name is not present"))
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
-    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
-    def getColFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
+    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(realMetricName))
+    def getColFilters: Seq[ColumnFilter] = if (metricName.isDefined) columnFilters :+ nameFilter else columnFilters
 
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
@@ -156,21 +158,23 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * at the end of a vector selector to specify how far back in time values
     * should be fetched for each resulting range vector element.
     */
-  case class RangeExpression(metricName: String,
+  case class RangeExpression(metricName: Option[String],
                              labelSelection: Seq[LabelMatch],
                              window: Duration,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
-    private val nameLabels = labelSelection.filter(_.label == PromMetricLabel)
+    private val nameLabelValue = labelSelection.find(_.label == PromMetricLabel).map(_.value)
 
-    if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
+    if (nameLabelValue.nonEmpty && metricName.nonEmpty) {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
+    val realMetricName = metricName.orElse(nameLabelValue)
+      .getOrElse(throw new IllegalArgumentException("Metric name is not present"))
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
-    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
+    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(realMetricName))
 
-    val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
+    val allFilters: Seq[ColumnFilter] = if (metricName.isDefined) columnFilters :+ nameFilter else columnFilters
 
     def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan = {
       if (isRoot && timeParams.start != timeParams.end) {

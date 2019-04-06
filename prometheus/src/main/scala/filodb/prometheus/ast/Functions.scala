@@ -19,7 +19,7 @@ trait Functions extends Base with Operators with Vectors {
       val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
       val otherParams = allParams.filter(!_.equals(seriesParam)).map(_ match {
         case num: ScalarExpression => num.toScalar
-        case s: InstantExpression => s.metricName.replaceAll("^\"|\"$", "")
+        case s: InstantExpression => s.realMetricName.replaceAll("^\"|\"$", "")
         case _ =>
           throw new IllegalArgumentException("Parameters can be a string or number")
       }
