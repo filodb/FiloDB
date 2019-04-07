@@ -322,6 +322,8 @@ class ParserSpec extends FunSpec with Matchers {
         "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(instance,EqualsRegex(.*)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000000,1524855988000),Absent,List())",
       "absent(sum(nonexistent{job=\"myjob\"}))" ->
         "ApplyInstantFunction(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),Absent,List())",
+      """{__name__="foo\\\"\n\t",job="myjob"}[5m]""" ->
+        "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo\\\"\n\t)), ColumnFilter(job,Equals(myjob))),List())",
       "{__name__=\"foo\",job=\"myjob\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo)), ColumnFilter(job,Equals(myjob))),List()),1524855988000,1000000,1524855988000)",
       "{__name__=\"foo\",job=\"myjob\"}[5m]" ->
@@ -332,7 +334,7 @@ class ParserSpec extends FunSpec with Matchers {
 
     val qts: Long = 1524855988L
     queryToLpString.foreach { case (q, e) =>
-      println(s"Parsing $q")
+      info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts)
       lp.toString shouldEqual (e)
     }

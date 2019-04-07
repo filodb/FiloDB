@@ -333,7 +333,7 @@ object Parser extends Expression {
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
-      case p: InstantExpression => MetadataExpression(p).toMetadataQueryPlan(timeParams)
+      case p: InstantExpression => p.toMetadataPlan(timeParams)
       case _ => throw new UnsupportedOperationException()
     }
   }

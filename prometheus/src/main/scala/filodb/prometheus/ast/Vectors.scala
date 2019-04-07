@@ -84,13 +84,30 @@ trait Vectors extends Scalars with TimeUnits with Base {
   }
 
   sealed trait Vector extends Expression {
+
+    def metricName: Option[String]
+    def labelSelection: Seq[LabelMatch]
+
+    def realMetricName: String = {
+      val nameLabelValue = labelSelection.find(_.label == PromMetricLabel).map(_.value)
+      if (nameLabelValue.nonEmpty && metricName.nonEmpty) {
+        throw new IllegalArgumentException("Metric name should not be set twice")
+      }
+      metricName.orElse(nameLabelValue)
+        .getOrElse(throw new IllegalArgumentException("Metric name is not present"))
+    }
+
     protected def labelMatchesToFilters(labels: Seq[LabelMatch]) =
       labels.map { labelMatch =>
-        labelMatch.labelMatchOp match {
-          case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
-          case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelMatch.value))
-          case RegexMatch      => ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelMatch.value))
-          case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelMatch.value))
+        val labelValue = labelMatch.value.replace("\\\\", "\\")
+                                         .replace("\\\"", "\"")
+                                         .replace("\\n", "\n")
+                                         .replace("\\t", "\t")
+          labelMatch.labelMatchOp match {
+          case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelValue))
+          case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelValue))
+          case RegexMatch      => ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelValue))
+          case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelValue))
           case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
         }
       // Remove the column selector as that is not a real time series filter
@@ -114,18 +131,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * appending a set of labels to match in curly braces ({}).
     */
 
-  case class InstantExpression(metricName: Option[String],
-                               labelSelection: Seq[LabelMatch],
+  case class InstantExpression(override val metricName: Option[String],
+                               override val labelSelection: Seq[LabelMatch],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
 
     val staleDataLookbackSeconds = 5 * 60 // 5 minutes
-
-    private val nameLabelValue = labelSelection.find(_.label == PromMetricLabel).map(_.value)
-    if (nameLabelValue.nonEmpty && metricName.nonEmpty) {
-      throw new IllegalArgumentException("Metric name should not be set twice")
-    }
-    val realMetricName = metricName.orElse(nameLabelValue)
-      .getOrElse(throw new IllegalArgumentException("Metric name is not present"))
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
@@ -142,12 +152,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
         timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000
       )
     }
-  }
 
-  case class MetadataExpression(instantExpression: InstantExpression) extends Vector with Metadata {
-
-    override def toMetadataQueryPlan(timeParams: TimeRangeParams): MetadataQueryPlan = {
-      SeriesKeysByFilters(instantExpression.getColFilters, timeParams.start * 1000, timeParams.end * 1000)
+    def toMetadataPlan(timeParams: TimeRangeParams): SeriesKeysByFilters = {
+      SeriesKeysByFilters(getColFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 
@@ -158,17 +165,10 @@ trait Vectors extends Scalars with TimeUnits with Base {
     * at the end of a vector selector to specify how far back in time values
     * should be fetched for each resulting range vector element.
     */
-  case class RangeExpression(metricName: Option[String],
-                             labelSelection: Seq[LabelMatch],
+  case class RangeExpression(override val metricName: Option[String],
+                             override val labelSelection: Seq[LabelMatch],
                              window: Duration,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
-    private val nameLabelValue = labelSelection.find(_.label == PromMetricLabel).map(_.value)
-
-    if (nameLabelValue.nonEmpty && metricName.nonEmpty) {
-      throw new IllegalArgumentException("Metric name should not be set twice")
-    }
-    val realMetricName = metricName.orElse(nameLabelValue)
-      .getOrElse(throw new IllegalArgumentException("Metric name is not present"))
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
