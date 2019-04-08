@@ -206,7 +206,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val shardManager = new ShardManager(settings, assignmentStrategy)
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
-  val shardUpdates = new MutableHashSet[DatasetRef]
 
   // Counter is incremented each time shardmapper snapshot is published.
   // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
@@ -350,7 +349,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   // handleEventEnvelope() currently acks right away, so there is a chance that this actor dies between receiving
   // a new event and the new snapshot is published.
   private def scheduleSnapshotPublishes() = {
-    pubTask = Some(context.system.scheduler.schedule(1.second, publishInterval, self, PublishSnapshot))
+    pubTask = Some(context.system.scheduler.schedule(1.minute, publishInterval, self, PublishSnapshot))
   }
 
   def shardMapHandler: Receive = LoggingReceive {
@@ -364,11 +363,10 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def subscriptionHandler: Receive = LoggingReceive {
     case e: ShardEvent            => handleShardEvent(e)
     case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
-    case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+    case PublishSnapshot          => datasets.keys.foreach(shardManager.publishSnapshot)
                                      //This counter gets published from ShardManager,
                                      // > 0 means this node is shardmanager
                                      iamShardManager.increment()
-                                     shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
     case Terminated(subscriber)   => context unwatch subscriber
@@ -376,7 +374,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   private def handleShardEvent(e: ShardEvent) = {
     logger.debug(s"Received ShardEvent $e from $sender")
-    shardUpdates += e.ref
     shardManager.updateFromExternalShardEvent(sender(), e)
   }
 
@@ -466,7 +463,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       logger.info("Resetting all dataset state except membership.")
       datasets.clear()
       sources.clear()
-      shardUpdates.clear()
 
       implicit val timeout: Timeout = DefaultTaskTimeout
       shardManager.reset()
