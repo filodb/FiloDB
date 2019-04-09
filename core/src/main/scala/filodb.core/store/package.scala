@@ -13,8 +13,7 @@ package object store {
   val decompressor = new ThreadLocal[LZ4FastDecompressor]()
 
   val msBitOffset   = 21
-  val baseNsBitOffset = 9   // 2 ** 9 = 512
-  val lowerBitsMask   = Math.pow(2, msBitOffset).toInt - 1
+  val lowerBitsMask = Math.pow(2, msBitOffset).toInt - 1
 
   // Assume LZ4 compressor has state and is not thread safe.  Use ThreadLocals.
   private def getCompressor: LZ4Compressor = {
