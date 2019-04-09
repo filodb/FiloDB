@@ -1,20 +1,21 @@
 package filodb.query.exec
 
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
+import monix.eval.Task
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
+import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import monix.eval.Task
-import monix.execution.Scheduler.Implicits.global
-import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{FunSpec, Matchers}
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
-import scala.util.Random
 
 class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   import SelectRawPartitionsExecSpec._
