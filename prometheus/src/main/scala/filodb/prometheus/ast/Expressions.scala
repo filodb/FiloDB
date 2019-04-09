@@ -47,7 +47,19 @@ trait Expressions extends Aggregates with Functions {
           val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           val cardinality = vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
-          BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs)
+
+          if (vectorMatch.isDefined && vectorMatch.get.matching.isDefined) {
+            val matcher = vectorMatch.get.matching.get
+            val matchLabels = matcher.labels
+            if (matcher.isInstanceOf[On])
+              BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs, matchLabels)
+            else
+              BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs, Nil, matchLabels)
+          }
+
+          else
+            BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs)
+
       }
     }
   }
