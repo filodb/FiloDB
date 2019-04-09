@@ -41,7 +41,7 @@ object ChunkSet {
   def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, newChunkID(startTime), rows.length,
+    val info = ChunkSetInfo(factory, dataset, chunkID(startTime), rows.length,
                             startTime,
                             dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
