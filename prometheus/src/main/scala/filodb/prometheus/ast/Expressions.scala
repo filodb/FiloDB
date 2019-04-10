@@ -48,17 +48,12 @@ trait Expressions extends Aggregates with Functions {
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           val cardinality = vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
 
-          if (vectorMatch.isDefined && vectorMatch.get.matching.isDefined) {
-            val matcher = vectorMatch.get.matching.get
-            val matchLabels = matcher.labels
-            if (matcher.isInstanceOf[On])
-              BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs, matchLabels)
-            else
-              BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs, Nil, matchLabels)
-          }
+          val matcher = vectorMatch.flatMap(_.matching)
+          val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
+          val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
 
-          else
-            BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs)
+          BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
+            onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil))
 
       }
     }
