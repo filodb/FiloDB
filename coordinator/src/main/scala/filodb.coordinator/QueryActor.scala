@@ -104,6 +104,17 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
+  private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
+    try {
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      replyTo ! execPlan
+    } catch {
+      case NonFatal(ex) =>
+        logger.error(s"Exception while materializing logical plan", ex)
+        replyTo ! QueryError("unknown", ex)
+    }
+  }
+
   private def processIndexValues(g: GetIndexValues, originator: ActorRef): Unit = {
     val localShards = memStore.activeShards(g.dataset)
     if (localShards contains g.shard) {
@@ -119,8 +130,9 @@ final class QueryActor(memStore: MemStore,
   def receive: Receive = {
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
-
-    case q: ExecPlan              => execPhysicalPlan2(q, sender())
+    case q: ExplainPlan2Query      => val replyTo = sender()
+                                      processExplainPlanQuery(q, replyTo)
+    case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer

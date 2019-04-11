@@ -4,6 +4,7 @@ import remote.RemoteStorage._
 
 import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
 import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
+import filodb.query.exec.ExecPlan
 
 object PrometheusModel {
 
@@ -14,6 +15,8 @@ object PrometheusModel {
   final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
 
   final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse
+
+  final case class ExplainPlanResponse(debugInfo: String, status: String = "success") extends PromQueryResponse
 
   final case class Data(resultType: String, result: Seq[Result])
 
@@ -78,6 +81,10 @@ object PrometheusModel {
 
   def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
     SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_, verbose))))
+  }
+
+  def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
+    ExplainPlanResponse(ex.toString)
   }
 
   def toPromResultType(r: QueryResultType): String = {

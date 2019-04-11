@@ -86,6 +86,10 @@ object QueryCommands {
                                      queryOptions: QueryOptions = QueryOptions(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
+  final case class ExplainPlan2Query(dataset: DatasetRef,
+                                     logicalPlan: LogicalPlan2,
+                                     queryOptions: QueryOptions = QueryOptions(),
+                                     submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse
