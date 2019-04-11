@@ -84,7 +84,7 @@ object PrometheusModel {
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
-    ExplainPlanResponse(ex.toString)
+    ExplainPlanResponse(ex.printTree())
   }
 
   def toPromResultType(r: QueryResultType): String = {
