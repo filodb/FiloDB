@@ -7,14 +7,11 @@ import scala.concurrent.duration._
 
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
-import akka.cluster.Cluster
-import akka.cluster.ClusterEvent.{InitialStateAsEvents, MemberEvent}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
-import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
 import filodb.core._
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.MemStore
@@ -60,20 +57,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
+  val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
   val shardMaps = new ConcurrentHashMap[DatasetRef, ShardMapper]
   var statusActor: Option[ActorRef] = None
-  val cluster = Cluster(context.system)
-
-  val tempQueryRouter = new TempQueryRouter(settings)
 
   private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
-
-  // subscribe to cluster changes, re-subscribe when restart
-  override def preStart(): Unit = {
-    logger.debug("Subscribing to member events")
-    cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberEvent])
-  }
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
@@ -91,13 +80,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     ingesters.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
   }
 
-  /** Subscribe to member events to track the right nodes to FORWARD to.
-    * This attempts to avoid the 404 from "spare" nodes.
-    */
-  def receiveTempQueryActorSetupEvents: Receive = {
-    case e: MemberEvent => tempQueryRouter.receiveMemberEvent(e, context, self)
-    case e: NodeCoordinatorActorDiscovered => tempQueryRouter.receiveNodeCoordDiscoveryEvent(e)
-  }
+  // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
+  // TODO: if we ever support query API against cold (not in memory) datasets, change this
+  private def withQueryActor(originator: ActorRef, dataset: DatasetRef)(func: ActorRef => Unit): Unit =
+    queryActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
 
   private def createDataset(originator: ActorRef,
                             datasetObj: Dataset): Unit = {
@@ -154,7 +140,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
         nca.tell(SubscribeShardUpdates(ref), self)
-        tempQueryRouter.queryActors(ref) = queryRef
+        queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
         logger.info(s"Coordinator set up for ingestion and querying for $ref.")
@@ -187,15 +173,11 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def queryHandlers: Receive = LoggingReceive {
     case q: QueryCommand =>
       val originator = sender()
-      if (q.isInstanceOf[LogicalPlan2Query] && q.submitTime < System.currentTimeMillis() - 5000L) {
-        logger.warn(s"rejecting q for ${q.dataset.dataset} that was submitted at ${q.submitTime}")
-        originator ! UnknownDataset // short-circuit to avoid too many hops.
-      } else {
-        tempQueryRouter.withQueryActor(originator, q.dataset) { _.forward(q) }
-      }
+      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case QueryActor.ThrowException(dataset) =>
       val originator = sender()
-      tempQueryRouter.withQueryActor(originator, dataset) { _.forward(QueryActor.ThrowException(dataset)) }
+      withQueryActor(originator, dataset) { _.tell(QueryActor.ThrowException(dataset), originator) }
+
   }
 
   def coordinatorReceive: Receive = LoggingReceive {
@@ -212,13 +194,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       // NOTE: QueryActor has AtomicRef so no need to forward message to it
   }
 
-  def receive: Receive = {
-    queryHandlers orElse
-      ingestHandlers orElse
-      datasetHandlers orElse
-      coordinatorReceive orElse
-      receiveTempQueryActorSetupEvents
-  }
+  def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
 
   private def registered(e: CoordinatorRegistered): Unit = {
     logger.info(s"${e.clusterActor} said hello!")
@@ -257,8 +233,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def reset(origin: ActorRef): Unit = {
     ingesters.values.foreach(_ ! PoisonPill)
+    queryActors.values.foreach(_ ! PoisonPill)
     ingesters.clear()
-    tempQueryRouter.resetState(origin)
+    queryActors.clear()
     memStore.reset()
 
     // Wait for all ingestor children to die

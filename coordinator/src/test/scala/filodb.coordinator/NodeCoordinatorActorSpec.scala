@@ -141,7 +141,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       dataset1.ref
     }
 
-    // Disabling this test as querying for unknown dataset will keep bouncing in the current setup.
     it("should return UnknownDataset if attempting to query before ingestion set up") {
       probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
