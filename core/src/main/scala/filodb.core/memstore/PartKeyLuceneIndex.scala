@@ -326,11 +326,13 @@ class PartKeyLuceneIndex(dataset: Dataset,
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
     val collector = new PartIdStartTimeCollector()
-    val booleanQuery = new BooleanQuery.Builder
-    partIds.foreach { pId =>
-      booleanQuery.add(new TermQuery(new Term(PART_ID, pId.toString)), Occur.SHOULD)
+    partIds.grouped(512).map { batch => // limit on query clause count is 1024, hence batch
+      val booleanQuery = new BooleanQuery.Builder
+      batch.foreach { pId =>
+        booleanQuery.add(new TermQuery(new Term(PART_ID, pId.toString)), Occur.SHOULD)
+      }
+      searcherManager.acquire().search(booleanQuery.build(), collector)
     }
-    searcherManager.acquire().search(booleanQuery.build(), collector)
     collector.startTimes
   }
 
