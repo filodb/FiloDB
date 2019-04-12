@@ -121,7 +121,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (newChunk) {
       // First row of a chunk, set the start time to it
       val (infoAddr, newAppenders) = bufferPool.obtain()
-      val currentChunkID = newChunkID(ts)
+      val currentChunkID = chunkID(ts)
       ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
       ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
       ChunkSetInfo.setStartTime(infoAddr, ts)
