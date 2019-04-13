@@ -36,22 +36,22 @@ object QueryCommands {
   final case class SpreadChange(time: Long = 0L, spread: Int = 1)
 
   trait SpreadProvider {
-    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange]
+    def spreadFunc(filter: Seq[ColumnFilter]): Seq[SpreadChange]
   }
 
-  case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
-    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange] = {
+  final case class StaticSpreadProvider(spreadChange: SpreadChange = SpreadChange()) extends SpreadProvider {
+    def spreadFunc(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(spreadChange)
     }
   }
 
   /**
     * Serialize with care! would be based on the provided function.
-    * @param f
+    * @param f  a function that would act as the spread provider
     */
-  case class FunctionalSpreadProvider(f: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) })
+  final case class FunctionalSpreadProvider(f: Seq[ColumnFilter] => Seq[SpreadChange] = { _ => Seq(SpreadChange()) })
     extends SpreadProvider {
-    def spreadFunc(filter: Seq[ColumnFilter]): scala.Seq[SpreadChange] = {
+    def spreadFunc(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       f (filter)
     }
   }
