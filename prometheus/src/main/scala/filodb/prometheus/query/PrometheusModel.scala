@@ -16,7 +16,7 @@ object PrometheusModel {
 
   final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse
 
-  final case class ExplainPlanResponse(debugInfo: String, status: String = "success") extends PromQueryResponse
+  final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success") extends PromQueryResponse
 
   final case class Data(resultType: String, result: Seq[Result])
 
@@ -84,7 +84,7 @@ object PrometheusModel {
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
-    ExplainPlanResponse(ex.printTree())
+    ExplainPlanResponse(ex.getPlan())
   }
 
   def toPromResultType(r: QueryResultType): String = {

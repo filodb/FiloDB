@@ -198,6 +198,16 @@ trait ExecPlan extends QueryCommand {
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
+  final def getPlan(level: Int = 0): Seq[String] = {
+    val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
+      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+    }
+    val nextLevel = rangeVectorTransformers.size + level
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
+    ((transf :+ curNode) ++ childr)
+  }
+
   protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
 
     new Iterator[RowReader] {
