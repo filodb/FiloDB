@@ -50,6 +50,23 @@ class HistogramVectorTest extends NativeVectorTest {
           .zipWithIndex.foreach { case (h, i) => verifyHistogram(h, i) }
   }
 
+  it("should accept LongHistograms with custom scheme and query them back") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    customHistograms.foreach { custHist =>
+      custHist.serialize(Some(buffer))
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual customHistograms.length
+
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual customHistograms.length
+
+    (0 until customHistograms.length).foreach { i =>
+      reader(i) shouldEqual customHistograms(i)
+    }
+  }
+
   it("should optimize histograms and be able to query optimized vectors") {
     val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
