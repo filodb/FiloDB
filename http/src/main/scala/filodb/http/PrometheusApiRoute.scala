@@ -41,10 +41,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double],
-                  'step.as[Int], 'explainPlan.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, start, end, step, explainPlan, verbose) =>
+                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
+        { (query, start, end, step, explainOnly, verbose) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, explainPlan.getOrElse(false),verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false))
         }
       }
     } ~
@@ -54,10 +54,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'explainPlan.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, time, explainPlan, verbose) =>
+        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
+        { (query, time, explainOnly, verbose) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan, explainPlan.getOrElse(false), verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false))
         }
       }
     } ~
@@ -103,8 +103,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainPlan: Boolean, verbose: Boolean) = {
-    val command = if (explainPlan) {
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean) = {
+    val command = if (explainOnly) {
       ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
     }
     else {

@@ -183,6 +183,10 @@ Used to issue a promQL query for a single time instant `time`.  Can also be used
 range expression. For more details, see Prometheus HTTP API Documentation
 [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
 
+#### GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}&explainOnly=true
+
+Used to get ExecPlan for query
+
 #### POST /promql/{dataset}/api/v1/read
 
 Used to extract raw data for integration with other TSDB systems.
