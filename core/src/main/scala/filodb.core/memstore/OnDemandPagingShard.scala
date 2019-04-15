@@ -15,6 +15,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
+import filodb.memory.MemFactory
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -24,13 +25,14 @@ import filodb.memory.format.UnsafeUtils
 class OnDemandPagingShard(dataset: Dataset,
                           storeConfig: StoreConfig,
                           shardNum: Int,
+                          bufferMemoryManager: MemFactory,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
                           evictionPolicy: PartitionEvictionPolicy,
                           downsampleConfig: DownsampleConfig,
                           downsamplePublisher: DownsamplePublisher)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy,
+TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
