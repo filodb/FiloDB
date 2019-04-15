@@ -1,3 +1,16 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB and Spark](#filodb-and-spark)
+  - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
+    - [Configuring FiloDB](#configuring-filodb)
+      - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
+    - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
+    - [Querying Datasets](#querying-datasets)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB and Spark
 
 NOTE: These docs are DEPRECATED.  Currently the Spark module is not working.  If you are interested in helping to revive this module and these docs, please raise an issue and/or use the mailing lists.  Thank you.

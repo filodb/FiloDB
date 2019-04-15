@@ -1,12 +1,10 @@
 package filodb.core.downsample
 
-import java.util
-
 import scala.collection.mutable
 
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
-import filodb.core.TestData
+import filodb.core.{TestData, MachineMetricsData => MMD}
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
 import filodb.core.metadata.{Dataset, DatasetOptions}
@@ -14,12 +12,10 @@ import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.memory._
-import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String, vectors => bv}
 
 // scalastyle:off null
 class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
-
-  val maxChunkSize = 200
 
   val promDataset = Dataset.make("custom1",
     Seq("someStr:string", "tags:map"),
@@ -29,31 +25,30 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val customDataset = Dataset.make("custom2",
-    Seq("name:string", "namespace:string","instance:string"),
-    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double"),
+    Seq("name:string", "namespace:string", "instance:string"),
+    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
     Seq("timestamp"),
-    Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)"),
+    Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
     DatasetOptions(Seq("name", "namespace"), "name", "total")).get
 
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), null, 16)
-
+  private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.blockMetaSize, true)
 
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset, maxChunkSize, 100)
+  val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
   }
 
-  val partKeyTags = new util.ArrayList[(String, String)]()
-  partKeyTags.add("dc"->"dc1")
-  partKeyTags.add("instance"->"instance1")
+  import ZeroCopyUTF8String._
+
+  val partKeyTags = Map("dc".utf8 -> "dc1".utf8, "instance".utf8 -> "instance1".utf8)
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, promDataset.partKeySchema, 4096)
   partKeyBuilder.startNewRecord()
   partKeyBuilder.addString("someStringValue")
-  partKeyBuilder.addSortedPairsAsMap(partKeyTags, RecordBuilder.sortAndComputeHashes(partKeyTags))
+  partKeyBuilder.addMap(partKeyTags)
   partKeyBuilder.endRecord(true)
   val partKeyBase = partKeyBuilder.allContainers.head.base
   val partKeyOffset = partKeyBuilder.allContainers.head.allOffsets(0)
@@ -86,9 +81,9 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       new TimeSeriesShardStats(customDataset.ref, 0))
     val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "name", "namespace", "instance")
+      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "hSum", "name", "namespace", "instance")
     dsSchema.columns.map(_.colType) shouldEqual
-      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
+      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, HistogramColumn,
         StringColumn, StringColumn, StringColumn)
   }
 
@@ -99,7 +94,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val dsSchema = downsampleOps.downsampleSchema
     val dsRecords = downsampleOps.newEmptyDownsampleRecords
 
-    downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition],chunkInfos, dsRecords)
+    downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
 
     // with resolution 5000
     val downsampledData1 = dsRecords(0).builder.optimalContainerBytes().flatMap { con =>
@@ -207,5 +202,47 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val expectedAvgs2 = expectedSums2.zip(expectedCounts2).map { case (sum,count) => sum/count }
     downsampledData2.map(_._6) shouldEqual expectedAvgs2
 
+  }
+
+  val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
+  val histDSDataset = MMD.histDataset.copy(
+                        downsamplers = Dataset.validateDownsamplers(histDSDownsamplers).get)
+
+  // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
+  val downsampleOpsH = new ShardDownsampler(histDSDataset, 0, true, Seq(60000), NoOpDownsamplePublisher,
+    new TimeSeriesShardStats(histDSDataset.ref, 0))
+
+  def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
+
+  it("should downsample histogram schema/dataset correctly") {
+    val startTS = 610000L   // So we can group by minute easily
+    val (data, rv) = MMD.histogramRV(startTS, numSamples = 200)
+    val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
+    val dsSchema = downsampleOpsH.downsampleSchema
+    val dsRecords = downsampleOpsH.newEmptyDownsampleRecords
+
+    downsampleOpsH.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
+
+    val downsampledData1 = dsRecords(0).builder.optimalContainerBytes().flatMap { con =>
+      val c = RecordContainer(con)
+
+      c.iterate(dsSchema).map {r =>
+        val timestamp = r.getLong(0)
+        val count= r.getLong(1)
+        val sum = r.getLong(2)
+        val hist = r.getHistogram(3)
+        (timestamp, count, sum, hist)
+      }
+    }
+
+    val expectedSums = data.grouped(6).toSeq.map { dataRows =>
+      dataRows.map(_(3).asInstanceOf[bv.MutableHistogram])
+              .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+    }
+
+    // Skip comparing the last sample because end of chunk=100 rows is not evenly divisible by 6
+    downsampledData1.zip(expectedSums).take(100/6).foreach { case (dsData, expected) =>
+      dsData._4 shouldEqual expected
+    }
   }
 }

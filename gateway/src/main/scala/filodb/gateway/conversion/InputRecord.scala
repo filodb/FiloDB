@@ -7,6 +7,7 @@ import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
+import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * An InputRecord represents one "record" of timeseries data for input to FiloDB system.
@@ -79,7 +80,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
       builder.addMapKeyValue(k.getBytes, v.getBytes)
       builder.updatePartitionHash(hashes(i))
     }
-    builder.endMap()
+    builder.endMap(bulkHash = false)
 
     builder.endRecord()
   }
@@ -123,5 +124,35 @@ object PrometheusInputRecord {
       }
     }
     tags ++ extraTags
+  }
+}
+
+/**
+ * A generic InputRecord that can serve different data schemas, so long as the partition key consists of:
+ *  - a single metric StringColumn
+ *  - a MapColumn of tags
+ *
+ * Can be used to adapt custom dataset/schemas for input into FiloDB using the gateway.
+ * Not going to be the fastest InputRecord but extremely flexible.
+ *
+ * @param values the data column values, first one is probably timestamp
+ */
+class MetricTagInputRecord(values: Seq[Any],
+                           metric: String,
+                           tags: Map[ZCUTF8, ZCUTF8],
+                           dataset: Dataset) extends InputRecord {
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, metric)
+  // NOTE: this is probably not very performant right now.
+  final def partitionKeyHash: Int = tags.hashCode
+
+  val nonMetricShardValues: Seq[String] =
+    dataset.options.nonMetricShardKeyUTF8.flatMap(tags.get).map(_.toString).toSeq
+  final def getMetric: String = metric
+
+  def addToBuilder(builder: RecordBuilder): Unit = {
+    require(builder.schema == dataset.ingestionSchema)
+
+    val reader = SeqRowReader(values :+ metric :+ tags)
+    builder.addFromReader(reader)
   }
 }

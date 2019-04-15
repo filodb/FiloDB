@@ -2,6 +2,7 @@ package filodb.core.metadata
 
 import scala.language.existentials
 
+import com.typesafe.config.Config
 import org.scalactic._
 
 import filodb.core.KeyType
@@ -17,6 +18,7 @@ case class ComputedColumn(id: Int,
                           sourceIndices: Seq[Int],    // index into schema of source column
                           val extractor: TypedFieldExtractor[_]) extends Column {
   def name: String = expr
+  def params: Config = ???
 }
 
 object ComputedColumn {

@@ -2,13 +2,15 @@ package filodb.core.zipkin
 
 import java.net.InetAddress
 
+import scala.util.Try
+
 import com.typesafe.config.Config
 import kamon.{Kamon, SpanReporter}
 import kamon.trace.Span.{FinishedSpan => KamonSpan, Mark, TagValue}
 import kamon.util.Clock
 import org.slf4j.LoggerFactory
-import scala.util.Try
 import zipkin2.{Endpoint, Span => ZipkinSpan}
+import zipkin2.codec.Encoding
 import zipkin2.reporter.AsyncReporter
 import zipkin2.reporter.okhttp3.OkHttpSender
 
@@ -125,16 +127,22 @@ class ZipkinReporter extends SpanReporter {
     val zipkinEndpoint = Kamon.config().getString(ZipkinEndpoint)
     val zipkinHost = Kamon.config().getString(HostConfigKey)
     val zipkinPort = Kamon.config().getInt(PortConfigKey)
+    val maxRequests = Kamon.config().getInt(MaxRequests)
+    val messageMaxBytes = Kamon.config().getInt(MessageMaxBytes)
 
-    if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty) {
-      AsyncReporter.create(
-        OkHttpSender.create(s"http://$zipkinHost:$zipkinPort/api/v2/spans")
-      )
-    } else {
-      AsyncReporter.create(
-        OkHttpSender.create(s"$zipkinEndpoint/api/v2/spans")
-      )
-    }
+    val url = if (zipkinEndpoint == null || zipkinEndpoint.trim.isEmpty)
+                s"http://$zipkinHost:$zipkinPort/api/v2/spans"
+              else
+                s"$zipkinEndpoint/api/v2/spans"
+
+    AsyncReporter.create(
+      OkHttpSender.newBuilder()
+        .encoding(Encoding.JSON)
+        .endpoint(url)
+        .maxRequests(maxRequests)
+        .messageMaxBytes(messageMaxBytes)
+        .build()
+    )
   }
   //scalastyle:on null
 
@@ -151,6 +159,8 @@ object ZipkinReporter {
   private val ZipkinEndpoint = "kamon.zipkin.endpoint"
   private val HostConfigKey = "kamon.zipkin.host"
   private val PortConfigKey = "kamon.zipkin.port"
+  private val MaxRequests = "kamon.zipkin.max.requests"
+  private val MessageMaxBytes = "kamon.zipkin.message.max.bytes"
   private val SpanKindTag = "span.kind"
   private val SpanKindServer = "server"
   private val SpanKindClient = "client"

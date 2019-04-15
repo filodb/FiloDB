@@ -19,8 +19,8 @@ object TimeSeriesPartitionSpec {
 
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
 
-  val maxChunkSize = 100
-  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
+  val maxChunkSize = TestData.storeConf.maxChunksSize
+  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, TestData.storeConf)
 
   def makePart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
@@ -156,7 +156,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     // Flushed chunk:  initTS -> initTS + 9000 (1000 ms per tick)
     // Read from flushed chunk only
-    val readIt = part.timeRangeRows(RowKeyChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
+    val readIt = part.timeRangeRows(TimeRangeChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
     readIt.toBuffer shouldEqual minData.take(10)
 
     val infos1 = part.infos(initTS, initTS + 9000)
@@ -165,27 +165,29 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     info1.numRows shouldEqual 10
     info1.startTime shouldEqual initTS
 
-    val readIt2 = part.timeRangeRows(RowKeyChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
+    val readIt2 = part.timeRangeRows(TimeRangeChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
     readIt2.toBuffer shouldEqual minData.drop(1).take(7)
 
     // Read from appending chunk only:  initTS + 10000
-    val readIt3 = part.timeRangeRows(RowKeyChunkScan(appendingTS, appendingTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    val readIt3 = part.timeRangeRows(TimeRangeChunkScan(appendingTS, appendingTS + 3000), Array(0, 1))
+                      .map(_.getDouble(1))
     readIt3.toBuffer shouldEqual minData.drop(10)
 
     // Try to read from before flushed to part of flushed chunk
-    val readIt4 = part.timeRangeRows(RowKeyChunkScan(initTS - 7000, initTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    val readIt4 = part.timeRangeRows(TimeRangeChunkScan(initTS - 7000, initTS + 3000), Array(0, 1)).map(_.getDouble(1))
     readIt4.toBuffer shouldEqual minData.take(4)
 
     // both flushed and appending chunk
-    val readIt5 = part.timeRangeRows(RowKeyChunkScan(initTS + 7000, initTS + 14000), Array(0, 1)).map(_.getDouble(1))
+    val readIt5 = part.timeRangeRows(TimeRangeChunkScan(initTS + 7000, initTS + 14000), Array(0, 1)).map(_.getDouble(1))
     readIt5.toBuffer shouldEqual minData.drop(7)
 
     // No data: past appending chunk
-    val readIt6 = part.timeRangeRows(RowKeyChunkScan(initTS + 20000, initTS + 24000), Array(0, 1)).map(_.getDouble(1))
+    val readIt6 = part.timeRangeRows(TimeRangeChunkScan(initTS + 20000, initTS + 24000), Array(0, 1))
+                      .map(_.getDouble(1))
     readIt6.toBuffer shouldEqual Nil
 
     // No data: before initTS
-    val readIt7 = part.timeRangeRows(RowKeyChunkScan(initTS - 9000, initTS - 900), Array(0, 1)).map(_.getDouble(1))
+    val readIt7 = part.timeRangeRows(TimeRangeChunkScan(initTS - 9000, initTS - 900), Array(0, 1)).map(_.getDouble(1))
     readIt7.toBuffer shouldEqual Nil
   }
 

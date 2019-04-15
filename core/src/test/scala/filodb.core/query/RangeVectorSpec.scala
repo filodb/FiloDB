@@ -18,7 +18,8 @@ class RangeVectorSpec  extends FunSpec with Matchers {
     }.iterator
     override def key: RangeVectorKey = new RangeVectorKey {
       def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
-      def sourceShards: Seq[Int] = Seq(0)
+      def sourceShards: Seq[Int] = Nil
+      def partIds: Seq[Int] = Nil
     }
   }
 

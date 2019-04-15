@@ -4,7 +4,6 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
 
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -14,11 +13,14 @@ import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
-  * Identifier for a single RangeVector
+  * Identifier for a single RangeVector.
+  * Sub-classes must be a case class or override equals/hashcode since this class is used in a
+  * hash table.
   */
 trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Map[UTF8Str, UTF8Str]
   def sourceShards: Seq[Int]
+  def partIds: Seq[Int]
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
 
@@ -39,8 +41,10 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partSchema: RecordSchema,
                                          partKeyCols: Seq[ColumnInfo],
                                          sourceShard: Int,
-                                         groupNum: Int) extends RangeVectorKey {
+                                         groupNum: Int,
+                                         partId: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
+  override def partIds: Seq[Int] = Seq(partId)
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
@@ -57,8 +61,10 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
   override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 }
 
-final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {
-  val sourceShards: Seq[Int] = Nil
+final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
+                                      sourceShards: Seq[Int] = Nil,
+                                      partIds: Seq[Int] = Nil)
+  extends RangeVectorKey {
 }
 
 object CustomRangeVectorKey {
@@ -141,7 +147,6 @@ final class SerializableRangeVector(val key: RangeVectorKey,
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
       rows.map {
-        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
         case reader =>
           val firstCol = if (formatTime && schema.isTimeSeries) {
             val timeStamp = reader.getLong(0)

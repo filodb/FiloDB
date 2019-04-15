@@ -6,7 +6,6 @@ import com.esotericsoftware.kryo.io._
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
 
 import filodb.core._
-import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
 import filodb.core.query.ColumnInfo
@@ -35,10 +34,7 @@ class KryoInit {
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
 
-    kryo.addDefaultSerializer(classOf[RecordSchema], classOf[RecordSchemaSerializer])
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
-    kryo.addDefaultSerializer(classOf[BinaryRecord], classOf[BinaryRecordSerializer])
-
     kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
 
     initOtherFiloClasses(kryo)
@@ -71,9 +67,6 @@ class KryoInit {
   def initOtherFiloClasses(kryo: Kryo): Unit = {
     // Initialize other commonly used FiloDB classes
     kryo.register(classOf[DatasetRef])
-    kryo.register(classOf[BinaryRecord])
-    kryo.register(classOf[ArrayBinaryRecord])
-    kryo.register(classOf[RecordSchema])
     kryo.register(classOf[RecordSchema2])
     kryo.register(classOf[filodb.coordinator.ShardEvent])
     kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
@@ -82,17 +75,14 @@ class KryoInit {
 
     import filodb.core.query._
     kryo.register(classOf[PartitionInfo], new PartitionInfoSerializer)
-    kryo.register(classOf[Tuple])
     kryo.register(classOf[ColumnInfo])
-    kryo.register(classOf[TupleResult])
-    kryo.register(classOf[TupleListResult])
     kryo.register(classOf[ColumnFilter])
 
     import filodb.core.store._
     kryo.register(classOf[ChunkSetInfo])
     kryo.register(WriteBufferChunkScan.getClass)
     kryo.register(AllChunkScan.getClass)
-    kryo.register(classOf[RowKeyChunkScan])
+    kryo.register(classOf[TimeRangeChunkScan])
     kryo.register(classOf[FilteredPartitionScan])
     kryo.register(classOf[ShardSplit])
 
@@ -109,17 +99,6 @@ class ColumnTypeSerializer extends KryoSerializer[Column.ColumnType] {
     Column.clazzToColType(typ)
 
   override def write(kryo: Kryo, output: Output, colType: Column.ColumnType): Unit = {}
-}
-
-class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
-  override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema]): RecordSchema = {
-    val colTypesObj = kryo.readClassAndObject(input)
-    new RecordSchema(colTypesObj.asInstanceOf[Seq[Column.ColumnType]])
-  }
-
-  override def write(kryo: Kryo, output: Output, schema: RecordSchema): Unit = {
-    kryo.writeClassAndObject(output, schema.columnTypes)
-  }
 }
 
 class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {

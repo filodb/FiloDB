@@ -136,7 +136,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     // scalastyle:off null
     val rvKey = new PartitionRangeVectorKey(null, defaultPartKey, dataset1.partKeySchema,
-                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5)
+                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100)
 
     val rowbuf = tuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))
@@ -189,7 +189,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis()
     val from = to - 50000
 
-    val intervalSelector = IntervalSelector(Seq(from), Seq(to))
+    val intervalSelector = IntervalSelector(from, to)
 
     val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
     val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
