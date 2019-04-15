@@ -34,9 +34,9 @@ class Arguments extends FieldArgs {
   var rowKeys: Seq[String] = Seq("timestamp")
   var partitionKeys: Seq[String] = Nil
   var select: Option[Seq[String]] = None
-  // max # query items (vectors or tuples) returned. Don't make it too high.
-  var limit: Int = 1000
-  var sampleLimit: Int = 200
+  // max # of RangeVectors returned. Don't make it too high.
+  var limit: Int = 200
+  var sampleLimit: Int = 1000000
   var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
   var delimiter: String = ","
@@ -364,7 +364,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(options.spread, options.limit)
+    val qOpts = QueryCommands.QueryOptions(options.spread, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
@@ -373,7 +373,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
+            case QueryResult(_, schema, result) => result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
@@ -385,7 +385,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
             case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
-                                                   result.foreach(rv => println(rv.prettyPrint()))
+                                                   result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }
         } catch {
@@ -408,11 +408,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case LongColumn => rowReader.getLong(position).toString
         case DoubleColumn => rowReader.getDouble(position).toString
         case StringColumn => rowReader.filoUTF8String(position).toString
-        case BitmapColumn => rowReader.getBoolean(position).toString
         case TimestampColumn => rowReader.as[Timestamp](position).toString
+        case HistogramColumn => rowReader.getHistogram(position).toString
         case _ => throw new UnsupportedOperationException("Unsupported type: " + columns(position).columnType)
       }
-      content.update(position,value)
+      content.update(position, value)
       position += 1
     }
     content

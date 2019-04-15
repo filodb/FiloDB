@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant ChunkedRangeFunction
+  participant ChunkedWindowIterator
+  participant WindowedChunkIterator
+  loop for each time window
+    ChunkedWindowIterator->>ChunkedRangeFunction: reset()
+    ChunkedWindowIterator->>WindowedChunkIterator: nextWindow()
+    loop fetch and work on chunks
+      ChunkedWindowIterator->>WindowedChunkIterator: next()
+      WindowedChunkIterator->>ChunkedWindowIterator: ChunkQueryInfo
+      ChunkedWindowIterator->>ChunkedRangeFunction: addChunks()
+    end
+    ChunkedWindowIterator->>ChunkedRangeFunction: apply()
+    Note right of ChunkedWindowIterator: yield value for time window
+  end

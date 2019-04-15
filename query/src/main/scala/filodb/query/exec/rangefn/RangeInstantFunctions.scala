@@ -119,10 +119,11 @@ object DerivFunction extends RangeFunction {
 }
 
 class ResetsFunction extends RangeFunction {
-  var resets = 0
+  var resets = Double.NaN // NaN for windows that do not have data
 
   def addedToWindow(row: TransientRow, window: Window): Unit = {
     val size = window.size
+    if (resets.isNaN && size > 0) resets = 0
     if (size > 1 && window(size - 2).value > row.value) {
       resets += 1
     }

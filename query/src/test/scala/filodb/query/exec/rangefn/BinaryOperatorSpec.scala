@@ -52,6 +52,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       override def rows: Iterator[RowReader] = data.iterator
     })
     fireBinaryOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
+
   }
 
   it ("should handle NaN") {
@@ -79,6 +81,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       }
     )
     fireBinaryOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
+
   }
 
   it ("should handle special cases") {
@@ -100,6 +104,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
       }
     )
     fireBinaryOperatorTests(samples)
+    fireComparatorOperatorTests(samples)
   }
 
   private def fireBinaryOperatorTests(samples: Array[RangeVector]): Unit = {
@@ -151,19 +156,58 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     // power - suffix
     val expectedPow2 = samples.map(_.rows.map(v => math.pow(v.getDouble(1), scalar)))
     applyBinaryOperationAndAssertResult(samples, expectedPow2, BinaryOperator.POW, scalar, false)
+
   }
 
-  it ("should handle unknown functions") {
-    // sort_desc
-    the[UnsupportedOperationException] thrownBy {
-      val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.EQL, 10, true)
-      binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-    } should have message "EQL not supported."
+  private def fireComparatorOperatorTests(samples: Array[RangeVector]): Unit = {
 
-    the[UnsupportedOperationException] thrownBy {
-      val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.GTE, 10, false)
-      binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-    } should have message "GTE not supported."
+    // GTE - prefix
+    val expectedGTE = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedGTE, BinaryOperator.GTE, scalar, true)
+
+    // GTR - prefix
+    val expectedGTR = samples.map(_.rows.map(v => if (scalar > v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedGTR, BinaryOperator.GTR, scalar, true)
+
+    // LTE - prefix
+    val expectedLTE = samples.map(_.rows.map(v => if (scalar <= v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedLTE, BinaryOperator.LTE, scalar, true)
+
+    // LTR - prefix
+    val expectedLTR = samples.map(_.rows.map(v => if (scalar < v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedLTR, BinaryOperator.LSS, scalar, true)
+
+    // EQL - prefix
+    val expectedEQL = samples.map(_.rows.map(v => if (scalar == v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedEQL, BinaryOperator.EQL, scalar, true)
+
+    // NEQ - prefix
+    val expectedNEQ = samples.map(_.rows.map(v => if (scalar != v.getDouble(1)) scalar else Double.NaN))
+    applyBinaryOperationAndAssertResult(samples, expectedNEQ, BinaryOperator.NEQ, scalar, true)
+
+    // GTE_BOOL - prefix
+    val expectedGTE_BOOL = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) 1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedGTE_BOOL, BinaryOperator.GTE_BOOL, scalar, true)
+
+    // GTR_BOOL - prefix
+    val expectedGTR_BOOL = samples.map(_.rows.map(v => if (scalar > v.getDouble(1))  1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedGTR_BOOL, BinaryOperator.GTR_BOOL, scalar, true)
+
+    // LTE_BOOL - prefix
+    val expectedLTE_BOOL = samples.map(_.rows.map(v => if (scalar <= v.getDouble(1))  1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedLTE_BOOL, BinaryOperator.LTE_BOOL, scalar, true)
+
+    // LTR_BOOL - prefix
+    val expectedLTR_BOOL = samples.map(_.rows.map(v => if (scalar < v.getDouble(1))  1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedLTR_BOOL, BinaryOperator.LSS_BOOL, scalar, true)
+
+    // EQL_BOOL - prefix
+    val expectedEQL_BOOL = samples.map(_.rows.map(v => if (scalar == v.getDouble(1))  1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedEQL_BOOL, BinaryOperator.EQL_BOOL, scalar, true)
+
+    // NEQ_BOOL - prefix
+    val expectedNEQ_BOOL = samples.map(_.rows.map(v => if (scalar != v.getDouble(1))  1.0 else 0.0))
+    applyBinaryOperationAndAssertResult(samples, expectedNEQ_BOOL, BinaryOperator.NEQ_BOOL, scalar, true)
   }
 
   it ("should fail with wrong calculation") {

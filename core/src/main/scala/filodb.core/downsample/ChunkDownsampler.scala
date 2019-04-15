@@ -7,6 +7,7 @@ import enumeratum.{Enum, EnumEntry}
 import filodb.core.memstore.TimeSeriesPartition
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.ChunkSetInfo
+import filodb.memory.format.{vectors => bv}
 
 /**
   * Enum of supported downsampling function names
@@ -21,6 +22,7 @@ object DownsamplerName extends Enum[DownsamplerName] {
   case object MinD extends DownsamplerName("dMin", classOf[MinDownsampler])
   case object MaxD extends DownsamplerName("dMax", classOf[MaxDownsampler])
   case object SumD extends DownsamplerName("dSum", classOf[SumDownsampler])
+  case object SumH extends DownsamplerName("hSum", classOf[HistSumDownsampler])
   case object CountD extends DownsamplerName("dCount", classOf[CountDownsampler])
   case object AvgD extends DownsamplerName("dAvg", classOf[AvgDownsampler])
   case object AvgAcD extends DownsamplerName("dAvgAc", classOf[AvgAcDownsampler])
@@ -95,6 +97,26 @@ trait TimeChunkDownsampler extends ChunkDownsampler {
 }
 
 /**
+ * Chunk downsampler trait for downsampling histogram columns -> histogram columns
+ */
+trait HistChunkDownsampler extends ChunkDownsampler {
+  override val colType: ColumnType = ColumnType.HistogramColumn
+
+  /**
+    * Downsamples Chunk using histogram column Ids configured and emit histogram value
+    * @param part Time series partition to extract data from
+    * @param chunkset The chunksetInfo that needs to be downsampled
+    * @param startRow The start row number for the downsample period (inclusive)
+    * @param endRow The end row number for the downsample period (inclusive)
+    * @return downsampled value to emit
+    */
+  def downsampleChunk(part: TimeSeriesPartition,
+                      chunkset: ChunkSetInfo,
+                      startRow: Int,
+                      endRow: Int): bv.Histogram
+}
+
+/**
   * Downsamples by calculating sum of values in one column
   */
 case class SumDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
@@ -107,6 +129,18 @@ case class SumDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
     val vecPtr = chunkset.vectorPtr(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecPtr)
     colReader.asDoubleReader.sum(vecPtr, startRow, endRow)
+  }
+}
+
+case class HistSumDownsampler(val colIds: Seq[Int]) extends HistChunkDownsampler {
+  require(colIds.length == 1, s"Sum downsample requires only one column. Got ${colIds.length}")
+  val name = DownsamplerName.SumH
+  def downsampleChunk(part: TimeSeriesPartition,
+                      chunkset: ChunkSetInfo,
+                      startRow: Int,
+                      endRow: Int): bv.Histogram = {
+    val histReader = part.chunkReader(colIds(0), chunkset.vectorPtr(colIds(0))).asHistReader
+    histReader.sum(startRow, endRow)
   }
 }
 

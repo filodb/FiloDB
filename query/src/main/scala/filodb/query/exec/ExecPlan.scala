@@ -98,17 +98,21 @@ trait ExecPlan extends QueryCommand {
                     queryConfig: QueryConfig)
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
-    try {
-      qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName} with $args")
+    // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
+    // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
+    // we don't want these to happen in a single thread.
+    Task {
+      qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Started Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+      qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators if necessary")
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>
@@ -148,9 +152,10 @@ trait ExecPlan extends QueryCommand {
           qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
-    } catch { case NonFatal(ex) =>
+    }.flatten
+    .onErrorRecover { case NonFatal(ex) =>
       qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
-      Task(QueryError(id, ex))
+      QueryError(id, ex)
     }
   }
 
@@ -244,7 +249,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }.map((_, i))
       }
     }
-    compose(childTasks, queryConfig)
+    compose(dataset, childTasks, queryConfig)
   }
 
   final protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = schemaOfCompose(dataset)
@@ -257,8 +262,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
   /**
     * Sub-class non-leaf nodes should provide their own implementation of how
     * to compose the sub-query results here.
+    *
+    * @param childResponses observable of a pair. First element of pair is the QueryResponse for
+    *                       a child ExecPlan, the second element is the index of the child plan.
+    *                       There is one response per child plan.
     */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector]
 
 }

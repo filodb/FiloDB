@@ -5,8 +5,12 @@ import java.sql.Timestamp
 
 import scala.reflect.ClassTag
 
+import org.agrona.DirectBuffer
+import org.agrona.concurrent.UnsafeBuffer
 import org.joda.time.DateTime
 import scalaxy.loops._
+
+import filodb.memory.format.vectors.Histogram
 
 /**
  * A generic trait for reading typed values out of a row of data.
@@ -27,6 +31,20 @@ trait RowReader {
   def getBlobBase(columnNo: Int): Any
   def getBlobOffset(columnNo: Int): Long
   def getBlobNumBytes(columnNo: Int): Int // Total number of bytes for the blob
+
+  // By default this is not implemented as histograms can be parsed from multiple serialized forms or actual objects
+  def getHistogram(columnNo: Int): Histogram = ???
+
+  /**
+   * Retrieves a view into the blob at column columnNo without duplicating contents.
+   * Smart implementations could reuse the same UnsafeBuffer to avoid allocations.
+   * This default implementation simply allocates a new one.
+   */
+  def blobAsBuffer(columnNo: Int): DirectBuffer = {
+    val buf = new UnsafeBuffer(Array.empty[Byte])
+    UnsafeUtils.wrapDirectBuf(getBlobBase(columnNo), getBlobOffset(columnNo), getBlobNumBytes(columnNo), buf)
+    buf
+  }
 
   final def getBuffer(columnNo: Int): ByteBuffer = {
     val length = getBlobNumBytes(columnNo)
@@ -212,6 +230,7 @@ final case class SingleValueRowReader(value: Any) extends RowReader {
   def getDouble(columnNo: Int): Double = value.asInstanceOf[Double]
   def getFloat(columnNo: Int): Float = value.asInstanceOf[Float]
   def getString(columnNo: Int): String = value.asInstanceOf[String]
+  override def getHistogram(columnNo: Int): Histogram = value.asInstanceOf[Histogram]
   def getAny(columnNo: Int): Any = value
   def getBlobBase(columnNo: Int): Any = value
   def getBlobOffset(columnNo: Int): Long = 0
@@ -226,6 +245,7 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getDouble(columnNo: Int): Double = sequence(columnNo).asInstanceOf[Double]
   def getFloat(columnNo: Int): Float = sequence(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = sequence(columnNo).asInstanceOf[String]
+  override def getHistogram(columnNo: Int): Histogram = sequence(columnNo).asInstanceOf[Histogram]
   def getAny(columnNo: Int): Any = sequence(columnNo)
   def getBlobBase(columnNo: Int): Any = ???
   def getBlobOffset(columnNo: Int): Long = ???
@@ -267,6 +287,7 @@ final case class SchemaSeqRowReader(sequence: Seq[Any],
   def getDouble(columnNo: Int): Double = sequence(columnNo).asInstanceOf[Double]
   def getFloat(columnNo: Int): Float = sequence(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = sequence(columnNo).asInstanceOf[String]
+  override def getHistogram(columnNo: Int): Histogram = sequence(columnNo).asInstanceOf[Histogram]
   def getAny(columnNo: Int): Any = sequence(columnNo)
   def getBlobBase(columnNo: Int): Any = sequence(columnNo).asInstanceOf[Array[Byte]]
   def getBlobOffset(columnNo: Int): Long = 0
@@ -366,5 +387,11 @@ object RowReader {
     // TODO: compare the Long, instead of deserializing and comparing Timestamp object
     final def compare(reader: RowReader, other: RowReader, columnNo: Int): Int =
       getFieldOrDefault(reader, columnNo).compareTo(getFieldOrDefault(other, columnNo))
+  }
+
+  implicit object HistogramExtractor extends TypedFieldExtractor[Histogram] {
+    final def getField(reader: RowReader, columnNo: Int): Histogram = reader.getHistogram(columnNo)
+    final def compare(reader: RowReader, other: RowReader, columnNo: Int): Int =
+      getFieldOrDefault(reader, columnNo).compare(getFieldOrDefault(other, columnNo))
   }
 }

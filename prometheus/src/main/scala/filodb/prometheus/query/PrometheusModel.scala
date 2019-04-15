@@ -32,7 +32,7 @@ object PrometheusModel {
   def toFiloDBLogicalPlans(readRequest: ReadRequest): Seq[LogicalPlan] = {
     for { i <- 0 until readRequest.getQueriesCount } yield {
       val q = readRequest.getQueries(i)
-      val interval = IntervalSelector(Seq(q.getStartTimestampMs), Seq(q.getEndTimestampMs))
+      val interval = IntervalSelector(q.getStartTimestampMs, q.getEndTimestampMs)
       val filters = for { j <- 0 until q.getMatchersCount } yield {
         val m = q.getMatchers(j)
         val filter = m.getType match {
@@ -76,8 +76,8 @@ object PrometheusModel {
     b.build()
   }
 
-  def toPromSuccessResponse(qr: filodb.query.QueryResult): SuccessResponse = {
-    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_))))
+  def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
+    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_, verbose))))
   }
 
   def toPromResultType(r: QueryResultType): String = {
@@ -91,8 +91,13 @@ object PrometheusModel {
   /**
     * Used to send out HTTP response
     */
-  def toPromResult(srv: SerializableRangeVector): Result = {
-    Result(srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)},
+  def toPromResult(srv: SerializableRangeVector, verbose: Boolean): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+                (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
+                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                else Map.empty)
+
+    Result(tags,
       // remove NaN in HTTP results
       // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
       // in HTTP raw query results.

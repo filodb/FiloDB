@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import java.net.Socket
+
 import akka.testkit.TestProbe
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.concurrent.ScalaFutures
@@ -8,11 +10,37 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator.client.MiscCommands
 import filodb.core.{AbstractSpec, Success}
 
+trait SocketChecker {
+  def waitSocketOpen(port: Int): Unit = {
+    while (!isPortAvail(port)) {
+      println(s"Port $port is not available, waiting and retrying...")
+      Thread sleep 1000
+    }
+  }
+
+  def isPortAvail(port: Int): Boolean = {
+    var s: Socket = null
+    try {
+      s = new Socket("localhost", port)
+      // If the code makes it this far without an exception it means
+      // something is using the port and has responded.
+      return false
+    } catch {
+      case e: Exception => return true;
+    } finally {
+      if (s != null) s.close()
+    }
+  }
+}
+
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
+  val port = 22552 + util.Random.nextInt(200)
+
   // Ensure that CoordinatedShutdown does not shutdown the whole test JVM, otherwise Travis CI/CD fails
   override protected lazy val roleConfig = ConfigFactory.parseString(
-        """akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
+       s"""akka.coordinated-shutdown.run-by-jvm-shutdown-hook=off
           |akka.coordinated-shutdown.exit-jvm = off
+          |akka.remote.netty.tcp.port=$port
         """.stripMargin)
 
   implicit abstract override val patienceConfig: PatienceConfig =
@@ -109,7 +137,6 @@ class ClusterNodeServerSpec extends FilodbClusterNodeSpec {
  * shardmap and subscription state, and checking that it is recovered properly on startup
  */
 class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
-
   import scala.collection.immutable
   import scala.concurrent.duration._
 

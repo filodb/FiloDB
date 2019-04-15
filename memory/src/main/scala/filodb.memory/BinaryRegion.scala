@@ -33,7 +33,7 @@ object BinaryRegion {
 
   // TODO: Can we PLEASE implement our own Unsafe XXHash which does not require creating a DirectBuffer?
   def hash32(base: Any, offset: Long, len: Int): Int = base match {
-    case a: Array[Byte] => hash32(a)
+    case a: Array[Byte]          => hasher32.hash(a, offset.toInt - UnsafeUtils.arayOffset, len, Seed)
     case UnsafeUtils.ZeroPointer => hasher32.hash(UnsafeUtils.asDirectBuffer(offset, len), Seed)
   }
 
@@ -47,7 +47,8 @@ object BinaryRegion {
   def copyArray(source: Array[Byte], dest: Array[Byte], destOffset: Int): Unit =
     System.arraycopy(source, 0, dest, destOffset, source.size)
 
-  // 64-bit pointer to native/offheap memory
+  // 64-bit pointer to native/offheap memory.  NOTE: instead of using this, please use the Ptr*
+  // value classes as they are much more type safe
   type NativePointer = Long
 }
 

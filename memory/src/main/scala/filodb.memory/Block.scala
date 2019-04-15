@@ -184,6 +184,9 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
     stringBuf.toString
   }
 
+  // debug method to set memory to specific value for testing
+  private[memory] def set(value: Byte): Unit =
+    UnsafeUtils.unsafe.setMemory(address, capacity, value)
 }
 
 
