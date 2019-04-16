@@ -112,8 +112,10 @@ class QueryEngine(dataset: Dataset,
 
   private def dispatcherForShard(shard: Int): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
-    if (targetActor == ActorRef.noSender)
+    if (targetActor == ActorRef.noSender) {
+      logger.debug(s"ShardMapper: $shardMapperFunc")
       throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
+    }
     ActorPlanDispatcher(targetActor)
   }
 
