@@ -1,0 +1,26 @@
+
+## Use the following template for commits
+## tip: the following command adds this template and helps whenever you do a `git commit` 
+##        `git config --replace-all commit.template .github/COMMIT_TEMPLATE`
+##
+## type: defines the type of change. can be one of:
+###  - fix: for general fixes
+###  - bug: for bug fixes
+###  - feat: for features
+###  - misc: for miscellaneous items
+##
+## scope: defines the scope of the change. e.g.:
+###  - query
+###  - coordinator
+###  - memory
+###  - core
+###  - coord
+## 
+## subject: a short description of the change 
+<type>(<scope>): <subject>
+
+## explain the change in greater detail.
+<body>
+
+## any footer notes (optional)
+<footer>

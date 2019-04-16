@@ -74,7 +74,8 @@ object Utils extends StrictLogging {
           val shardCols = dataset.options.shardKeyColumns
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols, dataset) match {
-              case Some(shardHash) => shardMap.queryShards(shardHash, options.spreadFunc(filters).last.spread)
+              case Some(shardHash) => shardMap.queryShards(shardHash,
+                                                           options.spreadProvider.spreadFunc(filters).last.spread)
               case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {
