@@ -1,9 +1,8 @@
 package filodb.prometheus.query
 
-import remote.RemoteStorage._
-
 import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
 import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
+import remote.RemoteStorage._
 
 object PrometheusModel {
 
@@ -77,7 +76,8 @@ object PrometheusModel {
   }
 
   def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
-    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_, verbose))))
+    SuccessResponse(Data(toPromResultType(qr.resultType),
+      qr.result.map(toPromResult(_, verbose)).filter(_.values.size > 0)))
   }
 
   def toPromResultType(r: QueryResultType): String = {
