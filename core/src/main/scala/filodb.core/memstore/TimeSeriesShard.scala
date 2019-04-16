@@ -239,7 +239,6 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
-  //private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
 
