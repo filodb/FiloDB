@@ -1,8 +1,9 @@
 package filodb.prometheus.query
 
+import remote.RemoteStorage._
+
 import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
 import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
-import remote.RemoteStorage._
 
 object PrometheusModel {
 
