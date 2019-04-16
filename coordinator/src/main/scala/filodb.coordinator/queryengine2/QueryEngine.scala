@@ -3,14 +3,8 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import monix.eval.Task
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
 import filodb.core.Types
@@ -19,8 +13,13 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query.{exec, _}
 import filodb.query.exec._
+import filodb.query.{exec, _}
+import kamon.Kamon
+import monix.eval.Task
+
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
 
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
@@ -113,7 +112,8 @@ class QueryEngine(dataset: Dataset,
 
   private def dispatcherForShard(shard: Int): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
-    if (targetActor == ActorRef.noSender) throw new RuntimeException("Not all shards available") // TODO fix this
+    if (targetActor == ActorRef.noSender)
+      throw new RuntimeException(s"Shard: $shard is not available") // TODO fix this
     ActorPlanDispatcher(targetActor)
   }
 
