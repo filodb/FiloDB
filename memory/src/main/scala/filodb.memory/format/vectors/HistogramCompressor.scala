@@ -20,6 +20,7 @@ object HistogramCompressor extends App {
   var numChunks = 0
   val numSamples = if (args.length > 1) args(1).toInt else 6000
 
+  // TODO: switch to PageAlignedMemManager so the memory can be constantly recycled
   val memFactory = new NativeMemoryManager(500 * 1024 * 1024)
   val inputBuffer = new ExpandableArrayBuffer(4096)
 
@@ -33,18 +34,24 @@ object HistogramCompressor extends App {
 
   var encodedTotal = 0
   var writeBufferTotal = 0
+  var samplesEncoded = 0
 
-  Source.fromFile(inputFile).getLines
-        .take(numSamples)
-        .foreach { line =>
-    // Ingest each histogram, parse and create a BinaryHistogram, then ingest into our histogram column
-    val buckets = line.split(",").map(_.trim.toLong)
-    val histSize = BinaryHistogram.writeDelta(bucketDef, buckets, inputBuffer)
+  val histograms = Source.fromFile(inputFile).getLines
+                         .take(numSamples)
+                         .map { line =>
+                           val buckets = line.split(",").map(_.trim.toLong)
+                           LongHistogram(bucketDef, buckets)
+                         }
+
+  histograms.foreach { h =>
+    val buf = h.serialize()
+    val histSize = (buf.getShort(0) & 0x0ffff) + 2
     numRecords += 1
     binHistBytesMax = Math.max(binHistBytesMax, histSize)
     binHistBytesSum += histSize
 
-    appender.addData(inputBuffer) match {
+    // Ingest into our histogram column
+    appender.addData(buf) match {
       case Ack =>    // data added, no problem
       case VectorTooSmall(_, _) =>   // not enough space.   Encode, aggregate, and add to a new appender
         // Optimize and get optimized size, dump out, aggregate
@@ -55,16 +62,15 @@ object HistogramCompressor extends App {
         encodedTotal += encodedSize
         writeBufferTotal += writeBufSize
         numChunks += 1
+        samplesEncoded += appender.length
 
         appender.reset()
         // Add back the input that did not fit into appender again
-        appender.addData(inputBuffer)
+        appender.addData(buf)
       case other =>
         println(s"Warning: response $other from appender.addData")
     }
   }
-
-  val samplesEncoded = numSamples - appender.length
 
   // Encode final chunk?  Or just forget it, because it will mess up size statistics?
 
