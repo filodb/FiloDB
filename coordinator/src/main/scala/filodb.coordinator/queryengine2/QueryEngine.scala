@@ -107,7 +107,7 @@ class QueryEngine(dataset: Dataset,
       val shardValues = shardVals.filterNot(_._1 == dataset.options.metricColumn).map(_._2)
       logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
       val shardHash = RecordBuilder.shardKeyHash(shardValues, metric)
-      shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters).last.spread)
+      shardMapperFunc.queryShards(shardHash, options.spreadProvider.spreadFunc(filters).last.spread)
     }
   }
 
@@ -232,7 +232,7 @@ class QueryEngine(dataset: Dataset,
                                    lp: RawSeries): PlanResult = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
-    val spreadChanges = options.spreadFunc(renamedFilters)
+    val spreadChanges = options.spreadProvider.spreadFunc(renamedFilters)
     val needsStitch = lp.rangeSelector match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
