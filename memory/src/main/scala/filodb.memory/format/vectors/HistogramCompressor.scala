@@ -33,6 +33,19 @@ trait CompressorAnalyzer {
                            LongHistogram(bucketDef, buckets)
                          }
 
+  // returns (writebuffer size, encoded size) given # timestamp samples and interval in seconds
+  def timestampVector(numSamples: Int, interval: Int): (Int, Int) = {
+    val tsAppender = LongBinaryVector.appendingVectorNoNA(memFactory, numSamples)
+    val startTime = System.currentTimeMillis
+    (0 until numSamples).foreach { i =>
+      tsAppender.addData(startTime + i * interval * 1000)
+    }
+    val writeBufSize = tsAppender.numBytes
+    val optimized = tsAppender.optimize(memFactory)
+    val encodedSize = BinaryVector.totalBytes(optimized)
+    (writeBufSize, encodedSize)
+  }
+
   def analyze(): Unit = {
     // Dump out overall aggregates
     val avgEncoded = encodedTotal.toDouble / numChunks
@@ -84,9 +97,10 @@ object HistogramCompressor extends App with CompressorAnalyzer {
         val writeBufSize = appender.numBytes
         val optimized = appender.optimize(memFactory)
         val encodedSize = BinaryVector.totalBytes(optimized)
-        println(s" WriteBuffer size: ${writeBufSize}\t\tEncoded size: $encodedSize")
-        encodedTotal += encodedSize
-        writeBufferTotal += writeBufSize
+        val (tsBufSize, tsEncodedSize) = timestampVector(appender.length, 10)
+
+        encodedTotal += encodedSize + tsEncodedSize
+        writeBufferTotal += writeBufSize + tsBufSize
         numChunks += 1
         samplesEncoded += appender.length
 
@@ -115,6 +129,8 @@ object PromCompressor extends App with CompressorAnalyzer {
     LongBinaryVector.appendingVectorNoNA(memFactory, 300)
   }.toArray
 
+  val (tsBufSize, tsEncodedSize) = timestampVector(300, 10)
+
   histograms.foreach { h =>
     numRecords += 1
     for { b <- 0 until bucketDef.numBuckets optimized } {
@@ -126,8 +142,8 @@ object PromCompressor extends App with CompressorAnalyzer {
           val optimized = appenders.map(_.optimize(memFactory))
           val encodedSize = optimized.map(BinaryVector.totalBytes).sum
           println(s" WriteBuffer size: ${writeBufSize}\t\tEncoded size: $encodedSize")
-          encodedTotal += encodedSize
-          writeBufferTotal += writeBufSize
+          encodedTotal += encodedSize + bucketDef.numBuckets * tsEncodedSize
+          writeBufferTotal += writeBufSize + bucketDef.numBuckets * tsBufSize
           numChunks += 1
           samplesEncoded += 300
 
