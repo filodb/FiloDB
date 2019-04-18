@@ -104,10 +104,10 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should add part keys and fetch startTimes correctly") {
-    val numPartIds = 3000
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
     val start = System.currentTimeMillis()
+    // we dont care much about the partKey here, but the startTime against partId.
     val partKeys = Stream.continually(readers.head).take(numPartIds).toList
-    // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) =>
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, start + i)()
