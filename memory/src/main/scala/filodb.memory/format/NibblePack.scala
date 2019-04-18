@@ -232,32 +232,29 @@ object NibblePack {
    * - Updates lastHistValues to the latest unpacked values so this sink can be used again
    *
    * For more details, see the "2D Delta" section in [compression.md](doc/compression.md)
+   *
+   * @param lastHistDeltas last histogram deltas as they arrive "over the wire"
+   * @param outBuf the MutableDirectBuffer to write the compressed 2D delta histogram to
    */
-  final case class DeltaDiffPackSink(lastHistValues: Array[Long], outBuf: MutableDirectBuffer) extends Sink {
+  final case class DeltaDiffPackSink(lastHistDeltas: Array[Long], outBuf: MutableDirectBuffer) extends Sink {
     // True if a packed value dropped
     var valueDropped: Boolean = false
-    private var current: Long = 0L
-    private var curDiff: Long = 0L
     private var i: Int = 0
     private val packArray = tempArray
     private var writePos: Int = 0
 
     def reset(): Unit = {
       i = 0
-      current = 0L
-      curDiff = 0L
       writePos = 0
       valueDropped = false
     }
 
     final def process(data: Long): Unit = {
-      if (i < lastHistValues.size) {
-        current += data
-        val diff = current - lastHistValues(i)
+      if (i < lastHistDeltas.size) {
+        val diff = data - lastHistDeltas(i)
         if (diff < 0) valueDropped = true
-        packArray(i % 8) = diff - curDiff
-        curDiff = diff
-        lastHistValues(i) = current
+        packArray(i % 8) = diff
+        lastHistDeltas(i) = data
         i += 1
         if ((i % 8) == 0) {
           writePos = pack8(packArray, outBuf, writePos)
