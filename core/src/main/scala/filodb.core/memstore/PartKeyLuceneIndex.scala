@@ -325,6 +325,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
     * Called when a document is updated with new endTime
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
+    val span = Kamon.buildSpan("index-startTimes-for-odp-lookup-latency")
+      .withTag("dataset", dataset.name)
+      .withTag("shard", shardNum)
+      .start()
     val collector = new PartIdStartTimeCollector()
     partIds.grouped(512).foreach { batch => // limit on query clause count is 1024, hence batch
       val booleanQuery = new BooleanQuery.Builder
@@ -333,6 +337,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
       }
       searcherManager.acquire().search(booleanQuery.build(), collector)
     }
+    span.finish()
     collector.startTimes
   }
 
