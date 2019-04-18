@@ -100,4 +100,45 @@ Currently, incoming histograms which are cumulative are encoded on the wire usin
 
 Please see [BinaryHistogram](../memory/src/main/scala/filodb.memory/format/vectors/HistogramVector.scala) for more details about the on-the-wire / BinaryRecord format used for histograms.
 
-TODO: document histogram compression techniques more when done.
+### 2D Delta Compression
+
+Prometheus treats each Histogram bucket as an increasing counter.  Thus over time you might have data like this:
+
+    10  20  30  40
+    15  25  35  55
+
+In general, let's say that you have raw Prometheus increasing histogram data like this:
+
+    t0:  [a,       a + d1,           a + d1 + d2]
+    t1:  [a + dA,  a + d1 + dA + dB, a + d1 + d2 + dA + dB + dC]
+
+After delta compression of each histogram, you end up with this data sent over the wire:
+
+    t0:  [a,      d1,      d2]
+    t1:  [a + dA, d1 + dB, d2 + dC]
+
+This is not bad, but over time the deltas for the successive histograms still grow larger and larger due to the increases.  Instead, we can compute the delta from the previous values and store the following for optimal storage:
+
+    t0:  [a,   d1,  d2]
+    t1:  [dA,  dB,  dC]
+
+I call this the "2D Delta" scheme.
+
+Restoring to original values consists of doing 1D Delta decompression on the first value:
+
+    t0:  [a, a + d1, a + d1 + d2]
+
+The second histogram is delta-decompressed, then added to the first values to arrive at the original:
+
+    t1': [dA,     dA + dB,          dA + dB + dC]
+    t1:  [a + dA, a + d1 + dA + dB, a + d1 + d2 + dA + dB + dC]
+
+The optimal 2D delta values can be arrived at simply by keeping track of the previous deltas and subtracting.
+
+    t1: dB = d1 + dB - d1
+    t1: dC = d2 + dC - d2
+
+Also, we can detect drops in counter values through a simplified expression:
+
+    a + d1 + d2 + dA + dB + dC < a + d1 + d2
+    dA + dB + dC < 0

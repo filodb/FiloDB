@@ -8,6 +8,7 @@ import scalaxy.loops._
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._
 
+//scalastyle:off
 trait CompressorAnalyzer {
   def inputFile: String
   def numSamples: Int
@@ -65,7 +66,6 @@ trait CompressorAnalyzer {
   }
 }
 
-//scalastyle:off
 // Input is a file with one line per histogram, bucket values are comma separated
 // This app is designed to measure histogram compression ratios based on real world histogram data
 object HistogramCompressor extends App with CompressorAnalyzer {

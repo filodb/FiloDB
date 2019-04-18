@@ -1,6 +1,6 @@
 package filodb.memory.format
 
-import org.agrona.ExpandableArrayBuffer
+import org.agrona.{DirectBuffer, ExpandableArrayBuffer}
 import org.agrona.concurrent.UnsafeBuffer
 
 import org.scalatest._
@@ -104,6 +104,59 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
 
     res shouldEqual NibblePack.Ok
     out shouldEqual inputs
+  }
+
+  def unpackAndCompare(inbuf: DirectBuffer, orig: Array[Long]): Unit = {
+    val sink2 = NibblePack.DeltaSink(new Array[Long](orig.size))
+    val res = NibblePack.unpackToSink(inbuf, sink2, orig.size)
+    res shouldEqual NibblePack.Ok
+    sink2.outArray shouldEqual orig
+  }
+
+  def unpackAndCompare(buf: DirectBuffer, index: Int, numBytes: Int, orig: Array[Long]): Unit = {
+    val slice = new UnsafeBuffer(buf, index, numBytes)
+    unpackAndCompare(slice, orig)
+  }
+
+  it("should repack increasing deltas to diffs using DeltaDiffPackSink") {
+    val inputs = Seq(Array(0L, 1000, 1001, 1002, 1003, 2005, 2010, 3034, 4045, 5056, 6067, 7078),
+                     Array(3L, 1004, 1006, 1008, 1009, 2010, 2020, 3056, 4070, 5090, 6101, 7150),
+                     Array(7L, 1010, 1016, 1018, 1019, 2020, 2030, 3078, 4101, 5112, 6134, 7195))
+    val diffs = inputs.sliding(2).map { case twoInputs =>
+      twoInputs.last.clone.zipWithIndex.map { case (num, i) => num - twoInputs.head(i) }
+    }.toSeq
+
+    val writeBuf = new ExpandableArrayBuffer()
+
+    // Compress each individual input into its own buffer
+    val bufsAndSize = inputs.map { in =>
+      val buf = new ExpandableArrayBuffer()
+      val bytesWritten = NibblePack.packDelta(in, buf, 0)
+      (buf, bytesWritten)
+    }
+
+    // Now, use DeltaDiffPackSink to recompress to deltas from initial inputs
+    val sink = NibblePack.DeltaDiffPackSink(new Array[Long](inputs.head.size), writeBuf)
+
+    // Verify delta on first one (empty diffs) yields back the original
+    val (firstCompBuf, firstBufSize) = bufsAndSize.head
+    val bufSlice0 = new UnsafeBuffer(firstCompBuf, 0, firstBufSize)
+    val res0 = NibblePack.unpackToSink(bufSlice0, sink, inputs.head.size)
+    res0 shouldEqual NibblePack.Ok
+
+    val finalWritten0 = sink.finish
+    finalWritten0 shouldEqual firstBufSize
+    unpackAndCompare(writeBuf, 0, finalWritten0, inputs.head)
+
+    // Verify delta on subsequent ones yields diff
+    bufsAndSize.drop(1).zip(diffs).foreach { case ((origCompressedBuf, origSize), diff) =>
+      val bufSlice = new UnsafeBuffer(origCompressedBuf, 0, origSize)
+      val res = NibblePack.unpackToSink(bufSlice, sink, inputs.head.size)
+      res shouldEqual NibblePack.Ok
+
+      val finalWritten = sink.finish
+      unpackAndCompare(writeBuf, 0, finalWritten, diff)
+    }
   }
 
   import org.scalacheck._

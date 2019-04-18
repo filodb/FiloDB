@@ -26,12 +26,7 @@ object NibblePack {
     }
 
     // Flush remainder - if any left
-    if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
-      pos = pack8(inputArray, buf, pos)
-    }
-
-    pos
+    packRemainder(inputArray, buf, pos, i)
   }
 
   /**
@@ -55,13 +50,17 @@ object NibblePack {
     }
 
     // Flush remainder - if any left
-    if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
-      pos = pack8(inputArray, buf, pos)
-    }
-
-    pos
+    packRemainder(inputArray, buf, pos, i)
   }
+
+  @inline
+  private def packRemainder(input: Array[Long], buf: MutableDirectBuffer, pos: Int, i: Int): Int =
+    if (i % 8 != 0) {
+      for { j <- (i % 8) until 8 optimized } { input(j) = 0 }
+      pack8(input, buf, pos)
+    } else {
+      pos
+    }
 
   /**
    * Packs Double values using XOR encoding to find minimal # of bits difference between successive values.
@@ -200,14 +199,14 @@ object NibblePack {
 
   final case class DeltaSink(outArray: Array[Long]) extends Sink {
     private var current: Long = 0L
-    private var pos: Int = 0
-    def process(data: Long): Unit = {
+    private var i: Int = 0
+    final def process(data: Long): Unit = {
       // It's necessary to ignore "extra" elements because NibblePack always unpacks in multiples of 8, but the
       // user might not intuitively allocate output arrays in elements of 8.
-      if (pos < outArray.size) {
+      if (i < outArray.size) {
         current += data
-        outArray(pos) = current
-        pos += 1
+        outArray(i) = current
+        i += 1
       }
     }
   }
@@ -222,6 +221,56 @@ object NibblePack {
         lastBits = nextBits
         pos += 1
       }
+    }
+  }
+
+  /**
+   * A sink used for increasing histogram counters.  In one shot:
+   * - Unpacks a delta-encoded NibblePack compressed Histogram
+   * - Subtracts the values from lastHistValues, noting if the difference is not >= 0 (means counter reset)
+   * - Packs the subtracted values
+   * - Updates lastHistValues to the latest unpacked values so this sink can be used again
+   *
+   * For more details, see the "2D Delta" section in [compression.md](doc/compression.md)
+   */
+  final case class DeltaDiffPackSink(lastHistValues: Array[Long], outBuf: MutableDirectBuffer) extends Sink {
+    // True if a packed value dropped
+    var valueDropped: Boolean = false
+    private var current: Long = 0L
+    private var curDiff: Long = 0L
+    private var i: Int = 0
+    private val packArray = tempArray
+    private var writePos: Int = 0
+
+    def reset(): Unit = {
+      i = 0
+      current = 0L
+      curDiff = 0L
+      writePos = 0
+      valueDropped = false
+    }
+
+    final def process(data: Long): Unit = {
+      if (i < lastHistValues.size) {
+        current += data
+        val diff = current - lastHistValues(i)
+        if (diff < 0) valueDropped = true
+        packArray(i % 8) = diff - curDiff
+        curDiff = diff
+        lastHistValues(i) = current
+        i += 1
+        if ((i % 8) == 0) {
+          writePos = pack8(packArray, outBuf, writePos)
+        }
+      }
+    }
+
+    // Finish packing any remainder bits that weren't packed before, then reset the state for another go
+    // Returns the final write position or length of the write buffer
+    final def finish(): Int = {
+      val finalPos = packRemainder(packArray, outBuf, writePos, i)
+      reset()
+      finalPos
     }
   }
 
