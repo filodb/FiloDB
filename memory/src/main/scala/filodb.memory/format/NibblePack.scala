@@ -231,21 +231,26 @@ object NibblePack {
    * - Packs the subtracted values
    * - Updates lastHistValues to the latest unpacked values so this sink can be used again
    *
+   * It is designed to be reused for delta repacking successive histograms.  Thus, the initial write position
+   * pos is not reset after finish(), instead it keeps increasing.  writePos may be adjusted by users, make sure
+   * you know what you are doing.
+   *
    * For more details, see the "2D Delta" section in [compression.md](doc/compression.md)
    *
    * @param lastHistDeltas last histogram deltas as they arrive "over the wire"
    * @param outBuf the MutableDirectBuffer to write the compressed 2D delta histogram to
+   * @param pos the initial write position for the outBuf
    */
-  final case class DeltaDiffPackSink(lastHistDeltas: Array[Long], outBuf: MutableDirectBuffer) extends Sink {
+  final case class DeltaDiffPackSink(lastHistDeltas: Array[Long], outBuf: MutableDirectBuffer, pos: Int = 0)
+  extends Sink {
     // True if a packed value dropped
     var valueDropped: Boolean = false
     private var i: Int = 0
     private val packArray = tempArray
-    private var writePos: Int = 0
+    var writePos: Int = pos
 
     def reset(): Unit = {
       i = 0
-      writePos = 0
       valueDropped = false
     }
 
@@ -267,6 +272,7 @@ object NibblePack {
     final def finish(): Int = {
       val finalPos = packRemainder(packArray, outBuf, writePos, i)
       reset()
+      writePos = finalPos
       finalPos
     }
   }
