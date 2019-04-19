@@ -80,7 +80,8 @@ object PrometheusModel {
   }
 
   def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
-    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_, verbose))))
+    SuccessResponse(Data(toPromResultType(qr.resultType),
+      qr.result.map(toPromResult(_, verbose)).filter(_.values.nonEmpty)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {

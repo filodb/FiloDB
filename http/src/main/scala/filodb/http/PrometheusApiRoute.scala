@@ -14,7 +14,7 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.{ExplainPlan2Query, LogicalPlan2Query, QueryOptions, SpreadChange}
+import filodb.coordinator.client.QueryCommands.{ExplainPlan2Query, LogicalPlan2Query, QueryOptions, SpreadChange, StaticSpreadProvider}
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -22,16 +22,19 @@ import filodb.prometheus.query.PrometheusModel.Sampl
 import filodb.query.{LogicalPlan, QueryError, QueryResult}
 import filodb.query.exec.ExecPlan
 
+
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
            extends FiloRoute with StrictLogging {
+
   import FailFastCirceSupport._
   import io.circe.generic.auto._
-  import PromCirceSupport._ // needed to override Sampl case class Encoder.
+
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
-  val queryOptions = QueryOptions(spreadFunc = { _ => Seq(SpreadChange(settings.queryDefaultSpread)) },
-                                  sampleLimit = settings.querySampleLimit)
+  val spreadProvider = new StaticSpreadProvider(SpreadChange(0, settings.queryDefaultSpread))
+
+  val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -41,10 +44,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double],
-                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, start, end, step, explainOnly, verbose) =>
+                  'step.as[Int], 'explain.as[Boolean].?, 'verbose.as[Boolean].?)
+        { (query, start, end, step, explain, verbose) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explain.getOrElse(false),verbose.getOrElse(false))
         }
       }
     } ~
@@ -54,10 +57,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, time, explainOnly, verbose) =>
+        parameter('query.as[String], 'time.as[Double], 'explain.as[Boolean].?, 'verbose.as[Boolean].?)
+        { (query, time, explain, verbose) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explain.getOrElse(false), verbose.getOrElse(false))
         }
       }
     } ~
@@ -103,8 +106,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean) = {
-    val command = if (explainOnly) {
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explain: Boolean, verbose: Boolean) = {
+    val command = if (explain) {
       ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
     }
     else {
