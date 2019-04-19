@@ -7,6 +7,7 @@ import scala.collection.mutable.ListBuffer
 
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
@@ -47,6 +48,11 @@ trait MemFactory {
    */
   def numFreeBytes: Long
 
+  /**
+   * Call to update (and publish) stats associated with this factory. Implementation might do nothing.
+   */
+  def updateStats(): Unit = {}
+
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
       (buf.array, UnsafeUtils.arayOffset.toLong + buf.arrayOffset + buf.position(), buf.limit() - buf.position())
@@ -75,16 +81,22 @@ object MemFactory {
   * first four bytes.  That in fact matches what is needed for BinaryVector and BinaryRecord allocations.
   * Have an allocateOffheapWithSizeHeader which just returns the address to the size bytes  :)
   * For now we still get millions of allocations/sec with synchronized
+  *
+  * @param tags Kamon tags used by updateStats method
   */
-class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
+class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String, String] = Map.empty)
+    extends MemFactory {
+
+  val statFree    = Kamon.gauge("memstore-writebuffer-bytes-free").refine(tags)
+  val statUsed    = Kamon.gauge("memstore-writebuffer-bytes-used").refine(tags)
+  val statEntries = Kamon.gauge("memstore-writebuffer-entries").refine(tags)
+
   private val sizeMapping = debox.Map.empty[Long, Int]
   @volatile private var usedSoFar = 0L
 
   def usedMemory: Long = usedSoFar
 
-  def availableDynMemory: Long = upperBoundSizeInBytes - usedSoFar
-
-  def numFreeBytes: Long = availableDynMemory
+  def numFreeBytes: Long = upperBoundSizeInBytes - usedSoFar
 
   // Allocates a native 64-bit pointer, or throws an exception if not enough space
   def allocateOffheap(size: Int, zero: Boolean = true): BinaryRegion.NativePointer = {
@@ -131,6 +143,17 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     }
     sizeMapping.clear()
     usedSoFar = 0
+  }
+
+  override def updateStats(): Unit = {
+    val used = usedSoFar
+    statUsed.set(used)
+    statFree.set(upperBoundSizeInBytes - used)
+    statEntries.set(entries)
+  }
+
+  private def entries = synchronized {
+    sizeMapping.size
   }
 
   def shutdown(): Unit = {

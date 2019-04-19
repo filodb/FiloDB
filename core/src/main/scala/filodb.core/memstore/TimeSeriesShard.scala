@@ -691,6 +691,10 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.numPartitions.set(numActivePartitions)
     val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
     shardStats.numActivelyIngestingParts.set(cardinality)
+
+    // Also publish MemFactory stats. Instance is expected to be shared, but no harm in
+    // publishing a little more often than necessary.
+    bufferMemoryManager.updateStats()
   }
 
   private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
