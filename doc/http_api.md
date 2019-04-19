@@ -176,6 +176,10 @@ Used to issue a promQL query for a time range with a `start` and `end` timestamp
 For more details, see Prometheus HTTP API Documentation
 [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
 
+```
+params:
+• `explainOnly` -- returns an ExecPlan instead of the query results
+```
 
 #### GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}
 
@@ -183,9 +187,10 @@ Used to issue a promQL query for a single time instant `time`.  Can also be used
 range expression. For more details, see Prometheus HTTP API Documentation
 [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
 
-#### GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}&explainOnly=true
-
-Used to get ExecPlan for query
+```
+params:
+• `explainOnly` -- returns an ExecPlan instead of the query results
+```
 
 #### POST /promql/{dataset}/api/v1/read
 

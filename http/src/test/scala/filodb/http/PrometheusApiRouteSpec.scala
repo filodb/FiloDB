@@ -27,7 +27,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
-  implicit val timeout = RouteTestTimeout(5.minute)
+  implicit val timeout = RouteTestTimeout(10.minute)
   cluster.coordinatorActor
   cluster.join()
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
