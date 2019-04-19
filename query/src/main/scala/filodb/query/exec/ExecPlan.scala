@@ -1,21 +1,20 @@
 package filodb.query.exec
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
-import scala.util.control.NonFatal
-
-import kamon.Kamon
-import monix.eval.Task
-import monix.execution.Scheduler
-import monix.reactive.Observable
-
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
-import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query._
+import kamon.Kamon
+import monix.eval.Task
+import monix.execution.Scheduler
+import monix.reactive.Observable
+
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.FiniteDuration
+import scala.util.control.NonFatal
 
 /**
   * This is the Execution Plan tree node interface.
@@ -189,9 +188,7 @@ trait ExecPlan extends QueryCommand {
     * @param useNewline pass false if the result string needs to be in one line
     */
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
-    val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
-    }
+    val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr = children.map(_.printTree(useNewline, nextLevel + 1))
@@ -199,13 +196,17 @@ trait ExecPlan extends QueryCommand {
   }
 
   final def getPlan(level: Int = 0): Seq[String] = {
-    val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
-    }
+    val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
     ((transf :+ curNode) ++ childr)
+  }
+
+  protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
+     rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
+      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+    }
   }
 
   protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
