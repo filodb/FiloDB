@@ -60,7 +60,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     val query = "heap_usage{_ns=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explain=true") ~> prometheusAPIRoute ~> check {
+      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
