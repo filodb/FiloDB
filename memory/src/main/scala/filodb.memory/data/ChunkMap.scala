@@ -9,6 +9,7 @@ import kamon.Kamon
 
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
+import filodb.memory.OutOfOffheapMemoryException
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -52,6 +53,7 @@ object ChunkMap extends StrictLogging {
 
   private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
+  private val chunkEvictions = Kamon.counter("memory-chunk-evictions")
 
   // Tracks all the shared locks held, by each thread.
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
@@ -376,10 +378,15 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
    * exclusive lock.
    * @param element the native pointer to the offheap element; must be able to apply
    * chunkmapKeyRetrieve to it to get the key
+   * @param evictKey The highest key which can be evicted (removed) if necessary to make room
+   * if no additional native memory can be allocated. The memory for the evicted chunks isn't
+   * freed here, under the assumption that the chunk is a part of a Block, which gets evicted
+   * later. This in turn calls chunkmapDoRemove, which does nothing because the chunk reference
+   * was already removed.
    */
-  final def chunkmapDoPut(element: NativePointer): Unit = {
+  final def chunkmapDoPut(element: NativePointer, evictKey: Long = Long.MinValue): Unit = {
     require(element != 0)
-    chunkmapDoPut(chunkmapKeyRetrieve(element), element)
+    chunkmapDoPut(chunkmapKeyRetrieve(element), element, evictKey)
   }
 
   /**
@@ -387,18 +394,18 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
    * already in the map. Caller must hold exclusive lock.
    * @return true if the element was inserted, false otherwise
    */
-  final def chunkmapDoPutIfAbsent(element: NativePointer): Boolean = {
+  final def chunkmapDoPutIfAbsent(element: NativePointer, evictKey: Long = Long.MinValue): Boolean = {
     require(element != 0)
     val key = chunkmapKeyRetrieve(element)
     if (doBinarySearch(key) >= 0) {
       return false
     }
-    chunkmapDoPut(key, element)
+    chunkmapDoPut(key, element, evictKey)
     true
   }
 
   //scalastyle:off
-  private def chunkmapDoPut(key: Long, element: NativePointer): Unit = {
+  private def chunkmapDoPut(key: Long, element: NativePointer, evictKey: Long): Unit = {
     if (size == 0) {
       arraySet(0, element)
       first = 0
@@ -409,20 +416,36 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     // Ensure enough capacity, under the assumption that in most cases the element is
     // inserted and not simply replaced.
     if (size >= capacity) {
-      val newArrayPtr = memFactory.allocateOffheap(capacity << 4, zero=true)
-      if (first == 0) {
-        // No wraparound.
-        UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr, size << 3)
-      } else {
-        // Wraparound correction.
-        val len = (capacity - first) << 3
-        UnsafeUtils.unsafe.copyMemory(arrayPtr + (first << 3), newArrayPtr, len)
-        UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr + len, first << 3)
-        first = 0
+      try {
+        val newArrayPtr = memFactory.allocateOffheap(capacity << 4, zero=true)
+        if (first == 0) {
+          // No wraparound.
+          UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr, size << 3)
+        } else {
+          // Wraparound correction.
+          val len = (capacity - first) << 3
+          UnsafeUtils.unsafe.copyMemory(arrayPtr + (first << 3), newArrayPtr, len)
+          UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr + len, first << 3)
+          first = 0
+        }
+        memFactory.freeMemory(arrayPtr)
+        arrayPtr = newArrayPtr
+        capacity <<= 1
+      } catch {
+        case e: OutOfOffheapMemoryException => {
+          // Try to evict the first entry instead of expanding the array.
+          if (evictKey == Long.MinValue || chunkmapKeyRetrieve(arrayGet(first)) > evictKey) {
+            throw e
+          }
+          chunkEvictions.increment()
+          first += 1
+          if (first >= capacity) {
+            // Wraparound.
+            first = 0
+          }
+          size -= 1
+        }
       }
-      memFactory.freeMemory(arrayPtr)
-      arrayPtr = newArrayPtr
-      capacity <<= 1
     }
 
     {

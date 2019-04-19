@@ -28,9 +28,10 @@ trait MemFactory {
     (UnsafeUtils.ZeroPointer, allocateOffheap(size), size)
 
   /**
-   * Allocates offheap memory and returns a native 64-bit pointer
-    * @param size Request memory allocation size in bytes
-    * @param zero if true, zeroes out the contents of the memory first
+   * Allocates offheap memory and returns a native 64-bit pointer, throwing
+   * OutOfOffheapMemoryException if no memory is available.
+   * @param size Request memory allocation size in bytes
+   * @param zero if true, zeroes out the contents of the memory first
    */
   def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer
 
