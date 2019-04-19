@@ -1,20 +1,21 @@
 package filodb.query.exec
 
-import filodb.core.DatasetRef
-import filodb.core.metadata.Dataset
-import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
-import filodb.core.store.ChunkSource
-import filodb.memory.format.RowReader
-import filodb.query.Query.qLogger
-import filodb.query._
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.FiniteDuration
+import scala.util.control.NonFatal
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
-import scala.util.control.NonFatal
+import filodb.core.DatasetRef
+import filodb.core.metadata.Dataset
+import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
+import filodb.core.store.ChunkSource
+import filodb.memory.format.RowReader
+import filodb.query._
+import filodb.query.Query.qLogger
 
 /**
   * This is the Execution Plan tree node interface.

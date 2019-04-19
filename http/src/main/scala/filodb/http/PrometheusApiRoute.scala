@@ -14,7 +14,7 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.{ExplainPlan2Query, LogicalPlan2Query, QueryOptions, SpreadChange, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands._
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
