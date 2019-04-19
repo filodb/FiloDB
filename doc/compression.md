@@ -8,6 +8,7 @@
   - [Predictive NibblePacking](#predictive-nibblepacking)
     - [Example](#example)
   - [Histograms](#histograms)
+    - [2D Delta Compression](#2d-delta-compression)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
