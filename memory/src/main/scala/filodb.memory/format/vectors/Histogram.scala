@@ -304,7 +304,7 @@ object HistogramBuckets {
    * @param bucketsDefOffset must point to the 2-byte length prefix of the bucket definition
    */
   def custom(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): CustomBuckets = {
-    val numBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + 2)
+    val numBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + 2) & 0x0ffff
     val les = new Array[Double](numBuckets)
     UnsafeUtils.wrapDirectBuf(bucketsDefBase,
                               bucketsDefOffset + 4,
