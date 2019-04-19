@@ -14,6 +14,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
+import filodb.memory.MemFactory
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.ZeroCopyUTF8String
 
@@ -25,6 +26,7 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
+  private val datasetMemFactories = new HashMap[DatasetRef, MemFactory]
 
   /**
     * The Downsample Publisher is per dataset on the memstore and is shared among all shards of the dataset
@@ -52,12 +54,14 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val bufferMemorySize = storeConf.ingestionBufferMemSize
-      logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
-      val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
+      val memFactory = datasetMemFactories.getOrElseUpdate(dataset.ref, {
+        val bufferMemorySize = storeConf.ingestionBufferMemSize
+        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
+        new NativeMemoryManager(bufferMemorySize)
+      })
 
       val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, bufferMemoryManager, store, metastore,
+      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, memFactory, store, metastore,
                               partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
