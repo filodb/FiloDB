@@ -93,6 +93,19 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
     sink2.outArray shouldEqual inputs2
   }
 
+  it("should pack and unpack double values") {
+    val inputs = Array(0.0, 2.5, 5.0, 7.5, 8, 13.2, 18.9, 89, 101.1, 102.3)
+    val buf = new ExpandableArrayBuffer()
+    val bytesWritten = NibblePack.packDoubles(inputs, buf, 0)
+
+    val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+    val out = new Array[Double](inputs.size)
+    val res = NibblePack.unpackDoubleXOR(bufSlice, out)
+
+    res shouldEqual NibblePack.Ok
+    out shouldEqual inputs
+  }
+
   import org.scalacheck._
 
   // Generate a list of increasing integers, every time bound it slightly differently
@@ -116,6 +129,23 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
 
       res shouldEqual NibblePack.Ok
       sink.outArray shouldEqual inputs
+    }
+  }
+
+  def increasingDoubleList: Gen[Seq[Double]] = increasingLongList.map(_.map(_.toDouble)).filter(_.length > 0)
+
+  it("should pack and unpack random list of increasing Doubles via XOR") {
+    val buf = new ExpandableArrayBuffer()
+    forAll(increasingDoubleList) { doubles =>
+      val inputs = doubles.toArray
+      val bytesWritten = NibblePack.packDoubles(inputs, buf, 0)
+
+      val bufSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+      val out = new Array[Double](inputs.size)
+      val res = NibblePack.unpackDoubleXOR(bufSlice, out)
+
+      res shouldEqual NibblePack.Ok
+      out shouldEqual inputs
     }
   }
 }
