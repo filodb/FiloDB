@@ -26,10 +26,6 @@ extends MemStore with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
 
-  // Memory pool for uncompressed ingestion data and partition keys, shared by all shards.
-  private val bufferMemoryManager = new NativeMemoryManager(
-    config.getMemorySize("memstore.ingestion-buffer-mem-size").toBytes)
-
   /**
     * The Downsample Publisher is per dataset on the memstore and is shared among all shards of the dataset
     */
@@ -56,6 +52,10 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
+      val bufferMemorySize = storeConf.ingestionBufferMemSize
+      logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
+      val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
+
       val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
       val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, bufferMemoryManager, store, metastore,
                               partEvictionPolicy, downsample, publisher)
