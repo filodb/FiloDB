@@ -498,9 +498,7 @@ class TimeSeriesShard(val dataset: Dataset,
         } else {
           // partition assign a new partId to non-ingesting partition,
           // but no need to create a new TSPartition heap object
-          val id = nextPartitionID
-          incrementPartitionID()
-          Some(id)
+          Some(createPartitionID())
         }
 
         // add newly assigned partId to lucene index
@@ -1079,11 +1077,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val partId = if (usePartId == CREATE_NEW_PARTID) {
-        val id = nextPartitionID
-        incrementPartitionID()
-        id
-      } else usePartId
+      val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
       val newPart = new TimeSeriesPartition(
         partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       partitions.put(partId, newPart)
@@ -1108,19 +1102,28 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
-  // Ensures partition ID wraps around safely to 0, not negative numbers (which don't work with bitmaps)
-  private def incrementPartitionID(): Unit = {
-    nextPartitionID += 1
-    if (nextPartitionID < 0) {
-      nextPartitionID = 0
-      logger.info(s"dataset=${dataset.ref} shard=$shardNum nextPartitionID has wrapped around to 0 again")
-    }
-    // Given that we have 2^31 range of partitionIDs, we should pretty much never run into this problem where
-    // we wraparound and hit a previously used partitionID.  Actually dealing with this is not easy;  what if
-    // the used one is still actively ingesting?  We need to solve the issue of evicting actively ingesting
-    // partitions first.  For now, assert so at least we will catch this condition.
-    require(!partitions.containsKey(nextPartitionID), s"Partition ID $nextPartitionID ran into existing partition" +
-      s"in dataset=${dataset.ref} shard=$shardNum")
+  /**
+   * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
+   * partition ID wouldn't work with bitmaps.
+   */
+  private def createPartitionID(): Int = {
+    val id = nextPartitionID
+
+    // It's unlikely that partition IDs will wrap around, and it's unlikely that collisions
+    // will be encountered. In case either of these conditions occur, keep incrementing the id
+    // until no collision is detected. A given shard is expected to support up to 1M actively
+    // ingesting partitions, and so in the worst case, the loop might run for up to ~100ms.
+    // Afterwards, a complete wraparound is required for collisions to be detected again.
+
+    do {
+      nextPartitionID += 1
+      if (nextPartitionID < 0) {
+        nextPartitionID = 0
+        logger.info(s"dataset=${dataset.ref} shard=$shardNum nextPartitionID has wrapped around to 0 again")
+      }
+    } while (partitions.containsKey(nextPartitionID))
+
+    id
   }
 
   /**
