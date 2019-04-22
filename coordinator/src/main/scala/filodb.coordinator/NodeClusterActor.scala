@@ -373,7 +373,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   private def handleShardEvent(e: ShardEvent) = {
-    logger.debug(s"Received ShardEvent $e from $sender")
     shardManager.updateFromExternalShardEvent(sender(), e)
   }
 

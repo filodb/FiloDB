@@ -456,11 +456,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * the ShardMapper for dataset.
     */
   def updateFromExternalShardEvent(sender: ActorRef, event: ShardEvent): Unit = {
-    logger.info(s"Received event=$event from sender=$sender for dataset=${event.ref} for shard=${event.shard}")
     _shardMappers.get(event.ref) foreach { mapper =>
       val currentCoord = mapper.coordForShard(event.shard)
       if (currentCoord == ActorRef.noSender) {
-        logger.warn(s"Ignoring event=$event from sender=$sender for dataset=${event.ref} since shard=${event.shard} " +
+        logger.debug(s"Ignoring event=$event from sender=$sender for dataset=${event.ref} since shard=${event.shard} " +
           s"is not currently assigned. Was $sender the previous owner for a shard that was just unassigned? " +
           s"How else could this happen? ")
         // Note that this path is not used for an initial shard assignment when currentCoord would indeed be noSender;
@@ -498,7 +497,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // RecoveryInProgress status results in too many messages that really do not need a publish
         if (!event.isInstanceOf[RecoveryInProgress]) publishSnapshot(event.ref)
       } else {
-        logger.warn(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
+        logger.debug(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
           s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")
       }
     }
@@ -523,7 +522,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         case Failure(l) =>
           logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
         case Success(r) =>
-          logger.info(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
+          logger.debug(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
       }
     }
     updateShardMetrics()
