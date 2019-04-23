@@ -8,7 +8,7 @@ import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfterEach, Ignore}
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -23,7 +23,7 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 // TODO disabled since several tests in this class are flaky in Travis.
-@Ignore
+// @org.scalatest.Ignore
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -143,14 +143,14 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       dataset1.ref
     }
 
-    it("should return UnknownDataset if attempting to query before ingestion set up") {
+    ignore("should reach out to NodeGuardian if attempting to query before ingestion set up") {
       probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
 
       val ref = MachineMetricsData.dataset1.ref
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")))
       probe.send(coordinatorActor, q1)
-      probe.expectMsg(UnknownDataset)
+      probe.expectMsgClass(classOf[NodeProtocol.ForwardMsg])
     }
 
     it("should return chunks when querying all samples after ingesting rows") {

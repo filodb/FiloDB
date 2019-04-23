@@ -18,6 +18,7 @@ final class NodeGuardian(val settings: FilodbSettings,
 
   import ActorName._
   import NodeProtocol._
+  import client.IngestionCommands.UnknownDataset
 
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
 
@@ -57,10 +58,10 @@ final class NodeGuardian(val settings: FilodbSettings,
   // Workaround: pass random shard's ActorRef to given function for dataset
   // Designed to work around bug where spare nodes cannot process query
   private def forward(f: ForwardMsg): Unit =
-    shardMappers.get(f.dataset).foreach { mapper =>
+    shardMappers.get(f.dataset).map { mapper =>
       val shard = util.Random.nextInt(mapper.numShards)
       f.func(mapper.coordForShard(shard))
-    }
+    }.getOrElse(sender() ! UnknownDataset)
 
   private def shardSnapshot(s: CurrentShardSnapshot): Unit = {
     logger.debug(s"Updating shardMappers for ref ${s.ref}")
