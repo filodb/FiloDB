@@ -42,6 +42,7 @@ final class NodeGuardian(val settings: FilodbSettings,
     case s: CurrentShardSnapshot   => shardSnapshot(s)
     case e: ShardSubscriptions     => subscriptions = e
     case GetClusterState           => state(sender())
+    case f: ForwardMsg             => forward(f)
     case e: ListenerRef            => failureAware ! e
   }
 
@@ -52,6 +53,14 @@ final class NodeGuardian(val settings: FilodbSettings,
     */
   private def state(requestor: ActorRef): Unit =
     requestor ! ClusterState(shardMappers, subscriptions)
+
+  // Workaround: pass random shard's ActorRef to given function for dataset
+  // Designed to work around bug where spare nodes cannot process query
+  private def forward(f: ForwardMsg): Unit =
+    shardMappers.get(f.dataset).foreach { mapper =>
+      val shard = util.Random.nextInt(mapper.numShards)
+      f.func(mapper.coordForShard(shard))
+    }
 
   private def shardSnapshot(s: CurrentShardSnapshot): Unit = {
     logger.debug(s"Updating shardMappers for ref ${s.ref}")
@@ -183,6 +192,8 @@ object NodeProtocol {
   private[coordinator] case object GetClusterState extends StateCommand
 
   private[filodb] case object StateReset extends StateTaskAck
+
+  private[coordinator] final case class ForwardMsg(dataset: DatasetRef, func: ActorRef => Unit)
 
   private[coordinator] final case class ClusterState(shardMaps: MMap[DatasetRef, ShardMapper],
                                                      subscriptions: ShardSubscriptions) extends StateTaskAck

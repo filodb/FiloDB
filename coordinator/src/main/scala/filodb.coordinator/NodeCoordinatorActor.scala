@@ -80,10 +80,11 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     ingesters.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
   }
 
-  // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
-  // TODO: if we ever support query API against cold (not in memory) datasets, change this
+  // NOTE: if no QueryActor is set up, forward to NodeGuardian who will then pass it on to a random shard
   private def withQueryActor(originator: ActorRef, dataset: DatasetRef)(func: ActorRef => Unit): Unit =
-    queryActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
+    queryActors.get(dataset).map(func).getOrElse {
+      context.parent forward NodeProtocol.ForwardMsg(dataset, func)
+    }
 
   private def createDataset(originator: ActorRef,
                             datasetObj: Dataset): Unit = {
