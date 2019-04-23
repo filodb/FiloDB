@@ -318,7 +318,7 @@ object Parser extends Expression {
     */
   override lazy val skipWhitespace: Boolean = true
 
-  override val whiteSpace = "[ \t\r\f]+".r
+  override val whiteSpace = "[ \t\r\f\n]+".r
 
   val FiveMinutes = Duration(5, Minute).millis
 
