@@ -8,6 +8,7 @@ import debox.Buffer
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.memory.BinaryRegion.NativePointer
+import filodb.memory.NativeMemoryManager
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.vectors.NativeVectorTest
 
@@ -753,5 +754,27 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapReleaseExclusive()
 
     map.chunkmapFree()
+  }
+
+  it("should evict when out of memory") {
+    // Very little memory is available.
+    val mm = new NativeMemoryManager(200)
+
+    // Tiny initial capacity.
+    val map = new ChunkMap(mm, 1)
+
+    val elems = makeElems((0 to 19).map(_.toLong))
+    elems.foreach { elem =>
+      map.chunkmapDoPut(elem, 9) // Evict anything less than or equal to 9.
+    }
+
+    // Not 20 due to evictions.
+    map.chunkmapSize shouldEqual 16
+
+    for (i <- 4 to 19) {
+      map.chunkmapContains(i) shouldEqual true
+    }
+
+    mm.freeAll()
   }
 }

@@ -1,12 +1,13 @@
 package filodb.memory
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 
 import scala.collection.mutable.ListBuffer
 
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
@@ -28,9 +29,10 @@ trait MemFactory {
     (UnsafeUtils.ZeroPointer, allocateOffheap(size), size)
 
   /**
-   * Allocates offheap memory and returns a native 64-bit pointer
-    * @param size Request memory allocation size in bytes
-    * @param zero if true, zeroes out the contents of the memory first
+   * Allocates offheap memory and returns a native 64-bit pointer, throwing
+   * OutOfOffheapMemoryException if no memory is available.
+   * @param size Request memory allocation size in bytes
+   * @param zero if true, zeroes out the contents of the memory first
    */
   def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer
 
@@ -45,6 +47,11 @@ trait MemFactory {
    * Number of "free" bytes left at the moment available for allocation
    */
   def numFreeBytes: Long
+
+  /**
+   * Call to update (and publish) stats associated with this factory. Implementation might do nothing.
+   */
+  def updateStats(): Unit = {}
 
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
@@ -74,43 +81,60 @@ object MemFactory {
   * first four bytes.  That in fact matches what is needed for BinaryVector and BinaryRecord allocations.
   * Have an allocateOffheapWithSizeHeader which just returns the address to the size bytes  :)
   * For now we still get millions of allocations/sec with synchronized
+  *
+  * @param tags Kamon tags used by updateStats method
   */
-class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
-  protected val usedSoFar = new AtomicLong(0)
-  protected val sizeMapping = debox.Map.empty[Long, Int]
+class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String, String] = Map.empty)
+    extends MemFactory {
 
-  def usedMemory: Long = usedSoFar.get()
+  val statFree    = Kamon.gauge("memstore-writebuffer-bytes-free").refine(tags)
+  val statUsed    = Kamon.gauge("memstore-writebuffer-bytes-used").refine(tags)
+  val statEntries = Kamon.gauge("memstore-writebuffer-entries").refine(tags)
 
-  def availableDynMemory: Long = upperBoundSizeInBytes - usedSoFar.get()
+  private val sizeMapping = debox.Map.empty[Long, Int]
+  @volatile private var usedSoFar = 0L
 
-  def numFreeBytes: Long = availableDynMemory
+  def usedMemory: Long = usedSoFar
+
+  def numFreeBytes: Long = upperBoundSizeInBytes - usedSoFar
 
   // Allocates a native 64-bit pointer, or throws an exception if not enough space
-  def allocateOffheap(size: Int, zero: Boolean = true): BinaryRegion.NativePointer = synchronized {
-    val currentSize = usedSoFar.get()
-    val resultantSize = currentSize + size
-    if (!(resultantSize > upperBoundSizeInBytes)) {
+  def allocateOffheap(size: Int, zero: Boolean = true): BinaryRegion.NativePointer = {
+    var currentSize = usedSoFar
+
+    if (currentSize + size <= upperBoundSizeInBytes) {
+      // Optimistically allocate without being synchronized.
       val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, zero)
-      usedSoFar.compareAndSet(currentSize, currentSize + size)
-      sizeMapping(address) = size
-      address
-    } else {
-      throw OutOfOffheapMemoryException(size, availableDynMemory)
+
+      synchronized {
+        currentSize = usedSoFar
+        if (currentSize + size <= upperBoundSizeInBytes) {
+          // Still within the upper bound, so all is good.
+          usedSoFar = currentSize + size;
+          sizeMapping(address) = size
+          return address
+        }
+      }
+
+      // Allocated too much due to optimistic failure, so free it.
+      MemoryIO.getCheckedInstance().freeMemory(address)
     }
+
+    throw OutOfOffheapMemoryException(size, upperBoundSizeInBytes - currentSize)
   }
 
-  override def freeMemory(startAddress: Long): Unit = synchronized {
-    val address = startAddress
-    val size = sizeMapping.getOrElse(address, -1)
-    if (size >= 0) {
-      val currentSize = usedSoFar.get()
-      MemoryIO.getCheckedInstance().freeMemory(address)
-      usedSoFar.compareAndSet(currentSize, currentSize - size)
-      val removed = sizeMapping.remove(address)
-    } else {
-      val msg = s"Address $address was not allocated by this memory manager"
-      throw new IllegalArgumentException(msg)
+  override def freeMemory(address: Long): Unit = {
+    synchronized {
+      val size = sizeMapping.getOrElse(address, -1)
+      if (size < 0) {
+        val msg = s"Address $address was not allocated by this memory manager"
+        throw new IllegalArgumentException(msg)
+      }
+      sizeMapping.remove(address)
+      usedSoFar -= size
     }
+
+    MemoryIO.getCheckedInstance().freeMemory(address)
   }
 
   protected[memory] def freeAll(): Unit = synchronized {
@@ -118,7 +142,18 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
       MemoryIO.getCheckedInstance().freeMemory(addr)
     }
     sizeMapping.clear()
-    usedSoFar.set(0)
+    usedSoFar = 0
+  }
+
+  override def updateStats(): Unit = {
+    val used = usedSoFar
+    statUsed.set(used)
+    statFree.set(upperBoundSizeInBytes - used)
+    statEntries.set(entries)
+  }
+
+  private def entries = synchronized {
+    sizeMapping.size
   }
 
   def shutdown(): Unit = {

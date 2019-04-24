@@ -169,6 +169,8 @@ object PartitionIterator {
   * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
   * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
   *
+  * @param bufferMemoryManager Unencoded/unoptimized ingested data is stored in buffers that are allocated from this
+  *                            memory pool. This pool is also used to store partition keys.
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
   * @param downsampleConfig configuration for downsample operations
   * @param downsamplePublisher is shared among all shards of the dataset on the node
@@ -176,6 +178,7 @@ object PartitionIterator {
 class TimeSeriesShard(val dataset: Dataset,
                       val storeConfig: StoreConfig,
                       val shardNum: Int,
+                      val bufferMemoryManager: MemFactory,
                       colStore: ColumnStore,
                       metastore: MetaStore,
                       evictionPolicy: PartitionEvictionPolicy,
@@ -236,7 +239,6 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
-  private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
 
@@ -262,13 +264,6 @@ class TimeSeriesShard(val dataset: Dataset,
   private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
-  /**
-    * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
-    * Note that this pool is also used to store partition keys.
-    */
-  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for " +
-    s"dataset=${dataset.ref} shard=$shardNum")
-  protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
     reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
@@ -694,6 +689,10 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.numPartitions.set(numActivePartitions)
     val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
     shardStats.numActivelyIngestingParts.set(cardinality)
+
+    // Also publish MemFactory stats. Instance is expected to be shared, but no harm in
+    // publishing a little more often than necessary.
+    bufferMemoryManager.updateStats()
   }
 
   private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
@@ -1313,7 +1312,6 @@ class TimeSeriesShard(val dataset: Dataset,
     logger.info(s"Shutting down dataset=${dataset.ref} shard=$shardNum")
     /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
        method to ensure that no threads are accessing the memory before it's freed.
-    bufferMemoryManager.shutdown()
     blockStore.releaseBlocks()
     */
   }

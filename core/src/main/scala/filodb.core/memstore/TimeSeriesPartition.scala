@@ -364,7 +364,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
     chunkmapWithExclusive({
-      val inserted = chunkmapDoPutIfAbsent(infoAddr)
+      val inserted = chunkmapDoPutIfAbsent(infoAddr, newestFlushedID)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
@@ -382,7 +382,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast)
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr))
+    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr, newestFlushedID))
   }
 
   // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
