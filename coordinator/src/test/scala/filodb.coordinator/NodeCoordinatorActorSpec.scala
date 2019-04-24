@@ -23,7 +23,7 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 // TODO disabled since several tests in this class are flaky in Travis.
-// @org.scalatest.Ignore
+@org.scalatest.Ignore
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
 
