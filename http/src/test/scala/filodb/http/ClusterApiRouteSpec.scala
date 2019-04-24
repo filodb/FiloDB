@@ -31,6 +31,7 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
   cluster.join()
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
   val clusterRoute = (new ClusterApiRoute(clusterProxy)).route
+  Thread sleep 2000
 
   private def setupDataset(): Unit = {
     val command = SetupDataset(dataset6.ref, DatasetResourceSpec(4, 2), noOpSource, TestData.storeConf)
