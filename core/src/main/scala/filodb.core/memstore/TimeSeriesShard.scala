@@ -327,6 +327,15 @@ class TimeSeriesShard(val dataset: Dataset,
       }
     })
 
+  /**
+   * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
+   * logs, use at your own risk.
+   */
+  val tracedPartFilters =
+    storeConfig.traceFilters.toSeq
+      .map { case (k, v) => (dataset.partitionColumns.indexWhere(_.name == k), v) }
+      .filter { case (i, v) => i >= 0 && dataset.partitionColumns(i).columnType == ColumnType.StringColumn }
+
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
@@ -1060,6 +1069,12 @@ class TimeSeriesShard(val dataset: Dataset,
         s"shard=$shardNum", e); disableAddPartitions()
     }
 
+  private def shouldTrace(partKeyAddr: Long): Boolean = tracedPartFilters.nonEmpty && {
+    tracedPartFilters.forall { case (i, filtVal) =>
+      dataset.partKeySchema.asJavaString(UnsafeUtils.ZeroPointer, partKeyAddr, i) == filtVal
+    }
+  }
+
   /**
     * Creates new partition and adds them to the shard data structures. DOES NOT update
     * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
@@ -1077,8 +1092,13 @@ class TimeSeriesShard(val dataset: Dataset,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
-      val newPart = new TimeSeriesPartition(
-        partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      val newPart = if (shouldTrace(partKeyAddr)) {
+        new TracingTimeSeriesPartition(
+          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      } else {
+        new TimeSeriesPartition(
+          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)

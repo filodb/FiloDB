@@ -32,7 +32,9 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              multiPartitionODP: Boolean,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
-                             evictedPkBfCapacity: Int) {
+                             evictedPkBfCapacity: Int,
+                             // filters on ingested records to log in detail
+                             traceFilters: Map[String, String]) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -80,6 +82,7 @@ object StoreConfig {
                                            |demand-paging-parallelism = 4
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
+                                           |trace-filters = {}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -102,7 +105,8 @@ object StoreConfig {
                 config.getBoolean("multi-partition-odp"),
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
-                config.getInt("evicted-pk-bloom-filter-capacity"))
+                config.getInt("evicted-pk-bloom-filter-capacity"),
+                config.as[Map[String, String]]("trace-filters"))
   }
 }
 
