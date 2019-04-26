@@ -57,7 +57,7 @@ extends MemStore with StrictLogging {
       val memFactory = datasetMemFactories.getOrElseUpdate(dataset.ref, {
         val bufferMemorySize = storeConf.ingestionBufferMemSize
         logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
-        val tags = Map("dataset" -> dataset.toString)
+        val tags = Map("dataset" -> dataset.ref.toString)
         new NativeMemoryManager(bufferMemorySize, tags)
       })
 
