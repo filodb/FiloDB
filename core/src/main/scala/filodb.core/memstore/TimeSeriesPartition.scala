@@ -394,7 +394,12 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
 /**
  * A variant of the above which logs every sample ingested and buffer switching/encoding event,
- * for debugging purposes.
+ * for debugging purposes.  See the trace-filters StoreConfig / ingestion config setting.
+ *
+ * NOTE(velvia): The reason why I used inheritance was not so much memory but just ease of implementation.
+ * With composition we'd need to add in tons of methods and clutter things up quite a bit. If it simply
+ * implemented ReadablePartition that might break things in a bunch of places.
+ * So best way to keep changes small and balance out different needs
  */
 class TracingTimeSeriesPartition(partID: Int,
                                  dataset: Dataset,
