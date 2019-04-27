@@ -165,11 +165,11 @@ object FiloBuild extends Build {
 
 
   /* Versions in various modules versus one area of build */
-  val akkaVersion       = "2.5.13" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
-  val akkaHttpVersion   = "10.1.3"
+  val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
+  val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.0.2"
   val ficusVersion      = "1.1.2"
-  val kamonVersion      = "1.1.3"
+  val kamonVersion      = "1.1.6"
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.0.0"
   val sttpVersion       = "1.3.3"
