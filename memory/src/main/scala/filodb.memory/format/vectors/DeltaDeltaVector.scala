@@ -68,7 +68,10 @@ object DeltaDeltaVector {
             minMax   <- getDeltasMinMax(inputVect, slope)
             nbitsSigned <- getNbitsSignedFromMinMax(minMax, maxNBits)
       } yield {
-        if (minMax.min == minMax.max) {
+        // Min and max == 0 for constant slope otherwise we can have some funny edge cases such as the first value
+        // being diff from all others which are the same (eg 55, 60, 60, ....).  That results in erroneous Const
+        // encoding.
+        if (minMax.min == 0 && minMax.max == 0) {
           const(memFactory, inputVect.length, inputVect(0), slope)
         } else if (approxConst && minMax.min >= MinApproxDelta && minMax.max <= MaxApproxDelta) {
           const(memFactory, inputVect.length, inputVect(0), slope)
