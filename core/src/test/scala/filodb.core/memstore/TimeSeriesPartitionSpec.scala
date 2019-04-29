@@ -28,6 +28,13 @@ object TimeSeriesPartitionSpec {
     new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
           new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
   }
+
+  def tracingPart(partNo: Int, dataset: Dataset,
+               partKey: NativePointer = defaultPartKey,
+               bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
+    new TracingTimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
+          new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
+  }
 }
 
 trait MemFactoryCleanupTest extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
@@ -399,4 +406,28 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     readData2.toBuffer shouldEqual (timestamps take 5) ++ (timestamps drop 7)
   }
 
+  it("TracingTSPartition should be able to ingest new rows") {
+    part = tracingPart(0, dataset1)
+    val data = singleSeriesReaders().take(11)
+    val minData = data.map(_.getDouble(1))
+    val initTS = data(0).getLong(0)
+    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
+
+    val origPoolSize = myBufferPool.poolSize
+
+    // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
+    part.switchBuffers(ingestBlockHolder)
+    // After switchBuffers, currentChunks should be null, pool size the same (nothing new allocated yet)
+    myBufferPool.poolSize shouldEqual origPoolSize
+    part.appendingChunkLen shouldEqual 0
+
+    // Before flush happens, should be able to read all chunks
+    part.unflushedChunksets shouldEqual 1
+    part.numChunks shouldEqual 1
+    val infos1 = part.infos(AllChunkScan).toBuffer
+    infos1 should have length 1
+    infos1.head.startTime shouldEqual initTS
+    val data1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0)).toBuffer
+    data1 shouldEqual (minData take 10)
+  }
 }

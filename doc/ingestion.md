@@ -72,9 +72,8 @@ sourceconfig {
     # Assume 5 bytes per sample, should be roughly equal to (# samples per time series) * (# time series)
     shard-mem-size = 256MB
 
-    # Number of bytes of offheap mem to allocate to write buffers in each shard.  Ex. 1000MB, 1G, 2GB
-    # Scales with the number of time series a shard should hold
-    ingestion-buffer-mem-size = 50MB
+    # Number of bytes of offheap mem to allocate to write buffers for all shards.  Ex. 1000MB, 1G, 2GB
+    ingestion-buffer-mem-size = 200MB
 
     # Number of subgroups within each shard.  Persistence to a ChunkSink occurs one subgroup at a time, as does
     # recovery from failure.  This many batches of flushes must occur to cover persistence of every partition
@@ -108,7 +107,7 @@ See the TestConsumer for more info.
 How much to allocate for `ingestion-buffer-mem-size` and `shard-mem-size` as well as heap?  Here are some guidelines:
 
 * **Heap memory** - heap usage grows by the number of time series stored by FiloDB in memory, but not by the number of chunks or amount of data within each series.  As of 8/6/18 1.5 million time series will fit within 1GB of heap.  At least 5-10 more GB is recommended though for extra memory for ingestion, recovery, and querying.
-* **Ingestion buffer** - The ingestion buffer is a per-shard offheap memory area for ingestion write buffers and some other time series-specific data structures.  It needs to be scaled with the number of time series actively ingesting in the system, a few KB for each series.  Once the ingestion buffer runs out, no more time series can be added and eviction of existing time series starting with the oldest non-actively ingesting time series will begin to free up room.  If not enough room can be freed, new time series and in extreme cases even new data may not be ingested.
+* **Ingestion buffer** - The ingestion buffer is a per-dataset offheap memory area for ingestion write buffers and some other time series-specific data structures.  It needs to be scaled with the number of time series actively ingesting in the system, a few KB for each series.  Once the ingestion buffer runs out, no more time series can be added and eviction of existing time series starting with the oldest non-actively ingesting time series will begin to free up room.  If not enough room can be freed, new time series and in extreme cases even new data may not be ingested.
 * `shard-mem-size` - this is the offheap block storage used to store encoded chunks for the time series data samples and metadata for each chunk.  This should be sized for the number of time series as well as the length of retention desired for all the time series.  The configuration is currently **per-shard**.  When this memory runs out, the oldest blocks will be reclaimed automatically and those chunks will be dropped from time series.
 
 ## Recovery and Persistence

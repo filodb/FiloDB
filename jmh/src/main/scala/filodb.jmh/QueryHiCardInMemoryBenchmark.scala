@@ -24,10 +24,11 @@ import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
 /**
- * Benchmark for scan performed at the lowest leaf of an ExecPlan tree for various queries
+ * Benchmark for high-cardinality sum() aggregation, each query aggregates 2000 time series.
+ * Scan is performed at the lowest leaf of an ExecPlan tree for various queries
  */
 @State(Scope.Thread)
-class QueryLeafScanInMemoryBenchmark extends StrictLogging {
+class QueryHiCardInMemoryBenchmark extends StrictLogging {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
 
   import filodb.coordinator._
@@ -36,9 +37,9 @@ class QueryLeafScanInMemoryBenchmark extends StrictLogging {
   import NodeClusterActor._
 
   val numShards = 1
-  val numSeries = 200
-  val samplesDuration = 2.hours
-  val numSamples = numSeries * (samplesDuration / 10.seconds).toInt
+  val numSeries = 8000   // NOTE: num of time series queried is this / 4
+  val samplesDuration = 15.minutes
+  val numSamples = (samplesDuration / 10.seconds).toInt   // # samples PER TIME SERIES
   val ingestionStartTime = System.currentTimeMillis - samplesDuration.toMillis
   val spread = 0
   val config = ConfigFactory.load("filodb-defaults.conf")
@@ -65,8 +66,8 @@ class QueryLeafScanInMemoryBenchmark extends StrictLogging {
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
-                  | shard-mem-size = 512MB
-                  | ingestion-buffer-mem-size = 50MB
+                  | shard-mem-size = 2GB
+                  | ingestion-buffer-mem-size = 1GB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
@@ -79,7 +80,6 @@ class QueryLeafScanInMemoryBenchmark extends StrictLogging {
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
   val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(ingestionStartTime,
     numShards, numSeries, numSamples * numSeries, dataset, shardMapper, spread)
-  println(s"Ingesting $numSamples samples")
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapAsync(numShards) { groupedStream =>
@@ -102,7 +102,7 @@ class QueryLeafScanInMemoryBenchmark extends StrictLogging {
   import filodb.coordinator.queryengine2.QueryEngine
   val engine = new QueryEngine(dataset, shardMapper)
 
-  val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
+  val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
 
@@ -125,7 +125,7 @@ class QueryLeafScanInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
       Await.result(scanSumOfRate.execute(store, dataset, queryConfig).runAsync, 60.seconds)

@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
+import org.jctools.queues.MpscUnboundedArrayQueue
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
@@ -29,7 +30,7 @@ class WriteBufferPool(memFactory: MemFactory,
                       storeConf: StoreConfig) extends StrictLogging {
   import TimeSeriesPartition._
 
-  val queue = new collection.mutable.Queue[(NativePointer, AppenderArray)]
+  val queue = new MpscUnboundedArrayQueue[(NativePointer, AppenderArray)](storeConf.allocStepSize * 10)
 
   private def allocateBuffers(): Unit = {
     logger.debug(s"Allocating ${storeConf.allocStepSize} WriteBuffers....")
@@ -41,14 +42,14 @@ class WriteBufferPool(memFactory: MemFactory,
       for { colNo <- 0 until dataset.numDataColumns optimized } {
         ChunkSetInfo.setVectorPtr(info.infoAddr, colNo, builders(colNo).addr)
       }
-      queue.enqueue((info.infoAddr, builders))
+      queue.add((info.infoAddr, builders))
     }
   }
 
   /**
    * Returns the number of allocatable sets of buffers in the pool
    */
-  def poolSize: Int = queue.length
+  def poolSize: Int = queue.size
 
   /**
    * Obtains a new set of AppendableVectors from the pool, creating additional buffers if there is memory available.
@@ -59,7 +60,7 @@ class WriteBufferPool(memFactory: MemFactory,
   def obtain(): (NativePointer, AppenderArray) = {
     // If queue is empty, try and allocate more buffers depending on if memFactory has more memory
     if (queue.isEmpty) allocateBuffers()
-    queue.dequeue
+    queue.remove()
   }
 
   /**
@@ -71,7 +72,7 @@ class WriteBufferPool(memFactory: MemFactory,
     // (in case some reader is still hanging on to this old info)
     ChunkSetInfo.resetNumRows(metaAddr)
     appenders.foreach(_.reset())
-    queue.enqueue((metaAddr, appenders))
+    queue.add((metaAddr, appenders))
     // TODO: check number of buffers in queue, and release baack to free memory.
     //  NOTE: no point to this until the pool shares a single MemFactory amongst multiple shards.  In that case
     //        we have to decide (w/ concurrency a concern): share a single MemFactory or a single WriteBufferPool?

@@ -4,6 +4,7 @@ import org.agrona.ExpandableArrayBuffer
 
 object HistogramTest {
   val bucketScheme = GeometricBuckets(1.0, 2.0, 8)
+  val customScheme = CustomBuckets(Array(0.25, 0.5, 1.0, 2.5, 5.0, 10, Double.PositiveInfinity))
   val rawHistBuckets = Seq(
     Array[Double](10, 15, 17, 20, 25, 34, 76, 82),
     Array[Double](6, 16, 26, 26, 36, 38, 56, 59),
@@ -15,6 +16,10 @@ object HistogramTest {
     MutableHistogram(bucketScheme, buckets)
   }
 
+  val customHistograms = rawHistBuckets.map { buckets =>
+    LongHistogram(customScheme, buckets.take(customScheme.numBuckets).map(_.toLong))
+  }
+
   val quantile50Result = Seq(37.333333333333336, 10.8, 8.666666666666666, 28.75)
 }
 
@@ -22,6 +27,8 @@ import BinaryHistogram._
 
 class HistogramTest extends NativeVectorTest {
   val writeBuf = new ExpandableArrayBuffer()
+
+  import HistogramTest._
 
   describe("HistogramBuckets") {
     it("can list out bucket definition LE values properly for Geometric and Geometric_1") {
@@ -40,10 +47,11 @@ class HistogramTest extends NativeVectorTest {
       val buckets2 = GeometricBuckets(2.0, 2.0, 8, minusOne = true)
       buckets2.serialize(writeBuf, 0) shouldEqual 2+2+8+8
       HistogramBuckets(writeBuf, HistFormat_Geometric1_Delta) shouldEqual buckets2
+
+      customScheme.serialize(writeBuf, 0) shouldEqual 26
+      HistogramBuckets(writeBuf, HistFormat_Custom_Delta) shouldEqual customScheme
     }
   }
-
-  import HistogramTest._
 
   describe("Histogram") {
     it("should calculate quantile correctly") {
@@ -66,6 +74,16 @@ class HistogramTest extends NativeVectorTest {
         binHist.hashCode shouldEqual mutHist.hashCode
         println(binHist)
       }
+    }
+
+    it("should serialize to and from BinaryHistograms with custom buckets") {
+      val longHist = LongHistogram(customScheme, Array[Long](10, 15, 17, 20, 25, 34, 76))
+      val buf = new ExpandableArrayBuffer()
+      longHist.serialize(Some(buf))
+
+      val hist2 = BinaryHistogram.BinHistogram(buf).toHistogram
+      hist2 shouldEqual longHist
+      hist2.hashCode shouldEqual longHist.hashCode
     }
 
     it("should serialize to and from an empty Histogram") {

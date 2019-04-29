@@ -71,7 +71,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * INTERNAL API. Idempotent.
     */
   def subscribe(subscriber: ActorRef, dataset: DatasetRef): Unit =
-    mapperOpt(dataset) match {
+    mapperCopyOpt(dataset) match {
       case Some(current) =>
         logger.info(s"Adding $subscriber as a subscriber for dataset=$dataset")
         _subscriptions = subscriptions.subscribe(subscriber, dataset)
@@ -117,8 +117,22 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * The response is returned directly to the requester.
     */
   def sendSnapshot(ref: DatasetRef, origin: ActorRef): Unit =
-    origin ! mapperOpt(ref).getOrElse(DatasetUnknown(ref))
+    origin ! mapperCopyOpt(ref).getOrElse(DatasetUnknown(ref))
 
+  /**
+    * Returns a complete copy of the ShardMapper within a CurrentShardSnapshot, if the dataset
+    * exists. Although a copy of the ShardMapper isn't typically required, it is required for
+    * the tests to work properly. This is because the TestProbe provides access to the local
+    * ShardMapper instance, and so any observation of the snapshot would expose the latest
+    * mappings instead. The complete copy also offers a nice safeguard, in case the ShardMapper
+    * is concurrently modified before the message is sent. This isn't really expected, however.
+    */
+  private def mapperCopyOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
+    _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m.copy()))
+
+  /**
+    * Same as mapperCopyOpt, except it directly references the ShardMapper instance.
+    */
   private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
     _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
 
@@ -134,19 +148,23 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
     for ((dataset, resources, mapper) <- datasetShardMaps) {
       val assignable = strategy.shardAssignments(coordinator, dataset, resources, mapper)
-      if (assignable.nonEmpty) sendAssignmentMessagesAndEvents(dataset, coordinator, assignable)
+      if (assignable.nonEmpty) {
+        doAssignShards(dataset, coordinator, assignable)
+        publishChanges(dataset)
+      }
     }
     logger.info(s"Completed addMember for coordinator $coordinator")
   }
 
   /** Called on MemberRemoved, new status already updated. */
-  def removeMember(address: Address): Option[ActorRef] =
+  def removeMember(address: Address): Option[ActorRef] = {
     _coordinators.get(address) map { coordinator =>
-        logger.info(s"Initiated removeMember for coordinator on $address")
-        _coordinators remove address
-        removeCoordinator(coordinator)
-        coordinator
+      logger.info(s"Initiated removeMember for coordinator on $address")
+      _coordinators remove address
+      removeCoordinator(coordinator)
+      coordinator
     }
+  }
 
   private def updateShardMetrics(): Unit = {
     _datasetInfo.foreach { case (dataset, info) =>
@@ -259,7 +277,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     *
     * @return - Validates and returns error message on failure and a unit if no validation error
     */
-  def validateRequestAndStopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit Or ErrorResponse = {
+  private def validateRequestAndStopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit Or ErrorResponse = {
     for {
       shardMapper <- validateDataset(shardStopReq.datasetRef)
       shards      <- validateShardsToStop(shardStopReq.unassignmentConfig.shardList, shardMapper)
@@ -271,14 +289,14 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   /**
     * Shutdown shards from the coordinator where it is running
     */
-  def unassignShards(shards: Seq[Int],
-                  dataset: DatasetRef,
-                  shardMapper: ShardMapper): Unit = {
+  private def unassignShards(shards: Seq[Int],
+                             dataset: DatasetRef,
+                             shardMapper: ShardMapper): Unit = {
     for { shard <-  shards} {
       val curCoordinator = shardMapper.coordForShard(shard)
-      sendUnassignmentMessagesAndEvents(dataset, curCoordinator,
-                                        shardMapper, Seq(shard))
+      doUnassignShards(dataset, curCoordinator, Seq(shard))
     }
+    publishChanges(dataset)
   }
 
   /**
@@ -302,9 +320,9 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     *
     * @return - Validates and returns error message on failure and a unit if no validation error
     */
-  def validateRequestAndStartShards(dataset: DatasetRef,
-                                    assignmentConfig: AssignShardConfig,
-                                    ackTo: ActorRef): Unit Or ErrorResponse = {
+  private def validateRequestAndStartShards(dataset: DatasetRef,
+                                            assignmentConfig: AssignShardConfig,
+                                            ackTo: ActorRef): Unit Or ErrorResponse = {
     for {
       shardMapper <- validateDataset(dataset)
       coordinator <- validateCoordinator(assignmentConfig.address, assignmentConfig.shardList)
@@ -312,7 +330,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       _           <- validateNodeCapacity(shards, shardMapper, dataset,
                                           _datasetInfo(dataset).resources, coordinator)
     } yield {
-      sendAssignmentMessagesAndEvents(dataset, coordinator, shards)
+      doAssignShards(dataset, coordinator, shards)
+      publishChanges(dataset)
     }
   }
 
@@ -339,9 +358,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private def removeCoordinator(coordinator: ActorRef): Unit = {
     for ((dataset, resources, mapper) <- datasetShardMaps) {
       var shardsToDown = mapper.shardsForCoord(coordinator)
-      sendUnassignmentMessagesAndEvents(dataset, coordinator, mapper, shardsToDown)
+      doUnassignShards(dataset, coordinator, shardsToDown)
       // try to reassign shards that were unassigned to other nodes that have room.
       assignShardsToNodes(dataset, mapper, resources)
+      publishChanges(dataset)
     }
     logger.info(s"Completed removeMember for coordinator $coordinator")
   }
@@ -353,7 +373,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   def addDataset(setup: SetupDataset,
                  dataset: Dataset,
                  ackTo: ActorRef): Map[ActorRef, Seq[Int]] = {
-
     logger.info(s"Initiated setup for dataset=${setup.ref}")
     val answer: Map[ActorRef, Seq[Int]] = mapperOpt(setup.ref) match {
       case Some(_) =>
@@ -380,7 +399,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         ackTo ! DatasetVerified
         assignments
     }
-    updateShardMetrics()
+    publishChanges(setup.ref)
     answer
   }
 
@@ -392,7 +411,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       coord <- latestCoords if !excludeCoords.contains(coord) // assign shards on newer nodes first
     } yield {
       val assignable = strategy.shardAssignments(coord, dataset, resources, mapper)
-      if (assignable.nonEmpty) sendAssignmentMessagesAndEvents(dataset, coord, assignable)
+      if (assignable.nonEmpty) doAssignShards(dataset, coord, assignable)
       coord -> assignable
     }).toMap
   }
@@ -403,7 +422,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       (_, coord) <- _coordinators
       mapper = _shardMappers(dataset)
       shardsToDown = mapper.shardsForCoord(coord)
-    } sendUnassignmentMessagesAndEvents(dataset, coord, mapper, shardsToDown)
+    } doUnassignShards(dataset, coord, shardsToDown)
+    publishChanges(dataset)
     _datasetInfo remove dataset
     _shardMappers remove dataset
     _subscriptions = _subscriptions - dataset
@@ -417,7 +437,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   def recoverShards(ref: DatasetRef, map: ShardMapper): Unit = {
     logger.info(s"Recovering ShardMap for dataset=$ref ; ShardMap contents: $map")
     _shardMappers(ref) = map
-    updateShardMetrics()
+    publishChanges(ref)
   }
 
   def recoverSubscriptions(subs: ShardSubscriptions): Unit = {
@@ -436,11 +456,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * the ShardMapper for dataset.
     */
   def updateFromExternalShardEvent(sender: ActorRef, event: ShardEvent): Unit = {
-    logger.info(s"Received event=$event from sender=$sender for dataset=${event.ref} for shard=${event.shard}")
     _shardMappers.get(event.ref) foreach { mapper =>
       val currentCoord = mapper.coordForShard(event.shard)
       if (currentCoord == ActorRef.noSender) {
-        logger.warn(s"Ignoring event=$event from sender=$sender for dataset=${event.ref} since shard=${event.shard} " +
+        logger.debug(s"Ignoring event=$event from sender=$sender for dataset=${event.ref} since shard=${event.shard} " +
           s"is not currently assigned. Was $sender the previous owner for a shard that was just unassigned? " +
           s"How else could this happen? ")
         // Note that this path is not used for an initial shard assignment when currentCoord would indeed be noSender;
@@ -449,8 +468,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Above condition ensures that we respond to shard events only from the node shard is currently assigned to.
         // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
         updateFromShardEvent(event)
-        // RecoveryInProgress status results in too many messages that really do not need a publish
-        if (!event.isInstanceOf[RecoveryInProgress]) publishSnapshot(event.ref)
         // reassign shard if IngestionError. Exclude previous node since it had error shards.
         event match {
           case _: IngestionError =>
@@ -477,9 +494,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             }
           case _ =>
         }
-        updateShardMetrics()
+        // RecoveryInProgress status results in too many messages that really do not need a publish
+        if (!event.isInstanceOf[RecoveryInProgress]) publishSnapshot(event.ref)
       } else {
-        logger.warn(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
+        logger.debug(s"Ignoring event $event from $sender for dataset=${event.ref} since it does not match current " +
           s"owner of shard=${event.shard} which is ${mapper.coordForShard(event.shard)}")
       }
     }
@@ -504,19 +522,15 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         case Failure(l) =>
           logger.error(s"updateFromShardEvent error for dataset=${event.ref} event $event. Mapper now: $mapper", l)
         case Success(r) =>
-          logger.info(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
+          logger.debug(s"updateFromShardEvent success for dataset=${event.ref} event $event. Mapper now: $mapper")
       }
     }
     updateShardMetrics()
   }
 
-  /**
-    * This method has the shared logic for sending shard assignment messages
-    * to the coordinator, updating state for the event and broadcast of the state change to subscribers
-    */
-  private def sendAssignmentMessagesAndEvents(dataset: DatasetRef,
-                                              coord: ActorRef,
-                                              shards: Seq[Int]): Unit = {
+  private def doAssignShards(dataset: DatasetRef,
+                             coord: ActorRef,
+                             shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
     logger.info(s"Sending setup message for dataset=${state.dataset.ref} to coordinators $coord.")
     val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
@@ -527,42 +541,52 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEvent(event)
     }
-    publishSnapshot(dataset)
-    /* If no shards are assigned to a coordinator, no commands are sent. */
-    logger.info(s"Sending start ingestion message for dataset=$dataset to coordinator $coord for shards $shards")
-    for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
   }
 
-  /**
-    * This method has the shared logic for sending shard un-assignment messages
-    * to the coordinator, updating state for the event and broadcast of the state change to subscribers
-    */
-  private def sendUnassignmentMessagesAndEvents(dataset: DatasetRef,
-                                                coordinator: ActorRef,
-                                                mapper: ShardMapper,
-                                                shardsToDown: Seq[Int],
-                                                nodeUp: Boolean = true): Unit = {
-    logger.info(s"Sending stop ingestion message for dataset=$dataset to " +
+  private def doUnassignShards(dataset: DatasetRef,
+                               coordinator: ActorRef,
+                               shardsToDown: Seq[Int]): Unit = {
+    logger.info(s"Unassigning shards for dataset=$dataset to " +
       s"coordinator $coordinator for shards $shardsToDown")
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
       updateFromShardEvent(event)
-      if (nodeUp) coordinator ! StopShardIngestion(dataset, shard)
     }
-    publishSnapshot(dataset)
-    logger.debug(s"Unassigned shards $shardsToDown of dataset=$dataset from $coordinator")
+  }
+
+  /**
+    * To be called after making a bunch of changes to the ShardMapper for the given dataset.
+    * Calling this method more often is permitted, but it generates more publish messages
+    * than is necessary.
+    */
+  private def publishChanges(ref: DatasetRef): Unit = {
+    publishSnapshot(ref)
+    updateShardMetrics()
   }
 
   /** Publishes a ShardMapper snapshot of given dataset to all subscribers of that dataset. */
-  def publishSnapshot(ref: DatasetRef): Unit =
-    mapperOpt(ref) match {
-      case Some(snapshot) =>
+  def publishSnapshot(ref: DatasetRef): Unit = {
+    mapperCopyOpt(ref) match {
+      case Some(snapshot) => {
         for {
           subscription <- _subscriptions.subscription(ref)
         } subscription.subscribers foreach (_ ! snapshot)
+
+        // Also send a complete ingestion state command to all ingestion actors. Without this,
+        // they won't start or stop ingestion.
+
+        // TODO: Need to provide a globally consistent version, incremented when anything
+        //       changes, for any dataset.
+        val resync = ShardIngestionState(0, snapshot.ref, snapshot.map)
+
+        for (coord <- coordinators) {
+          coord ! resync
+        }
+      }
       case None =>
         logger.warn(s"Cannot publish snapshot which doesn't exist for ref $ref")
     }
+  }
 
   private def latestCoords: Seq[ActorRef] =
     _coordinators.values.foldLeft(List[ActorRef]())((x, y) => y :: x) // reverses the set

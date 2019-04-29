@@ -169,6 +169,8 @@ object PartitionIterator {
   * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
   * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
   *
+  * @param bufferMemoryManager Unencoded/unoptimized ingested data is stored in buffers that are allocated from this
+  *                            memory pool. This pool is also used to store partition keys.
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
   * @param downsampleConfig configuration for downsample operations
   * @param downsamplePublisher is shared among all shards of the dataset on the node
@@ -176,6 +178,7 @@ object PartitionIterator {
 class TimeSeriesShard(val dataset: Dataset,
                       val storeConfig: StoreConfig,
                       val shardNum: Int,
+                      val bufferMemoryManager: MemFactory,
                       colStore: ColumnStore,
                       metastore: MetaStore,
                       evictionPolicy: PartitionEvictionPolicy,
@@ -236,7 +239,6 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private val blockMemorySize = storeConfig.shardMemSize
   protected val numGroups = storeConfig.groupsPerShard
-  private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
 
@@ -262,13 +264,6 @@ class TimeSeriesShard(val dataset: Dataset,
   private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
-  /**
-    * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
-    * Note that this pool is also used to store partition keys.
-    */
-  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for " +
-    s"dataset=${dataset.ref} shard=$shardNum")
-  protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
     reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
@@ -331,6 +326,15 @@ class TimeSeriesShard(val dataset: Dataset,
         dataset.partKeySchema.partitionHash(from.base, from.offset)
       }
     })
+
+  /**
+   * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
+   * logs, use at your own risk.
+   */
+  val tracedPartFilters =
+    storeConfig.traceFilters.toSeq
+      .map { case (k, v) => (dataset.partitionColumns.indexWhere(_.name == k), v) }
+      .filter { case (i, v) => i >= 0 && dataset.partitionColumns(i).columnType == ColumnType.StringColumn }
 
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -498,9 +502,7 @@ class TimeSeriesShard(val dataset: Dataset,
         } else {
           // partition assign a new partId to non-ingesting partition,
           // but no need to create a new TSPartition heap object
-          val id = nextPartitionID
-          incrementPartitionID()
-          Some(id)
+          Some(createPartitionID())
         }
 
         // add newly assigned partId to lucene index
@@ -696,6 +698,10 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.numPartitions.set(numActivePartitions)
     val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
     shardStats.numActivelyIngestingParts.set(cardinality)
+
+    // Also publish MemFactory stats. Instance is expected to be shared, but no harm in
+    // publishing a little more often than necessary.
+    bufferMemoryManager.updateStats()
   }
 
   private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
@@ -1063,6 +1069,12 @@ class TimeSeriesShard(val dataset: Dataset,
         s"shard=$shardNum", e); disableAddPartitions()
     }
 
+  private def shouldTrace(partKeyAddr: Long): Boolean = tracedPartFilters.nonEmpty && {
+    tracedPartFilters.forall { case (i, filtVal) =>
+      dataset.partKeySchema.asJavaString(UnsafeUtils.ZeroPointer, partKeyAddr, i) == filtVal
+    }
+  }
+
   /**
     * Creates new partition and adds them to the shard data structures. DOES NOT update
     * lucene index. It is the caller's responsibility to add or skip that step depending on the situation.
@@ -1079,13 +1091,14 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val partId = if (usePartId == CREATE_NEW_PARTID) {
-        val id = nextPartitionID
-        incrementPartitionID()
-        id
-      } else usePartId
-      val newPart = new TimeSeriesPartition(
-        partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
+      val newPart = if (shouldTrace(partKeyAddr)) {
+        new TracingTimeSeriesPartition(
+          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      } else {
+        new TimeSeriesPartition(
+          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+      }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
@@ -1108,19 +1121,28 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
-  // Ensures partition ID wraps around safely to 0, not negative numbers (which don't work with bitmaps)
-  private def incrementPartitionID(): Unit = {
-    nextPartitionID += 1
-    if (nextPartitionID < 0) {
-      nextPartitionID = 0
-      logger.info(s"dataset=${dataset.ref} shard=$shardNum nextPartitionID has wrapped around to 0 again")
-    }
-    // Given that we have 2^31 range of partitionIDs, we should pretty much never run into this problem where
-    // we wraparound and hit a previously used partitionID.  Actually dealing with this is not easy;  what if
-    // the used one is still actively ingesting?  We need to solve the issue of evicting actively ingesting
-    // partitions first.  For now, assert so at least we will catch this condition.
-    require(!partitions.containsKey(nextPartitionID), s"Partition ID $nextPartitionID ran into existing partition" +
-      s"in dataset=${dataset.ref} shard=$shardNum")
+  /**
+   * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
+   * partition ID wouldn't work with bitmaps.
+   */
+  private def createPartitionID(): Int = {
+    val id = nextPartitionID
+
+    // It's unlikely that partition IDs will wrap around, and it's unlikely that collisions
+    // will be encountered. In case either of these conditions occur, keep incrementing the id
+    // until no collision is detected. A given shard is expected to support up to 1M actively
+    // ingesting partitions, and so in the worst case, the loop might run for up to ~100ms.
+    // Afterwards, a complete wraparound is required for collisions to be detected again.
+
+    do {
+      nextPartitionID += 1
+      if (nextPartitionID < 0) {
+        nextPartitionID = 0
+        logger.info(s"dataset=${dataset.ref} shard=$shardNum nextPartitionID has wrapped around to 0 again")
+      }
+    } while (partitions.containsKey(nextPartitionID))
+
+    id
   }
 
   /**
@@ -1310,7 +1332,6 @@ class TimeSeriesShard(val dataset: Dataset,
     logger.info(s"Shutting down dataset=${dataset.ref} shard=$shardNum")
     /* Don't explcitly free the memory just yet. These classes instead rely on a finalize
        method to ensure that no threads are accessing the memory before it's freed.
-    bufferMemoryManager.shutdown()
     blockStore.releaseBlocks()
     */
   }

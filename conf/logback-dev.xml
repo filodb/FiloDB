@@ -29,6 +29,5 @@
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>
-        <!-- Direct logs to Console in PIE. They get moved to Splunk -->
     </root>
 </configuration>

@@ -50,7 +50,7 @@ import filodb.timeseries.TestTimeseriesProducer
  * also be used together to control the # of samples per series and # of time series.
  * To generate Histogram schema test data, one must create the following dataset:
  *   ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset histogram \
- *      --dataColumns timestamp:ts,sum:long,count:long,h:hist --partitionColumns metric:string,tags:map \
+ *      --dataColumns timestamp:ts,sum:long,count:long,h:hist:counter=true --partitionColumns metric:string,tags:map \
  *      --shardKeyColumns metric --metricColumn metric
  * create a Kafka topic:
  *   kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic histogram-dev
