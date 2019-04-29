@@ -167,7 +167,7 @@ object FiloBuild extends Build {
   /* Versions in various modules versus one area of build */
   val akkaVersion       = "2.5.22" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
   val akkaHttpVersion   = "10.1.8"
-  val cassDriverVersion = "3.0.2"
+  val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.1.2"
   val kamonVersion      = "1.1.6"
   val monixKafkaVersion = "0.15"
@@ -188,9 +188,9 @@ object FiloBuild extends Build {
 
   lazy val commonDeps = Seq(
     "io.kamon" %% "kamon-core" % kamonVersion,
-    "io.kamon" %% "kamon-akka-2.5" % "1.0.1",
-    "io.kamon" %% "kamon-executors" % "1.0.1",
-    "io.kamon" %% "kamon-akka-remote-2.5" % "1.0.1",
+    "io.kamon" %% "kamon-akka-2.5" % "1.1.3",
+    "io.kamon" %% "kamon-executors" % "1.0.2",
+    "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     logbackDep % Test,
     scalaTest  % Test,
     scalaCheck % "test"
@@ -254,9 +254,9 @@ object FiloBuild extends Build {
 
   lazy val cliDeps = Seq(
     logbackDep,
-    "io.kamon" %% "kamon-akka-2.5" % "1.0.1",
-    "io.kamon" %% "kamon-executors" % "1.0.1",
-    "io.kamon" %% "kamon-akka-remote-2.5" % "1.0.1",
+    "io.kamon" %% "kamon-akka-2.5" % "1.1.3",
+    "io.kamon" %% "kamon-executors" % "1.0.2",
+    "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     "com.quantifind"    %% "sumac"          % "0.3.0"
   )
 
@@ -284,7 +284,7 @@ object FiloBuild extends Build {
     circeGeneric,
     circeParser,
     akkaHttpTestkit % Test,
-    "org.xerial.snappy" % "snappy-java" % "1.1.7.2"
+    "org.xerial.snappy" % "snappy-java" % "1.1.7.3"
   )
 
   lazy val standaloneDeps = Seq(
