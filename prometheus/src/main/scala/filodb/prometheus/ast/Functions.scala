@@ -17,13 +17,11 @@ trait Functions extends Base with Operators with Vectors {
 
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
-      val otherParams = allParams.filter(!_.equals(seriesParam)).map(_ match {
+      val otherParams = allParams.filter(!_.equals(seriesParam)).map {
         case num: ScalarExpression => num.toScalar
-        case s: InstantExpression => s.metricName.replaceAll("^\"|\"$", "")
-        case _ =>
-          throw new IllegalArgumentException("Parameters can be a string or number")
+        case s: InstantExpression  => s.realMetricName.replaceAll("^\"|\"$", "")
+        case _                     => throw new IllegalArgumentException("Parameters can be a string or number")
       }
-      )
 
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)

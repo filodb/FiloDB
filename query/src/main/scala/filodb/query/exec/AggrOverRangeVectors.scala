@@ -7,6 +7,7 @@ import scala.collection.mutable
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
+import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
@@ -65,6 +66,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
         if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
@@ -72,7 +74,17 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         else Map.empty
       CustomRangeVectorKey(groupBy)
     }
-    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+
+    // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
+    if (without.isEmpty && by.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
+      sourceSchema.fixedVectorLen.filter(_ <= queryConfig.fastReduceMaxWindows).map { numWindows =>
+        RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
+      }.getOrElse {
+        RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+      }
+    } else {
+      RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
+    }
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
@@ -152,17 +164,64 @@ object RangeVectorAggregator extends StrictLogging {
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
-        val rowIterators = rvs.map(_.rows)
-        val rvKeys = rvs.map(_.key)
-        def hasNext: Boolean = rowIterators.forall(_.hasNext)
+        val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
+        def hasNext: Boolean = itsAndKeys.forall(_._1.hasNext)
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
-          rowIterators.zip(rvKeys).foreach { case (rowIter, rvk) =>
+          itsAndKeys.foreach { case (rowIter, rvk) =>
             val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
             acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
           }
           acc
         }
+      }
+    }
+  }
+
+  /**
+   * A fast reduce method intended specifically for the case when no grouping needs to be done AND
+   * the previous transformer is a PeriodicSampleMapper with fixed output lengths.
+   * It's much faster than mapReduce() since it iterates through each vector first and then from vector to vector.
+   * Time wise first iteration also uses less memory for high-cardinality use cases and reduces the
+   * time window of holding chunk map locks to each time series, instead of the entire query.
+   */
+  def fastReduce(rowAgg: RowAggregator,
+                 skipMapPhase: Boolean,
+                 source: Observable[RangeVector],
+                 outputLen: Int): Observable[RangeVector] = {
+    // Can't use an Array here because rowAgg.AggHolderType does not have a ClassTag
+    val accs = collection.mutable.ArrayBuffer.fill(outputLen)(rowAgg.zero)
+    var count = 0
+
+    // FoldLeft means we create the source PeriodicMapper etc and process immediately.  We can release locks right away
+    // NOTE: ChunkedWindowIterator automatically releases locks after last window.  So it should all just work.  :)
+    val aggObs = if (skipMapPhase) {
+      source.foldLeftF(accs) { case (_, rv) =>
+        count += 1
+        val rowIter = rv.rows
+        for { i <- 0 until outputLen optimized } {
+          accs(i) = rowAgg.reduceAggregate(accs(i), rowIter.next)
+        }
+        accs
+      }
+    } else {
+      val mapIntos = Array.fill(outputLen)(rowAgg.newRowToMapInto)
+      source.foldLeftF(accs) { case (_, rv) =>
+        count += 1
+        val rowIter = rv.rows
+        for { i <- 0 until outputLen optimized } {
+          val mapped = rowAgg.map(rv.key, rowIter.next, mapIntos(i))
+          accs(i) = rowAgg.reduceMappedRow(accs(i), mapped)
+        }
+        accs
+      }
+    }
+
+    aggObs.flatMap { _ =>
+      if (count > 0) {
+        Observable.now(new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+      } else {
+        Observable.empty
       }
     }
   }
@@ -199,6 +258,7 @@ trait RowAggregator {
     * Note that one object is used per aggregation. The returned object
     * is reused to aggregate each row-key of each RangeVector by resetting
     * before aggregation of next row-key.
+    * Should return a new AggHolder.
     */
   def zero: AggHolderType
 

@@ -77,6 +77,18 @@ class DoubleVectorTest extends NativeVectorTest {
       BinaryVector.totalBytes(optimized) shouldEqual 24   // Const DeltaDeltaVector (since this is linearly increasing)
     }
 
+    it("should encode some edge cases correctly to DDV") {
+      val orig = Seq(55.0, 60.0) ++ Seq.fill(10)(60.0)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100)
+      orig.foreach(appender.addData)
+      appender.length shouldEqual orig.length
+
+      val optimized = appender.optimize(memFactory)
+      DoubleVector(optimized).length(optimized) shouldEqual orig.length
+      DoubleVector(optimized).toBuffer(optimized).toList shouldEqual orig
+      BinaryVector.totalBytes(optimized) should be > (24)   // Not const DDV!
+    }
+
     it("should be able to optimize off-heap No NA integral vector to DeltaDeltaVector") {
       val builder = DoubleVector.appendingVectorNoNA(memFactory, 100)
       // Use higher numbers to verify they can be encoded efficiently too

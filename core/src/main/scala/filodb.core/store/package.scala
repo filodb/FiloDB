@@ -2,26 +2,18 @@ package filodb.core
 
 import java.nio.ByteBuffer
 
-import com.github.rholder.fauxflake.IdGenerators
 import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
-import filodb.core.SingleKeyTypes.Long64HighBit
 import filodb.memory.format.{RowReader, UnsafeUtils}
 
 package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()
   val decompressor = new ThreadLocal[LZ4FastDecompressor]()
 
-  val machineIdLong = IdGenerators.newSnowflakeIdGenerator.generateId(1)
-  val machineId1024 = (machineIdLong.asLong >> 12) & (0x03ff)
   val msBitOffset   = 21
-  val machIdBitOffset = 11
-  val baseNsBitOffset = 9   // 2 ** 9 = 512
-  val nanoBitMask     = Math.pow(2, machIdBitOffset).toInt - 1
-  val lowerBitsMask   = Math.pow(2, msBitOffset).toInt - 1
-  val baseTimeMillis  = org.joda.time.DateTime.parse("2016-01-01T00Z").getMillis
+  val lowerBitsMask = Math.pow(2, msBitOffset).toInt - 1
 
   // Assume LZ4 compressor has state and is not thread safe.  Use ThreadLocals.
   private def getCompressor: LZ4Compressor = {
@@ -95,32 +87,13 @@ package object store {
   }
 
   /**
-   * 64-bit TimeUUID function designed specifically for generating unique ChunkIDs.  Chunks take a while
-   * to encode so rarely would you be generating more than a few thousand chunks per second.  Format:
-   * bits 63-21 (43 bits):  milliseconds since Jan 1, 2016 - enough for 278.7 years or through 2294
-   * bits 20-11 (10 bits):  SnowFlake-style machine ID from FauxFlake library
-   * bits 10-0  (11 bits):  nanosecond time in 512-ns increments.
-   *
-   * Bit 63 is inverted to allow for easy comparisons using standard signed Long math.
-   *
-   * The TimeUUID function generally increases in time but successive calls are not guaranteed to be strictly
-   * increasing, but if called greater than 512ns apart should be unique.
-   */
-  def timeUUID64: Long = {
-    ((System.currentTimeMillis - baseTimeMillis) << msBitOffset) |
-    (machineId1024 << machIdBitOffset) |
-    ((System.nanoTime >> baseNsBitOffset) & nanoBitMask) ^
-    Long64HighBit
-  }
-
-  /**
-   * New formulation for chunkID based on a combo of the start time for a chunk and the current time in the lower
+   * Formulation for chunkID based on a combo of the start time for a chunk and the current time in the lower
    * bits to disambiguate two chunks which have the same start time.
    *
    * bits 63-21 (43 bits):  milliseconds since Unix Epoch (1/1/1970) - enough for 278.7 years or through 2248
    * bits 20-0  (21 bits):  The lower 21 bits of nanotime for disambiguation
    */
-  @inline final def newChunkID(startTime: Long): Long = chunkID(startTime, System.nanoTime)
+  @inline final def chunkID(startTime: Long): Long = chunkID(startTime, System.nanoTime)
 
   @inline final def chunkID(startTime: Long, currentTime: Long): Long =
     (startTime << msBitOffset) | (currentTime & lowerBitsMask)

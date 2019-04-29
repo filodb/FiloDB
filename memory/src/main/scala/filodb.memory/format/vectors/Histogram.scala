@@ -136,9 +136,7 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    buckets match {
-      case g: GeometricBuckets => BinaryHistogram.writeDelta(g, values, buf)
-    }
+    BinaryHistogram.writeDelta(buckets, values, buf)
     buf
   }
 }
@@ -158,9 +156,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    buckets match {
-      case g: GeometricBuckets => BinaryHistogram.writeDelta(g, values.map(_.toLong), buf)
-    }
+    BinaryHistogram.writeDelta(buckets, values.map(_.toLong), buf)
     buf
   }
 
@@ -258,11 +254,21 @@ sealed trait HistogramBuckets {
   }
 
   override def toString: String = allBucketTops.mkString("buckets[", ", ", "]")
+
+  /**
+   * Serializes this bucket definition to a mutable buffer, including writing length bytes
+   * @param buf the buffer to write to
+   * @param pos the position within buffer to write to
+   * @return the final position
+   */
+  def serialize(buf: MutableDirectBuffer, pos: Int): Int
 }
 
 object HistogramBuckets {
   val OffsetNumBuckets = 0
   val OffsetBucketDetails = 2
+
+  val MAX_BUCKETS = 8192
 
   import BinaryHistogram._
 
@@ -274,6 +280,7 @@ object HistogramBuckets {
   def apply(buffer: DirectBuffer, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(buffer.byteArray, buffer.addressOffset + 2, false)
     case HistFormat_Geometric1_Delta => geometric(buffer.byteArray, buffer.addressOffset + 2, true)
+    case HistFormat_Custom_Delta     => custom(buffer.byteArray, buffer.addressOffset)
     case _                           => emptyBuckets
   }
 
@@ -281,6 +288,7 @@ object HistogramBuckets {
   def apply(bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(UnsafeUtils.ZeroArray, bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(UnsafeUtils.ZeroArray, bucketsDef.add(2).addr, true)
+    case HistFormat_Custom_Delta     => custom(UnsafeUtils.ZeroArray, bucketsDef.addr)
     case _                           => emptyBuckets
   }
 
@@ -290,6 +298,21 @@ object HistogramBuckets {
                      UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
                      UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + OffsetNumBuckets).toInt,
                      minusOne)
+
+  /**
+   * Creates a CustomBuckets definition.
+   * @param bucketsDefOffset must point to the 2-byte length prefix of the bucket definition
+   */
+  def custom(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): CustomBuckets = {
+    val numBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + 2) & 0x0ffff
+    val les = new Array[Double](numBuckets)
+    UnsafeUtils.wrapDirectBuf(bucketsDefBase,
+                              bucketsDefOffset + 4,
+                              (UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset) & 0xffff) - 2,
+                              valuesBuf)
+    require(NibblePack.unpackDoubleXOR(valuesBuf, les) == NibblePack.Ok)
+    CustomBuckets(les)
+  }
 
   // A bucket definition for the bits of a long, ie from 2^0 to 2^63
   // le's = [1, 3, 7, 15, 31, ....]
@@ -312,12 +335,7 @@ final case class GeometricBuckets(firstBucket: Double,
   final def bucketTop(no: Int): Double = (firstBucket * Math.pow(multiplier, no)) + adjustment
 
   import HistogramBuckets._
-  /**
-   * Serializes this bucket definition to a mutable buffer, including writing length bytes
-   * @param buf the buffer to write to
-   * @param pos the position within buffer to write to
-   * @return the final position
-   */
+
   final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
     require(numBuckets < 65536, s"Too many buckets: $numBuckets")
     val numBucketsPos = pos + 2
@@ -327,4 +345,29 @@ final case class GeometricBuckets(firstBucket: Double,
     buf.putDouble(numBucketsPos + OffsetBucketDetails + 8, multiplier, LITTLE_ENDIAN)
     pos + 2 + 2 + 8 + 8
   }
+}
+
+/**
+ * A bucketing scheme with custom bucket/LE values.
+ *
+ * Binary/serialized: short:numBytes, short:numBuckets, then NibblePacked XOR-compressed bucket/LE defs
+ */
+final case class CustomBuckets(les: Array[Double]) extends HistogramBuckets {
+  require(les.size < HistogramBuckets.MAX_BUCKETS)
+  def numBuckets: Int = les.size
+  def bucketTop(no: Int): Double = les(no)
+  final def serialize(buf: MutableDirectBuffer, pos: Int): Int = {
+    buf.putShort(pos + 2, les.size.toShort)
+    val finalPos = NibblePack.packDoubles(les, buf, pos + 4)
+    require((finalPos - pos) <= 65535, s"Packing of ${les.size} buckets takes too much space!")
+    buf.putShort(pos, (finalPos - pos - 2).toShort)
+    finalPos
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case CustomBuckets(otherLes) => les.toSeq == otherLes.toSeq
+    case other: Any              => false
+  }
+
+  override def hashCode: Int = les.hashCode
 }

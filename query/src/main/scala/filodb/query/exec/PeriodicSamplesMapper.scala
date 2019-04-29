@@ -88,13 +88,13 @@ final case class PeriodicSamplesMapper(start: Long,
   // Transform source double or long to double schema
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema =
     source.copy(columns = source.columns.zipWithIndex.map {
-      // Transform if its not a row key column
-      case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
-        ColumnInfo(name, ColumnType.DoubleColumn)
-      case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
-        ColumnInfo(name, ColumnType.DoubleColumn)
-      case (c: ColumnInfo, _) => c
-    })
+                  // Transform if its not a row key column
+                  case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
+                    ColumnInfo(name, ColumnType.DoubleColumn)
+                  case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
+                    ColumnInfo(name, ColumnType.DoubleColumn)
+                  case (c: ColumnInfo, _) => c
+                }, fixedVectorLen = Some(((end - start)/step).toInt + 1))
 }
 
 /**

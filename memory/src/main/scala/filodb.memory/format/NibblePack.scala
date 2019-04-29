@@ -37,6 +37,7 @@ object NibblePack {
   /**
    * Packs Long values which must be positive and increasing.  If the next value is lower than the previous value
    * then a 0 is packed -- negative deltas are not allowed.
+   * @return the final position within the buffer after packing
    */
   final def packDelta(input: Array[Long], buf: MutableDirectBuffer, bufindex: Int): Int = {
     val inputArray = tempArray
@@ -47,6 +48,38 @@ object NibblePack {
       val delta = if (input(i) >= last) input(i) - last else 0L
       last = input(i)
       inputArray(i % 8) = delta
+      i += 1
+      if (i % 8 == 0) {
+        pos = pack8(inputArray, buf, pos)
+      }
+    }
+
+    // Flush remainder - if any left
+    if (i % 8 != 0) {
+      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
+      pos = pack8(inputArray, buf, pos)
+    }
+
+    pos
+  }
+
+  /**
+   * Packs Double values using XOR encoding to find minimal # of bits difference between successive values.
+   * Initial Double value is written first.
+   * @return the final position within the buffer after packing
+   */
+  final def packDoubles(inputs: Array[Double], buf: MutableDirectBuffer, bufindex: Int): Int = {
+    require(inputs.size > 0)
+    buf.putDouble(bufindex, inputs(0), LITTLE_ENDIAN)
+    var pos = bufindex + 8
+
+    val inputArray = tempArray
+    var last = java.lang.Double.doubleToLongBits(inputs(0))
+    var i = 0
+    while (i < (inputs.size - 1)) {
+      val bits = java.lang.Double.doubleToLongBits(inputs(i + 1))
+      inputArray(i % 8) = bits ^ last
+      last = bits
       i += 1
       if (i % 8 == 0) {
         pos = pack8(inputArray, buf, pos)
@@ -179,6 +212,19 @@ object NibblePack {
     }
   }
 
+  final case class DoubleXORSink(outArray: Array[Double], initial: Long) extends Sink {
+    private var lastBits = initial
+    private var pos: Int = 1
+    def process(data: Long): Unit = {
+      if (pos < outArray.size) {
+        val nextBits = lastBits ^ data
+        outArray(pos) = java.lang.Double.longBitsToDouble(nextBits)
+        lastBits = nextBits
+        pos += 1
+      }
+    }
+  }
+
   /**
    * Generic unpack function which outputs values to a Sink which can process raw 64-bit values from unpack8.
    * @param compressed a DirectBuffer wrapping the compressed bytes. Position 0 must be the beginning of the buffer
@@ -199,6 +245,18 @@ object NibblePack {
       }
     }
     res
+  }
+
+  final def unpackDoubleXOR(compressed: DirectBuffer, outArray: Array[Double]): UnpackResult = {
+    if (compressed.capacity < 8) {
+      InputTooShort
+    } else {
+      val initVal = readLong(compressed, 0)
+      val sink = DoubleXORSink(outArray, initVal)
+      outArray(0) = java.lang.Double.longBitsToDouble(initVal)
+      subslice(compressed, 8)
+      unpackToSink(compressed, sink, outArray.size - 1)
+    }
   }
 
   /**

@@ -109,7 +109,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    *
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
     if (ts < timestampOfLatestSample) {
@@ -121,7 +121,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (newChunk) {
       // First row of a chunk, set the start time to it
       val (infoAddr, newAppenders) = bufferPool.obtain()
-      val currentChunkID = newChunkID(ts)
+      val currentChunkID = chunkID(ts)
       ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
       ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
       ChunkSetInfo.setStartTime(infoAddr, ts)
@@ -165,7 +165,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
    * called from a single thread / single synchronous stream.
    */
-  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean =
+  def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean =
     nonEmptyWriteBuffers && {
       val oldInfo = currentInfo
       val oldAppenders = currentChunks
@@ -364,7 +364,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
     chunkmapWithExclusive({
-      val inserted = chunkmapDoPutIfAbsent(infoAddr)
+      val inserted = chunkmapDoPutIfAbsent(infoAddr, newestFlushedID)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
@@ -382,7 +382,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   private[core] def infoLast(): ChunkSetInfo = ChunkSetInfo(chunkmapDoGetLast)
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr))
+    chunkmapWithExclusive(chunkmapDoPut(info.infoAddr, newestFlushedID))
   }
 
   // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
@@ -391,6 +391,39 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }
+
+/**
+ * A variant of the above which logs every sample ingested and buffer switching/encoding event,
+ * for debugging purposes.  See the trace-filters StoreConfig / ingestion config setting.
+ *
+ * NOTE(velvia): The reason why I used inheritance was not so much memory but just ease of implementation.
+ * With composition we'd need to add in tons of methods and clutter things up quite a bit. If it simply
+ * implemented ReadablePartition that might break things in a bunch of places.
+ * So best way to keep changes small and balance out different needs
+ */
+class TracingTimeSeriesPartition(partID: Int,
+                                 dataset: Dataset,
+                                 partitionKey: BinaryRegion.NativePointer,
+                                 shard: Int,
+                                 bufferPool: WriteBufferPool,
+                                 shardStats: TimeSeriesShardStats,
+                                 memFactory: MemFactory,
+                                 initMapSize: Int) extends
+TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
+  import TimeSeriesPartition._
+
+  override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    _log.debug(s"partID=$partID $stringPartition - ingesting ts=${dataset.timestamp(row)} " +
+               (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
+    super.ingest(row, blockHolder)
+  }
+
+  override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
+    _log.debug(s"partID=$partID $stringPartition - switchBuffers, encode=$encode")
+    super.switchBuffers(blockHolder, encode)
+  }
+}
+
 
 final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
   var currVal: TimeSeriesPartition = _

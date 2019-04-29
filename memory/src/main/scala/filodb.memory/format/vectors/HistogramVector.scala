@@ -21,6 +21,7 @@ import filodb.memory.format.BinaryVector.BinaryVectorPtr
  *                  0x00   Empty/null histogram
  *                  0x03   geometric   + NibblePacked delta Long values
  *                  0x04   geometric_1 + NibblePacked delta Long values  (see [[HistogramBuckets]])
+ *                  0x05   custom LE/bucket values + NibblePacked delta Long values
  *
  *   +0003  u16  2-byte length of Histogram bucket definition
  *   +0005  [u8] Histogram bucket definition, see [[HistogramBuckets]]
@@ -45,6 +46,9 @@ object BinaryHistogram extends StrictLogging {
     }
     override def toString: String = s"<BinHistogram: ${toHistogram}>"
 
+    def debugStr: String = s"totalLen=$totalLength numBuckets=$numBuckets formatCode=$formatCode " +
+                           s"bucketDef=$bucketDefNumBytes bytes valuesIndex=$valuesIndex values=$valuesNumBytes bytes"
+
     /**
      * Converts this BinHistogram to a Histogram object.  May not be the most efficient.
      * Intended for slower paths such as high level (lower # samples) aggregation and HTTP/CLI materialization
@@ -57,6 +61,9 @@ object BinaryHistogram extends StrictLogging {
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case HistFormat_Geometric1_Delta =>
         val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, true)
+        LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_Custom_Delta =>
+        val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case x =>
         logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
@@ -85,9 +92,11 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Null = 0x00.toByte
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
+  val HistFormat_Custom_Delta = 0x05.toByte
 
   def isValidFormatCode(code: Byte): Boolean =
-    (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta)
+    (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
+    (code == HistFormat_Custom_Delta)
 
   /**
    * Writes binary histogram with geometric bucket definition and data which is non-increasing, but will be
@@ -110,8 +119,8 @@ object BinaryHistogram extends StrictLogging {
     finalPos
   }
 
-  def writeDelta(buckets: GeometricBuckets, values: Array[Long]): Int =
-    writeNonIncreasing(buckets, values, histBuf)
+  def writeDelta(buckets: HistogramBuckets, values: Array[Long]): Int =
+    writeDelta(buckets, values, histBuf)
 
   /**
    * Encodes binary histogram with geometric bucket definition and data which is strictly increasing and positive.
@@ -121,9 +130,13 @@ object BinaryHistogram extends StrictLogging {
    *            so it can grow.
    * @return the number of bytes written, including the length prefix
    */
-  def writeDelta(buckets: GeometricBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
+  def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
     require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
-    val formatCode = if (buckets.minusOne) HistFormat_Geometric1_Delta else HistFormat_Geometric_Delta
+    val formatCode = buckets match {
+      case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
+      case g: GeometricBuckets               => HistFormat_Geometric_Delta
+      case c: CustomBuckets                  => HistFormat_Custom_Delta
+    }
 
     buf.putByte(2, formatCode)
     val valuesIndex = buckets.serialize(buf, 3)
@@ -140,7 +153,7 @@ object HistogramVector {
 
   val OffsetNumHistograms = 6
   val OffsetFormatCode = 8     // u8: BinHistogram format code/bucket type
-  val OffsetBucketDefSize = 9  // # of bytes of bucket definition, including bucket def type
+  val OffsetBucketDefSize = 9  // # of bytes of bucket definition
   val OffsetBucketDef  = 11    // Start of bucket definition
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
