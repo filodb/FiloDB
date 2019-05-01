@@ -5,7 +5,7 @@ import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadChange}
+import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, QueryOptions, SpreadChange}
 import filodb.core.MetricsTestData
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.TimeStepParams
@@ -133,7 +133,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(spreadFunc))
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(FunctionalSpreadProvider(spreadFunc)))
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
     execPlan.children should have length (2)
@@ -148,7 +148,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val execPlan = engine.materialize(lp, QueryOptions(FunctionalSpreadProvider(spread)))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
@@ -157,7 +157,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val execPlan = engine.materialize(lp, QueryOptions(FunctionalSpreadProvider(spread)))
     execPlan.rangeVectorTransformers.isEmpty shouldEqual true
   }
 
@@ -167,7 +167,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val execPlan = engine.materialize(lp, QueryOptions(FunctionalSpreadProvider(spread)))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.size shouldEqual 2
@@ -180,7 +180,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(spread))
+    val execPlan = engine.materialize(lp, QueryOptions(FunctionalSpreadProvider(spread)))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
