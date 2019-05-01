@@ -51,7 +51,6 @@ trait Histogram extends Ordered[Histogram] {
 
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
-   * TODO: monotonicity check, which will be in a separate function.
    */
   final def quantile(q: Double): Double = {
     val result = if (q < 0) Double.NegativeInfinity
@@ -63,9 +62,8 @@ trait Histogram extends Ordered[Histogram] {
       // using rank, find the le bucket which would have the identified rank
       val b = firstBucketGTE(rank)
 
-      // now calculate quantile
-      // If the rank is at the top return the last bucket (though shouldn't we interpolate here too?)
-      if (b == numBuckets-1) return bucketTop(numBuckets-2)
+      // now calculate quantile.  Special case if rank is at the top bucket.
+      if (b == numBuckets-1) return topQuantile(rank)
       else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
         // interpolate quantile within le bucket
@@ -80,6 +78,12 @@ trait Histogram extends Ordered[Histogram] {
     }
     result
   }
+
+  /**
+   * Returns the quantile when the rank is above the last non-Inf bucket.  By default this just returns
+   * the second to last bucket definiton, as interpolation with +Inf is not possible.
+   */
+  protected def topQuantile(rank: Double): Double = bucketTop(numBuckets-2)
 
   /**
    * Compares two Histograms for equality.
@@ -225,6 +229,28 @@ object MutableHistogram {
   def apply(h: Histogram): MutableHistogram = h match {
     case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)
     case other: Histogram         => ???
+  }
+}
+
+/**
+ * MaxHistogram improves quantile calculation with a known max value.
+ * Whereas normally Prom histograms have +Inf as the highest bucket, and we cannot interpolate above the last
+ * non-Inf bucket, having a max allows us to interpolate from the rank up to the max, giving a much more accurate
+ * high end quantile calculation that is not capped.
+ */
+final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends HistogramWithBuckets {
+  final def buckets: HistogramBuckets = innerHist.buckets
+  final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
+
+  def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
+
+  override def topQuantile(rank: Double): Double = {
+    assert(numBuckets >= 2)
+    // Ratio of rank/occurrences within occurrence delta of last bucket
+    val ratio = (rank - bucketValue(numBuckets - 2)) / (topBucketValue - bucketValue(numBuckets - 2))
+
+    // Top quantile is same ratio between 2nd-last bucket def and the max
+    (max - bucketTop(numBuckets - 2)) * ratio + bucketTop(numBuckets - 2)
   }
 }
 

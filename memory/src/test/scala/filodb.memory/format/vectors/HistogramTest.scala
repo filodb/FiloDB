@@ -60,6 +60,14 @@ class HistogramTest extends NativeVectorTest {
         info(s"For histogram ${h.values.toList} -> quantile = $quantile")
         quantile shouldEqual res
       }
+
+      // Cannot return anything more than 2nd-to-last bucket (ie 64)
+      mutableHistograms(0).quantile(0.95) shouldEqual 64
+    }
+
+    it("should calculate more accurate quantile with MaxHistogram") {
+      val h = MaxHistogram(mutableHistograms(0), 90)
+      h.quantile(0.95) shouldEqual 72.2 +- 0.1   // more accurate due to max!
     }
 
     it("should serialize to and from BinaryHistograms and compare correctly") {
