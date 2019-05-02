@@ -144,13 +144,11 @@ object DeltaDeltaVector {
  * Thus overall header for DDV = 28 bytes
  */
 object DeltaDeltaDataReader extends LongVectorDataReader {
-  import BinaryRegion._
-
   val InnerVectorOffset = 20
   override def length(vector: BinaryVectorPtr): Int =
     IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
   final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 8)
-  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 16)
+  final def slope(vector: BinaryVectorPtr): Long = UnsafeUtils.getInt(vector + 16).toLong
   final def apply(vector: BinaryVectorPtr, n: Int): Long = {
     val inner = vector + InnerVectorOffset
     initValue(vector) + slope(vector) * n + IntBinaryVector.simple(inner)(inner, n)
@@ -195,7 +193,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   }
 
   // Efficient iterator as we keep track of current value and inner iterator
-  class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: NativePointer) extends LongIterator {
+  class DeltaDeltaIterator(innerIt: IntIterator, slope: Long, var curBase: Long) extends LongIterator {
     final def next: Long = {
       val out: Long = curBase + innerIt.next
       curBase += slope
@@ -219,7 +217,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
 object DeltaDeltaConstDataReader extends LongVectorDataReader {
   override def length(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 8)
   final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 12)
-  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 20)
+  final def slope(vector: BinaryVectorPtr): Long = UnsafeUtils.getInt(vector + 20).toLong
   final def apply(vector: BinaryVectorPtr, n: Int): Long = initValue(vector) + slope(vector) * n
 
   // This is O(1) since we can find exactly where on line it is
@@ -242,7 +240,7 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     slopeSum(initValue(vector), slope(vector), start, end)
   }
 
-  private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
+  private[memory] def slopeSum(initVal: Long, slope: Long, start: Int, end: Int): Double = {
     val len = end - start + 1
     len.toDouble * (initVal + start * slope) + ((end-start)*len/2) * slope
   }
@@ -278,7 +276,7 @@ class DeltaDeltaAppendingVector(val addr: BinaryRegion.NativePointer,
 
   override def length: Int = deltas.length
   final def isAvailable(index: Int): Boolean = true
-  final def apply(index: Int): Long = initValue + slope * index + deltas(index)
+  final def apply(index: Int): Long = initValue + slope.toLong * index + deltas(index)
   final def numBytes: Int = 20 + deltas.numBytes
   final def reader: VectorDataReader = DeltaDeltaDataReader
   final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(addr)
