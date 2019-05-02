@@ -148,15 +148,15 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   override def length(vector: BinaryVectorPtr): Int =
     IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
   final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 8)
-  final def slope(vector: BinaryVectorPtr): Long = UnsafeUtils.getInt(vector + 16).toLong
+  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 16)
   final def apply(vector: BinaryVectorPtr, n: Int): Long = {
     val inner = vector + InnerVectorOffset
-    initValue(vector) + slope(vector) * n + IntBinaryVector.simple(inner)(inner, n)
+    initValue(vector) + slope(vector).toLong * n + IntBinaryVector.simple(inner)(inner, n)
   }
 
   // Should be close to O(1), initial guess should be almost spot on
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val _slope = slope(vector)
+    val _slope = slope(vector).toLong
     val _len   = length(vector)
     var elemNo = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
                  else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
@@ -193,7 +193,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   }
 
   // Efficient iterator as we keep track of current value and inner iterator
-  class DeltaDeltaIterator(innerIt: IntIterator, slope: Long, var curBase: Long) extends LongIterator {
+  class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: Long) extends LongIterator {
     final def next: Long = {
       val out: Long = curBase + innerIt.next
       curBase += slope
@@ -204,7 +204,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = {
     val inner = vector + InnerVectorOffset
     val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
-    new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector))
+    new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
 }
 
@@ -217,12 +217,12 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
 object DeltaDeltaConstDataReader extends LongVectorDataReader {
   override def length(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 8)
   final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 12)
-  final def slope(vector: BinaryVectorPtr): Long = UnsafeUtils.getInt(vector + 20).toLong
+  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 20)
   final def apply(vector: BinaryVectorPtr, n: Int): Long = initValue(vector) + slope(vector) * n
 
   // This is O(1) since we can find exactly where on line it is
   final def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val _slope = slope(vector)
+    val _slope = slope(vector).toLong
     val guess = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
                 else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
     if (guess < 0)                         { 0x80000000 }
@@ -240,13 +240,13 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     slopeSum(initValue(vector), slope(vector), start, end)
   }
 
-  private[memory] def slopeSum(initVal: Long, slope: Long, start: Int, end: Int): Double = {
+  private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
     val len = end - start + 1
-    len.toDouble * (initVal + start * slope) + ((end-start)*len/2) * slope
+    len.toDouble * (initVal + start * slope.toLong) + ((end-start)*len/2) * slope.toLong
   }
 
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
-    private final var curBase = initValue(vector) + startElement * slope(vector)
+    private final var curBase = initValue(vector) + startElement * slope(vector).toLong
     final def next: Long = {
       val out = curBase
       curBase += slope(vector)
