@@ -147,11 +147,13 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         return
     }
 
+    logger.info(s"Initiating ingestion for dataset=${dataset.ref} shard=${shard}")
     val ingestion = for {
       _ <- memStore.recoverIndex(dataset.ref, shard)
       checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, shard) }
     yield {
       if (checkpoints.isEmpty) {
+        logger.info(s"No checkpoints were found for dataset=${dataset.ref} shard=${shard} -- skipping kafka recovery")
         // Start normal ingestion with no recovery checkpoint and flush group 0 first
         normalIngestion(shard, None, 0, storeConfig.diskTTLSeconds)
       } else {
@@ -162,7 +164,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
         val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
         logger.info(s"Starting recovery for dataset=${dataset.ref} " +
-          s"shard=${shard}: from $startRecoveryWatermark to $endRecoveryWatermark; " +
+          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark; " +
           s"last flushed group $lastFlushedGroup")
         logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard}: $checkpoints")
         for { lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
