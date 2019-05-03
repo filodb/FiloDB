@@ -28,7 +28,9 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
 
   import FailFastCirceSupport._
   import io.circe.generic.auto._
-
+  // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
+  // Needed to override Sampl case class Encoder.
+  import PromCirceSupport._
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
