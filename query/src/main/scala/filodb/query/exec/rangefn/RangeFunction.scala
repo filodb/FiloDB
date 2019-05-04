@@ -109,10 +109,10 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
 }
 
 /**
- * Standard ChunkedRangeFunction implementation extracting the start and ending row numbers from the timestamp
- * and returning the double value vector and reader with the row numbers
+ * A trait for RangeFunctions that operate on both a start time and an end time.  Will find the start and end
+ * row numbers for the chunk.
  */
-trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
+trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
   final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                       startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
@@ -122,11 +122,26 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
     val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
 
     // At least one sample is present
-    if (startRowNum <= endRowNum) {
-      addTimeDoubleChunks(valueVector, valueReader.asDoubleReader,
-                          startRowNum, Math.min(endRowNum, info.numRows - 1))
-    }
+    if (startRowNum <= endRowNum)
+      addTimeChunks(valueVector, valueReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
   }
+
+  def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+                    reader: VectorDataReader,
+                    startRowNum: Int,
+                    endRowNum: Int): Unit
+}
+
+/**
+ * Standard ChunkedRangeFunction implementation extracting the start and ending row numbers from the timestamp
+ * and returning the double value vector and reader with the row numbers
+ */
+trait ChunkedDoubleRangeFunction extends TimeRangeFunction[TransientRow] {
+  final def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+                          reader: VectorDataReader,
+                          startRowNum: Int,
+                          endRowNum: Int): Unit =
+    addTimeDoubleChunks(vectPtr, reader.asDoubleReader, startRowNum, endRowNum)
 
   /**
    * Add a Double BinaryVector in the range (startRowNum, endRowNum) to the range computation
@@ -139,20 +154,12 @@ trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction[TransientRow] {
                           endRowNum: Int): Unit
 }
 
-trait ChunkedLongRangeFunction extends ChunkedRangeFunction[TransientRow] {
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
-    // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
-    // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
-
-    if (startRowNum <= endRowNum) {
-      addTimeLongChunks(valueVector, valueReader.asLongReader,
-                        startRowNum, Math.min(endRowNum, info.numRows - 1))
-    }
-  }
+trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
+  final def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+                          reader: VectorDataReader,
+                          startRowNum: Int,
+                          endRowNum: Int): Unit =
+    addTimeLongChunks(vectPtr, reader.asLongReader, startRowNum, endRowNum)
 
   /**
    * Add a Long BinaryVector in the range (startRowNum, endRowNum) to the range computation
