@@ -338,8 +338,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   it("topK should not have any trailing value ") {
 
+    // The value before NaN should not get carried over. Topk result for timestamp 1556744173L should have Double.NaN
     val samples: Array[RangeVector] = Array(
-      toRv(Seq((1556744143L, 42d), (1556744158L, 42d),(1556744173L, Double.NaN )))
+      toRv(Seq((1556744143L, 42d), (1556744158L, 42d),(1556744173L, Double.NaN)))
     )
 
     val agg6 = RowAggregator(AggregationOperator.TopK, Seq(5.0), ColumnType.DoubleColumn)
