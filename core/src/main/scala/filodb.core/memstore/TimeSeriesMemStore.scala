@@ -143,10 +143,11 @@ extends MemStore with StrictLogging {
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
+    val endOffset = checkpoints.values.max
     shard.setGroupWatermarks(checkpoints)
     var targetOffset = checkpoints.values.min + reportingInterval
     stream.map(shard.ingest(_)).collect {
-      case offset: Long if offset > targetOffset =>
+      case offset: Long if offset > targetOffset || offset >= endOffset =>
         targetOffset += reportingInterval
         offset
     }
