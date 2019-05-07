@@ -119,11 +119,11 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
     // At least one sample is present
     if (startRowNum <= endRowNum)
-      addTimeChunks(valueVector, valueReader, startRowNum, Math.min(endRowNum, info.numRows - 1))
+      addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
   }
 
   def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
@@ -234,8 +234,10 @@ object RangeFunction {
   }
 
   def histChunkedFunction(func: Option[RangeFunctionId],
-                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+                          funcParams: Seq[Any] = Nil,
+                          maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionH
+    case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case _                    => ???
   }

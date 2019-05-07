@@ -3,9 +3,10 @@ package filodb.query.exec.rangefn
 import java.lang.{Double => JLDouble}
 import java.util
 
+import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.query.QueryConfig
-import filodb.query.exec.{TransientHistRow, TransientRow}
+import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -180,6 +181,43 @@ extends TimeRangeFunction[TransientHistRow] {
       // sum is mutable histogram, copy to be sure it's our own copy
       case hist if hist.numBuckets == 0 => h = sum.copy
       case hist: bv.MutableHistogram    => hist.add(sum)
+    }
+  }
+}
+
+/**
+ * Sums Histograms over time and also computes Max over time of a Max field.
+ * @param maxColID the data column ID containing the max column
+ */
+class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[TransientHistMaxRow] {
+  private val hFunc = new SumOverTimeChunkedFunctionH
+  private val maxFunc = new MaxOverTimeChunkedFunctionD
+
+  override final def reset(): Unit = {
+    hFunc.reset()
+    maxFunc.reset()
+  }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, hFunc.h)
+    sampleToEmit.setDouble(2, maxFunc.max)
+  }
+
+  import BinaryVector.BinaryVectorPtr
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for both columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      hFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+
+      // Get valueVector/reader for max column
+      val maxVectPtr = info.vectorPtr(maxColID)
+      maxFunc.addTimeChunks(maxVectPtr, bv.DoubleVector(maxVectPtr), startRowNum, endRowNum)
     }
   }
 }
