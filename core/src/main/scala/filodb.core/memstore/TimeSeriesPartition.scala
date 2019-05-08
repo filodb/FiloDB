@@ -413,13 +413,13 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
   import TimeSeriesPartition._
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
-    _log.debug(s"partID=$partID $stringPartition - ingesting ts=${dataset.timestamp(row)} " +
+    _log.debug(s"$dataset=${dataset.ref} partId=$partID $stringPartition - ingesting ts=${dataset.timestamp(row)} " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"partID=$partID $stringPartition - switchBuffers, encode=$encode")
+    _log.debug(s"$dataset=${dataset.ref} partId=$partID $stringPartition - switchBuffers, encode=$encode")
     super.switchBuffers(blockHolder, encode)
   }
 }

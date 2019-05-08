@@ -171,8 +171,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                        checkpoints) }
         yield {
           // Start reading past last offset for normal records; start flushes one group past last group
-          normalIngestion(shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % numGroups,
-                          storeConfig.diskTTLSeconds)
+          normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
+                          (lastFlushedGroup + 1) % numGroups, storeConfig.diskTTLSeconds)
         }
       }
     }
@@ -246,7 +246,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
    * @param interval the interval of reporting progress
    */
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
-                         checkpoints: Map[Int, Long]): Future[Long] = {
+                         checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
       val recoveryTrace = Kamon.buildSpan("ingestion-recovery-trace")
                                .withTag("shard", shard.toString)
@@ -255,7 +255,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       statusActor ! RecoveryInProgress(dataset.ref, shard, nodeCoord, 0)
 
       val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(dataset.ref, shard)
-      val fut = memStore.recoverStream(dataset.ref, shard, stream, checkpoints, interval)
+      val fut = memStore.recoverStream(dataset.ref, shard, stream, startOffset, endOffset, checkpoints, interval)
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
@@ -265,9 +265,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           off }
         .until(_ >= endOffset)
         // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread
-        .lastL.runAsync(shardInstance.ingestSched)
+        .lastOptionL.runAsync(shardInstance.ingestSched)
       fut.onComplete {
         case Success(_) =>
+          logger.info(s"Finished recovery for dataset=${dataset.ref} shard=$shard")
           ingestionStream.teardown()
           streams.remove(shard)
           recoveryTrace.finish()

@@ -265,10 +265,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
                             partKeyOnHeapBytes: Array[Byte],
                             partKeyBytesRefOffset: Int = 0): String = {
     //scalastyle:off
-    s"sh$shardNum-pId$partId[${
+    s"shard=$shardNum partId=$partId [${
       TimeSeriesPartition
         .partKeyString(dataset, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
-    }"
+    }]"
     //scalastyle:on
   }
 
@@ -378,8 +378,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
     var startTime = startTimeFromPartId(partId) // look up index for old start time
     if (startTime == NOT_FOUND) {
       startTime = System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis
-      logger.warn(s"Could not find in Lucene startTime for partId $partId. Using $startTime instead.",
-        new IllegalStateException()) // assume this time series started retention period ago
+      logger.warn(s"Could not find in Lucene startTime for partId=$partId in dataset=${dataset.ref}. Using " +
+        s"$startTime instead.", new IllegalStateException()) // assume this time series started retention period ago
     }
     val updatedDoc = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
       partId, startTime, endTime)

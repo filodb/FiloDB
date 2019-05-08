@@ -615,7 +615,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
     val nextPart = partitions.get(partId)
     if (nextPart == UnsafeUtils.ZeroPointer)
-      logger.warn(s"PartId $partId was not found in memory and was not included in metadata query result. ")
+      logger.warn(s"PartId=$partId was not found in memory and was not included in metadata query result. ")
     // TODO Revisit this code for evicted partitions
     /*if (nextPart == UnsafeUtils.ZeroPointer) {
       val partKey = partKeyIndex.partKeyFromPartId(partId)
@@ -720,7 +720,7 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
     indexRb.addBlob(p.partKeyBase, p.partKeyOffset, BinaryRegionLarge.numBytes(p.partKeyBase, p.partKeyOffset) + 4)
-    logger.debug(s"Added into timebucket RB ${timebucketNum} partId=${p.partID} in dataset=${dataset.ref} " +
+    logger.debug(s"Added entry into timebucket=${timebucketNum} partId=${p.partID} in dataset=${dataset.ref} " +
       s"shard=$shardNum partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
     indexRb.endRecord(false)
   }
@@ -1006,8 +1006,9 @@ class TimeSeriesShard(val dataset: Dataset,
                                 if (dataset.partKeySchema.equals(partKeyBase, partKeyOffset,
                                       candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
                                   partId = nextPartId
-                                  logger.debug(s"There is already a partId $partId assigned for " +
-                                    s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)}")
+                                  logger.debug(s"There is already a partId=$partId assigned for " +
+                                    s"${dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)} in" +
+                                    s" dataset=${dataset.ref} shard=$shardNum")
                                 }
                               }
                             } while (iter.hasNext && partId != -1)
@@ -1067,7 +1068,7 @@ class TimeSeriesShard(val dataset: Dataset,
       case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
       case e: Exception                   => logger.error(s"Unexpected ingestion err in dataset=${dataset.ref} " +
-        s"shard=$shardNum", e); disableAddPartitions()
+                                             s"shard=$shardNum", e); disableAddPartitions()
     }
 
   private def shouldTrace(partKeyAddr: Long): Boolean = tracedPartFilters.nonEmpty && {
@@ -1103,8 +1104,8 @@ class TimeSeriesShard(val dataset: Dataset,
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
-      logger.debug(s"Created new partition with partId ${newPart.partID} ${newPart.stringPartition} on " +
-        s"dataset=${dataset.ref} shard $shardNum")
+      logger.debug(s"Created new partition with partId=${newPart.partID} ${newPart.stringPartition} on " +
+        s"dataset=${dataset.ref} shard=$shardNum")
       newPart
     }
 

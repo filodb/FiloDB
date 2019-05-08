@@ -127,6 +127,8 @@ trait MemStore extends ChunkSource {
   def recoverStream(dataset: DatasetRef,
                     shard: Int,
                     stream: Observable[SomeData],
+                    startOffset: Long,
+                    endOffset: Long,
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long]
 
