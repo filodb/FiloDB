@@ -16,6 +16,7 @@ object FiloBuild extends Build {
   lazy val memory = project
     .in(file("memory"))
     .settings(commonSettings: _*)
+    .settings(assemblySettings: _*)
     .settings(name := "filodb-memory")
     .settings(scalacOptions += "-language:postfixOps")
     .settings(libraryDependencies ++= memoryDeps)

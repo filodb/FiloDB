@@ -2,7 +2,8 @@ package filodb.memory.format.vectors
 
 import scala.io.Source
 
-import org.agrona.ExpandableArrayBuffer
+import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
+import org.agrona.concurrent.UnsafeBuffer
 import scalaxy.loops._
 
 import filodb.memory.NativeMemoryManager
@@ -113,6 +114,60 @@ object HistogramCompressor extends App with CompressorAnalyzer {
   }
 
   analyze()
+}
+
+/**
+ * Intended to measure ingestion performance, rather than size.  Thus, pre-compressed BinaryHistograms are stored
+ * in memory and repeatedly ingested again and again, including chunk encoding.
+ * In between loops, the encoded chunks are freed and ingestion state is reset.
+ * Each line of the file is CSV, no headers, and is expected to be Prom style (ie increasing bucket to bucket
+ * and increasing over time).
+ */
+object HistogramIngestBench extends App with CompressorAnalyzer {
+  if (args.length < 1) {
+    println("Usage: sbt memory/run <histogram-file> <numsamples>")
+    println("Tests histogram ingestion performance against a file of real data")
+    sys.exit(0)
+  }
+  val inputFile = args(0)
+  val numSamples = Int.MaxValue
+  val numLoops = 1000
+
+  // Maybe for the first run, just delta encode the histogram itself, forget about the HistogramBuckets for now.
+  // Create lot lot compressed histograms
+  val increasingBuf = new ExpandableDirectByteBuffer()
+  var lastPos = 0
+  val increasingHistPos = histograms.map { h =>
+    lastPos = NibblePack.packDelta(h.values, increasingBuf, lastPos)
+    lastPos
+  }.toArray
+
+  val numHist = increasingHistPos.size
+
+  println(s"Finished reading and compressing $numHist histograms, now running $numLoops iterations of 2D Delta...")
+
+  // Now, use DeltaDiffPackSink to recompress to deltas from initial inputs
+  val outBuf = new ExpandableDirectByteBuffer()
+  val ddsink = NibblePack.DeltaDiffPackSink(new Array[Long](bucketDef.numBuckets), outBuf)
+  val ddSlice = new UnsafeBuffer(increasingBuf, 0, 0)
+
+  val start = System.currentTimeMillis
+  for { _ <- 0 until numLoops } {
+    ddsink.writePos = 0
+    java.util.Arrays.fill(ddsink.lastHistDeltas, 0)
+    var lastPos = 0
+    for { i <- 0 until numHist optimized } {
+      ddSlice.wrap(increasingBuf, lastPos, increasingHistPos(i) - lastPos)
+      val res = NibblePack.unpackToSink(ddSlice, ddsink, bucketDef.numBuckets)
+      require(res == NibblePack.Ok)
+      lastPos = increasingHistPos(i)
+      ddsink.finish
+    }
+  }
+
+  val millisElapsed = System.currentTimeMillis - start
+  val rate = numHist.toLong * numLoops * 1000 / millisElapsed
+  println(s"${numHist * numLoops} encoded in $millisElapsed ms = $rate histograms/sec")
 }
 
 // Like HistogramCompressor but uses individual Long writebuffers like Prometheus (time series per bucket)
