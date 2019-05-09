@@ -580,6 +580,12 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         row.setDouble(i + 1, el.value)
         i += 2
       }
+      // Reset remaining values of row to overwrite previous row value
+      while (i < numRowReaderColumns) {
+        row.setString(i, CustomRangeVectorKey.emptyAsZcUtf8)
+        row.setDouble(i + 1, if (bottomK) Double.MaxValue else Double.MinValue)
+        i += 2
+      }
       row
     }
     def resetToZero(): Unit = { heap.clear() }
