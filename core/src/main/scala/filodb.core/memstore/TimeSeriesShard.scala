@@ -678,7 +678,7 @@ class TimeSeriesShard(val dataset: Dataset,
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     val removedParts = new EWAHCompressedBitmap()
-    InMemPartitionIterator(partsToPurge).foreach { p =>
+    InMemPartitionIterator(partsToPurge.intIterator()).foreach { p =>
       if (!p.infosToBeFlushed.hasNext) {
         logger.debug(s"Purging partition with partId=${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
         removePartition(p)

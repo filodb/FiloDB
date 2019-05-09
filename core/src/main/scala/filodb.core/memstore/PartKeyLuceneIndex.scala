@@ -152,11 +152,11 @@ class PartKeyLuceneIndex(dataset: Dataset,
     * Use to delete partitions that were ingesting before retention period
     * @return partIds of deleted partitions
     */
-  def partIdsEndedBefore(endedBefore: Long): IntIterator = {
+  def partIdsEndedBefore(endedBefore: Long): EWAHCompressedBitmap = {
     val collector = new PartIdCollector()
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
     searcherManager.acquire().search(deleteQuery, collector)
-    collector.intIterator()
+    collector.result
   }
 
   def removePartKeys(partIds: Array[Int]): Unit = {
