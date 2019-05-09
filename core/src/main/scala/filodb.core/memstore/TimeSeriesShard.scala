@@ -440,11 +440,12 @@ class TimeSeriesShard(val dataset: Dataset,
     val partIdMap = debox.Map.empty[BytesRef, Int]
 
     val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
-    logger.info(s"Recovering timebuckets $earliestTimeBucket until $currentIndexTimeBucket " +
+    logger.info(s"Recovering timebuckets $earliestTimeBucket to ${currentIndexTimeBucket - 1} " +
       s"for dataset=${dataset.ref} shard=$shardNum ")
     // go through the buckets in reverse order to first one wins and we need not rewrite
     // entries in lucene
-    val timeBuckets = for { tb <- currentIndexTimeBucket until earliestTimeBucket by -1 } yield {
+    // no need to go into currentIndexTimeBucket since it is not present in cass
+    val timeBuckets = for { tb <- currentIndexTimeBucket-1 to earliestTimeBucket by -1 } yield {
       colStore.getPartKeyTimeBucket(dataset, shardNum, tb).map { b =>
         new IndexData(tb, b.segmentId, RecordContainer(b.segment.array()))
       }
@@ -677,7 +678,7 @@ class TimeSeriesShard(val dataset: Dataset,
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     InMemPartitionIterator(deletedParts).foreach { p =>
-      logger.debug(s"Purging partition with partId ${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
+      logger.debug(s"Purging partition with partId=${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
       removePartition(p)
       numDeleted += 1
     }
@@ -704,7 +705,7 @@ class TimeSeriesShard(val dataset: Dataset,
     bufferMemoryManager.updateStats()
   }
 
-  private def addPartKeyToTimebucketRb(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
+  private def addPartKeyToTimebucketRb(timebucketNum: Int, indexRb: RecordBuilder, p: TimeSeriesPartition) = {
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
     if (startTime == Long.MaxValue) startTime = 0 // if for any reason we cant find the startTime, use 0
@@ -719,8 +720,8 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
     indexRb.addBlob(p.partKeyBase, p.partKeyOffset, BinaryRegionLarge.numBytes(p.partKeyBase, p.partKeyOffset) + 4)
-    logger.debug(s"Added into timebucket RB partId ${p.partID} in dataset=${dataset.ref} shard=$shardNum " +
-      s"partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
+    logger.debug(s"Added into timebucket RB ${timebucketNum} partId=${p.partID} in dataset=${dataset.ref} " +
+      s"shard=$shardNum partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
     indexRb.endRecord(false)
   }
 
@@ -849,7 +850,7 @@ class TimeSeriesShard(val dataset: Dataset,
       /* create time bucket using record builder */
       val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
       InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
-        addPartKeyToTimebucketRb(timeBucketRb, p)
+        addPartKeyToTimebucketRb(cmd.timeBucket, timeBucketRb, p)
       }
       val numPartKeysInBucket = timeBucketBitmaps.get(cmd.timeBucket).cardinality()
       logger.debug(s"Number of records in timebucket=${cmd.timeBucket} of " +
