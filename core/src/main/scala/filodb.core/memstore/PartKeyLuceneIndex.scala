@@ -8,6 +8,7 @@ import scala.collection.immutable.HashSet
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
+import java.util
 import kamon.Kamon
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
@@ -147,21 +148,28 @@ class PartKeyLuceneIndex(dataset: Dataset,
     logger.info(s"Started flush thread for lucene index on dataset=${dataset.ref} shard=$shardNum")
   }
 
-  def removeEntries(prunedPartitions: EWAHCompressedBitmap): Unit = {
-    val deleteQuery = IntPoint.newSetQuery(PartKeyLuceneIndex.PART_ID, prunedPartitions.toList)
-    indexWriter.deleteDocuments(deleteQuery)
-  }
-
   /**
-    * Use to delete partitions that were ingesting before retention period
-    * @return partIds of deleted partitions
+    * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
+    * @return matching partIds
     */
-  def removePartKeysEndedBefore(endedBefore: Long): IntIterator = {
+  def partIdsEndedBefore(endedBefore: Long): EWAHCompressedBitmap = {
     val collector = new PartIdCollector()
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
     searcherManager.acquire().search(deleteQuery, collector)
-    indexWriter.deleteDocuments(deleteQuery)
-    collector.intIterator()
+    collector.result
+  }
+
+  /**
+    * Delete partitions with given partIds
+    */
+  def removePartKeys(partIds: EWAHCompressedBitmap): Unit = {
+    val terms = new util.ArrayList[BytesRef]()
+    val iter = partIds.intIterator()
+    while (iter.hasNext) {
+      val pId = iter.next()
+      terms.add(new BytesRef(pId.toString.getBytes))
+    }
+    indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
   }
 
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
@@ -330,13 +338,13 @@ class PartKeyLuceneIndex(dataset: Dataset,
       .withTag("shard", shardNum)
       .start()
     val collector = new PartIdStartTimeCollector()
-    partIds.grouped(512).foreach { batch => // limit on query clause count is 1024, hence batch
-      val booleanQuery = new BooleanQuery.Builder
-      batch.foreach { pId =>
-        booleanQuery.add(new TermQuery(new Term(PART_ID, pId.toString)), Occur.SHOULD)
-      }
-      searcherManager.acquire().search(booleanQuery.build(), collector)
+    val terms = new util.ArrayList[BytesRef]()
+    partIds.foreach { pId =>
+      terms.add(new BytesRef(pId.toString.getBytes))
     }
+    // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
+    // more efficient within Lucene
+    searcherManager.acquire().search(new TermInSetQuery(PART_ID, terms), collector)
     span.finish()
     collector.startTimes
   }

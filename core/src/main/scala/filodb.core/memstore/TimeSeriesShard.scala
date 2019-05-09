@@ -674,16 +674,21 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
-    val deletedParts = partKeyIndex.removePartKeysEndedBefore(
+    val partsToPurge = partKeyIndex.partIdsEndedBefore(
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
-    InMemPartitionIterator(deletedParts).foreach { p =>
-      logger.debug(s"Purging partition with partId=${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
-      removePartition(p)
-      numDeleted += 1
+    val removedParts = new EWAHCompressedBitmap()
+    InMemPartitionIterator(partsToPurge.intIterator()).foreach { p =>
+      if (!p.infosToBeFlushed.hasNext) {
+        logger.debug(s"Purging partition with partId=${p.partID} from memory in dataset=${dataset.ref} shard=$shardNum")
+        removePartition(p)
+        removedParts.set(p.partID)
+        numDeleted += 1
+      }
     }
+    if (!removedParts.isEmpty) partKeyIndex.removePartKeys(removedParts)
     if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and " +
-      s"index from dataset=${dataset.ref} shard=$shardNum")
+                        s"index from dataset=${dataset.ref} shard=$shardNum")
     shardStats.purgedPartitions.increment(numDeleted)
   }
 
