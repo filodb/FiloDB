@@ -78,7 +78,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     * and new chunk is added to the partition.
     * Note that if this is not NULL, then it is always the most recent element of infoMap.
     */
-  private var currentChunks = nullChunks
+  protected var currentChunks = nullChunks
   private var currentInfo = nullInfo
 
   /**
@@ -413,13 +413,18 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
   import TimeSeriesPartition._
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
-    _log.debug(s"$dataset=${dataset.ref} partId=$partID $stringPartition - ingesting ts=${dataset.timestamp(row)} " +
+    val ts = dataset.timestamp(row)
+    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - ingesting ts=$ts " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
+    if (ts < timestampOfLatestSample)
+      _log.debug(s"dataset=${dataset.ref} partId=$partID DROPPING SAMPLE! $ts < $timestampOfLatestSample")
+    if (currentChunks == nullChunks)
+      _log.debug(s"dataset=${dataset.ref} partId=$partID STARTING NEW CHUNK at ts=$ts")
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"$dataset=${dataset.ref} partId=$partID $stringPartition - switchBuffers, encode=$encode")
+    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - switchBuffers, encode=$encode")
     super.switchBuffers(blockHolder, encode)
   }
 }
