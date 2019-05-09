@@ -181,8 +181,9 @@ object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             columnType: ColumnType,
             funcParams: Seq[Any] = Nil,
+            maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(func, columnType, funcParams, useChunked)()
+    generatorFor(func, columnType, funcParams, maxCol, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
@@ -190,12 +191,13 @@ object RangeFunction {
   def generatorFor(func: Option[RangeFunctionId],
                    columnType: ColumnType,
                    funcParams: Seq[Any] = Nil,
+                   maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator =
     if (useChunked) columnType match {
       case ColumnType.DoubleColumn => doubleChunkedFunction(func, funcParams)
       case ColumnType.LongColumn   => longChunkedFunction(func, funcParams)
       case ColumnType.TimestampColumn => longChunkedFunction(func, funcParams)
-      case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams)
+      case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
       case other: ColumnType       => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
       iteratingFunction(func, funcParams)

@@ -33,7 +33,8 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType)
  */
 final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
                               brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty,
-                              fixedVectorLen: Option[Int] = None) {
+                              fixedVectorLen: Option[Int] = None,
+                              colIDs: Seq[Int] = Nil) {
   import Column.ColumnType._
 
   def length: Int = columns.length

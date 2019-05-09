@@ -45,7 +45,9 @@ final case class PeriodicSamplesMapper(start: Long,
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams)
+    val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
+                   Some(sourceSchema.colIDs(2)) else None
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams, maxCol)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
