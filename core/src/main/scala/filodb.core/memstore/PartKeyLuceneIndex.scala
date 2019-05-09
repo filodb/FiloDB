@@ -149,8 +149,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
   }
 
   /**
-    * Use to delete partitions that were ingesting before retention period
-    * @return partIds of deleted partitions
+    * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
+    * @return matching partIds
     */
   def partIdsEndedBefore(endedBefore: Long): EWAHCompressedBitmap = {
     val collector = new PartIdCollector()
@@ -159,9 +159,14 @@ class PartKeyLuceneIndex(dataset: Dataset,
     collector.result
   }
 
-  def removePartKeys(partIds: Array[Int]): Unit = {
+  /**
+    * Delete partitions with given partIds
+    */
+  def removePartKeys(partIds: EWAHCompressedBitmap): Unit = {
     val terms = new util.ArrayList[BytesRef]()
-    partIds.foreach { pId =>
+    val iter = partIds.intIterator()
+    while (iter.hasNext) {
+      val pId = iter.next()
       terms.add(new BytesRef(pId.toString.getBytes))
     }
     indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
@@ -337,6 +342,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
     partIds.foreach { pId =>
       terms.add(new BytesRef(pId.toString.getBytes))
     }
+    // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
+    // more efficient within Lucene
     searcherManager.acquire().search(new TermInSetQuery(PART_ID, terms), collector)
     span.finish()
     collector.startTimes

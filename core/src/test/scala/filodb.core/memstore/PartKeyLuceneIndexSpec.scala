@@ -120,7 +120,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
   }
 
-  it("should add part keys and fetch partIdsEndedBefore correctly for more than 1024 keys") {
+  it("should add part keys and fetch partIdsEndedBefore and removePartKeys correctly for more than 1024 keys") {
     val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
     val start = 1000
     // we dont care much about the partKey here, but the startTime against partId.
@@ -135,6 +135,14 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     for { i <- 0 until numPartIds} {
       pIds.get(i) shouldEqual (if (i <= 100) true else false)
     }
+
+    keyIndex.removePartKeys(pIds)
+    keyIndex.commitBlocking()
+
+    for { i <- 0 until numPartIds} {
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (if (i <= 100) false else true)
+    }
+
   }
 
   it("should update part keys with endtime and parse filters correctly") {

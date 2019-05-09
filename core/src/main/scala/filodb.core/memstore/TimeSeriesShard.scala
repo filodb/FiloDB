@@ -686,7 +686,7 @@ class TimeSeriesShard(val dataset: Dataset,
         numDeleted += 1
       }
     }
-    if (!removedParts.isEmpty) partKeyIndex.removePartKeys(removedParts.toArray)
+    if (!removedParts.isEmpty) partKeyIndex.removePartKeys(removedParts)
     if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and " +
                         s"index from dataset=${dataset.ref} shard=$shardNum")
     shardStats.purgedPartitions.increment(numDeleted)
