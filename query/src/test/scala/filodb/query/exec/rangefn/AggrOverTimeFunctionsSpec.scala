@@ -78,17 +78,26 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     new ChunkedWindowIteratorD(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
   }
 
-  def chunkedWindowItHist(data: Seq[Seq[Any]],
+  def chunkedWindowItHist[R <: TransientHistRow](data: Seq[Seq[Any]],
                           rv: RawDataRangeVector,
-                          func: ChunkedRangeFunction[TransientHistRow],
+                          func: ChunkedRangeFunction[R],
                           windowSize: Int,
-                          step: Int): ChunkedWindowIteratorH = {
+                          step: Int,
+                          row: R): ChunkedWindowIteratorH = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+    new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
+                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
   }
+
+  def chunkedWindowItHist(data: Seq[Seq[Any]],
+                          rv: RawDataRangeVector,
+                          func: ChunkedRangeFunction[TransientHistRow],
+                          windowSize: Int,
+                          step: Int): ChunkedWindowIteratorH =
+    chunkedWindowItHist(data, rv, func, windowSize, step, new TransientHistRow())
 
   def slidingWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,
@@ -141,6 +150,30 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
         val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.MutableHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
+      }
+    }
+  }
+
+  // Goal of this is to verify aggregation functionality for diff time windows.
+  // See PeriodicSampleMapperSpec for verifying integration of histograms with max
+  it("should aggregate both max and hist for sum_over_time when max in schema") {
+    val (data, rv) = MMD.histMaxRV(defaultStartTS, pubFreq, 150, 8)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(50) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val row = new TransientHistMaxRow()
+      val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
+      chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
+        val aggHist = aggRow.getHistogram(1)
+        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.MutableHistogram])
+                                      .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        aggHist shouldEqual sumRawHist
+
+        val maxMax = rawDataWindow.map(_(3).asInstanceOf[Double])
+                                  .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
+        aggRow.getDouble(2) shouldEqual maxMax
       }
     }
   }

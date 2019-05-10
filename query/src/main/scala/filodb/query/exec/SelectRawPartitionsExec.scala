@@ -40,7 +40,7 @@ final case class SelectRawPartitionsExec(id: String,
 
   require(colIds.nonEmpty)
 
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
+  protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
     val numRowKeyCols = colIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
 
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed

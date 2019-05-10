@@ -59,9 +59,10 @@ final case class PeriodicSamplesMapper(start: Long,
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
+          val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                       windowLength, rangeFuncGen().asChunkedH, queryConfig))
+                                       windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>

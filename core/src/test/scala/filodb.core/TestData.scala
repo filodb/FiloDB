@@ -319,6 +319,19 @@ object MachineMetricsData {
     }
   }
 
+  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+
+  // Pass in the output of linearHistSeries here.
+  // Adds in the max column before h/hist
+  def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
+    histStream.map { row =>
+      val hist = row(3).asInstanceOf[bv.MutableHistogram]
+      // Set max to a random number above 2nd-to-last bucket top
+      val max = hist.bucketTop(hist.numBuckets - 2) + util.Random.nextInt(30)
+      ((row take 3) :+ max) ++ (row drop 3)
+    }
+
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
   val histPartKey = histKeyBuilder.addFromObjects(extraTags)
 
@@ -336,6 +349,21 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
+  }
+
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS, TestData.storeConf)
+
+  // Designed explicitly to work with histMax(linearHistSeries) records
+  def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(histMaxDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    // Select timestamp, hist, max
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
   }
 }
 
