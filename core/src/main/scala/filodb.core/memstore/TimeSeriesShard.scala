@@ -940,11 +940,6 @@ class TimeSeriesShard(val dataset: Dataset,
         updatePartEndTimeInIndex(p, endTime)
         timeBucketBitmaps.get(timeBucket).set(p.partID)
         activelyIngesting.clear(p.partID)
-      } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
-        // Partition started re-ingesting.
-        updatePartEndTimeInIndex(p, Long.MaxValue)
-        timeBucketBitmaps.get(timeBucket).set(p.partID)
-        activelyIngesting.set(p.partID)
       }
     }
   }
@@ -1068,7 +1063,17 @@ class TimeSeriesShard(val dataset: Dataset,
     try {
       val part: FiloPartition = getOrAddPartition(recordBase, recordOff, group, ingestOffset)
       if (part == OutOfMemPartition) { disableAddPartitions() }
-      else { part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory) }
+      else {
+        part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory)
+        activelyIngesting.synchronized {
+          if (!activelyIngesting.get(part.partID)) {
+            // time series was inactive and has just started re-ingesting
+            updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+            timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
+            activelyIngesting.set(part.partID)
+          }
+        }
+      }
     } catch {
       case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
