@@ -12,8 +12,8 @@ trait MiscellaneousFunction {
   def execute(source: Observable[RangeVector]): Observable[RangeVector]
 }
 
-case class LabelFunction(funcParams: Seq[Any])
-  extends MiscellaneousFunction {
+case class LabelReplaceFunction(funcParams: Seq[Any])
+  extends MiscellaneousFunction{
 
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
 
@@ -78,16 +78,16 @@ case class LabelFunction(funcParams: Seq[Any])
 
     return rangeVectorKey;
   }
-
+}
   //label_join(v instant-vector, dst_label string, separator string, src_label_1 string, src_label_2 string, ...)
   case class LabelJoinFunction(funcParams: Seq[Any])
     extends MiscellaneousFunction {
 
     val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
 
-//    require(funcParams.size == 4,
-//      "Cannot use LabelReplace without function parameters: " +
-//        "instant-vector, dst_label string, replacement string, src_label string, regex string")
+    //    require(funcParams.size == 4,
+    //      "Cannot use LabelReplace without function parameters: " +
+    //        "instant-vector, dst_label string, replacement string, src_label string, regex string")
 
     val dstLabel: String = funcParams(0).asInstanceOf[String]
     val separator: String = funcParams(1).asInstanceOf[String]
@@ -104,18 +104,20 @@ case class LabelFunction(funcParams: Seq[Any])
 
     def labelJoinImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
       var srcLabelValues = ArrayBuffer[String]()
-    srcLabel.foreach(x=> srcLabelValues += rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).get.toString)
-      val labelJoinValue= srcLabelValues.mkString(separator)
-        if (labelJoinValue.length > 0) {
-          return CustomRangeVectorKey(rangeVectorKey.labelValues.
-            updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelJoinValue)), rangeVectorKey.sourceShards)
-        }
-        else {
-          // Drop label if new value is empty
-          return CustomRangeVectorKey(rangeVectorKey.labelValues -
-            ZeroCopyUTF8String(dstLabel), rangeVectorKey.sourceShards)
-        }
+      srcLabel.foreach(x => srcLabelValues += rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).get.toString)
+      val labelJoinValue = srcLabelValues.mkString(separator)
+      if (labelJoinValue.length > 0) {
+        return CustomRangeVectorKey(rangeVectorKey.labelValues.
+          updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelJoinValue)), rangeVectorKey.sourceShards)
+      }
+      else {
+        // Drop label if new value is empty
+        return CustomRangeVectorKey(rangeVectorKey.labelValues -
+          ZeroCopyUTF8String(dstLabel), rangeVectorKey.sourceShards)
+      }
 
-      return rangeVectorKey;
+
     }
-}
+  }
+
+
