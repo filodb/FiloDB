@@ -26,10 +26,32 @@ class ThreadsafeBitmap(bitmap: EWAHCompressedBitmap) {
     ingesting
   }
 
+  def setWithoutLock(partID: Int): Boolean = bitmap.set(partID)
+  def clearWithoutLock(partID: Int): Boolean = bitmap.clear(partID)
+  def getWithoutLock(partID: Int): Boolean = bitmap.get(partID)
+
   def set(partID: Int): Boolean = {
     val stamp = lock.writeLock()
     try {
       bitmap.set(partID)
+    } finally {
+      lock.unlockWrite(stamp)
+    }
+  }
+
+  /**
+    * Execute code block with a write lock.
+    *
+    * WARNING: Do not try to execute set/clear/get within this
+    * block since StampedLocks are not re-entrant.
+    * Instead use getWithoutLock/clearWithoutLock/setWithoutLock
+    *
+    * @param func function to execute after holding write lock
+    */
+  def withWriteLock(func: => Unit): Unit = {
+    val stamp = lock.writeLock()
+    try {
+      func
     } finally {
       lock.unlockWrite(stamp)
     }

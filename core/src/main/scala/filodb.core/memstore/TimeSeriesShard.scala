@@ -924,13 +924,19 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    // Synchronize for safe read-modify-write behavior.
     if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
-      var endTime = p.timestampOfLatestSample
-      if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
-      updatePartEndTimeInIndex(p, endTime)
-      timeBucketBitmaps.get(timeBucket).set(p.partID)
-      activelyIngesting.clear(p.partID)
+      // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
+      // where we try to activate an idle time series
+      activelyIngesting.withWriteLock {
+        // do not use get/set since activelyIngesting locks are not reentrant
+        if (!activelyIngesting.getWithoutLock(p.partID)) {
+          var endTime = p.timestampOfLatestSample
+          if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
+          updatePartEndTimeInIndex(p, endTime)
+          timeBucketBitmaps.get(timeBucket).set(p.partID)
+          activelyIngesting.clearWithoutLock(p.partID)
+        }
+      }
     }
   }
 
@@ -1026,10 +1032,10 @@ class TimeSeriesShard(val dataset: Dataset,
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
-        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)() // causes endTime to be set to Long.MaxValue
       }
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
-      activelyIngesting.synchronized { activelyIngesting.set(partId) } // causes endTime to be set to Long.MaxValue
+      activelyIngesting.set(partId)
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1055,11 +1061,18 @@ class TimeSeriesShard(val dataset: Dataset,
       if (part == OutOfMemPartition) { disableAddPartitions() }
       else {
         part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory)
+        // Below is coded to work concurrently with logic in updateIndexWithEndTime
+        // where we try to de-activate an active time series
         if (!activelyIngesting.get(part.partID)) {
-          // time series was inactive and has just started re-ingesting
-          updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-          timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
-          activelyIngesting.set(part.partID)
+          activelyIngesting.withWriteLock {
+            // do not use get/set since activelyIngesting locks are not reentrant
+            if (!activelyIngesting.getWithoutLock(part.partID)) {
+              // time series was inactive and has just started re-ingesting
+              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+              timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
+              activelyIngesting.setWithoutLock(part.partID)
+            }
+          }
         }
       }
     } catch {
