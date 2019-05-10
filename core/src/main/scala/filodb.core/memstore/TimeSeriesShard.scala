@@ -929,7 +929,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // where we try to activate an idle time series
       activelyIngesting.withWriteLock {
         // do not use get/set since activelyIngesting locks are not reentrant
-        if (!activelyIngesting.getWithoutLock(p.partID)) {
+        if (activelyIngesting.getWithoutLock(p.partID)) {
           var endTime = p.timestampOfLatestSample
           if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
           updatePartEndTimeInIndex(p, endTime)
