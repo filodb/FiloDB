@@ -464,7 +464,10 @@ class TimeSeriesShard(val dataset: Dataset,
     // sleep until all the recovered index entries are readable. Otherwise, duplicate partIds
     // could be created for same partKey during ingestion. This happens when an intermittent
     // non-ingesting partition which is not in heap re-ingests before index entry is readable.
-    Thread.sleep(storeConfig.partIndexFlushMaxDelaySeconds.seconds.toMillis + 2.seconds.toMillis)
+    do {
+      Thread.sleep(1000)
+    }
+    while (nextPartitionID > 0 && partKeyIndex.partKeyFromPartId(nextPartitionID - 1).isEmpty)
     logger.info(s"Bootstrapped index for dataset=${dataset.ref} shard=$shardNum")
   }
 
