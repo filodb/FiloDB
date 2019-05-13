@@ -1122,6 +1122,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
       val newPart = if (shouldTrace(partKeyAddr)) {
+        logger.debug(s"Adding tracing TSPartition dataset=${dataset.ref} shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(
           partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       } else {
@@ -1131,8 +1132,6 @@ class TimeSeriesShard(val dataset: Dataset,
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
-      logger.debug(s"Created new partition with partId=${newPart.partID} ${newPart.stringPartition} on " +
-        s"dataset=${dataset.ref} shard=$shardNum")
       newPart
     }
 

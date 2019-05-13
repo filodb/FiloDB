@@ -419,19 +419,17 @@ class TracingTimeSeriesPartition(partID: Int,
 TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
 
+  _log.debug(s"Creating TracingTimeSeriesPartition: dataset=${dataset.ref} partId=$partID $stringPartition")
+
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = dataset.timestamp(row)
-    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - ingesting ts=$ts " +
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - ingesting ts=$ts " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
-    if (ts < timestampOfLatestSample)
-      _log.debug(s"dataset=${dataset.ref} partId=$partID DROPPING SAMPLE! $ts < $timestampOfLatestSample")
-    if (currentChunks == nullChunks)
-      _log.debug(s"dataset=${dataset.ref} partId=$partID STARTING NEW CHUNK at ts=$ts")
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - switchBuffers, encode=$encode")
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - switchBuffers, encode=$encode")
     super.switchBuffers(blockHolder, encode)
   }
 }
