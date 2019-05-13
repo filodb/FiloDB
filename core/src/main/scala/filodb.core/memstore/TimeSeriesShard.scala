@@ -712,7 +712,7 @@ class TimeSeriesShard(val dataset: Dataset,
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
     if (startTime == Long.MaxValue) startTime = 0 // if for any reason we cant find the startTime, use 0
-    val endTime = if (activelyIngesting.get(p.partID)) {
+    val endTime = if (p.ingesting) {
       Long.MaxValue
     } else {
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
@@ -924,17 +924,18 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
+    if (partFlushChunks.isEmpty && p.ingesting) {
       // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
       // where we try to activate an idle time series
       activelyIngesting.withWriteLock {
         // do not use get/set since activelyIngesting locks are not reentrant
-        if (activelyIngesting.getWithoutLock(p.partID)) {
+        if (p.ingesting) {
           var endTime = p.timestampOfLatestSample
           if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
           updatePartEndTimeInIndex(p, endTime)
           timeBucketBitmaps.get(timeBucket).set(p.partID)
           activelyIngesting.clearWithoutLock(p.partID)
+          p.ingesting = false
         }
       }
     }
@@ -1036,6 +1037,7 @@ class TimeSeriesShard(val dataset: Dataset,
       }
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
       activelyIngesting.set(partId)
+      newPart.ingesting = true
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1060,17 +1062,20 @@ class TimeSeriesShard(val dataset: Dataset,
       val part: FiloPartition = getOrAddPartition(recordBase, recordOff, group, ingestOffset)
       if (part == OutOfMemPartition) { disableAddPartitions() }
       else {
-        part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory)
+        val tsp = part.asInstanceOf[TimeSeriesPartition]
+        tsp.ingest(binRecordReader, overflowBlockFactory)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
-        if (!activelyIngesting.get(part.partID)) {
+        if (!tsp.ingesting) {
+          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
           activelyIngesting.withWriteLock {
             // do not use get/set since activelyIngesting locks are not reentrant
-            if (!activelyIngesting.getWithoutLock(part.partID)) {
+            if (!tsp.ingesting) {
               // time series was inactive and has just started re-ingesting
               updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
               timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
               activelyIngesting.setWithoutLock(part.partID)
+              tsp.ingesting = true
             }
           }
         }
@@ -1194,7 +1199,7 @@ class TimeSeriesShard(val dataset: Dataset,
           if (partitionObj != UnsafeUtils.ZeroPointer) {
             // TODO we can optimize fetching of endTime by getting them along with top-k query
             val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-            if (activelyIngesting.get(partitionObj.partID))
+            if (partitionObj.ingesting)
               logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
             if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
               logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())

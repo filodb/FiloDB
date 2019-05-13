@@ -61,7 +61,8 @@ class TimeSeriesPartition(val partID: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
                           memFactory: MemFactory,
-                          initMapSize: Int)
+                          initMapSize: Int,
+                          @volatile var ingesting: Boolean = true)
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
