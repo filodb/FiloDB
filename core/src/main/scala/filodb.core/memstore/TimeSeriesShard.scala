@@ -503,6 +503,8 @@ class TimeSeriesShard(val dataset: Dataset,
         } else {
           // partition assign a new partId to non-ingesting partition,
           // but no need to create a new TSPartition heap object
+          // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
+          evictedPartKeys.add(PartKey(partKeyBaseOnHeap, partKeyOffset))
           Some(createPartitionID())
         }
 
