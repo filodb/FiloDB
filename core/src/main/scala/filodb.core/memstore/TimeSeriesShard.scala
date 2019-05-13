@@ -461,13 +461,6 @@ class TimeSeriesShard(val dataset: Dataset,
   def completeIndexRecovery(): Unit = {
     commitPartKeyIndexBlocking()
     startFlushingIndex() // start flushing index now that we have recovered
-    // sleep until all the recovered index entries are readable. Otherwise, duplicate partIds
-    // could be created for same partKey during ingestion. This happens when an intermittent
-    // non-ingesting partition which is not in heap re-ingests before index entry is readable.
-    do {
-      Thread.sleep(1000)
-    }
-    while (nextPartitionID > 0 && partKeyIndex.partKeyFromPartId(nextPartitionID - 1).isEmpty)
     logger.info(s"Bootstrapped index for dataset=${dataset.ref} shard=$shardNum")
   }
 

@@ -402,6 +402,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     */
   def commitBlocking(): Unit = {
     searcherManager.maybeRefreshBlocking()
+    logger.info("Refreshed index searchers to make reads consistent")
   }
 
   private def leafFilter(column: String, filter: Filter): Query = {
