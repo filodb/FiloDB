@@ -1110,8 +1110,6 @@ class TimeSeriesShard(val dataset: Dataset,
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
-      logger.debug(s"Created new partition with partId=${newPart.partID} ${newPart.stringPartition} on " +
-        s"dataset=${dataset.ref} shard=$shardNum")
       newPart
     }
 
