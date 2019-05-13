@@ -82,6 +82,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   private var currentInfo = nullInfo
 
   /**
+    * True if partition is actively ingesting.
+    * This flag is maintained in addition to the activelyIngesting bitmap maintained in
+    * TimeSeriesShard because this flag is checked for each sample and bitmap.get is not fast.
+    */
+  @volatile var ingesting: Boolean = true
+
+  /**
    * The newest ChunkID that has been flushed or encoded.  You can think of the progression of chunks like this,
    * from newest to oldest (thus represents a traversal of infoMap):
    * current -> notEncoded -> encodedNotFlushed -> Flushed -> Flushed -> (eventually) reclaimed

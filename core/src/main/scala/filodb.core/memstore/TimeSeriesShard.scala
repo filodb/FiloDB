@@ -270,6 +270,13 @@ class TimeSeriesShard(val dataset: Dataset,
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
+
+  /**
+    * Bitmap to track actively ingesting partitions.
+    * This bitmap is maintained in addition to the ingesting flag per partition.
+    * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
+    * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
+    */
   private final val activelyIngesting = new EWAHCompressedBitmap
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
@@ -716,7 +723,7 @@ class TimeSeriesShard(val dataset: Dataset,
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
     if (startTime == Long.MaxValue) startTime = 0 // if for any reason we cant find the startTime, use 0
-    val endTime = if (isActivelyIngesting(p.partID)) {
+    val endTime = if (p.ingesting) {
       Long.MaxValue
     } else {
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
@@ -730,10 +737,6 @@ class TimeSeriesShard(val dataset: Dataset,
     logger.debug(s"Added entry into timebucket=${timebucketNum} partId=${p.partID} in dataset=${dataset.ref} " +
       s"shard=$shardNum partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
     indexRb.endRecord(false)
-  }
-
-  private def isActivelyIngesting(partID: Integer): Boolean = {
-    activelyIngesting.synchronized { activelyIngesting.get(partID) }
   }
 
   // scalastyle:off method.length
@@ -790,7 +793,7 @@ class TimeSeriesShard(val dataset: Dataset,
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
-        commitCheckpoint(dataset.ref, shardNum, flushGroup)
+                                commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case er: ErrorResponse => Future.successful(er)
     }.recover { case e =>
       logger.error(s"Internal Error when persisting chunks in dataset=${dataset.ref} shard=$shardNum - should " +
@@ -934,19 +937,16 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    // Synchronize for safe read-modify-write behavior.
+    // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
+    // where we try to activate an inactive time series
     activelyIngesting.synchronized {
-      if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
+      if (partFlushChunks.isEmpty && p.ingesting) {
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         timeBucketBitmaps.get(timeBucket).set(p.partID)
         activelyIngesting.clear(p.partID)
-      } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
-        // Partition started re-ingesting.
-        updatePartEndTimeInIndex(p, Long.MaxValue)
-        timeBucketBitmaps.get(timeBucket).set(p.partID)
-        activelyIngesting.set(p.partID)
+        p.ingesting = false
       }
     }
   }
@@ -1043,10 +1043,13 @@ class TimeSeriesShard(val dataset: Dataset,
       val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
-        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)() // causes endTime to be set to Long.MaxValue
       }
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
-      activelyIngesting.synchronized { activelyIngesting.set(partId) } // causes endTime to be set to Long.MaxValue
+      activelyIngesting.synchronized {
+        activelyIngesting.set(partId)
+        newPart.ingesting = true
+      }
       val stamp = partSetLock.writeLock()
       try {
         partSet.add(newPart)
@@ -1070,7 +1073,24 @@ class TimeSeriesShard(val dataset: Dataset,
     try {
       val part: FiloPartition = getOrAddPartition(recordBase, recordOff, group, ingestOffset)
       if (part == OutOfMemPartition) { disableAddPartitions() }
-      else { part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory) }
+      else {
+        val tsp = part.asInstanceOf[TimeSeriesPartition]
+        tsp.ingest(binRecordReader, overflowBlockFactory)
+        // Below is coded to work concurrently with logic in updateIndexWithEndTime
+        // where we try to de-activate an active time series
+        if (!tsp.ingesting) {
+          // DO NOT use activelyIngesting to check above condition since it is slow and is called for every sample
+          activelyIngesting.synchronized {
+            if (!tsp.ingesting) {
+              // time series was inactive and has just started re-ingesting
+              updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
+              timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
+              activelyIngesting.set(part.partID)
+              tsp.ingesting = true
+            }
+          }
+        }
+      }
     } catch {
       case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
@@ -1190,7 +1210,7 @@ class TimeSeriesShard(val dataset: Dataset,
           if (partitionObj != UnsafeUtils.ZeroPointer) {
             // TODO we can optimize fetching of endTime by getting them along with top-k query
             val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
-            if (isActivelyIngesting(partitionObj.partID))
+            if (partitionObj.ingesting)
               logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
             if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
               logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
