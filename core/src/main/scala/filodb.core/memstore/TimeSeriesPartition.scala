@@ -416,13 +416,13 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = dataset.timestamp(row)
-    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - ingesting ts=$ts " +
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - ingesting ts=$ts " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"dataset=${dataset.ref} partId=$partID $stringPartition - switchBuffers, encode=$encode")
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - switchBuffers, encode=$encode")
     super.switchBuffers(blockHolder, encode)
   }
 }
