@@ -270,6 +270,13 @@ class TimeSeriesShard(val dataset: Dataset,
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
+
+  /**
+    * Bitmap to track actively ingesting partitions.
+    * This bitmap is maintained in addition to the ingesting flag per partition.
+    * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
+    * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
+    */
   private final val activelyIngesting = new EWAHCompressedBitmap
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt

@@ -61,8 +61,7 @@ class TimeSeriesPartition(val partID: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
                           memFactory: MemFactory,
-                          initMapSize: Int,
-                          @volatile var ingesting: Boolean = true)
+                          initMapSize: Int)
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
@@ -81,6 +80,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     */
   protected var currentChunks = nullChunks
   private var currentInfo = nullInfo
+
+  /**
+    * True if partition is actively ingesting.
+    * This flag is maintained in addition to the activelyIngesting bitmap maintained in
+    * TimeSeriesShard because this flag is checked for each sample and bitmap.get is not fast.
+    */
+  @volatile var ingesting: Boolean = true
 
   /**
    * The newest ChunkID that has been flushed or encoded.  You can think of the progression of chunks like this,
