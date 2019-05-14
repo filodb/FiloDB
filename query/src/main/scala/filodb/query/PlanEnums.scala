@@ -24,6 +24,8 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object HistogramQuantile extends InstantFunctionId("histogram_quantile")
 
+  case object HistogramMaxQuantile extends InstantFunctionId("histogram_max_quantile")
+
   case object HistogramBucket extends InstantFunctionId("histogram_bucket")
 
   case object Ln extends InstantFunctionId("ln")

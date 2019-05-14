@@ -40,6 +40,8 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   def length: Int = columns.length
   def isTimeSeries: Boolean = columns.length >= 1 && numRowKeyColumns == 1 &&
                               (columns.head.colType == LongColumn || columns.head.colType == TimestampColumn)
+  def isHD: Boolean = columns.length == 3 &&
+                      columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
 }
 
 /**

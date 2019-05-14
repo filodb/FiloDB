@@ -327,8 +327,11 @@ object MachineMetricsData {
   def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
       val hist = row(3).asInstanceOf[bv.MutableHistogram]
-      // Set max to a random number above 2nd-to-last bucket top
-      val max = hist.bucketTop(hist.numBuckets - 2) + util.Random.nextInt(30)
+      // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
+      val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
+      val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
+                            .lastOption.getOrElse(hist.numBuckets - 1)
+      val max = hist.bucketTop(lastBucketNum) * 0.8
       ((row take 3) :+ max) ++ (row drop 3)
     }
 
