@@ -14,7 +14,7 @@ trait MiscellaneousFunction {
 }
 
 case class LabelReplaceFunction(funcParams: Seq[Any])
-  extends MiscellaneousFunction{
+  extends MiscellaneousFunction {
 
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
 
