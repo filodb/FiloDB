@@ -5,25 +5,26 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.MetricsTestData
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.TransientRow
 
-class LableJoinSpec extends FunSpec with Matchers with ScalaFutures  {
+class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-  val testKey1= CustomRangeVectorKey(
+  val testKey1 = CustomRangeVectorKey(
     Map(
       ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value"),
       ZeroCopyUTF8String("src1") -> ZeroCopyUTF8String("source-value-1"),
       ZeroCopyUTF8String("src2") -> ZeroCopyUTF8String("source-value-2"),
       ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("dst-value")
-  )
+    )
   )
 
   val testKey2 = CustomRangeVectorKey(
@@ -157,7 +158,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures  {
       Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("src-value"),
         ZeroCopyUTF8String("src1") -> ZeroCopyUTF8String("src1-value"),
         ZeroCopyUTF8String("src2") -> ZeroCopyUTF8String("src2-value")
-    ))
+      ))
 
     val funcParams = Seq("dst", "", "emptysrc", "emptysrc1", "emptysrc2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
@@ -218,7 +219,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures  {
       Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("src-value"),
         ZeroCopyUTF8String("src1") -> ZeroCopyUTF8String("src1-value"),
         ZeroCopyUTF8String("src2") -> ZeroCopyUTF8String("src2-value")
-    ))
+      ))
 
     val funcParams = Seq("dst", "-")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
@@ -261,6 +262,5 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures  {
         Seq("dst"))
       miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: expected at least 3 argument(s) in call to label_join"
-
   }
 }

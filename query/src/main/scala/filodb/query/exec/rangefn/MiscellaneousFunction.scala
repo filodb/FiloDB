@@ -2,9 +2,8 @@ package filodb.query.exec.rangefn
 
 import java.util.regex.{Pattern, PatternSyntaxException}
 
-import scala.collection.mutable.ArrayBuffer
-
 import monix.reactive.Observable
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.query.{CustomRangeVectorKey, IteratorBackedRangeVector, RangeVector, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
@@ -130,6 +129,6 @@ case class LabelJoinFunction(funcParams: Seq[Any])
     }
 
   }
-  }
+}
 
 
