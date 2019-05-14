@@ -228,10 +228,12 @@ object MutableHistogram {
 }
 
 /**
- * MaxHistogram improves quantile calculation with a known max value.
+ * MaxHistogram improves quantile calculation accuracy with a known max value recorded from the client.
  * Whereas normally Prom histograms have +Inf as the highest bucket, and we cannot interpolate above the last
  * non-Inf bucket, having a max allows us to interpolate from the rank up to the max.
- * Furthermore, the quantile result can never be above max, regardless of the bucket scheme.
+ * When the max value is lower, we interpolate between the bottom of the bucket and the max value.
+ * Both changes mean that the 0.90+ quantiles return much closer to the max value, instead of interpolating or clipping.
+ * The quantile result can never be above max, regardless of the bucket scheme.
  */
 final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends HistogramWithBuckets {
   final def buckets: HistogramBuckets = innerHist.buckets
