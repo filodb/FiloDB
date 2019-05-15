@@ -150,10 +150,10 @@ extends MemStore with StrictLogging {
     else {
       var targetOffset = startOffset + reportingInterval
       stream.map(shard.ingest(_)).collect {
+        case offset: Long if offset >= endOffset => // last offset reached
+          offset
         case offset: Long if offset > targetOffset => // reporting interval reached
           targetOffset += reportingInterval
-          offset
-        case offset: Long if offset >= endOffset => // last offset reached
           offset
       }
     }

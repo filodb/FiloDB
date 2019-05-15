@@ -86,7 +86,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     * This flag is maintained in addition to the activelyIngesting bitmap maintained in
     * TimeSeriesShard because this flag is checked for each sample and bitmap.get is not fast.
     */
-  @volatile var ingesting: Boolean = true
+  @volatile var ingesting: Boolean = false
 
   /**
    * The newest ChunkID that has been flushed or encoded.  You can think of the progression of chunks like this,
