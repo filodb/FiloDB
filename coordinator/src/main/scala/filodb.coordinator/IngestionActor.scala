@@ -164,9 +164,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
         val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
         logger.info(s"Starting recovery for dataset=${dataset.ref} " +
-          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark; " +
+          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark ; " +
           s"last flushed group $lastFlushedGroup")
-        logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard}: $checkpoints")
+        logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard} were $checkpoints")
         for { lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
                                        checkpoints) }
         yield {
