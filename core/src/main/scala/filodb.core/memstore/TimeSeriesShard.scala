@@ -502,6 +502,7 @@ class TimeSeriesShard(val dataset: Dataset,
             val stamp = partSetLock.writeLock()
             try {
               partSet.add(part) // createNewPartition doesn't add part to partSet
+              part.ingesting = true
               Some(part.partID)
             } finally {
               partSetLock.unlockWrite(stamp)

@@ -170,6 +170,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, 4)) } yield {
             val stamp = partSetLock.writeLock()
             try {
+              part.ingesting = false
               partSet.add(part)
             } finally {
               partSetLock.unlockWrite(stamp)
