@@ -1093,8 +1093,7 @@ class TimeSeriesShard(val dataset: Dataset,
         }
       }
     } catch {
-      case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
-                                             s"shard=$shardNum", e); disableAddPartitions()
+      case e: OutOfOffheapMemoryException => disableAddPartitions()
       case e: Exception                   => logger.error(s"Unexpected ingestion err in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
     }
