@@ -126,12 +126,12 @@ object ChunkMap extends StrictLogging {
       logger.debug(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
     }
 
-    execPlanTracker.put(t, execPlan)
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
       logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
     }
+    execPlanTracker.put(t, execPlan)
   }
 }
 
