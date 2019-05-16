@@ -124,7 +124,7 @@ trait ExecPlan extends QueryCommand {
             srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            val srv = SerializableRangeVector(rv, builder, recSchema)
+            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (numResultSamples > limit)

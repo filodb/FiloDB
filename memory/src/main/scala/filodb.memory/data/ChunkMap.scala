@@ -1,7 +1,8 @@
 package filodb.memory.data
 
-import scala.collection.mutable.HashMap
-import scala.collection.mutable.Map
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.mutable.{HashMap, Map}
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -49,7 +50,7 @@ object ChunkMap extends StrictLogging {
     classOf[ChunkMap].getDeclaredField("lockState"))
 
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
-  private val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
+  private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
 
   private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
@@ -59,6 +60,13 @@ object ChunkMap extends StrictLogging {
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
     override def initialValue() = new HashMap[ChunkMap, Int]
   }
+
+  /**
+    * FIXME: Remove this after debugging is done.
+    * This keeps track of which thread is running which execPlan.
+    * Entry is added on lock acquisition, removed when lock is released.
+    */
+  private val execPlanTracker = new ConcurrentHashMap[Thread, String]
 
   // Returns true if the current thread has acquired the shared lock at least once.
   private def hasSharedLock(inst: ChunkMap): Boolean = sharedLockCounts.get.contains(inst)
@@ -85,6 +93,7 @@ object ChunkMap extends StrictLogging {
    */
   //scalastyle:off null
   def releaseAllSharedLocks(): Int = {
+    execPlanTracker.remove(Thread.currentThread())
     var total = 0
     val countMap = sharedLockCounts.get
     if (countMap != null) {
@@ -111,7 +120,13 @@ object ChunkMap extends StrictLogging {
     * consumption from a query iterator. If there are lingering locks,
     * it is quite possible a lock acquire or release bug exists
     */
-  def validateNoSharedLocks(): Unit = {
+  def validateNoSharedLocks(execPlan: String): Unit = {
+    val t = Thread.currentThread()
+    if (execPlanTracker.containsKey(t)) {
+      logger.debug(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
+    }
+
+    execPlanTracker.put(t, execPlan)
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
       logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
@@ -124,7 +139,7 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
+class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogging {
   require(capacity > 0)
 
   private var lockState: Int = 0
@@ -240,6 +255,8 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     var timeoutNanos = InitialExclusiveRetryTimeoutNanos
     var warned = false
 
+    // scalastyle:off null
+    var locks1: ConcurrentHashMap[Thread, String] = null
     while (true) {
       if (tryAcquireExclusive(timeoutNanos)) {
         return
@@ -256,7 +273,14 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
         }
         exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
+        locks1 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         warned = true
+      } else if (warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
+        val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
+        locks2.entrySet().retainAll(locks1.entrySet())
+        logger.error(s"Following execPlan locks have not been released for a while: $locks2")
+        logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
+        Runtime.getRuntime.halt(1)
       }
     }
   }
