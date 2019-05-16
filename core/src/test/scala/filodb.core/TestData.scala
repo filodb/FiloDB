@@ -39,11 +39,11 @@ object TestData {
   val sourceConf = ConfigFactory.parseString("""
     store {
       max-chunks-size = 100
-      buffer-alloc-step-size = 50
       demand-paged-chunk-retention-period = 10 hours
       shard-mem-size = 50MB
       groups-per-shard = 4
-      ingestion-buffer-mem-size = 10MB
+      ingestion-buffer-mem-size = 80MB
+      max-buffer-pool-size = 250
       flush-interval = 10 minutes
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds

@@ -267,7 +267,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
     reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
-  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
+  private[memstore] val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 
@@ -1093,8 +1093,7 @@ class TimeSeriesShard(val dataset: Dataset,
         }
       }
     } catch {
-      case e: OutOfOffheapMemoryException => logger.error(s"Out of offheap memory in dataset=${dataset.ref} " +
-                                             s"shard=$shardNum", e); disableAddPartitions()
+      case e: OutOfOffheapMemoryException => disableAddPartitions()
       case e: Exception                   => logger.error(s"Unexpected ingestion err in dataset=${dataset.ref} " +
                                              s"shard=$shardNum", e); disableAddPartitions()
     }
