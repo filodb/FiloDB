@@ -326,6 +326,7 @@ class TimeSeriesShard(val dataset: Dataset,
         dataset.partKeySchema.partitionHash(from.base, from.offset)
       }
     })
+  private var evictedPartKeysDisposed = false
 
   /**
    * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
@@ -505,6 +506,7 @@ class TimeSeriesShard(val dataset: Dataset,
           // but no need to create a new TSPartition heap object
           // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
           evictedPartKeys.synchronized {
+            require(!evictedPartKeysDisposed)
             evictedPartKeys.add(PartKey(partKeyBaseOnHeap, partKeyOffset))
           }
           Some(createPartitionID())
@@ -993,7 +995,11 @@ class TimeSeriesShard(val dataset: Dataset,
     shardStats.evictedPartKeyBloomFilterQueries.increment()
 
     val mightContain = evictedPartKeys.synchronized {
-      evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))
+      if (!evictedPartKeysDisposed) {
+        evictedPartKeys.mightContain(PartKey(partKeyBase, partKeyOffset))
+      } else {
+        false
+      }
     }
 
     if (mightContain) {
@@ -1200,7 +1206,9 @@ class TimeSeriesShard(val dataset: Dataset,
               // add the evicted partKey to a bloom filter so that we are able to quickly
               // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
               evictedPartKeys.synchronized {
-                evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
+                if (!evictedPartKeysDisposed) {
+                  evictedPartKeys.add(PartKey(partitionObj.partKeyBase, partitionObj.partKeyOffset))
+                }
               }
               // The previously created PartKey is just meant for bloom filter and will be GCed
               removePartition(partitionObj)
@@ -1212,7 +1220,11 @@ class TimeSeriesShard(val dataset: Dataset,
           }
         }
         val elemCount = evictedPartKeys.synchronized {
-          evictedPartKeys.approximateElementCount()
+          if (!evictedPartKeysDisposed) {
+            evictedPartKeys.approximateElementCount()
+          } else {
+            0
+          }
         }
         shardStats.evictedPkBloomFilterSize.set(elemCount)
         evictionWatermark = maxEndTime + 1
@@ -1343,7 +1355,10 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def shutdown(): Unit = {
     evictedPartKeys.synchronized {
-      evictedPartKeys.dispose()
+      if (!evictedPartKeysDisposed) {
+        evictedPartKeysDisposed = true
+        evictedPartKeys.dispose()
+      }
     }
     reset()   // Not really needed, but clear everything just to be consistent
     logger.info(s"Shutting down dataset=${dataset.ref} shard=$shardNum")
