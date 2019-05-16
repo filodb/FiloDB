@@ -13,6 +13,7 @@ import net.ceedubs.ficus.Ficus._
 final class FilodbSettings(val conf: Config) {
 
   def this() = this(ConfigFactory.empty)
+  println("conf FilodbSettings" + conf)
 
   ConfigFactory.invalidateCaches()
 
@@ -40,9 +41,11 @@ final class FilodbSettings(val conf: Config) {
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])
+  DatasetDefinitions
 
   /** The timeout to use to resolve an actor ref for new nodes. */
   val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
+
 
 }
 

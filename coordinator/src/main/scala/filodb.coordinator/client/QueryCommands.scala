@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand}
+import filodb.query.{QueryCommand, LogicalPlan => LogicalPlan2}
 
 object QueryCommands {
   import filodb.core._
@@ -60,15 +60,16 @@ object QueryCommands {
     * This class provides general query processing parameters
     * @param spreadFunc a function that returns chronologically ordered spread changes for the filter
     */
-  final case class QueryOptions(spreadProvider: SpreadProvider = StaticSpreadProvider(),
+     // to do see if can make spreadProvider as Options[Int] issue with QueryEngine
+  final case class QueryOptions(spread: Option[Int]= None,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
                                 shardOverrides: Option[Seq[Int]] = None)
 
   object QueryOptions {
-    def apply(constSpread: Int, sampleLimit: Int): QueryOptions =
-      QueryOptions(spreadProvider = StaticSpreadProvider(SpreadChange(0, constSpread)), sampleLimit = sampleLimit)
+    def apply(constSpread: Option[Int], sampleLimit: Int): QueryOptions =
+      QueryOptions(spread = constSpread, sampleLimit = sampleLimit)
 
     /**
      * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
@@ -109,7 +110,7 @@ object QueryCommands {
 
   final case class ExplainPlan2Query(dataset: DatasetRef,
                                      logicalPlan: LogicalPlan2,
-                                     queryOptions: QueryOptions = QueryOptions(),
+                                     queryOptions: QueryOptions =  QueryOptions(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse

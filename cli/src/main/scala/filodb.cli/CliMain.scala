@@ -60,6 +60,7 @@ class Arguments extends FieldArgs {
   var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
   var shards: Option[Seq[String]] = None
+  var spread: Option[String] = None
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -116,7 +117,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
 
   def main(args: Arguments): Unit = {
-    val spread = config.getInt("default-spread")
+    //val spread = config.getInt("default-spread")
     try {
       val timeout = args.timeoutSeconds.seconds
       args.command match {
@@ -198,7 +199,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-            timeout, args.shards.map(_.map(_.toInt)), spread)
+            timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
           parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
             getQueryRange(args), options)
 
@@ -206,7 +207,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelNames.nonEmpty, "--host, --dataset and --labelName must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-            timeout, args.shards.map(_.map(_.toInt)), spread)
+            timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
           parseLabelValuesQuery(remote, args.labelNames, args.labelFilter, args.dataset.get,
             getQueryRange(args), options)
 
@@ -216,7 +217,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-              timeout, args.shards.map(_.map(_.toInt)), spread)
+              timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
             parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.select.map { selectCols =>
@@ -339,7 +340,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   final case class QOptions(limit: Int, sampleLimit: Int,
                             everyN: Option[Int], timeout: FiniteDuration,
                             shardOverrides: Option[Seq[Int]],
-                            spread: Int)
+                            spread: Option[Int])
 
   def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
                                    timeParams: TimeRangeParams,
@@ -364,7 +365,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(options.spread, options.sampleLimit)
+    val qOpts = QueryCommands.QueryOptions(options.spread.map(_.toInt), options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")

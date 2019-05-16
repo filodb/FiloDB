@@ -1,22 +1,21 @@
 package filodb.coordinator.queryengine
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
-
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
-import monix.reactive.Observable
-import org.scalactic._
-
 import filodb.coordinator.ShardMapper
-import filodb.core.{ErrorResponse, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
+import filodb.core.{ErrorResponse, Types}
+import monix.eval.Task
+import monix.reactive.Observable
+import org.scalactic._
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -26,8 +25,8 @@ final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) exten
  * Logical -> Physical Plan conversion and implementing the Distribute* physical primitives
  */
 object Utils extends StrictLogging {
-  import filodb.coordinator.client.QueryCommands._
   import TrySugar._
+  import filodb.coordinator.client.QueryCommands._
 
   /**
    * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
@@ -49,7 +48,8 @@ object Utils extends StrictLogging {
    */
   def validatePartQuery(dataset: Dataset, shardMap: ShardMapper,
                         partQuery: PartitionQuery,
-                        options: QueryOptions): Seq[PartitionScanMethod] Or ErrorResponse =
+                        options: QueryOptions, spreadProvider: SpreadProvider):
+  Seq[PartitionScanMethod] Or ErrorResponse =
     Try(partQuery match {
       case SinglePartitionQuery(keyParts) =>
         val partKey = dataset.partKey(keyParts: _*)
@@ -75,8 +75,8 @@ object Utils extends StrictLogging {
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash,
-                                                           options.spreadProvider.spreadFunc(filters).last.spread)
-              case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
+                spreadProvider.spreadFunc(filters).last.spread)
+              case None => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {
             shardMap.assignedShards

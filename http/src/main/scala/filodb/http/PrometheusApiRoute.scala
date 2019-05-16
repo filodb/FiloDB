@@ -1,7 +1,6 @@
 package filodb.http
 
 import scala.concurrent.Future
-
 import akka.actor.ActorRef
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaTypes, StatusCodes => Codes}
 import akka.http.scaladsl.server.Directives._
@@ -9,10 +8,10 @@ import akka.stream.ActorMaterializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
+import filodb.coordinator.GlobalConfig
 import io.circe.{Decoder, Encoder, HCursor, Json}
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
-
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.DatasetRef
@@ -35,8 +34,19 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.prometheus.query.PrometheusModel._
 
   val spreadProvider = new StaticSpreadProvider(SpreadChange(0, settings.queryDefaultSpread))
-
-  val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
+  val globalConfigSystemConfig=  GlobalConfig.systemConfig
+  logger.info("PrometheusApiRoute: globalConfigSystemConfig:" + globalConfigSystemConfig)
+  //val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
+//  val queryOptions = QueryOptions(
+//    new QueryCommands.FunctionalSpreadProvider(
+//      QueryCommands.QueryOptions$.MODULE$.simpleMapSpreadFunc(
+//        query.getApplicationShardKeyName(), query.getFilodbSpreadMap(), query.getSpread())), settings.querySampleLimit)
+//  val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map("myService" -> 2), 1)
+//
+//  // final logical plan
+//
+//  // materialized exec plan
+//  val execPlan = engine.materialize(logicalPlan, QueryOptions(FunctionalSpreadProvider(spreadFunc)))
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -84,7 +94,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))
             }
             Future.sequence(asks)
           }
@@ -110,10 +120,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
 
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean) = {
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
     }
     else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
     }
     onSuccess(asyncAsk(nodeCoord, command)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))

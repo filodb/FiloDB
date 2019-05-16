@@ -33,6 +33,8 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
   val filoServerConfig = ConfigFactory.load("application_test.conf")
   val config = GlobalConfig.systemConfig
+  println("PrometheusApiRouteSpec: filoServerConfig" + filoServerConfig)
+  println("PrometheusApiRouteSpec: config" + config)
 
   val settings = new HttpSettings(config)
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route

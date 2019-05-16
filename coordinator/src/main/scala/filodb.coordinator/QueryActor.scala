@@ -2,20 +2,21 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
-import kamon.Kamon
-import monix.execution.Scheduler
-
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.query._
 import filodb.query.exec.ExecPlan
+import kamon.Kamon
+import monix.execution.Scheduler
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.util.control.NonFatal
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -54,7 +55,17 @@ final class QueryActor(memStore: MemStore,
   import client.QueryCommands._
 
   val config = context.system.settings.config
-
+  //val globalConfigSystemConfig=  GlobalConfig.systemConfig
+  //logger.info("QueryActor: globalConfigSystemConfig:" + globalConfigSystemConfig)
+  logger.info("QueryActor config:" + config)
+  // _config = ConfigFactory.load()
+  var filodbSpreadMap = new mutable.HashMap[String, Int]()
+  config.getConfig("spread.override").entrySet().asScala.
+    foreach(x => filodbSpreadMap.put(x.getKey(), x.getValue().asInstanceOf[Int]))
+  val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
+  val defaultSpread = config.getInt("spread.default")
+  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
+  val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
@@ -91,11 +102,21 @@ final class QueryActor(memStore: MemStore,
      }
   }
 
+  private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
+    val spreadProvider: SpreadProvider = if (queryOptions.spread.isDefined)
+      new StaticSpreadProvider(SpreadChange(0, queryOptions.spread.get))
+    else
+      functionalSpreadProvider
+    return spreadProvider
+
+  }
+
+
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan,q.queryOptions,getSpreadProvider(q.queryOptions))
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -106,7 +127,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>
