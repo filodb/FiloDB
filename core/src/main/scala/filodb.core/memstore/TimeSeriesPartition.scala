@@ -132,7 +132,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
       ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
       ChunkSetInfo.setStartTime(infoAddr, ts)
-      ChunkSetInfo.setEndTime(infoAddr, ts)
       currentInfo = ChunkSetInfo(infoAddr)
       currentChunks = newAppenders
       // Don't publish the new chunk just yet. Wait until it has one row.
