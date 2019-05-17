@@ -292,7 +292,9 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
       } else if (warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
         val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         locks2.entrySet().retainAll(locks1.entrySet())
-        logger.error(s"Following execPlan locks have not been released for a while: $locks2")
+        val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
+        logger.error(s"Following execPlan locks have not been released for a while: " +
+          s"$locks2 $locks1 $execPlanTracker $lockState")
         logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
         Runtime.getRuntime.halt(1)
       }
