@@ -120,8 +120,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
             // Is aready ingesting, and it must not be stopped.
             shardsToStop.remove(shard)
           } else {
-            // Isn't ingesting, so start it.
-            startIngestion(shard)
+            try {
+              // Isn't ingesting, so start it.
+              startIngestion(shard)
+            } catch {
+              case t: Throwable =>
+                logger.error(s"Error occurred during initialization of ingestion for " +
+                  s"dataset=${dataset.ref} shard=${shard}", t)
+                handleError(dataset.ref, shard, t)
+            }
           }
         } else {
           val status = state.map.statuses(shard)
