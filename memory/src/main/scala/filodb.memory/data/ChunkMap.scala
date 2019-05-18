@@ -64,7 +64,7 @@ object ChunkMap extends StrictLogging {
   /**
     * FIXME: Remove this after debugging is done.
     */
-  private val ingestionSharedLock = new ThreadLocal[Exception]
+  private val ingestionSharedLock = new ThreadLocal[Throwable]
 
   /**
     * FIXME: Remove this after debugging is done.
@@ -79,7 +79,8 @@ object ChunkMap extends StrictLogging {
   // Updates the shared lock count, for the current thread.
   private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
     if (amt > 0 && Thread.currentThread().getName().startsWith("ingestion")) {
-      ingestionSharedLock.set(new Exception())
+      val existing = ingestionSharedLock.get()
+      ingestionSharedLock.set(new Throwable().initCause(existing))
     }
 
     val countMap = sharedLockCounts.get
