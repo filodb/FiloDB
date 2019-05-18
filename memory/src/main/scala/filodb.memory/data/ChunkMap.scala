@@ -284,6 +284,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
           val ex = new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
           val cause = ingestionSharedLock.get()
           ex.initCause(cause)
+          releaseAllSharedLocks()
           throw ex;
         }
         exclusiveLockWait.increment()
