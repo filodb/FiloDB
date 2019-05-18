@@ -65,7 +65,7 @@ object ChunkMap extends StrictLogging {
     * FIXME: Remove this after debugging is done.
     */
   private val ingestionSharedLock = new ThreadLocal[Throwable]
-  
+
   /**
     * FIXME: Remove this after debugging is done.
     * This keeps track of which thread is running which execPlan.
