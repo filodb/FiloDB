@@ -65,7 +65,7 @@ object ChunkMap extends StrictLogging {
     * FIXME: Remove this after debugging is done.
     */
   private val ingestionSharedLock = new ThreadLocal[Throwable]
-
+  
   /**
     * FIXME: Remove this after debugging is done.
     * This keeps track of which thread is running which execPlan.
@@ -138,12 +138,12 @@ object ChunkMap extends StrictLogging {
       logger.debug(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
     }
 
-    execPlanTracker.put(t, execPlan)
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
       logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
     }
+    execPlanTracker.put(t, execPlan)
   }
 }
 
