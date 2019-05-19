@@ -64,7 +64,7 @@ object ChunkMap extends StrictLogging {
   /**
     * FIXME: Remove this after debugging is done.
     */
-  private val ingestionSharedLock = new ThreadLocal[Exception]
+  private val ingestionSharedLock = new ThreadLocal[Throwable]
 
   /**
     * FIXME: Remove this after debugging is done.
@@ -79,7 +79,8 @@ object ChunkMap extends StrictLogging {
   // Updates the shared lock count, for the current thread.
   private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
     if (amt > 0 && Thread.currentThread().getName().startsWith("ingestion")) {
-      ingestionSharedLock.set(new Exception())
+      val existing = ingestionSharedLock.get()
+      ingestionSharedLock.set(new Throwable().initCause(existing))
     }
 
     val countMap = sharedLockCounts.get
@@ -283,6 +284,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
           val ex = new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
           val cause = ingestionSharedLock.get()
           ex.initCause(cause)
+          releaseAllSharedLocks()
           throw ex;
         }
         exclusiveLockWait.increment()
@@ -292,7 +294,9 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
       } else if (warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
         val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         locks2.entrySet().retainAll(locks1.entrySet())
-        logger.error(s"Following execPlan locks have not been released for a while: $locks2")
+        val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
+        logger.error(s"Following execPlan locks have not been released for a while: " +
+          s"$locks2 $locks1 $execPlanTracker $lockState")
         logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
         Runtime.getRuntime.halt(1)
       }
