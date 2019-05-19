@@ -400,7 +400,7 @@ class TimeSeriesShard(val dataset: Dataset,
           // TODO:
           // explore aligning index time buckets with chunks, and we can then
           // remove this partition existence check per sample.
-          val part: FiloPartition = getOrAddPartition(recBase, recOffset, group, ingestOffset)
+          val part: FiloPartition = getOrAddPartitionForIngestion(recBase, recOffset, group, ingestOffset)
           if (part == OutOfMemPartition) { disableAddPartitions() }
         } catch {
           case e: OutOfOffheapMemoryException => disableAddPartitions()
@@ -984,10 +984,11 @@ class TimeSeriesShard(val dataset: Dataset,
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
   // scalastyle:off null
-  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
+  private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
+                                                    group: Int, ingestOffset: Long) = {
     var part = partSet.getWithIngestBR(recordBase, recordOff)
     if (part == null) {
-      part = addPartition(recordBase, recordOff, group)
+      part = addPartitionForIngestion(recordBase, recordOff, group)
     }
     part
   }
@@ -1047,7 +1048,7 @@ class TimeSeriesShard(val dataset: Dataset,
     *
     * This method also updates lucene index and time bucket bitmaps properly.
     */
-  private def addPartition(recordBase: Any, recordOff: Long, group: Int) = {
+  private def addPartitionForIngestion(recordBase: Any, recordOff: Long, group: Int) = {
     val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId)
@@ -1058,6 +1059,9 @@ class TimeSeriesShard(val dataset: Dataset,
       if (previousPartId == CREATE_NEW_PARTID) {
         // add new lucene entry if this partKey was never seen before
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)() // causes endTime to be set to Long.MaxValue
+      } else {
+        // newly created partition is re-ingesting now, so update endTime
+        updatePartEndTimeInIndex(newPart, Long.MaxValue)
       }
       timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
       activelyIngesting.synchronized {
@@ -1085,7 +1089,7 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   def getOrAddPartitionAndIngest(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long): Unit =
     try {
-      val part: FiloPartition = getOrAddPartition(recordBase, recordOff, group, ingestOffset)
+      val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, ingestOffset)
       if (part == OutOfMemPartition) { disableAddPartitions() }
       else {
         val tsp = part.asInstanceOf[TimeSeriesPartition]
