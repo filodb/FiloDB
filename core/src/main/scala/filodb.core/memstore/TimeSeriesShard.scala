@@ -707,7 +707,8 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
-    val partitionIt = InMemPartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
+    // clone the bitmap so that reads on the flush thread do not conflict with writes on ingestion thread
+    val partitionIt = InMemPartitionIterator(partitionGroups(flushGroup.groupNum).clone().intIterator)
     doFlushSteps(flushGroup, partitionIt)
   }
 
