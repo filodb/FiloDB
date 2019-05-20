@@ -33,14 +33,12 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
   val filoServerConfig = ConfigFactory.load("application_test.conf")
   val config = GlobalConfig.systemConfig
-  println("PrometheusApiRouteSpec: filoServerConfig" + filoServerConfig)
-  println("PrometheusApiRouteSpec: config" + config)
 
   val settings = new HttpSettings(config)
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(2, 1), noOpSource, TestData.storeConf)
+    val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(8, 1), noOpSource, TestData.storeConf)
     probe.send(clusterProxy, command)
     probe.expectMsg(DatasetVerified)
   }
@@ -75,9 +73,62 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       resp.debugInfo(2) should startWith("--E~SelectRawPartitionsExec")
       resp.debugInfo(3) should startWith("-T~PeriodicSamplesMapper")
       resp.debugInfo(4) should startWith("--E~SelectRawPartitionsExec")
-
-
     }
   }
+
+  it("should take spread override value from config for app") {
+    setupDataset()
+    // Give the coordinator nodes some time to get started
+    Thread sleep 2000
+    val query = "heap_usage{_ns=\"App-0\"}"
+
+    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[ExplainPlanResponse]
+      resp.status shouldEqual "success"
+      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
+    }
+  }
+
+  it("should get explainPlan for query based on spread as query parameter") {
+    setupDataset()
+    // Give the coordinator nodes some time to get started
+    Thread sleep 2000
+    val query = "heap_usage{_ns=\"App-1\"}"
+
+    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+      s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=3") ~> prometheusAPIRoute ~> check {
+
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[ExplainPlanResponse]
+      resp.status shouldEqual "success"
+      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 8
+    }
+  }
+
+    it("should take default spread value if no there is override") {
+      setupDataset()
+      // Give the coordinator nodes some time to get started
+      Thread sleep 2000
+      val query = "heap_usage{_ns=\"App-1\"}"
+
+      Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+        s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+
+        handled shouldBe true
+        status shouldEqual StatusCodes.OK
+        contentType shouldEqual ContentTypes.`application/json`
+        val resp = responseAs[ExplainPlanResponse]
+        resp.status shouldEqual "success"
+        resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 2
+      }
+
+    }
 }
 

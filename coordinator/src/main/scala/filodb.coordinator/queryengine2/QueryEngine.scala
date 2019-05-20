@@ -3,8 +3,14 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import monix.eval.Task
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
 import filodb.core.Types
@@ -13,13 +19,8 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query.exec._
 import filodb.query.{exec, _}
-import kamon.Kamon
-import monix.eval.Task
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
+import filodb.query.exec._
 
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
@@ -85,7 +86,7 @@ class QueryEngine(dataset: Dataset,
   val shardColumns = dataset.options.shardKeyColumns.sorted
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
-                                options: QueryOptions,spreadProvider : SpreadProvider): Seq[Int] = {
+                                options: QueryOptions, spreadProvider : SpreadProvider): Seq[Int] = {
     require(shardColumns.nonEmpty || options.shardOverrides.nonEmpty,
       s"Dataset ${dataset.ref} does not have shard columns defined, and shard overrides were not mentioned")
 
@@ -233,8 +234,8 @@ class QueryEngine(dataset: Dataset,
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
                                        options: QueryOptions,
-                                       lp: PeriodicSeries,spreadProvider : SpreadProvider): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options,spreadProvider)
+                                       lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
     rawSeries
@@ -246,7 +247,7 @@ class QueryEngine(dataset: Dataset,
                                    lp: RawSeries, spreadProvider : SpreadProvider): PlanResult = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
-    val spreadChanges =spreadProvider.spreadFunc(renamedFilters)
+    val spreadChanges = spreadProvider.spreadFunc(renamedFilters)
     val needsStitch = lp.rangeSelector match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
@@ -262,7 +263,7 @@ class QueryEngine(dataset: Dataset,
   private def materializeLabelValues(queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
-                                      lp: LabelValues,spreadProvider : SpreadProvider): PlanResult = {
+                                      lp: LabelValues, spreadProvider : SpreadProvider): PlanResult = {
     val filters = lp.labelConstraints.map { case (k, v) =>
       new ColumnFilter(k, Filter.Equals(v))
     }.toSeq
@@ -289,11 +290,11 @@ class QueryEngine(dataset: Dataset,
   private def materializeSeriesKeysByFilters(queryId: String,
                                      submitTime: Long,
                                      options: QueryOptions,
-                                     lp: SeriesKeysByFilters,spreadProvider : SpreadProvider): PlanResult = {
+                                     lp: SeriesKeysByFilters, spreadProvider : SpreadProvider): PlanResult = {
     val renamedFilters = renameMetricFilter(lp.filters)
     val filterCols = lp.filters.map(_.column).toSet
     val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
-                        shardsFromFilters(lp.filters, options,spreadProvider)
+                        shardsFromFilters(lp.filters, options, spreadProvider)
                       } else {
                         mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
@@ -309,7 +310,7 @@ class QueryEngine(dataset: Dataset,
   private def materializeRawChunkMeta(queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
-                                      lp: RawChunkMeta,spreadProvider : SpreadProvider): PlanResult = {
+                                      lp: RawChunkMeta, spreadProvider : SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
     val colID = dataset.colIDs(colName).get.head

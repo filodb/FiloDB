@@ -117,7 +117,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
 
   def main(args: Arguments): Unit = {
-    //val spread = config.getInt("default-spread")
     try {
       val timeout = args.timeoutSeconds.seconds
       args.command match {
@@ -365,7 +364,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(options.spread.map(_.toInt), options.sampleLimit)
+    val qOpts = QueryCommands.QueryOptions(options.spread, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")

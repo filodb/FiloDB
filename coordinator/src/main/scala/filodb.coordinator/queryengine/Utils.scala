@@ -1,21 +1,22 @@
 package filodb.coordinator.queryengine
 
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
+
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import filodb.coordinator.ShardMapper
-import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.store._
-import filodb.core.{ErrorResponse, Types}
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
+import filodb.coordinator.ShardMapper
+import filodb.core.{ErrorResponse, Types}
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store._
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")

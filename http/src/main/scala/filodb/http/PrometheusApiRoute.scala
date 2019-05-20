@@ -1,6 +1,7 @@
 package filodb.http
 
 import scala.concurrent.Future
+
 import akka.actor.ActorRef
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaTypes, StatusCodes => Codes}
 import akka.http.scaladsl.server.Directives._
@@ -8,10 +9,10 @@ import akka.stream.ActorMaterializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-import filodb.coordinator.GlobalConfig
 import io.circe.{Decoder, Encoder, HCursor, Json}
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
+
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.DatasetRef
@@ -20,7 +21,6 @@ import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.Sampl
 import filodb.query.{LogicalPlan, QueryError, QueryResult}
 import filodb.query.exec.ExecPlan
-
 
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
            extends FiloRoute with StrictLogging {
@@ -33,21 +33,6 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
-  val spreadProvider = new StaticSpreadProvider(SpreadChange(0, settings.queryDefaultSpread))
-  val globalConfigSystemConfig=  GlobalConfig.systemConfig
-  logger.info("PrometheusApiRoute: globalConfigSystemConfig:" + globalConfigSystemConfig)
-  //val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
-//  val queryOptions = QueryOptions(
-//    new QueryCommands.FunctionalSpreadProvider(
-//      QueryCommands.QueryOptions$.MODULE$.simpleMapSpreadFunc(
-//        query.getApplicationShardKeyName(), query.getFilodbSpreadMap(), query.getSpread())), settings.querySampleLimit)
-//  val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map("myService" -> 2), 1)
-//
-//  // final logical plan
-//
-//  // materialized exec plan
-//  val execPlan = engine.materialize(logicalPlan, QueryOptions(FunctionalSpreadProvider(spreadFunc)))
-
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
     // Used to issue a promQL query for a time range with a `start` and `end` timestamp and at regular `step` intervals.
@@ -56,10 +41,11 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double],
-                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, start, end, step, explainOnly, verbose) =>
+                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
+        { (query, start, end, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false),
+            spread)
         }
       }
     } ~
@@ -69,10 +55,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, time, explainOnly, verbose) =>
+        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
+          'spread.as[Int].?)
+        { (query, time, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
+            verbose.getOrElse(false),spread)
         }
       }
     } ~
@@ -118,12 +106,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean) = {
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
+                                 spread: Option[Int]) = {
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spread))
     }
     else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spread))
     }
     onSuccess(asyncAsk(nodeCoord, command)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
