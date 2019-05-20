@@ -16,7 +16,7 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.NativeMemoryManager
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -193,7 +193,8 @@ extends MemStore with StrictLogging {
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
     val shard = datasets(dataset.ref).get(partMethod.shard)
-    if (shard == null) {
+
+    if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset ${dataset.ref} is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
