@@ -295,7 +295,7 @@ private[filodb] object ShardMapper extends StrictLogging {
     extends Exception(s"$context [shard=${event.shard}, event=$event]")
 
   def statusToLetter(status: ShardStatus): String = status match {
-    case ShardStatusUnassigned  => "U"
+    case ShardStatusUnassigned  => "."
     case ShardStatusAssigned    => "N"
     case ShardStatusActive      => "A"
     case ShardStatusError       => "E"
