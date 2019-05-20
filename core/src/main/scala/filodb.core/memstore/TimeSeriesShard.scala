@@ -906,25 +906,21 @@ class TimeSeriesShard(val dataset: Dataset,
                           chunkSetIt: Iterator[ChunkSet],
                           partitionIt: Iterator[TimeSeriesPartition],
                           blockHolder: BlockMemFactory): Future[Response] = {
-    if (chunkSetIt.isEmpty) {
-      Future.successful(Success)
-    } else {
-      val chunkSetStream = Observable.fromIterator(chunkSetIt)
-      logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
-        s"dataset=${dataset.ref} shard=$shardNum")
+    val chunkSetStream = Observable.fromIterator(chunkSetIt)
+    logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
+      s"dataset=${dataset.ref} shard=$shardNum")
 
-      colStore.write(dataset, chunkSetStream, flushGroup.diskTimeToLiveSeconds).recover { case e =>
-        logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=${dataset.ref} " +
-          s"shard=$shardNum", e)
-        shardStats.flushesFailedChunkWrite.increment
+    colStore.write(dataset, chunkSetStream, flushGroup.diskTimeToLiveSeconds).recover { case e =>
+      logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=${dataset.ref} " +
+        s"shard=$shardNum", e)
+      shardStats.flushesFailedChunkWrite.increment
 
-        // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
-        // never be freed.
-        partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
-        // If the above futures fail with ErrorResponse because of DB failures, skip the chunk.
-        // Sorry - need to drop the data to keep the ingestion moving
-        DataDropped
-      }
+      // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
+      // never be freed.
+      partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
+      // If the above futures fail with ErrorResponse because of DB failures, skip the chunk.
+      // Sorry - need to drop the data to keep the ingestion moving
+      DataDropped
     }
   }
 
