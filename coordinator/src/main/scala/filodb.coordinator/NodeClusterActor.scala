@@ -257,7 +257,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     }
 
   private def memberUp(member: Member): Future[Unit] = {
-    logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
     val memberCoordActor = nodeCoordinatorPath(member.address)
     context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
       .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
@@ -271,12 +270,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def membershipHandler: Receive = LoggingReceive {
     case s: CurrentClusterState =>
       logger.info(s"Initial Cluster State was: $s")
+      shardManager.logAllMappers("After receiving initial cluster state")
       val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).map(memberUp(_))
       Future.sequence(memberUpFutures.toSeq).onComplete { _ =>
         self ! RemoveStaleCoordinators
       }
 
     case MemberUp(member) =>
+      logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
       memberUp(member)
 
     case UnreachableMember(member) =>
@@ -336,6 +337,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       // never includes downed nodes, which come through cluster.subscribe event replay
       mappers foreach { case (ref, map) => shardManager.recoverShards(ref, map) }
       shardManager.recoverSubscriptions(subscriptions)
+      shardManager.logAllMappers("After NCA shard state/subscription recovery")
 
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Subscribing to cluster events and switching to normalReceive")
