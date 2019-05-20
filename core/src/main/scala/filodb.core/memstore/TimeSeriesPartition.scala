@@ -79,7 +79,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     * Note that if this is not NULL, then it is always the most recent element of infoMap.
     */
   protected var currentChunks = nullChunks
-  private var currentInfo = nullInfo
+  protected var currentInfo = nullInfo
 
   /**
     * True if partition is actively ingesting.
@@ -125,17 +125,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     }
 
     val newChunk = currentChunks == nullChunks
-    if (newChunk) {
-      // First row of a chunk, set the start time to it
-      val (infoAddr, newAppenders) = bufferPool.obtain()
-      val currentChunkID = chunkID(ts)
-      ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
-      ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-      ChunkSetInfo.setStartTime(infoAddr, ts)
-      currentInfo = ChunkSetInfo(infoAddr)
-      currentChunks = newAppenders
-      // Don't publish the new chunk just yet. Wait until it has one row.
-    }
+    if (newChunk) initNewChunk(ts)
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -160,6 +150,18 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // Publish it now that it has something.
       infoPut(currentInfo)
     }
+  }
+
+  protected def initNewChunk(ts: Long): Unit = {
+    // First row of a chunk, set the start time to it
+    val (infoAddr, newAppenders) = bufferPool.obtain()
+    val currentChunkID = chunkID(ts)
+    ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
+    ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
+    ChunkSetInfo.setStartTime(infoAddr, ts)
+    currentInfo = ChunkSetInfo(infoAddr)
+    currentChunks = newAppenders
+    // Don't publish the new chunk just yet. Wait until it has one row.
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -429,8 +431,16 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - switchBuffers, encode=$encode")
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - switchBuffers, encode=$encode" +
+               s" for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
+  }
+
+  override protected def initNewChunk(ts: Long): Unit = {
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
+    super.initNewChunk(ts)
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
+               s"${currentInfo.debugString}")
   }
 }
 

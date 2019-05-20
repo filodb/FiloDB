@@ -102,6 +102,8 @@ final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
       None
     }
   }
+
+  def debugString: String = s"ChunkSetInfo(id=$id numRows=$numRows startTime=$startTime endTime=$endTime)"
 }
 
 case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)
