@@ -67,11 +67,16 @@ trait SectionWriter {
   var curSection: Section = _
   var bytesLeft: Int = 0
 
-  // Appends a blob, writing a 2-byte length prefix before it.
-  protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
+  // Returns true if appending numBytes will start a new section
+  protected def needNewSection(numBytes: Int): Boolean = {
     // Check remaining length/space.  A section must be less than 2^16 bytes long. Create new section if needed
     val newNumBytes = curSection.sectionNumBytes + numBytes
-    if (curSection.numElements >= maxElementsPerSection || newNumBytes >= 65536) {
+    curSection.numElements >= maxElementsPerSection || newNumBytes >= 65536
+  }
+
+  // Appends a blob, writing a 2-byte length prefix before it.
+  protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
+    if (needNewSection(numBytes)) {
       if (bytesLeft >= (4 + numBytes)) {
         curSection = Section.init(curSection.endAddr)
         bytesLeft -= 4
