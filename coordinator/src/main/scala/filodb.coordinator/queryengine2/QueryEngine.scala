@@ -133,24 +133,23 @@ class QueryEngine(dataset: Dataset,
                                   submitTime: Long,
                                   options: QueryOptions, spreadProvider: SpreadProvider): PlanResult = {
     logicalPlan match {
-      case lp: RawSeries => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
-      case lp: RawChunkMeta => materializeRawChunkMeta(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: PeriodicSeries => materializePeriodicSeries(queryId, submitTime, options, lp,
-        spreadProvider)
+      case lp: RawSeries =>                   materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
+      case lp: RawChunkMeta =>                materializeRawChunkMeta(queryId, submitTime, options, lp, spreadProvider)
+      case lp: PeriodicSeries =>              materializePeriodicSeries(queryId, submitTime, options, lp,
+                                              spreadProvider)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: ApplyInstantFunction => materializeApplyInstantFunction(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: Aggregate => materializeAggregate(queryId, submitTime, options, lp, spreadProvider)
-      case lp: BinaryJoin => materializeBinaryJoin(queryId, submitTime, options, lp, spreadProvider)
+                                              spreadProvider)
+      case lp: ApplyInstantFunction =>        materializeApplyInstantFunction(queryId, submitTime, options, lp,
+                                              spreadProvider)
+      case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp, spreadProvider)
+      case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: LabelValues => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-      case lp: SeriesKeysByFilters => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: ApplyMiscellaneousFunction => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
-        spreadProvider)
+                                              spreadProvider)
+      case lp: LabelValues =>                 materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
+      case lp: SeriesKeysByFilters =>         materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+                                              spreadProvider)
+      case lp: ApplyMiscellaneousFunction =>  materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+                                              spreadProvider)
     }
   }
 
@@ -171,7 +170,7 @@ class QueryEngine(dataset: Dataset,
     val lhs = walkLogicalPlanTree(lp.lhs, queryId, submitTime, options, spreadProvider)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(lhs.plans), lhs.plans))
                       else lhs.plans
-    val rhs =  walkLogicalPlanTree(lp.rhs, queryId, submitTime, options, spreadProvider)
+    val rhs = walkLogicalPlanTree(lp.rhs, queryId, submitTime, options, spreadProvider)
     val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(rhs.plans), rhs.plans))
                       else rhs.plans
     // TODO Currently we create separate exec plan node for stitching.

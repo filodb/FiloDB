@@ -267,13 +267,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                     ignoreTagsOnPartitionKeyHash: Seq[String],
                     timeout: FiniteDuration): Unit = {
     try {
-      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys, downsamplers)
       val options = DatasetOptions.DefaultOptions.copy(metricColumn = metricColumn,
                                                        shardKeyColumns = shardKeyColumns,
                                                        ignoreShardKeyColumnSuffixes = ignoreShardKeyColumnSuffixes,
                                                        ignoreTagsOnPartitionKeyHash = ignoreTagsOnPartitionKeyHash)
+      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys, downsamplers, options)
       println(s"Creating dataset $dataset with options $options...")
-      client.createNewDataset(datasetObj.copy(options = options), dataset.database)
+      client.createNewDataset(datasetObj, dataset.database)
       exitCode = 0
     } catch {
       case b: Dataset.BadSchemaError =>

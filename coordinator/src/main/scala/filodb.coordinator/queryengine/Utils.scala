@@ -26,6 +26,7 @@ final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) exten
  * Logical -> Physical Plan conversion and implementing the Distribute* physical primitives
  */
 object Utils extends StrictLogging {
+  import filodb.coordinator.client.QueryCommands._
   import TrySugar._
   import filodb.coordinator.client.QueryCommands._
 
@@ -76,7 +77,7 @@ object Utils extends StrictLogging {
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash,
-                spreadProvider.spreadFunc(filters).last.spread)
+                                                           spreadProvider.spreadFunc(filters).last.spread)
               case None => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {

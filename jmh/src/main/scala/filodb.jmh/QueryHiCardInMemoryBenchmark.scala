@@ -110,7 +110,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   private def toExecPlan(query: String): ExecPlan = {
     val queryStartTime = ingestionStartTime + 5.minutes.toMillis  // 5 minutes from start until 60 minutes from start
     val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
-    val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams), QueryOptions(0, 20000))
+    val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams), QueryOptions(Some(0), 20000))
     var child = execPlan
     while (child.children.size > 0) child = child.children(0)
     child

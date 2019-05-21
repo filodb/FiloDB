@@ -59,7 +59,7 @@ final class QueryActor(memStore: MemStore,
 
   var filodbSpreadMap = new mutable.HashMap[String, Int]()
   config.getConfig("filodb.spread.override").entrySet().asScala.
-    foreach(x => filodbSpreadMap.put(x.getKey(), x.getValue().unwrapped().asInstanceOf[Int]))
+    foreach { x => filodbSpreadMap.put(x.getKey(), x.getValue().unwrapped().asInstanceOf[Int])}
   val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
   val defaultSpread = config.getInt("filodb.spread.default")
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
@@ -114,7 +114,7 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan,q.queryOptions,getSpreadProvider(q.queryOptions))
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
