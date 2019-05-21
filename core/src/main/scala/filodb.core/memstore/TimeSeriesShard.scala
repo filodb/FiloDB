@@ -814,7 +814,9 @@ class TimeSeriesShard(val dataset: Dataset,
       } catch { case e: Throwable =>
         logger.error(s"Error when wrapping up doFlushSteps in dataset=${dataset.ref} shard=$shardNum", e)
       }
-    }
+    }(ingestSched)
+    // Note: The data structures accessed by flushDoneTasks can only be safely accessed by the
+    //       ingestion thread, hence the onComplete steps are run from that thread.
     Task.fromFuture(result)
   }
 
