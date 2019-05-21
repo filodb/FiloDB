@@ -30,7 +30,7 @@ class IngestionBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   // # of records in a container to test ingestion speed
-  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags)
+  val dataStream = withMap(linearMultiSeries(), extraTags = extraTags)
 
   val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
                                                     Seq("job", "instance"))

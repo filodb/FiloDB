@@ -60,7 +60,7 @@ class Arguments extends FieldArgs {
   var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
   var shards: Option[Seq[String]] = None
-  var spread: Option[String] = None
+  var spread: Option[Int] = None
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -198,7 +198,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-            timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
+            timeout, args.shards.map(_.map(_.toInt)), args.spread)
           parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
             getQueryRange(args), options)
 
@@ -206,7 +206,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelNames.nonEmpty, "--host, --dataset and --labelName must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-            timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
+            timeout, args.shards.map(_.map(_.toInt)), args.spread)
           parseLabelValuesQuery(remote, args.labelNames, args.labelFilter, args.dataset.get,
             getQueryRange(args), options)
 
@@ -216,7 +216,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-              timeout, args.shards.map(_.map(_.toInt)), args.spread.map(_.toInt))
+              timeout, args.shards.map(_.map(_.toInt)), args.spread)
             parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.select.map { selectCols =>

@@ -50,7 +50,7 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
   def getPartKeySegments(shard: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
     val it = session.execute(readCql.bind(shard: JInt, timeBucket: JInt))
       .asScala.toIterator.map(row => {
-      PartKeyTimeBucketSegment(row.getInt("segmentid"),  row.getBytes("segment"))
+      PartKeyTimeBucketSegment(row.getInt("segmentid"), row.getBytes("segment"))
     })
     Observable.fromIterator(it)
   }

@@ -130,7 +130,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
   private var lockState: Int = 0
   private var size: Int = 0
   private var first: Int = 0
-  private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero=true)
+  private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero = true)
 
   import ChunkMap._
 

@@ -19,7 +19,7 @@ object LongBinaryVector {
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(addr)
+    val dispose = () => memFactory.freeMemory(addr)
     GrowableVector(memFactory, new MaskedLongAppendingVector(addr, bytesRequired, maxElements, dispose))
   }
 
@@ -30,7 +30,7 @@ object LongBinaryVector {
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(addr)
+    val dispose = () => memFactory.freeMemory(addr)
     new LongAppendingVector(addr, bytesRequired, dispose)
   }
 
@@ -41,7 +41,7 @@ object LongBinaryVector {
   def timestampVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(addr)
+    val dispose = () => memFactory.freeMemory(addr)
     new TimestampAppendingVector(addr, bytesRequired, dispose)
   }
 
@@ -54,8 +54,8 @@ object LongBinaryVector {
    * LongVectorDataReader object for parsing it
    */
   def apply(vector: BinaryVectorPtr): LongVectorDataReader = BinaryVector.vectorType(vector) match {
-    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK) => DeltaDeltaDataReader
-    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_REPEATED)   => DeltaDeltaConstDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK) => DeltaDeltaDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)   => DeltaDeltaConstDataReader
     case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedLongDataReader
     case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => LongVectorDataReader64
   }

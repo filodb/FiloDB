@@ -58,7 +58,7 @@ object RowToVectorBuilder {
 class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory) {
   import RowToVectorBuilder._
   val builders = schema.zipWithIndex.map {
-    case (VectorInfo(_, dataType),index)=> dataType match {
+    case (VectorInfo(_, dataType), index)=> dataType match {
       case Classes.Int    => IntBinaryVector.appendingVector(memFactory, MaxElements)
       case Classes.Long   => LongBinaryVector.appendingVector(memFactory, MaxElements)
       case Classes.Double => DoubleVector.appendingVector(memFactory, MaxElements)

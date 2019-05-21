@@ -72,11 +72,11 @@ object GatewayServer extends StrictLogging {
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
-                                    descr="# of samples per time series")
-    val numSeries = opt[Int](short='p', default = Some(20), descr="# of total time series")
-    val sourceConfigPath = trailArg[String](descr="Path to source config, eg conf/timeseries-dev-source.conf")
-    val genHistData = toggle(noshort=true, descrYes="Generate histogram-schema test data and exit")
-    val genPromData = toggle(noshort=true, descrYes="Generate Prometheus-schema test data and exit")
+                                    descr = "# of samples per time series")
+    val numSeries = opt[Int](short = 'p', default = Some(20), descr = "# of total time series")
+    val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
+    val genHistData = toggle(noshort = true, descrYes = "Generate histogram-schema test data and exit")
+    val genPromData = toggle(noshort = true, descrYes = "Generate Prometheus-schema test data and exit")
     verify()
   }
 

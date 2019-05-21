@@ -44,7 +44,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
                   'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
         { (query, start, end, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false),
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
             spread)
         }
       }
@@ -60,7 +60,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         { (query, time, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false),spread)
+            verbose.getOrElse(false), spread)
         }
       }
     } ~

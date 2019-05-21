@@ -273,7 +273,7 @@ class QueryEngine(dataset: Dataset,
       lp.labelNames.updated(metricLabelIndex, dataset.options.metricColumn) else lp.labelNames
 
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
-                        shardsFromFilters(filters, options,spreadProvider)
+                        shardsFromFilters(filters, options, spreadProvider)
                       } else {
                         mdNoShardKeyFilterRequests.increment()
                         shardMapperFunc.assignedShards
@@ -300,7 +300,7 @@ class QueryEngine(dataset: Dataset,
                       }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(queryId, submitTime,  options.sampleLimit, dispatcher, dataset.ref, shard,
+      PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
         renamedFilters, lp.start, lp.end)
     }
     PlanResult(metaExec, false)

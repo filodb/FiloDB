@@ -119,7 +119,7 @@ class EncodingBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def newDictUtf8VectorEncoding(): Unit = {
-    val hint = Encodings.AutoDictString(samplingRate=0.5)
+    val hint = Encodings.AutoDictString(samplingRate = 0.5)
     UTF8Vector(memFactory, utf8strings).optimize(memFactory, hint)
   }
 }

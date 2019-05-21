@@ -41,6 +41,8 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(8, 1), noOpSource, TestData.storeConf)
     probe.send(clusterProxy, command)
     probe.expectMsg(DatasetVerified)
+    // Give the coordinator nodes some time to get started
+    Thread sleep 5000
   }
 
   before {
@@ -55,8 +57,6 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
   it("should get explainPlan for query") {
     setupDataset()
-    // Give the coordinator nodes some time to get started
-    Thread sleep 5000
     val query = "heap_usage{_ns=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
@@ -78,8 +78,6 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
   it("should take spread override value from config for app") {
     setupDataset()
-    // Give the coordinator nodes some time to get started
-    Thread sleep 5000
     val query = "heap_usage{_ns=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
@@ -96,8 +94,6 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
   it("should get explainPlan for query based on spread as query parameter") {
     setupDataset()
-    // Give the coordinator nodes some time to get started
-    Thread sleep 5000
     val query = "heap_usage{_ns=\"App-1\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
@@ -114,8 +110,6 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
     it("should take default spread value if no there is override") {
       setupDataset()
-      // Give the coordinator nodes some time to get started
-      Thread sleep 5000
       val query = "heap_usage{_ns=\"App-1\"}"
 
       Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +

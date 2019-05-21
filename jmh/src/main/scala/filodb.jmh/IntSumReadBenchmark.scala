@@ -9,12 +9,13 @@ import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.core.{NamesTestData, TestData}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.store.ChunkSet
 import filodb.memory.format.{vectors => bv, TupleRowReader, UnsafeUtils}
 
 object IntSumReadBenchmark {
-  val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), "rownum")
+  val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), "rownum",
+    DatasetOptions.DefaultOptions)
   val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row.toLong), Some(0)) }
   val partKey = NamesTestData.defaultPartKey
   val rowColumns = Seq("int", "rownum", "part")
