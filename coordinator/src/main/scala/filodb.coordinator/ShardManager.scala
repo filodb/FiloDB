@@ -544,6 +544,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       state.storeConfig, state.source, state.downsample)
     coord ! setupMsg
 
+    logger.info(s"Assigning shards for dataset=$dataset to " +
+      s"coordinator $coord for shards $shards")
     for { shard <- shards }  {
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEvent(event)
