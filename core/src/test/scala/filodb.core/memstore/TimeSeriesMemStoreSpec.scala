@@ -30,7 +30,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
-  implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
+  implicit override val patienceConfig = PatienceConfig(timeout = Span(5, Seconds), interval = Span(50, Millis))
 
   after {
     // clear the highest time bucket from test runs
