@@ -82,7 +82,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       } else {
         // in the very rare case that partition literally *just* got evicted
         // we do not want to thrash by paging this partition back in.
-        logger.warn(s"Skipped ODP of partId $pId in dataset=${dataset.ref} " +
+        logger.warn(s"Skipped ODP of partId=$pId in dataset=${dataset.ref} " +
           s"shard=$shardNum since we are very likely thrashing")
       }
     }
@@ -170,6 +170,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, 4)) } yield {
             val stamp = partSetLock.writeLock()
             try {
+              part.ingesting = false
               partSet.add(part)
             } finally {
               partSetLock.unlockWrite(stamp)

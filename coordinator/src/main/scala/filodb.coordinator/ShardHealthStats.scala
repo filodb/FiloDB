@@ -19,15 +19,17 @@ class ShardHealthStats(ref: DatasetRef,
                        shardMapFunc: => ShardMapper,
                        reportingInterval: FiniteDuration = 5.seconds) {
 
-  val numActive = Kamon.gauge(s"num-active-shards-$ref")
-  val numRecovering = Kamon.gauge(s"num-recovering-shards-$ref")
-  val numUnassigned = Kamon.gauge(s"num-unassigned-shards-$ref")
-  val numAssigned = Kamon.gauge(s"num-assigned-shards-$ref")
-  val numError = Kamon.gauge(s"num-error-shards-$ref")
-  val numStopped = Kamon.gauge(s"num-stopped-shards-$ref")
-  val numDown = Kamon.gauge(s"num-down-shards-$ref")
-  val numErrorReassignmentsDone = Kamon.counter(s"num-error-reassignments-done-$ref")
-  val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped-$ref")
+  val numActive = Kamon.gauge(s"num-active-shards").refine("dataset", ref.toString)
+  val numRecovering = Kamon.gauge(s"num-recovering-shards").refine("dataset", ref.toString)
+  val numUnassigned = Kamon.gauge(s"num-unassigned-shards").refine("dataset", ref.toString)
+  val numAssigned = Kamon.gauge(s"num-assigned-shards").refine("dataset", ref.toString)
+  val numError = Kamon.gauge(s"num-error-shards").refine("dataset", ref.toString)
+  val numStopped = Kamon.gauge(s"num-stopped-shards").refine("dataset", ref.toString)
+  val numDown = Kamon.gauge(s"num-down-shards").refine("dataset", ref.toString)
+  val numErrorReassignmentsDone = Kamon.counter(s"num-error-reassignments-done")
+                      .refine("dataset", ref.toString)
+  val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped")
+                      .refine("dataset", ref.toString)
 
   def update(mapper: ShardMapper): Unit = {
     numActive.set(shardMapFunc.statuses.count(_ == ShardStatusActive))

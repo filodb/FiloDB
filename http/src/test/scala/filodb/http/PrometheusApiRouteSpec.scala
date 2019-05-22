@@ -56,7 +56,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   it("should get explainPlan for query") {
     setupDataset()
     // Give the coordinator nodes some time to get started
-    Thread sleep 1000
+    Thread sleep 2000
     val query = "heap_usage{_ns=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
