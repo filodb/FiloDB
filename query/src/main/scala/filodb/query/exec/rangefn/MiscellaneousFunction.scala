@@ -3,7 +3,6 @@ package filodb.query.exec.rangefn
 import java.util.regex.{Pattern, PatternSyntaxException}
 
 import monix.reactive.Observable
-import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.query.{CustomRangeVectorKey, IteratorBackedRangeVector, RangeVector, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
@@ -44,7 +43,7 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     }
   }
 
-  def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
+  private def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
 
     val value: ZeroCopyUTF8String = if (rangeVectorKey.labelValues.contains(ZeroCopyUTF8String(srcLabel))) {
       rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel)).get
@@ -92,12 +91,12 @@ case class LabelJoinFunction(funcParams: Seq[Any])
   val separator: String = funcParams(1).asInstanceOf[String]
 
   require(dstLabel.asInstanceOf[String].matches(labelIdentifier), "Invalid destination label name in label_join()")
-  var srcLabel = ArrayBuffer[String]()
-  funcParams.drop(2).foreach(x => {
-    require(x.asInstanceOf[String].matches(labelIdentifier),
-      "Invalid source label name in label_join()")
-    srcLabel += x.asInstanceOf[String]
-  })
+  var srcLabel =
+    funcParams.drop(2).map { x =>
+      require(x.asInstanceOf[String].matches(labelIdentifier),
+        "Invalid source label name in label_join()")
+      x.asInstanceOf[String]
+    }
 
   override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {
     source.map { rv =>
@@ -106,15 +105,10 @@ case class LabelJoinFunction(funcParams: Seq[Any])
     }
   }
 
-  def labelJoinImpl(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
-    var srcLabelValues = ArrayBuffer[String]()
+  private def labelJoinImpl(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
 
-    srcLabel.
-      foreach(x => if (rangeVectorKey.labelValues.contains(ZeroCopyUTF8String(x)))
-        srcLabelValues += rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).get.toString
-      else
-        srcLabelValues += ""
-      )
+    val srcLabelValues = srcLabel.map(x=> rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).
+      map(_.toString).getOrElse(""))
 
     val labelJoinValue = srcLabelValues.mkString(separator)
 
