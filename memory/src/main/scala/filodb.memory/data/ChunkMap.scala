@@ -63,11 +63,6 @@ object ChunkMap extends StrictLogging {
 
   /**
     * FIXME: Remove this after debugging is done.
-    */
-  private val ingestionSharedLock = new ThreadLocal[Throwable]
-
-  /**
-    * FIXME: Remove this after debugging is done.
     * This keeps track of which thread is running which execPlan.
     * Entry is added on lock acquisition, removed when lock is released.
     */
@@ -78,11 +73,6 @@ object ChunkMap extends StrictLogging {
 
   // Updates the shared lock count, for the current thread.
   private def adjustSharedLockCount(inst: ChunkMap, amt: Int): Unit = {
-    if (amt > 0 && Thread.currentThread().getName().startsWith("ingestion")) {
-      val existing = ingestionSharedLock.get()
-      ingestionSharedLock.set(new Throwable().initCause(existing))
-    }
-
     val countMap = sharedLockCounts.get
     if (!countMap.contains(inst)) {
       if (amt > 0) {
@@ -92,7 +82,6 @@ object ChunkMap extends StrictLogging {
       val newCount = countMap(inst) + amt
       if (newCount <= 0) {
         countMap.remove(inst)
-        ingestionSharedLock.remove()
       } else {
         countMap.put(inst, newCount)
       }
@@ -104,7 +93,6 @@ object ChunkMap extends StrictLogging {
    */
   //scalastyle:off null
   def releaseAllSharedLocks(): Int = {
-    ingestionSharedLock.remove()
     execPlanTracker.remove(Thread.currentThread())
     var total = 0
     val countMap = sharedLockCounts.get
@@ -281,11 +269,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
           // Self deadlock. Upgrading the shared lock to an exclusive lock is possible if the
           // current thread is the only shared lock owner, but this isn't that common. Instead,
           // this is a bug which needs to be fixed.
-          val ex = new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
-          val cause = ingestionSharedLock.get()
-          ex.initCause(cause)
-          releaseAllSharedLocks()
-          throw ex;
+          throw new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
         }
         exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
