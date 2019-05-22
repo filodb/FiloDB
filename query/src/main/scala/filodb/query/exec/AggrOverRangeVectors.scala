@@ -326,6 +326,9 @@ trait RowAggregator {
 }
 
 object RowAggregator {
+  def isHistMax(valColType: ColumnType, schema: ResultSchema): Boolean =
+    valColType == ColumnType.HistogramColumn && schema.isHistDouble && schema.columns(2).name == "max"
+
   /**
     * Factory for RowAggregator
     */
@@ -335,7 +338,7 @@ object RowAggregator {
       case Min      => MinRowAggregator
       case Max      => MaxRowAggregator
       case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
-      case Sum if valColType == ColumnType.HistogramColumn && schema.isHD => HistMaxSumAggregator
+      case Sum if isHistMax(valColType, schema)            => HistMaxSumAggregator
       case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count    => CountRowAggregator
       case Avg      => AvgRowAggregator

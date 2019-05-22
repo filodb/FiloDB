@@ -30,7 +30,7 @@ trait EmptyParamsInstantFunction extends DoubleInstantFunction {
 
 sealed trait HistogramInstantFunction {
   def isHToDoubleFunc: Boolean = this.isInstanceOf[HistToDoubleIFunction]
-  def isHDToDoubleFunc: Boolean = this.isInstanceOf[HDToDoubleIFunction]
+  def isHistDoubleToDoubleFunc: Boolean = this.isInstanceOf[HDToDoubleIFunction]
   def asHToDouble: HistToDoubleIFunction = this.asInstanceOf[HistToDoubleIFunction]
   def asHDToDouble: HDToDoubleIFunction = this.asInstanceOf[HDToDoubleIFunction]
   def asHToH: HistToHistIFunction = this.asInstanceOf[HistToHistIFunction]
@@ -278,10 +278,10 @@ case class HistogramMaxQuantileImpl(funcParams: Seq[Any]) extends HDToDoubleIFun
   require(funcParams(0).isInstanceOf[Number], "histogram_quantile parameter must be a number")
   val q = funcParams(0).asInstanceOf[Number].doubleValue()
 
-  final def apply(h: Histogram, d: Double): Double = {
-    val maxHist = h match {
-      case hist: MutableHistogram => MaxHistogram(hist, d)
-      case other: Histogram       => MaxHistogram(MutableHistogram(other), d)
+  final def apply(hist: Histogram, max: Double): Double = {
+    val maxHist = hist match {
+      case h: MutableHistogram => MaxHistogram(h, max)
+      case other: Histogram    => MaxHistogram(MutableHistogram(other), max)
     }
     maxHist.quantile(q)
   }

@@ -71,7 +71,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble))
           }
-        } else if (instantFunction.isHDToDoubleFunc && sourceSchema.isHD) {
+        } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble))
           }
