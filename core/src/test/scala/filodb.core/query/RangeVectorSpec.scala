@@ -47,7 +47,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
     val builder = SerializableRangeVector.toBuilder(schema)
 
     // Sharing one builder across multiple input RangeVectors
-    val srvs = rvs.map(rv => SerializableRangeVector(rv, builder, schema))
+    val srvs = rvs.map(rv => SerializableRangeVector(rv, builder, schema, "Unit-test"))
 
     // Now verify each of them
     val observedTs = srvs(0).rows.toSeq.map(_.getLong(0))
