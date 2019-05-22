@@ -2,18 +2,11 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
-import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
-
-import filodb.query.QueryConfig
-import filodb.query.exec.{QueueBasedWindow, TransientRow}
+import filodb.query.exec.{ChunkedWindowIteratorD, QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
-class RateFunctionsSpec extends FunSpec with Matchers {
-
+class RateFunctionsSpec extends RawDataWindowingSpec {
   val rand = new Random()
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val counterSamples = Seq(  8072000L->4419.00,
                       8082100L->4511.00,
@@ -24,7 +17,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
                       8132570L->5000.00,
                       8142822L->5095.00,
                       8152858L->5102.00,
-                      8163000L->5201.00)
+                      8162999L->5201.00)
 
   val q = new IndexedArrayQueue[TransientRow]()
   counterSamples.foreach { case (t, v) =>
@@ -32,6 +25,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     q.add(s)
   }
   val counterWindow = new QueueBasedWindow(q)
+  val counterRV = timeValueRV(counterSamples)
 
   val gaugeSamples = Seq(   8072000L->7419.00,
                             8082100L->5511.00,
@@ -62,7 +56,12 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * 1000
     val toEmit = new TransientRow
     RateFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs + 1,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("irate should work when start and end are outside window") {
@@ -183,7 +182,12 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
     IncreaseFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs + 1,
+                                        new ChunkedIncreaseFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("delta should work when start and end are outside window") {

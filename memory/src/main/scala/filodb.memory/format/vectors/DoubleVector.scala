@@ -102,7 +102,7 @@ trait DoubleIterator extends TypedIterator {
  * +0006   2-byte nbits / signed / bitshift
  * +0008   start of packed Double data
  */
-trait DoubleVectorDataReader extends VectorDataReader {
+trait DoubleVectorDataReader extends CounterVectorReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
@@ -151,10 +151,36 @@ trait DoubleVectorDataReader extends VectorDataReader {
     }
     newBuf
   }
+
+  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = meta match {
+    case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
+    case DoubleCorrection(lastValue, correction) =>
+      val firstValue = apply(vector, 0)
+      if (firstValue < lastValue) DoubleCorrection(lastValue, correction + firstValue)
+      else                        meta
+  }
+
+  // Default implementation for vectors with no correction
+  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta = {
+    // Return the last value and simply pass on the previous correction value
+    DoubleCorrection(apply(vector, length(vector) - 1), meta.correction)
+  }
+
+  /**
+   * Retrieves the element at position/row n, with counter correction, taking into account a previous
+   * correction factor.  Calling this method with increasing n should result in nondecreasing
+   * values starting no lower than the initial correction factor in correctionMeta.
+   * NOTE: this is a default implementation for vectors having no correction
+   */
+  def correctedValue(vector: BinaryVectorPtr, n: Int, correctionMeta: CorrectionMeta): Double = {
+    // Since this is a vector that needs no correction, simply add the correction amount to the original value
+    apply(vector, n) + correctionMeta.correction
+  }
 }
 
 /**
  * VectorDataReader for a Double BinaryVector using full 64-bits for a Double value
+ * Right now this is for non-corrected ingested vectors.
  */
 object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   import PrimitiveVector.OffsetData

@@ -128,6 +128,43 @@ trait VectorDataReader extends AvailableReader {
   def asHistReader: vectors.HistogramReader = this.asInstanceOf[vectors.HistogramReader]
 }
 
+trait CorrectionMeta {
+  def correction: Double
+}
+
+object NoCorrection extends CorrectionMeta {
+  def correction: Double = 0.0
+}
+
+// TODO: move to DoubleVector
+final case class DoubleCorrection(lastValue: Double, correction: Double = 0.0) extends CorrectionMeta
+
+/**
+ * Trait that extends VectorDataReaders with methods assisting counter-like vectors that may reset or need correction
+ */
+trait CounterVectorReader extends VectorDataReader {
+  /**
+   * Detects if there is a drop/reset from end of last chunk to the first value of this chunk.
+   * Returns a new CorrectionMeta with a new correction value, which should be equal to the old value
+   * plus any detected drop.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param meta CorrectionMeta obtained from updateCorrection()
+   * @return a new CorrectionMeta with adjusted correction value if needed
+   */
+  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+
+  /**
+   * Updates the CorrectionMeta from this vector from startElement to the end,
+   * namely the total correction over that period plus the last value of the vector.
+   * Returns a new CorrectionMeta which has lastValue plus the total running correction including prev correction.
+   * IE this method should upward adjust the correction in meta based on any new corrections detected in this chunk.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param startElement the starting element # to seek out correction metadata
+   * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
+   */
+  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta
+}
+
 // An efficient iterator for the bitmap mask, rotating a mask as we go
 class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
   var bitmapAddr: Long = vector + 12 + (startElement >> 6) * 8

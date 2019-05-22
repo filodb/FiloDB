@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import debox.Buffer
 
-import filodb.memory.format.{ArrayStringRowReader, BinaryVector, GrowableVector}
+import filodb.memory.format._
 
 class DoubleVectorTest extends NativeVectorTest {
   describe("DoubleMaskedAppendableVector") {
@@ -190,6 +190,41 @@ class DoubleVectorTest extends NativeVectorTest {
         (i until timestampAppender.length).foreach(_ => samples.append(iter.next))
         samples shouldEqual origValues.drop(i)
       }
+    }
+  }
+
+  describe("counter correction") {
+    val orig = Seq(1000, 2001.1, 2999.99, 5123.4, 5250, 6004, 7678)
+    val builder = DoubleVector.appendingVectorNoNA(memFactory, orig.length)
+    orig.foreach(builder.addData)
+    builder.length shouldEqual orig.length
+    val frozen = builder.optimize(memFactory)
+    val reader = DoubleVector(frozen)
+
+    it("should detect drop correctly at beginning of chunk and adjust CorrectionMeta") {
+      reader.detectDropAndCorrection(frozen, NoCorrection) shouldEqual NoCorrection
+
+      // No drop in first value, correction should be returned unchanged
+      val corr1 = DoubleCorrection(999.9, 100.0)
+      reader.detectDropAndCorrection(frozen, corr1) shouldEqual corr1
+
+      // Drop in first value, correction should be done
+      val corr2 = DoubleCorrection(1201.2, 100.0)
+      reader.detectDropAndCorrection(frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1000)
+    }
+
+    it("should return correctedValue with correction adjustment even if vector has no resets") {
+      reader.correctedValue(frozen, 1, NoCorrection) shouldEqual 2001.1
+
+      val corr1 = DoubleCorrection(999.9, 100.0)
+      reader.correctedValue(frozen, 3, corr1) shouldEqual 5223.4
+    }
+
+    it("should updateCorrections correctly") {
+      reader.updateCorrection(frozen, 0, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
+
+      val corr1 = DoubleCorrection(999.9, 50.0)
+      reader.updateCorrection(frozen, 0, corr1) shouldEqual DoubleCorrection(7678, 50.0)
     }
   }
 }
