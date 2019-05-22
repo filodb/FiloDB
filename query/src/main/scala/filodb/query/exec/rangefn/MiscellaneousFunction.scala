@@ -43,7 +43,7 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     }
   }
 
-  def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
+  private def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
 
     val value: ZeroCopyUTF8String = if (rangeVectorKey.labelValues.contains(ZeroCopyUTF8String(srcLabel))) {
       rangeVectorKey.labelValues.get(ZeroCopyUTF8String(srcLabel)).get
@@ -78,3 +78,51 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     return rangeVectorKey;
   }
 }
+
+case class LabelJoinFunction(funcParams: Seq[Any])
+  extends MiscellaneousFunction {
+
+  val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
+
+  require(funcParams.size >= 2,
+    "expected at least 3 argument(s) in call to label_join")
+
+  val dstLabel: String = funcParams(0).asInstanceOf[String]
+  val separator: String = funcParams(1).asInstanceOf[String]
+
+  require(dstLabel.asInstanceOf[String].matches(labelIdentifier), "Invalid destination label name in label_join()")
+  var srcLabel =
+    funcParams.drop(2).map { x =>
+      require(x.asInstanceOf[String].matches(labelIdentifier),
+        "Invalid source label name in label_join()")
+      x.asInstanceOf[String]
+    }
+
+  override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {
+    source.map { rv =>
+      val newLabel = labelJoinImpl(rv.key)
+      IteratorBackedRangeVector(newLabel, rv.rows)
+    }
+  }
+
+  private def labelJoinImpl(rangeVectorKey: RangeVectorKey): RangeVectorKey = {
+
+    val srcLabelValues = srcLabel.map(x=> rangeVectorKey.labelValues.get(ZeroCopyUTF8String(x)).
+      map(_.toString).getOrElse(""))
+
+    val labelJoinValue = srcLabelValues.mkString(separator)
+
+    if (labelJoinValue.length > 0) {
+      return CustomRangeVectorKey(rangeVectorKey.labelValues.
+        updated(ZeroCopyUTF8String(dstLabel), ZeroCopyUTF8String(labelJoinValue)), rangeVectorKey.sourceShards)
+    }
+    else {
+      // Drop label if new value is empty
+      return CustomRangeVectorKey(rangeVectorKey.labelValues -
+        ZeroCopyUTF8String(dstLabel), rangeVectorKey.sourceShards)
+    }
+
+  }
+}
+
+
