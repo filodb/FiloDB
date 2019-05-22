@@ -198,15 +198,15 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     import Column.ColumnType._
     val result = new ArrayBuffer[String]()
     columnTypes.zipWithIndex.map {
-      case (IntColumn, i)    => result += s"${colNames(i)}= ${getInt(base, offset, i)}"
-      case (LongColumn, i)   => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
-      case (DoubleColumn, i) => result += s"${colNames(i)}= ${getDouble(base, offset, i)}"
-      case (StringColumn, i) => result += s"${colNames(i)}= ${asJavaString(base, offset, i)}"
-      case (TimestampColumn, i) => result += s"${colNames(i)}= ${getLong(base, offset, i)}"
+      case (IntColumn, i)    => result += s"${colNames(i)}=${getInt(base, offset, i)}"
+      case (LongColumn, i)   => result += s"${colNames(i)}=${getLong(base, offset, i)}"
+      case (DoubleColumn, i) => result += s"${colNames(i)}=${getDouble(base, offset, i)}"
+      case (StringColumn, i) => result += s"${colNames(i)}=${asJavaString(base, offset, i)}"
+      case (TimestampColumn, i) => result += s"${colNames(i)}=${getLong(base, offset, i)}"
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
-                                result += s"${colNames(i)}= ${consumer.prettyPrint}"
-      case (BinaryRecordColumn, i)  => result += s"${colNames(i)}= ${brSchema(i).stringify(base, offset)}"
+                                result += s"${colNames(i)}=${consumer.prettyPrint}"
+      case (BinaryRecordColumn, i)  => result += s"${colNames(i)}=${brSchema(i).stringify(base, offset)}"
       case (HistogramColumn, i) =>
         result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }

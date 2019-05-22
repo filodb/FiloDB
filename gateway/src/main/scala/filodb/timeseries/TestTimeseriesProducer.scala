@@ -71,7 +71,7 @@ object TestTimeseriesProducer extends StrictLogging {
       s"""--promql 'heap_usage{dc="DC0",_ns="App-0"}' --start $startQuery --end $endQuery --limit 15"""
     logger.info(s"Periodic Samples CLI Query : \n$query")
 
-    val q = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}[2m]""", StandardCharsets.UTF_8.toString)
+    val q = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}""", StandardCharsets.UTF_8.toString)
     val periodicSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
       s"query=$q&start=$startQuery&end=$endQuery&step=15"
     logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
