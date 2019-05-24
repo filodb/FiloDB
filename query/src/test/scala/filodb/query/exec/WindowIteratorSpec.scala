@@ -234,7 +234,6 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val rv = timeValueRV(samples)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(Some(RangeFunctionId.Rate), ColumnType.DoubleColumn, useChunked = true).asChunkedD, queryConfig)
-    //.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
     chunkedIt.foreach { v =>
       windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
     }
