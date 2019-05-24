@@ -2,6 +2,8 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
+import filodb.core.memstore.TimeSeriesPartition
+import filodb.memory.format.TupleRowReader
 import filodb.query.exec.{ChunkedWindowIteratorD, QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
@@ -50,7 +52,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
   // Basic test cases covered
   // TODO Extrapolation special cases not done
 
-  it ("rate should work when start and end are outside window") {
+  it("rate should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * 1000
@@ -59,9 +61,69 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual expected +- errorOk
 
     // One window, start=end=endTS
-    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs + 1,
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, queryConfig)
     it.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  it("should compute rate correctly when reset occurs at chunk boundaries") {
+    val chunk2Data = Seq(8173000L->325.00,
+                         8183000L->511.00,
+                         8193000L->614.00,
+                         8203000L->724.00,
+                         8213000L->909.00)
+    val rv = timeValueRV(counterSamples)
+
+    // Add data and chunkify chunk2Data
+    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
+    part.numChunks shouldEqual 1
+    val readers = chunk2Data.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+    readers.foreach { row => part.ingest(row, ingestBlockHolder) }
+    part.switchBuffers(ingestBlockHolder, encode = true)
+    part.numChunks shouldEqual 2
+
+    val startTs = 8071950L
+    val endTs =   8213070L
+    val correction = q.last.value
+    val expected = (chunk2Data.last._2 + correction - q.head.value) / (chunk2Data.last._1 - q.head.timestamp) * 1000
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  // Also ensures that chunked rate works across chunk boundaries
+  it("rate should work for variety of window and step sizes") {
+    val data = (1 to 500).map(_ * 10 + rand.nextInt(10)).map(_.toDouble)
+    val tuples = data.zipWithIndex.map { case (d, t) => (defaultStartTS + t * pubFreq, d) }
+    val rv = timeValueRV(tuples)  // should be a couple chunks
+
+    (0 until 10).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val slidingRate = slidingWindowIt(data, rv, RateFunction, windowSize, step)
+      val slidingResults = slidingRate.map(_.getDouble(1)).toBuffer
+
+      val rateChunked = chunkedWindowIt(data, rv, new ChunkedRateFunction, windowSize, step)
+      val resultRows = rateChunked.map { r => (r.getLong(0), r.getDouble(1)) }.toBuffer
+      val rates = resultRows.map(_._2)
+
+      // Since the input data and window sizes are randomized, it is not possible to precompute results
+      // beforehand.  Coming up with a formula to figure out the right rate is really hard.
+      // Thus we take an approach of comparing the sliding and chunked results to ensure they are identical.
+
+      // val windowTime = (windowSize.toLong - 1) * pubFreq
+      // val expected = tuples.sliding(windowSize, step).toBuffer
+      //                      .zip(resultRows).map { case (w, (ts, _)) =>
+      //   // For some reason rate is based on window, not timestamps  - so not w.last._1
+      //   (w.last._2 - w.head._2) / (windowTime) * 1000
+      //   // (w.last._2 - w.head._2) / (w.last._1 - w.head._1) * 1000
+      // }
+      rates shouldEqual slidingResults
+    }
   }
 
   it ("irate should work when start and end are outside window") {
@@ -185,7 +247,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     toEmit.value shouldEqual expected +- errorOk
 
     // One window, start=end=endTS
-    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs + 1,
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedIncreaseFunction, queryConfig)
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }

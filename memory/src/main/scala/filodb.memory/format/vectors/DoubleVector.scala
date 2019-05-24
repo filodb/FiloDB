@@ -156,7 +156,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
     case DoubleCorrection(lastValue, correction) =>
       val firstValue = apply(vector, 0)
-      if (firstValue < lastValue) DoubleCorrection(lastValue, correction + firstValue)
+      // Last value is the new delta correction
+      if (firstValue < lastValue) DoubleCorrection(lastValue, correction + lastValue)
       else                        meta
   }
 

@@ -173,8 +173,9 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
 
   override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientRow): Unit = {
     if (highestTime > lowestTime) {
+      // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
       val result = RateFunctions.extrapolatedRate(
-                     windowStart, windowEnd, numSamples,
+                     windowStart - 1, windowEnd, numSamples,
                      lowestTime, lowestValue,
                      highestTime, highestValue,
                      isCounter, isRate)

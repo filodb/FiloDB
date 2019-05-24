@@ -210,7 +210,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
       // Drop in first value, correction should be done
       val corr2 = DoubleCorrection(1201.2, 100.0)
-      reader.detectDropAndCorrection(frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1000)
+      reader.detectDropAndCorrection(frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1201.2)
     }
 
     it("should return correctedValue with correction adjustment even if vector has no resets") {

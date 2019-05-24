@@ -275,6 +275,8 @@ object RangeFunction {
   def doubleChunkedFunction(func: Option[RangeFunctionId],
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
+    case Some(Rate)           => () => new ChunkedRateFunction
+    case Some(Increase)       => () => new ChunkedIncreaseFunction
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
