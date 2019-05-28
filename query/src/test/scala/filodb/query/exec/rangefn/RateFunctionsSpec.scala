@@ -2,8 +2,6 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
-import filodb.core.memstore.TimeSeriesPartition
-import filodb.memory.format.TupleRowReader
 import filodb.query.exec.{ChunkedWindowIteratorD, QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
@@ -75,17 +73,48 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val rv = timeValueRV(counterSamples)
 
     // Add data and chunkify chunk2Data
-    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
-    part.numChunks shouldEqual 1
-    val readers = chunk2Data.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(row, ingestBlockHolder) }
-    part.switchBuffers(ingestBlockHolder, encode = true)
-    part.numChunks shouldEqual 2
+    addChunkToRV(rv, chunk2Data)
 
     val startTs = 8071950L
     val endTs =   8213070L
     val correction = q.last.value
     val expected = (chunk2Data.last._2 + correction - q.head.value) / (chunk2Data.last._1 - q.head.timestamp) * 1000
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  val resetChunk1 = Seq(8072000L->4419.00,
+                        8082100L->4511.00,
+                        8092196L->4614.00,
+                        8102215L->4724.00,
+                        8112223L->4909.00,
+                        8122388L->948.00,
+                        8132570L->1000.00,
+                        8142822L->1095.00,
+                        8152858L->1102.00,
+                        8162999L->1201.00)
+  val correction1 = resetChunk1(4)._2
+
+  val resetChunk2 = Seq(8173000L->1325.00,
+                        8183000L->1511.00,
+                        8193000L->214.00,
+                        8203000L->324.00,
+                        8213000L->409.00)
+
+  val corr2 = resetChunk2(1)._2
+
+  it("should compute rate correctly when resets occur in middle of chunks") {
+    val rv = timeValueRV(resetChunk1)
+    addChunkToRV(rv, resetChunk2)
+
+    val startTs = 8071950L
+    val endTs =   8213070L
+    val corrections = correction1 + corr2
+    val expected = (resetChunk2.last._2 + corrections - resetChunk1.head._2) /
+                   (resetChunk2.last._1 - resetChunk1.head._1) * 1000
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,

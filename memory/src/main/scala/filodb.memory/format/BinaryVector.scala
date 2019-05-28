@@ -477,6 +477,7 @@ object PrimitiveVector {
 
   val NBitsMask = 0x07f
   val SignMask  = 0x080
+  val ResetMask = 0x08000
 }
 
 object PrimitiveVectorReader {
@@ -485,6 +486,11 @@ object PrimitiveVectorReader {
   final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
   final def signed(vector: BinaryVectorPtr): Boolean =
     (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
+  final def resetted(vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getShort(vector + OffsetNBits) & ResetMask) != 0
+
+  final def markReset(vector: BinaryVectorPtr): Unit =
+    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | ResetMask).toShort)
 }
 
 /**
@@ -493,9 +499,10 @@ object PrimitiveVectorReader {
  * +0000 length word
  * +0004 WireFormat(16 bits)
  * +0006 nbits/signed:
- *    xxBBBBBBSNNNNNNN  bits 0-6:  nbits
+ *    RxBBBBBBSNNNNNNN  bits 0-6:  nbits
  *                      bits 7:    signed 0 or 1
  *                      bits 8-13: bitshift
+ *                      bit  15:   1=reset/drop within chunk
  */
 abstract class PrimitiveAppendableVector[@specialized(Int, Long, Double, Boolean) A]
   (val addr: BinaryRegion.NativePointer, val maxBytes: Int, val nbits: Short, signed: Boolean)

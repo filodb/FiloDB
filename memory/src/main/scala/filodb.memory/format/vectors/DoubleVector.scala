@@ -28,12 +28,15 @@ object DoubleVector {
    * Creates a DoubleAppendingVector - does not grow and does not have bit mask. All values are marked
    * as available.
    * @param maxElements the max number of elements the vector will hold.  Not expandable
+   * @param counter if true, then use a DoubleCounterAppender instead
    */
-  def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
+  def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int, counter: Boolean = false):
+  BinaryAppendableVector[Double] = {
     val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose = () => memFactory.freeMemory(addr)
-    new DoubleAppendingVector(addr, bytesRequired, dispose)
+    if (counter) new DoubleCounterAppender(addr, bytesRequired, dispose)
+    else         new DoubleAppendingVector(addr, bytesRequired, dispose)
   }
 
   /**
@@ -53,11 +56,15 @@ object DoubleVector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * DoubleVectorDataReader object for parsing it
    */
-  def apply(vector: BinaryVectorPtr): DoubleVectorDataReader = BinaryVector.vectorType(vector) match {
-    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK) => DoubleLongWrapDataReader
-    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)   => DoubleLongWrapDataReader
-    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
-    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
+  def apply(vector: BinaryVectorPtr): DoubleVectorDataReader = {
+    val reader = BinaryVector.vectorType(vector) match {
+      case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK)    => DoubleLongWrapDataReader
+      case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)      => DoubleLongWrapDataReader
+      case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
+      case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
+    }
+    if (PrimitiveVectorReader.resetted(vector)) new CorrectingDoubleVectorReader(reader, vector)
+    else                                        reader
   }
 
   /**
@@ -235,6 +242,48 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   }
 }
 
+// Corrects and caches ONE underlying chunk.
+// The algorithm is naive - just go through and correct all values.  Total correction for whole vector is passed.
+// Works fine for randomly accessible vectors.
+class CorrectingDoubleVectorReader(inner: DoubleVectorDataReader, vect: BinaryVectorPtr)
+extends DoubleVectorDataReader {
+  override def length(vector: BinaryVectorPtr): Int = inner.length(vector)
+  def apply(vector: BinaryVectorPtr, n: Int): Double = inner(vector, n)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = inner.iterate(vector, startElement)
+  def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+    inner.sum(vector, start, end, ignoreNaN)
+  def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = inner.count(vector, start, end)
+
+  var _correction = 0.0
+  // Lazily correct - not all queries want corrected data
+  lazy val corrected = {
+    // if asked, lazily create corrected values and resets list
+    val _corrected = new Array[Double](length(vect))
+    val it = iterate(vect, 0)
+    var last = Double.MinValue
+    for { pos <- 0 until length(vect) optimized } {
+      val nextVal = it.next
+      if (nextVal < last) {   // reset!
+        _correction += last
+      }
+      _corrected(pos) = nextVal + _correction
+      last = nextVal
+    }
+    _corrected
+  }
+
+  override def correctedValue(vector: BinaryVectorPtr, n: Int, correctionMeta: CorrectionMeta): Double = {
+    assert(vector == vect)
+    corrected(n) + correctionMeta.correction   // corrected value + any carryover correction
+  }
+
+  override def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta = {
+    assert(vector == vect)
+    // Return the last (original) value and all corrections onward
+    DoubleCorrection(apply(vector, length(vector) - 1), meta.correction + _correction)
+  }
+}
+
 /**
  * VectorDataReader for a masked (NA bit) Double BinaryVector, uses underlying DataReader for subvector
  */
@@ -256,11 +305,10 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
 }
 
-
 class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
 extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
   final def addNA(): AddResponse = addData(0.0)
-  final def addData(data: Double): AddResponse = checkOffset() match {
+  def addData(data: Double): AddResponse = checkOffset() match {
     case Ack =>
       UnsafeUtils.setDouble(writeOffset, data)
       incWriteOffset(8)
@@ -283,11 +331,34 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
 
   private final val readVect = DoubleVector(addr)
   final def apply(index: Int): Double = readVect.apply(addr, index)
-  final def reader: VectorDataReader = DoubleVectorDataReader64
+  def reader: VectorDataReader = readVect
   final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(addr)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
+}
+
+/**
+ * A Double appender for incrementing counters that detects if there is a drop in ingested value,
+ * and if so, marks the Reset/Drop bit (bit 15 of the NBits/Offset u16).  Also marks this bit in
+ * encoded chunks as well.
+ */
+class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dispose: () => Unit)
+extends DoubleAppendingVector(addr, maxBytes, dispose) {
+  private var last = Double.MinValue
+  override final def addData(data: Double): AddResponse = {
+    if (data < last) PrimitiveVectorReader.markReset(addr)
+    last = data
+    super.addData(data)
+  }
+
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
+    val newChunk = DoubleVector.optimize(memFactory, this)
+    if (PrimitiveVectorReader.resetted(addr)) PrimitiveVectorReader.markReset(newChunk)
+    newChunk
+  }
+
+  override def reader: VectorDataReader = DoubleVector(addr)
 }
 
 class MaskedDoubleAppendingVector(addr: BinaryRegion.NativePointer,
