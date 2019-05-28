@@ -39,8 +39,19 @@ What the above means is that
 
 ## Spread, or How to Avoid Hotspotting
 
-The **spread** determines how many shards a given shard key is mapped to.  The number of shards is equal to 2 to the power of the spread.  It is used to manage how widely specific shard keys (such as applications, the job, or metrics) are distributed.  For example, if one job or metric has a huge number of series, one can assign a higher spread to it to avoid hotspotting.  (The management of spreads for individual shard keys is not currently included in the open source offering).
-
+The **spread** determines how many shards a given shard key is mapped to.  The number of shards is equal to 2 to the power of the spread.  It is used to manage how widely specific shard keys (such as applications, the job, or metrics) are distributed.  For example, if one job or metric has a huge number of series, one can assign a higher spread to it to avoid hotspotting. Default spread can be overriden by appending spread as a parameter in the query. Spread can also be overriden for every application by specifying all non metric shard keys in the config
+```
+spread-override = [
+    {
+      _ns = App-0,
+      spread = 2
+    },
+    {
+      _ns = App-5,
+      spread = 0
+    }
+  ]
+```
 ## Shard Coordination
 FiloDB Clients enable users to set up new datasets as needed. Internally clients send a `SetupDataset` command 
 to the [NodeClusterActor](../coordinator/src/main/scala/filodb.coordinator/NodeClusterActor.scala). 
