@@ -45,7 +45,9 @@ final case class PeriodicSamplesMapper(start: Long,
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams)
+    val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
+                   sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams, maxCol)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
@@ -57,9 +59,10 @@ final case class PeriodicSamplesMapper(start: Long,
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
+          val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                       windowLength, rangeFuncGen().asChunkedH, queryConfig))
+                                       windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>

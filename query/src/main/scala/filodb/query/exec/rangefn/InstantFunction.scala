@@ -2,7 +2,7 @@ package filodb.query.exec.rangefn
 
 import scalaxy.loops._
 
-import filodb.memory.format.vectors.Histogram
+import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
 
@@ -30,7 +30,9 @@ trait EmptyParamsInstantFunction extends DoubleInstantFunction {
 
 sealed trait HistogramInstantFunction {
   def isHToDoubleFunc: Boolean = this.isInstanceOf[HistToDoubleIFunction]
+  def isHistDoubleToDoubleFunc: Boolean = this.isInstanceOf[HDToDoubleIFunction]
   def asHToDouble: HistToDoubleIFunction = this.asInstanceOf[HistToDoubleIFunction]
+  def asHDToDouble: HDToDoubleIFunction = this.asInstanceOf[HDToDoubleIFunction]
   def asHToH: HistToHistIFunction = this.asInstanceOf[HistToHistIFunction]
 }
 
@@ -45,6 +47,19 @@ trait HistToDoubleIFunction extends HistogramInstantFunction {
     * @return Calculated value
     */
   def apply(value: Histogram): Double
+}
+
+/**
+ * An instant function taking a histogram and double and returning a Double value
+ */
+trait HDToDoubleIFunction extends HistogramInstantFunction {
+  /**
+    * Apply the required instant function against the given value.
+    *
+    * @param value Sample against which the function will be applied
+    * @return Calculated value
+    */
+  def apply(h: Histogram, d: Double): Double
 }
 
 /**
@@ -90,6 +105,7 @@ object InstantFunction {
    */
   def histogram(function: InstantFunctionId, funcParams: Seq[Any]): HistogramInstantFunction = function match {
     case HistogramQuantile    => HistogramQuantileImpl(funcParams)
+    case HistogramMaxQuantile => HistogramMaxQuantileImpl(funcParams)
     case HistogramBucket      => HistogramBucketImpl(funcParams)
     case _                    => throw new UnsupportedOperationException(s"$function not supported.")
   }
@@ -251,6 +267,24 @@ case class HistogramQuantileImpl(funcParams: Seq[Any]) extends HistToDoubleIFunc
   val q = funcParams(0).asInstanceOf[Number].doubleValue()
 
   final def apply(value: Histogram): Double = value.quantile(q)
+}
+
+/**
+ * Histogram max quantile function for Histogram column + extra max (Double) column.
+ * @param funcParams - a single value between 0 and 1, the quantile to calculate.
+ */
+case class HistogramMaxQuantileImpl(funcParams: Seq[Any]) extends HDToDoubleIFunction {
+  require(funcParams.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
+  require(funcParams(0).isInstanceOf[Number], "histogram_quantile parameter must be a number")
+  val q = funcParams(0).asInstanceOf[Number].doubleValue()
+
+  final def apply(hist: Histogram, max: Double): Double = {
+    val maxHist = hist match {
+      case h: MutableHistogram => MaxHistogram(h, max)
+      case other: Histogram    => MaxHistogram(MutableHistogram(other), max)
+    }
+    maxHist.quantile(q)
+  }
 }
 
 /**

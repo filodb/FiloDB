@@ -40,8 +40,7 @@ final case class ReduceAggregateExec(id: String,
         case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val valColType = RangeVectorTransformer.valueColumnType(schemaOfCompose(dataset))
-    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    val aggregator = RowAggregator(aggrOp, aggrParams, schemaOfCompose(dataset))
     RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
   }
 }
@@ -64,8 +63,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
@@ -88,8 +86,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    val valColType = RangeVectorTransformer.valueColumnType(source)
-    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    val aggregator = RowAggregator(aggrOp, aggrParams, source)
     // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
     aggregator.reductionSchema(source)
   }
@@ -104,14 +101,12 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    val valColType = RangeVectorTransformer.valueColumnType(source)
-    val aggregator = RowAggregator(aggrOp, aggrParams, valColType)
+    val aggregator = RowAggregator(aggrOp, aggrParams, source)
     aggregator.presentationSchema(source)
   }
 }
@@ -331,15 +326,20 @@ trait RowAggregator {
 }
 
 object RowAggregator {
+  def isHistMax(valColType: ColumnType, schema: ResultSchema): Boolean =
+    valColType == ColumnType.HistogramColumn && schema.isHistDouble && schema.columns(2).name == "max"
+
   /**
     * Factory for RowAggregator
     */
-  def apply(aggrOp: AggregationOperator, params: Seq[Any], dataColType: ColumnType): RowAggregator = {
+  def apply(aggrOp: AggregationOperator, params: Seq[Any], schema: ResultSchema): RowAggregator = {
+    val valColType = RangeVectorTransformer.valueColumnType(schema)
     aggrOp match {
       case Min      => MinRowAggregator
       case Max      => MaxRowAggregator
-      case Sum if dataColType == ColumnType.DoubleColumn => SumRowAggregator
-      case Sum if dataColType == ColumnType.HistogramColumn => HistSumRowAggregator
+      case Sum if valColType == ColumnType.DoubleColumn => SumRowAggregator
+      case Sum if isHistMax(valColType, schema)            => HistMaxSumAggregator
+      case Sum if valColType == ColumnType.HistogramColumn => HistSumRowAggregator
       case Count    => CountRowAggregator
       case Avg      => AvgRowAggregator
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
@@ -401,6 +401,37 @@ object HistSumRowAggregator extends RowAggregator {
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }
+    acc
+  }
+  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def reductionSchema(source: ResultSchema): ResultSchema = source
+  def presentationSchema(reductionSchema: ResultSchema): ResultSchema = reductionSchema
+}
+
+object HistMaxSumAggregator extends RowAggregator {
+  import filodb.memory.format.{vectors => bv}
+
+  class HistSumMaxHolder(var timestamp: Long = 0L,
+                         var h: bv.MutableHistogram = bv.Histogram.empty,
+                         var m: Double = Double.NaN) extends AggregateHolder {
+    val row = new TransientHistMaxRow()
+    def toRowReader: MutableRowReader = { row.setValues(timestamp, h); row.max = m; row }
+    def resetToZero(): Unit = { h = bv.Histogram.empty; m = 0.0 }
+  }
+  type AggHolderType = HistSumMaxHolder
+  def zero: HistSumMaxHolder = new HistSumMaxHolder
+  def newRowToMapInto: MutableRowReader = new TransientHistMaxRow()
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
+  def reduceAggregate(acc: HistSumMaxHolder, aggRes: RowReader): HistSumMaxHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    val newHist = aggRes.getHistogram(1)
+    acc.h match {
+      // sum is mutable histogram, copy to be sure it's our own copy
+      case hist if hist.numBuckets == 0 => acc.h = bv.MutableHistogram(newHist)
+      case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
+      case h                            =>
+    }
+    acc.m = if (acc.m == Double.NaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)

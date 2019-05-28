@@ -71,6 +71,10 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble))
           }
+        } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble))
+          }
         } else {
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
         }
@@ -126,6 +130,18 @@ private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
   final def next(): RowReader = {
     val next = rows.next()
     val newValue = instantFunction(next.getHistogram(1))
+    result.setValues(next.getLong(0), newValue)
+    result
+  }
+}
+
+private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
+                                           instantFunction: HDToDoubleIFunction,
+                                           result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+  final def hasNext: Boolean = rows.hasNext
+  final def next(): RowReader = {
+    val next = rows.next()
+    val newValue = instantFunction(next.getHistogram(1), next.getDouble(2))
     result.setValues(next.getLong(0), newValue)
     result
   }
