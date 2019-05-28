@@ -95,7 +95,7 @@ object GatewayServer extends StrictLogging {
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
-    val spread = config.getInt("filodb.spread.default")
+    val spread = config.getInt("filodb.spread-default")
     val shardMapper = new ShardMapper(numShards)
     val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
 

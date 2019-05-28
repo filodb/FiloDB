@@ -2,15 +2,15 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-import scala.util.control.NonFatal
-
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
 import monix.execution.Scheduler
+import net.ceedubs.ficus.Ficus._
+import net.ceedubs.ficus.readers.ValueReader
+import scala.collection.mutable
+import scala.util.control.NonFatal
 
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
@@ -57,11 +57,20 @@ final class QueryActor(memStore: MemStore,
 
   val config = context.system.settings.config
 
-  var filodbSpreadMap = new mutable.HashMap[String, Int]()
-  config.getConfig("filodb.spread.override").entrySet().asScala.
-    foreach { x => filodbSpreadMap.put(x.getKey(), x.getValue().unwrapped().asInstanceOf[Int])}
+  var filodbSpreadMap = new mutable.HashMap[Map[String, String], Int]
   val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
-  val defaultSpread = config.getInt("filodb.spread.default")
+  val defaultSpread = config.getInt("filodb.spread-default")
+
+  implicit val spreadOverrideReader: ValueReader[SpreadOverride] = ValueReader.relative { spreadOverrideConfig =>
+    SpreadOverride(
+    shardKeysMap = dataset.options.nonMetricShardColumns.map(x =>
+      (x, spreadOverrideConfig.getString(x))).toMap[String, String],
+      spread = spreadOverrideConfig.getInt("spread")
+    )
+  }
+  val spreadOverride : List[SpreadOverride]= config.as[List[SpreadOverride]]("filodb.spread-override")
+  spreadOverride.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
+
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
@@ -102,8 +111,8 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
-    val spreadProvider: SpreadProvider = if (queryOptions.spread.isDefined)
-      new StaticSpreadProvider(SpreadChange(0, queryOptions.spread.get))
+    val spreadProvider: SpreadProvider = if (queryOptions.spreadProvider.isDefined)
+      queryOptions.spreadProvider.get
     else
       functionalSpreadProvider
     return spreadProvider
