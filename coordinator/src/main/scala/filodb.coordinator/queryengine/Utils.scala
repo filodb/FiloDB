@@ -78,7 +78,7 @@ object Utils extends StrictLogging {
             shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash,
                                                            spreadProvider.spreadFunc(filters).last.spread)
-              case None => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
+              case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {
             shardMap.assignedShards

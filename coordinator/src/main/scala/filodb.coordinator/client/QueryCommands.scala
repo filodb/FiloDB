@@ -81,7 +81,7 @@ object QueryCommands {
       filters: Seq[ColumnFilter] =>
         filters.collectFirst {
           case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
-        }.map{ tagValue =>
+        }.map { tagValue =>
           Seq(SpreadChange(spread = spreadMap.getOrElse(Map(keyName->tagValue), defaultSpread)))
         }.getOrElse(Seq(SpreadChange(defaultSpread)))
     }

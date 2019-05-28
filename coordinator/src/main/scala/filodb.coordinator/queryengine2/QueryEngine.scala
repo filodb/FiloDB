@@ -132,23 +132,24 @@ class QueryEngine(dataset: Dataset,
                                   queryId: String,
                                   submitTime: Long,
                                   options: QueryOptions, spreadProvider: SpreadProvider): PlanResult = {
+
     logicalPlan match {
-      case lp: RawSeries =>                   materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
-      case lp: RawChunkMeta =>                materializeRawChunkMeta(queryId, submitTime, options, lp, spreadProvider)
-      case lp: PeriodicSeries =>              materializePeriodicSeries(queryId, submitTime, options, lp,
+      case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
+      case lp: RawChunkMeta                => materializeRawChunkMeta(queryId, submitTime, options, lp, spreadProvider)
+      case lp: PeriodicSeries              => materializePeriodicSeries(queryId, submitTime, options, lp,
                                               spreadProvider)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplyInstantFunction =>        materializeApplyInstantFunction(queryId, submitTime, options, lp,
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp, spreadProvider)
-      case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp, spreadProvider)
+      case lp: Aggregate                   => materializeAggregate(queryId, submitTime, options, lp, spreadProvider)
+      case lp: BinaryJoin                  => materializeBinaryJoin(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: LabelValues =>                 materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-      case lp: SeriesKeysByFilters =>         materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
+      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplyMiscellaneousFunction =>  materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
     }
   }
