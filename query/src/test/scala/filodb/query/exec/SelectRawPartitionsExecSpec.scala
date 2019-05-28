@@ -15,7 +15,7 @@ import filodb.core.{TestData, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, ResponseTooLargeException}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -263,5 +263,21 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val startTimes = tuples.grouped(TestData.storeConf.maxChunksSize).map(_.head._1).toBuffer
     infosRead.map(_._2) shouldEqual startTimes
   }
+
+  it ("should fail with exception ResponseTooLargeException") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
+    // with ResponseTooLargeException
+    val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples - 1, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
+
+    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryError]
+    result.t.getClass shouldEqual classOf[ResponseTooLargeException]
+  }
+
 }
 

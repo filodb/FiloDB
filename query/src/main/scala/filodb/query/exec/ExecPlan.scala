@@ -50,6 +50,12 @@ trait ExecPlan extends QueryCommand {
     */
   def limit: Int
 
+  /**
+    * Throw error if the size of the resultset is greater than Limit
+    * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
+    */
+  def enforceLimit: Boolean = true
+
   def dataset: DatasetRef
 
   /**
@@ -118,13 +124,14 @@ trait ExecPlan extends QueryCommand {
           case srv: SerializableRangeVector =>
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (numResultSamples > limit)
+            if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
+            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false), numResultSamples,
+              limit, enforceLimit)
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (numResultSamples > limit)

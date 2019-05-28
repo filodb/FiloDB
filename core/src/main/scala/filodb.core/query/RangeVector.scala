@@ -177,8 +177,12 @@ object SerializableRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializableRangeVector = {
+            execPlan: String,
+            resultSize: Int = 0,
+            limit: Int = Int.MaxValue,
+            enforceLimit: Boolean = true): SerializableRangeVector = {
     var numRows = 0
+    var numSamples = resultSize
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
@@ -186,8 +190,10 @@ object SerializableRangeVector extends StrictLogging {
     try {
       ChunkMap.validateNoSharedLocks(execPlan)
       val rows = rv.rows
-      while (rows.hasNext) {
+      // Once limit is hit, do not accumulate result
+      while (numSamples <= limit && rows.hasNext) {
         numRows += 1
+        numSamples += 1
         builder.addFromReader(rows.next)
       }
     } finally {
@@ -195,6 +201,12 @@ object SerializableRangeVector extends StrictLogging {
       // When the query is done, clean up lingering shared locks caused by iterator limit.
       ChunkMap.releaseAllSharedLocks()
     }
+
+    // Throw an exception if the result size exceeds the limit, provided it's enforced
+    if (enforceLimit && numSamples > limit)
+      throw new ResponseTooLargeException(s"result size is more than $limit samples. " +
+        s"Try applying more filters or reduce time range.")
+
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to
     val containers = oldContainerOpt match {
@@ -231,3 +243,9 @@ object SerializableRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: Iterator[RowReader]) extends RangeVector
+
+/**
+  * Use this exception to raise user errors when inside the context of an observable.
+  * Currently no other way to raise user errors when returning an observable
+  */
+class ResponseTooLargeException(message: String) extends RuntimeException(message)

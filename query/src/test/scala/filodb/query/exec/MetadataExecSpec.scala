@@ -30,13 +30,18 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
-  val partKeyLabelValues = Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService")
+  val partKeyLabelValues = Seq(
+    Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService"),
+    Map("__name__"->"http_resp_time", "instance"->"someHost:8787", "job"->"myCoolService")
+  )
+
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
 
-  val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
+  val partTagsUTF8s = partKeyLabelValues.map { _.map { case (k, v) => (k.utf8, v.utf8) }}
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
   val reportingInterval = 10000
+  val limit = 2
   val tuples = (numRawSamples until 0).by(-1).map { n =>
     (now - n * reportingInterval, n.toDouble)
   }
@@ -44,7 +49,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  partTagsUTF8s.map( partTagsUTF8 => tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }
+    .foreach(builder.addFromReader))
   val container = builder.allContainers.head
 
   implicit val execTimeout = 5.seconds
@@ -70,7 +76,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = LabelValuesExec("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
@@ -91,7 +97,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
@@ -103,22 +109,39 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
   it ("should read the label names/values from timeseriesindex matching the columnfilters") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
-      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        val record = response(0).rows.next()
-        val schema = response(0).schema
-        schema.toStringPairs(record.getBlobBase(0), record.getBlobOffset(0))
+        response(0).rows.map (row => response(0).schema.toStringPairs(row.getBlobBase(0),
+          row.getBlobOffset(0)).toMap).toList
       }
     }
-    result shouldEqual partKeyLabelValues.toSeq
+    result shouldEqual partKeyLabelValues
+  }
+
+  it ("should return one matching row (limit 1)") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    //Reducing limit results in truncated metadata response
+    val execPlan = PartKeysExec("someQueryId", now, limit - 1, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, now-5000, now)
+
+    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val result = resp match {
+      case QueryResult(id, _, response) => {
+        response.size shouldEqual 1
+        response(0).rows.map (row => response(0).schema.toStringPairs(row.getBlobBase(0),
+          row.getBlobOffset(0)).toMap).toList
+      }
+    }
+    result shouldEqual List(partKeyLabelValues(0))
   }
 
 }
