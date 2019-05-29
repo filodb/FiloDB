@@ -108,11 +108,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
 
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
                                  spread: Option[Int]) = {
-    val spreadProvider = if (spread.isDefined)
-      Some(StaticSpreadProvider(SpreadChange(0, spread.get)))
-    else
-      None
-
+    val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
       ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
     }

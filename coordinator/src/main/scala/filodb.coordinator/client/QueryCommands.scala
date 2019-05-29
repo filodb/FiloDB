@@ -44,7 +44,7 @@ object QueryCommands {
       Seq(spreadChange)
     }
   }
-  case class SpreadOverride(shardKeysMap: Map[String, String], spread: Int)
+  case class SpreadAssignment(shardKeysMap: Map[String, String], spread: Int)
 
   /**
     * Serialize with care! would be based on the provided function.

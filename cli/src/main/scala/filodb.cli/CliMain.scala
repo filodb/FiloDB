@@ -13,7 +13,7 @@ import monix.reactive.Observable
 
 import filodb.coordinator._
 import filodb.coordinator.client._
-import filodb.coordinator.client.QueryCommands.{SpreadChange, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands.{SpreadChange, SpreadProvider, StaticSpreadProvider}
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
@@ -365,11 +365,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-
-    val spreadProvider = if (options.spread.isDefined)
-      Some(StaticSpreadProvider(SpreadChange(0, options.spread.get)))
-    else
-      None
+    val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val qOpts = QueryCommands.QueryOptions(spreadProvider, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)

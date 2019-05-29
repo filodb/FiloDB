@@ -122,7 +122,6 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
         resp.status shouldEqual "success"
         resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 2
       }
-
     }
 }
 

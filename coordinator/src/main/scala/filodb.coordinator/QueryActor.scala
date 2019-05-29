@@ -61,15 +61,15 @@ final class QueryActor(memStore: MemStore,
   val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
   val defaultSpread = config.getInt("filodb.spread-default")
 
-  implicit val spreadOverrideReader: ValueReader[SpreadOverride] = ValueReader.relative { spreadOverrideConfig =>
-    SpreadOverride(
+  implicit val spreadOverrideReader: ValueReader[SpreadAssignment] = ValueReader.relative { spreadAssignmentConfig =>
+    SpreadAssignment(
     shardKeysMap = dataset.options.nonMetricShardColumns.map(x =>
-      (x, spreadOverrideConfig.getString(x))).toMap[String, String],
-      spread = spreadOverrideConfig.getInt("spread")
+      (x, spreadAssignmentConfig.getString(x))).toMap[String, String],
+      spread = spreadAssignmentConfig.getInt("_spread_")
     )
   }
-  val spreadOverride : List[SpreadOverride]= config.as[List[SpreadOverride]]("filodb.spread-override")
-  spreadOverride.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
+  val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
+  spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
@@ -111,12 +111,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
-    val spreadProvider: SpreadProvider = if (queryOptions.spreadProvider.isDefined)
-      queryOptions.spreadProvider.get
-    else
-      functionalSpreadProvider
-    return spreadProvider
-
+    return queryOptions.spreadProvider.getOrElse(functionalSpreadProvider)
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
