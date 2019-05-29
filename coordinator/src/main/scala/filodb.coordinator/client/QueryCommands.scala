@@ -44,7 +44,7 @@ object QueryCommands {
       Seq(spreadChange)
     }
   }
-  case class SpreadAssignment(shardKeysMap: Map[String, String], spread: Int)
+  case class SpreadAssignment(shardKeysMap: collection.Map[String, String], spread: Int)
 
   /**
     * Serialize with care! would be based on the provided function.
@@ -76,22 +76,27 @@ object QueryCommands {
      * present in the spreadMap to specific spread values, with a default if the filter/value not present in the map
      */
     def simpleMapSpreadFunc(keyName: String,
-                            spreadMap: collection.Map[Map[String, String], Int],
+                            spreadMap: collection.mutable.Map[collection.Map[String, String], Int],
                             defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
       filters: Seq[ColumnFilter] =>
         filters.collectFirst {
           case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
         }.map { tagValue =>
-          Seq(SpreadChange(spread = spreadMap.getOrElse(Map(keyName->tagValue), defaultSpread)))
+          Seq(SpreadChange(spread = spreadMap.getOrElse(collection.mutable.Map(keyName->tagValue), defaultSpread)))
         }.getOrElse(Seq(SpreadChange(defaultSpread)))
     }
 
     import collection.JavaConverters._
 
     def simpleMapSpreadFunc(keyName: String,
-                            spreadMap: java.util.Map[Map[String, String], Int],
-                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] =
-      simpleMapSpreadFunc(keyName, spreadMap.asScala, defaultSpread)
+                            spreadMap: java.util.Map[java.util.Map[String, String], Int],
+                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
+      val spreadAssignment: collection.mutable.Map[collection.Map[String, String], Int]= spreadMap.asScala.map {
+        case (d, v) => d.asScala -> v
+      }
+
+      simpleMapSpreadFunc(keyName, spreadAssignment, defaultSpread)
+    }
   }
 
   /**

@@ -125,7 +125,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
   }
 
   it("should use spread function to change/override spread and generate ExecPlan with appropriate shards") {
-    val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map(Map("job" -> "myService") -> 2), 1)
+    var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
+    filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
+
+    val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", filodbSpreadMap, 1)
 
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)

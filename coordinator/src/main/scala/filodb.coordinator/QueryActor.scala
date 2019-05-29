@@ -9,7 +9,6 @@ import kamon.Kamon
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-import scala.collection.mutable
 import scala.util.control.NonFatal
 
 import filodb.coordinator.queryengine2.QueryEngine
@@ -57,7 +56,7 @@ final class QueryActor(memStore: MemStore,
 
   val config = context.system.settings.config
 
-  var filodbSpreadMap = new mutable.HashMap[Map[String, String], Int]
+  var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
   val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
   val defaultSpread = config.getInt("filodb.spread-default")
 
