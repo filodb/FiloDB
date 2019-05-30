@@ -40,7 +40,7 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
        |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val readCql =s"SELECT segmentid, segment " +
+  lazy val readCql = s"SELECT segmentid, segment " +
     s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc"
 
   lazy val writePartitionCql = session.prepare(
