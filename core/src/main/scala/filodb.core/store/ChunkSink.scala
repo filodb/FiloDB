@@ -133,7 +133,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   def readRawPartitions(dataset: Dataset,
                         columnIDs: Seq[Types.ColumnId],
                         partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] =  Observable.empty
+                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 

@@ -40,7 +40,7 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
        |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val readCql =s"SELECT segmentid, segment " +
+  lazy val readCql = s"SELECT segmentid, segment " +
     s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc"
 
   lazy val writePartitionCql = session.prepare(
@@ -51,7 +51,7 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
     // fetch size should be low since each row is about an MB. Default fetchSize can result in ReadTimeouts at server
     val it = session.execute(new SimpleStatement(readCql, shard: JInt, timeBucket: JInt).setFetchSize(15))
       .asScala.toIterator.map(row => {
-      PartKeyTimeBucketSegment(row.getInt("segmentid"),  row.getBytes("segment"))
+      PartKeyTimeBucketSegment(row.getInt("segmentid"), row.getBytes("segment"))
     })
     Observable.fromIterator(it)
   }
