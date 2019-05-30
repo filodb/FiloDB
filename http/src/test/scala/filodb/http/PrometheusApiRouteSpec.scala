@@ -108,7 +108,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     }
   }
 
-    it("should take default spread value if no there is override") {
+    it("should take default spread value if there is no override") {
       setupDataset()
       val query = "heap_usage{_ns=\"App-1\"}"
 

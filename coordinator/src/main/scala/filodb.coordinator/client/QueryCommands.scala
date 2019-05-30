@@ -89,10 +89,10 @@ object QueryCommands {
     import collection.JavaConverters._
 
     def simpleMapSpreadFunc(keyName: String,
-                            spreadMap: java.util.Map[java.util.Map[String, String], Int],
+                            spreadMap: java.util.Map[java.util.Map[String, String], Integer],
                             defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
       val spreadAssignment: collection.mutable.Map[collection.Map[String, String], Int]= spreadMap.asScala.map {
-        case (d, v) => d.asScala -> v
+        case (d, v) => d.asScala -> v.toInt
       }
 
       simpleMapSpreadFunc(keyName, spreadAssignment, defaultSpread)
