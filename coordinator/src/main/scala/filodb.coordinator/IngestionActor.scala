@@ -120,8 +120,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
             // Is aready ingesting, and it must not be stopped.
             shardsToStop.remove(shard)
           } else {
-            // Isn't ingesting, so start it.
-            startIngestion(shard)
+            try {
+              // Isn't ingesting, so start it.
+              startIngestion(shard)
+            } catch {
+              case t: Throwable =>
+                logger.error(s"Error occurred during initialization of ingestion for " +
+                  s"dataset=${dataset.ref} shard=${shard}", t)
+                handleError(dataset.ref, shard, t)
+            }
           }
         } else {
           val status = state.map.statuses(shard)
@@ -164,9 +171,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
         val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
         logger.info(s"Starting recovery for dataset=${dataset.ref} " +
-          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark; " +
+          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark ; " +
           s"last flushed group $lastFlushedGroup")
-        logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard}: $checkpoints")
+        logger.info(s"Checkpoints for dataset=${dataset.ref} shard=${shard} were $checkpoints")
         for { lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
                                        checkpoints) }
         yield {

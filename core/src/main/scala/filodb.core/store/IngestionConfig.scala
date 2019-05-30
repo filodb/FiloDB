@@ -19,8 +19,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              shardMemSize: Long,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
-                             // Number of WriteBuffers to allocate at once
-                             allocStepSize: Int,
+                             maxBufferPoolSize: Int,
                              numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
@@ -44,7 +43,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
-                               "buffer-alloc-step-size" -> allocStepSize,
+                               "max-buffer-pool-size" -> maxBufferPoolSize,
                                "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock,
@@ -70,7 +69,7 @@ object StoreConfig {
                                            |max-chunks-size = 400
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
-                                           |buffer-alloc-step-size = 1000
+                                           |max-buffer-pool-size = 10000
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
@@ -94,7 +93,7 @@ object StoreConfig {
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
-                config.getInt("buffer-alloc-step-size"),
+                config.getInt("max-buffer-pool-size"),
                 config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),

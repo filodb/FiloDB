@@ -58,6 +58,12 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     _shardMappers foreach { case (ref, map) => subscriber ! CurrentShardSnapshot(ref, map) }
   }
 
+  def logAllMappers(msg: String = ""): Unit = {
+    _shardMappers.foreach { case (ref, mapper) =>
+      logger.info(s"$msg dataset=$ref Current mapper state:\n${mapper.prettyPrint}")
+    }
+  }
+
   /** If the mapper for the provided `datasetRef` has been added, sends an initial
     * current snapshot of partition state, as ingestion will subscribe usually when
     * the cluster is already stable.
@@ -159,7 +165,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   /** Called on MemberRemoved, new status already updated. */
   def removeMember(address: Address): Option[ActorRef] = {
     _coordinators.get(address) map { coordinator =>
-      logger.info(s"Initiated removeMember for coordinator on $address")
+      logger.info(s"Initiated removeMember for coordinator=$coordinator on $address")
       _coordinators remove address
       removeCoordinator(coordinator)
       coordinator
@@ -346,13 +352,15 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       (dataset, mapper) <- shardMappers
     } yield {
       val allRegisteredNodes = mapper.allNodes
-      allRegisteredNodes -- coordinators // coordinators is the list of recovered nodes
+      val toRemove = allRegisteredNodes -- coordinators // coordinators is the list of recovered nodes
+      logger.info(s"Cleaning up dataset=$dataset stale coordinators $toRemove after recovery")
+      toRemove
     }
     for { coord <- nodesToRemove.flatten } {
-      logger.info(s"Cleaning up stale coordinator $coord after recovery")
       removeCoordinator(coord)
     }
     updateShardMetrics()
+    logAllMappers("After removing stale coordinators")
   }
 
   private def removeCoordinator(coordinator: ActorRef): Unit = {
@@ -363,7 +371,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       assignShardsToNodes(dataset, mapper, resources)
       publishChanges(dataset)
     }
-    logger.info(s"Completed removeMember for coordinator $coordinator")
   }
 
   /**
@@ -537,6 +544,8 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       state.storeConfig, state.source, state.downsample)
     coord ! setupMsg
 
+    logger.info(s"Assigning shards for dataset=$dataset to " +
+      s"coordinator $coord for shards $shards")
     for { shard <- shards }  {
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEvent(event)

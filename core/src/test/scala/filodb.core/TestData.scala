@@ -39,11 +39,11 @@ object TestData {
   val sourceConf = ConfigFactory.parseString("""
     store {
       max-chunks-size = 100
-      buffer-alloc-step-size = 50
       demand-paged-chunk-retention-period = 10 hours
-      shard-mem-size = 50MB
+      shard-mem-size = 100MB
       groups-per-shard = 4
-      ingestion-buffer-mem-size = 10MB
+      ingestion-buffer-mem-size = 80MB
+      max-buffer-pool-size = 250
       flush-interval = 10 minutes
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
@@ -321,6 +321,22 @@ object MachineMetricsData {
     }
   }
 
+  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+
+  // Pass in the output of linearHistSeries here.
+  // Adds in the max column before h/hist
+  def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
+    histStream.map { row =>
+      val hist = row(3).asInstanceOf[bv.MutableHistogram]
+      // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
+      val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
+      val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
+                            .lastOption.getOrElse(hist.numBuckets - 1)
+      val max = hist.bucketTop(lastBucketNum) * 0.8
+      ((row take 3) :+ max) ++ (row drop 3)
+    }
+
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
   val histPartKey = histKeyBuilder.addFromObjects(extraTags)
 
@@ -338,6 +354,21 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
+  }
+
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS, TestData.storeConf)
+
+  // Designed explicitly to work with histMax(linearHistSeries) records
+  def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(histMaxDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    // Select timestamp, hist, max
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
   }
 }
 

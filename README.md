@@ -383,6 +383,8 @@ Some special functions exist to aid debugging and for other purposes:
 | function | description    |
 |----------|----------------|
 | `_filodb_chunkmeta_all` | (CLI Only) Returns chunk metadata fields for all chunks matching the time range and filter criteria - ID, # rows, start and end time, as well as the number of bytes and type of encoding used for a particular column.  |
+| `histogram_bucket` | Extract a bucket from a HistogramColumn |
+| `histogram_max_quantile` | More accurate `histogram_quantile` when the max is known |
 
 Example of debugging chunk metadata using the CLI:
 
@@ -399,6 +401,8 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 * Sum over multiple Histogram time series:  `sum(sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))` - you could then compute quantile over the sum.
   - NOTE: Do NOT use `group by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
+
+FiloDB offers an improved accuracy `histogram_max_quantile` function designed to work with a max column from the source.  If clients are able to send the max value captured during a window, then we can report more accurate upper quantiles (ie 99%, 99.9%, etc.) that do not suffer from clipping.
 
 ### Using the FiloDB HTTP API
 
