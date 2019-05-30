@@ -96,7 +96,7 @@ object DeltaDeltaVector {
    */
   def const(memFactory: MemFactory, numElements: Int, initValue: Long, slope: Int): BinaryVectorPtr = {
     val addr = memFactory.allocateOffheap(24)
-    UnsafeUtils.setInt(addr,     20)
+    UnsafeUtils.setInt(addr, 20)
     UnsafeUtils.setInt(addr + 4, WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED))
     UnsafeUtils.setInt(addr + 8, numElements)
     UnsafeUtils.setLong(addr + 12, initValue)

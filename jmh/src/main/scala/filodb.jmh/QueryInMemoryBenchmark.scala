@@ -119,7 +119,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 20000))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
   }
 
   @TearDown
@@ -148,7 +148,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams2 = TimeStepParams(queryTime/1000, noOverlapStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
   val queryCommands2 = logicalPlans2.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 10000))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000))
   }
 
   @Benchmark
@@ -168,7 +168,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   }
 
   // Single-threaded query test
-  val qOptions = QueryOptions(1, 10000)
+  val qOptions = QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000)
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
   // Pick the children nodes, not the DistConcatExec.  Thus we can run in a single thread this way
   val execPlan = engine.materialize(logicalPlan, qOptions).children.head

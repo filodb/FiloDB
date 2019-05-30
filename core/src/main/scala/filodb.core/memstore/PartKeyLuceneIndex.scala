@@ -32,10 +32,10 @@ import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
-  final val PART_ID =    "__partId__"
+  final val PART_ID = "__partId__"
   final val START_TIME = "__startTime__"
-  final val END_TIME =   "__endTime__"
-  final val PART_KEY =   "__partKey__"
+  final val END_TIME = "__endTime__"
+  final val PART_KEY = "__partKey__"
 
   final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
 

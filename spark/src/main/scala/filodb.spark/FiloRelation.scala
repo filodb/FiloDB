@@ -102,9 +102,9 @@ object FiloRelation extends StrictLogging {
   }
 
   val betweenRangePF: PartialFunction[(Column, Seq[Filter]), Option[(Any, Any)]] = {
-    case (_, Seq(GreaterThan(_, lVal),        LessThan(_, rVal))) => Some((lVal, rVal))
+    case (_, Seq(GreaterThan(_, lVal), LessThan(_, rVal))) => Some((lVal, rVal))
     case (_, Seq(GreaterThanOrEqual(_, lVal), LessThan(_, rVal))) => Some((lVal, rVal))
-    case (_, Seq(GreaterThan(_, lVal),        LessThanOrEqual(_, rVal))) => Some((lVal, rVal))
+    case (_, Seq(GreaterThan(_, lVal), LessThanOrEqual(_, rVal))) => Some((lVal, rVal))
     case (_, Seq(GreaterThanOrEqual(_, lVal), LessThanOrEqual(_, rVal))) => Some((lVal, rVal))
   }
 
