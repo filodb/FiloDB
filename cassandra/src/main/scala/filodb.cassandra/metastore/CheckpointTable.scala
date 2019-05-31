@@ -76,7 +76,7 @@ sealed class CheckpointTable(val config: Config,
       dataset.dataset, shardNum: JInt, groupNum: JInt, offset: JLong))
   }
 
-  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]] = {
+  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]] = {
     session.executeAsync(readCheckpointCql.bind(dataset.database.getOrElse(""),
             dataset.dataset, shardNum: JInt))
       .toIterator // future of Iterator

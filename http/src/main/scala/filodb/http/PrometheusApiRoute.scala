@@ -22,7 +22,6 @@ import filodb.prometheus.query.PrometheusModel.Sampl
 import filodb.query.{LogicalPlan, QueryError, QueryResult}
 import filodb.query.exec.ExecPlan
 
-
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
            extends FiloRoute with StrictLogging {
 
@@ -34,10 +33,6 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
-  val spreadProvider = new StaticSpreadProvider(SpreadChange(0, settings.queryDefaultSpread))
-
-  val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
-
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
     // Used to issue a promQL query for a time range with a `start` and `end` timestamp and at regular `step` intervals.
@@ -46,10 +41,11 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double],
-                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, start, end, step, explainOnly, verbose) =>
+                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
+        { (query, start, end, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
+            spread)
         }
       }
     } ~
@@ -59,10 +55,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?)
-        { (query, time, explainOnly, verbose) =>
+        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
+          'spread.as[Int].?)
+        { (query, time, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
+            verbose.getOrElse(false), spread)
         }
       }
     } ~
@@ -84,7 +82,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))
             }
             Future.sequence(asks)
           }
@@ -108,12 +106,14 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean) = {
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
+                                 spread: Option[Int]) = {
+    val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
-      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
     }
     else {
-      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
     }
     onSuccess(asyncAsk(nodeCoord, command)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))

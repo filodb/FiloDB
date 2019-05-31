@@ -95,8 +95,8 @@ class HistogramIngestBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @Warmup(batchSize=50)
-  @Measurement(batchSize=100)
+  @Warmup(batchSize = 50)
+  @Measurement(batchSize = 100)
   def ingestHistColumn1(): Unit = {
     hShard.ingest(histContainers(containerNo), 0)
     containerNo += 1
@@ -113,8 +113,8 @@ class HistogramIngestBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  @Warmup(batchSize=50)
-  @Measurement(batchSize=100)
+  @Warmup(batchSize = 50)
+  @Measurement(batchSize = 100)
   def ingestPromHistograms(): Unit = {
     pShard.ingest(promContainers(containerNo), 0)
     containerNo += 1

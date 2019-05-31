@@ -28,6 +28,7 @@ final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) exten
 object Utils extends StrictLogging {
   import filodb.coordinator.client.QueryCommands._
   import TrySugar._
+  import filodb.coordinator.client.QueryCommands._
 
   /**
    * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
@@ -49,7 +50,8 @@ object Utils extends StrictLogging {
    */
   def validatePartQuery(dataset: Dataset, shardMap: ShardMapper,
                         partQuery: PartitionQuery,
-                        options: QueryOptions): Seq[PartitionScanMethod] Or ErrorResponse =
+                        options: QueryOptions, spreadProvider: SpreadProvider):
+  Seq[PartitionScanMethod] Or ErrorResponse =
     Try(partQuery match {
       case SinglePartitionQuery(keyParts) =>
         val partKey = dataset.partKey(keyParts: _*)
@@ -75,7 +77,7 @@ object Utils extends StrictLogging {
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash,
-                                                           options.spreadProvider.spreadFunc(filters).last.spread)
+                                                           spreadProvider.spreadFunc(filters).last.spread)
               case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {

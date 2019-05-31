@@ -17,7 +17,7 @@ class DatasetSpec extends FunSpec with Matchers {
       resp1.swap.get shouldEqual ColumnErrors(Seq(NotNameColonType("column2")))
 
       intercept[BadSchemaError] {
-        Dataset("dataset", Seq("part:string"), dataColSpecs :+ "column2:a:b", "age")
+        Dataset("dataset", Seq("part:string"), dataColSpecs :+ "column2:a:b", "age", DatasetOptions.DefaultOptions)
       }
     }
 
@@ -94,11 +94,11 @@ class DatasetSpec extends FunSpec with Matchers {
       val mapCol = "tags:map"
 
       // OK: only partition column is map
-      val ds1 = Dataset("dataset", Seq(mapCol), dataColSpecs, "age")
+      val ds1 = Dataset("dataset", Seq(mapCol), dataColSpecs, "age", DatasetOptions.DefaultOptions)
       ds1.partitionColumns.map(_.name) should equal (Seq("tags"))
 
       // OK: last partition column is map
-      val ds2 = Dataset("dataset", Seq("first:string", mapCol), dataColSpecs drop 1, "age")
+      val ds2 = Dataset("dataset", Seq("first:string", mapCol), dataColSpecs drop 1, "age", DatasetOptions.DefaultOptions)
       ds2.partitionColumns.map(_.name) should equal (Seq("first", "tags"))
 
       // Not OK: first partition column is map
@@ -118,7 +118,7 @@ class DatasetSpec extends FunSpec with Matchers {
     }
 
     it("should return a valid Dataset when a good specification passed") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
       ds.rowKeyIDs shouldEqual Seq(2)
       ds.dataColumns should have length (3)
       ds.dataColumns.map(_.id) shouldEqual Seq(0, 1, 2)
@@ -144,7 +144,7 @@ class DatasetSpec extends FunSpec with Matchers {
     }
 
     it("should return IDs for column names or seq of missing names") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
       ds.colIDs("first", "age").get shouldEqual Seq(0, 2)
 
       ds.colIDs("part").get shouldEqual Seq(Dataset.PartColStartIndex)
@@ -155,7 +155,7 @@ class DatasetSpec extends FunSpec with Matchers {
     }
 
     it("should return ColumnInfos for colIDs") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
       val infos = ds.infosFromIDs(Seq(0, 2))
       infos shouldEqual Seq(ColumnInfo("first", StringColumn), ColumnInfo("age", LongColumn))
 
@@ -172,7 +172,8 @@ class DatasetSpec extends FunSpec with Matchers {
 
   describe("Dataset serialization") {
     it("should serialize and deserialize") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, Seq("age"), Seq("dMin(1)"))
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, Seq("age"), Seq("dMin(1)"),
+        DatasetOptions.DefaultOptions)
                  .copy(options = DatasetOptions.DefaultOptions.copy(
                    copyTags = Map("exporter" -> "_ns")))
       Dataset.fromCompactString(ds.asCompactString) shouldEqual ds
