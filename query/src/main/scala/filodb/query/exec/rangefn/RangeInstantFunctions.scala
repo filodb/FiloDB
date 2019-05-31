@@ -130,7 +130,9 @@ class ResetsFunction extends RangeFunction {
   }
 
   def removedFromWindow(row: TransientRow, window: Window): Unit = {
-    if (window.size > 0 && row.value > window.head.value) {
+    if (window.size == 0) {
+      resets = Double.NaN
+    } else if (row.value > window.head.value) {
       resets -= 1
     }
   }

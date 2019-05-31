@@ -1,19 +1,43 @@
 package filodb.query.exec.rangefn
 
+import scala.concurrent.duration._
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
+import monix.execution.Scheduler.Implicits.global
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.query.QueryConfig
-import filodb.query.exec.{QueueBasedWindow, TransientRow}
+import filodb.core.MetricsTestData.{builder, timeseriesDataset}
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
+import filodb.core.TestData
+import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
+import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
+import filodb.query._
+import filodb.query.exec.{PeriodicSamplesMapper, QueueBasedWindow, SelectRawPartitionsExec, TransientRow}
 import filodb.query.util.IndexedArrayQueue
+import filodb.query.RangeFunctionId.Resets
+import filodb.query.exec.SelectRawPartitionsExecSpec.dummyDispatcher
 
-class RateFunctionsSpec extends FunSpec with Matchers {
+class RateFunctionsSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll{
+
+  import ZeroCopyUTF8String._
+
+  implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val rand = new Random()
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+
+  val policy = new FixedMaxPartitionsEvictionPolicy(20)
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+
+  val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
+  val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
+  implicit val execTimeout = 5.seconds
+
 
   val counterSamples = Seq(  8072000L->4419.00,
                       8082100L->4511.00,
@@ -31,6 +55,11 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val s = new TransientRow(t, v)
     q.add(s)
   }
+
+  builder.reset()
+  counterSamples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  val container = builder.allContainers.head
+
   val counterWindow = new QueueBasedWindow(q)
 
   val gaugeSamples = Seq(   8072000L->7419.00,
@@ -55,6 +84,16 @@ class RateFunctionsSpec extends FunSpec with Matchers {
 
   // Basic test cases covered
   // TODO Extrapolation special cases not done
+
+  override def beforeAll(): Unit = {
+    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
+    memStore.commitIndexForTesting(timeseriesDataset.ref)
+  }
+
+  override def afterAll(): Unit = {
+    memStore.shutdown()
+  }
 
   it ("rate should work when start and end are outside window") {
     val startTs = 8071950L
@@ -106,6 +145,33 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     toEmit.value shouldEqual 0
   }
 
+
+  it ("resets should return NaNs for empty (No Data) time windows") {
+    import ZeroCopyUTF8String._
+
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    // read from an interval of 100000ms, resulting in 11 samples
+    val startTime = 8071950L
+    val endTime =   8163070L
+
+    val lp = new PeriodicSeriesWithWindowing(new RawSeries(new IntervalSelector(startTime, endTime), filters,
+      List()), startTime, 60, startTime + 120, 60, Resets, List())
+    val execPlan = SelectRawPartitionsExec("someQueryId", startTime, 10, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
+    execPlan.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
+      lp.end, Some(lp.window), Some(lp.function), lp.functionArgs))
+    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
+    partKeyRead shouldEqual partKeyLabelValues
+    val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
+    dataRead.head._2.isNaN shouldEqual true
+    dataRead.last._2.isNaN shouldEqual true
+
+  }
+
   it ("resets should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
@@ -135,6 +201,19 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     }
     resetsFunction.apply(startTs, endTs, gaugeWindow, toEmit2, queryConfig)
     Math.abs(toEmit2.value - expected2) should be < errorOk
+
+
+    // Empty window case - resets should be NaN
+    val expected3 = true
+    var toEmit3 = new TransientRow
+
+    //Remove all the elements from the window
+    for (i <- 0 until 5) {
+      toEmit3 = q3.remove
+      resetsFunction.removedFromWindow(toEmit3, gaugeWindowForReset)// old items being evicted
+    }
+    resetsFunction.apply(startTs, endTs, gaugeWindow, toEmit3, queryConfig)
+    toEmit3.value.isNaN shouldEqual expected3
   }
 
   it ("deriv should work when start and end are outside window") {
