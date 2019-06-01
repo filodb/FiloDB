@@ -38,7 +38,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(8, 1), noOpSource, TestData.storeConf)
+    val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(4, 1), noOpSource, TestData.storeConf)
     probe.send(clusterProxy, command)
     probe.expectMsg(DatasetVerified)
     // Give the coordinator nodes some time to get started
@@ -97,14 +97,14 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     val query = "heap_usage{_ns=\"App-1\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=3") ~> prometheusAPIRoute ~> check {
+      s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 8
+      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
     }
   }
 
