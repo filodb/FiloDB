@@ -67,8 +67,11 @@ final class QueryActor(memStore: MemStore,
       spread = spreadAssignmentConfig.getInt("_spread_")
     )
   }
-  val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
-  spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
+  
+  if(config.hasPath("filodb.spread-assignment")) {
+    config.as[List[SpreadAssignment]]("filodb.spread-assignment").
+      foreach { x => filodbSpreadMap.put(x.shardKeysMap, x.spread) }
+  }
 
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
