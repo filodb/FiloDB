@@ -67,7 +67,6 @@ final class QueryActor(memStore: MemStore,
       spread = spreadAssignmentConfig.getInt("_spread_")
     )
   }
-  
   if(config.hasPath("filodb.spread-assignment")) {
     config.as[List[SpreadAssignment]]("filodb.spread-assignment").
       foreach { x => filodbSpreadMap.put(x.shardKeysMap, x.spread) }
