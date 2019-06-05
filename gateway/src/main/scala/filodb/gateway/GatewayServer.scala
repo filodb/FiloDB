@@ -72,11 +72,11 @@ object GatewayServer extends StrictLogging {
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
-                                    descr="# of samples per time series")
-    val numSeries = opt[Int](short='p', default = Some(20), descr="# of total time series")
-    val sourceConfigPath = trailArg[String](descr="Path to source config, eg conf/timeseries-dev-source.conf")
-    val genHistData = toggle(noshort=true, descrYes="Generate histogram-schema test data and exit")
-    val genPromData = toggle(noshort=true, descrYes="Generate Prometheus-schema test data and exit")
+                                    descr = "# of samples per time series")
+    val numSeries = opt[Int](short = 'p', default = Some(20), descr = "# of total time series")
+    val sourceConfigPath = trailArg[String](descr = "Path to source config, eg conf/timeseries-dev-source.conf")
+    val genHistData = toggle(noshort = true, descrYes = "Generate histogram-schema test data and exit")
+    val genPromData = toggle(noshort = true, descrYes = "Generate Prometheus-schema test data and exit")
     verify()
   }
 
@@ -95,7 +95,7 @@ object GatewayServer extends StrictLogging {
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding
-    val spread = config.getInt("filodb.default-spread")
+    val spread = config.getInt("filodb.spread-default")
     val shardMapper = new ShardMapper(numShards)
     val queueFullWait = config.as[FiniteDuration]("gateway.queue-full-wait").toMillis
 

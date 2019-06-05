@@ -27,7 +27,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
                             var numRecords: Int = 0) {
   import RecordBuilder._
 
-  @inline final def numBytes: Int =  UnsafeUtils.getInt(base, offset)
+  @inline final def numBytes: Int = UnsafeUtils.getInt(base, offset)
   @inline final def isEmpty: Boolean = numBytes <= 4
 
   /**

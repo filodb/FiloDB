@@ -134,7 +134,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
           // So we do not call ingest again unless switcing buffers succeeds.
           // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode=true)) { ingest(row, blockHolder) }
+          if (switchBuffers(blockHolder, encode = true)) { ingest(row, blockHolder) }
           else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
                            s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return

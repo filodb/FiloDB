@@ -19,7 +19,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     metaStore.initialize().futureValue
   }
 
-  val dataset = Dataset("foo", Seq("part:string"), Seq("timestamp:long", "value:double"), "timestamp")
+  val dataset = Dataset("foo", Seq("part:string"), Seq("timestamp:long", "value:double"), "timestamp",
+    DatasetOptions.DefaultOptions)
 
   before { metaStore.clearAllData().futureValue }
 

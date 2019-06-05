@@ -30,7 +30,7 @@ object Iterators extends StrictLogging {
       def next: (B, Iterator[T]) = {
         val first = iter.next()
         val firstValue = func(first)
-        val (i1,i2) = iter.span(el => func(el) == firstValue)
+        val (i1, i2) = iter.span(el => func(el) == firstValue)
         iter = i2
         (firstValue, Iterator.single(first) ++ i1)
       }

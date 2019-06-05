@@ -129,7 +129,7 @@
  <check level="error" class="org.scalastyle.scalariform.PublicMethodsHaveTypeChecker" enabled="true"/>
  <check level="error" class="org.scalastyle.scalariform.EnsureSingleSpaceAfterTokenChecker" enabled="true" >
   <parameters>
-   <parameter name="tokens">COLON, IF</parameter>
+   <parameter name="tokens">COLON, IF, EQUALS, COMMA</parameter>
   </parameters>
  </check>
  <check level="error" class="org.scalastyle.file.NewLineAtEofChecker" enabled="false"/>
