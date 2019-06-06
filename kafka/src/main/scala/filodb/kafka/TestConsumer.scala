@@ -8,6 +8,7 @@ import monix.execution.Scheduler
 
 import filodb.coordinator.{FilodbSettings, IngestionStreamFactory, StoreFactory}
 import filodb.core.memstore.SomeData
+import filodb.core.metadata.Dataset
 import filodb.core.store.IngestionConfig
 
 /**
@@ -38,7 +39,7 @@ object TestConsumer extends App {
   import monix.execution.Scheduler.Implicits.global
 
   val ingestConf = IngestionConfig(sourceConf, classOf[KafkaIngestionStreamFactory].getClass.getName).get
-  val dataset = Await.result(storeFactory.metaStore.getDataset(ingestConf.ref), 30.seconds)
+  val dataset = Dataset.fromConfig(sourceConf)
 
   val ctor = Class.forName(ingestConf.streamFactoryClass).getConstructors.head
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]

@@ -21,7 +21,7 @@ import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.client.LocalClient
-import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
 import filodb.http.PromCirceSupport
 import filodb.prometheus.ast.TimeStepParams
@@ -132,12 +132,6 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
       case _ =>
 
     }
-
-  def setupDataset(client: LocalClient): Unit = {
-    client.setupDataset(dataset, resourceSpec, ingestionSource, storeConf).foreach {
-      e: ErrorResponse => fail(s"Errors setting up dataset $dataset: $e")
-    }
-  }
 
   def topValuesInShards(client: LocalClient, tagKey: String, shards: Seq[Int]): Unit = {
     shards.foreach { shard =>

@@ -4,7 +4,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.Charset
 import java.util.concurrent.Executors
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
@@ -18,9 +18,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.jboss.netty.bootstrap.ServerBootstrap
 import org.jboss.netty.buffer.ChannelBuffer
-import org.jboss.netty.channel.ChannelPipeline
-import org.jboss.netty.channel.ChannelPipelineFactory
-import org.jboss.netty.channel.Channels
+import org.jboss.netty.channel.{ChannelPipeline, ChannelPipelineFactory, Channels}
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory
 import org.jboss.netty.handler.ssl.SslContext
 import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
@@ -90,8 +88,7 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    val datasetStr = sourceConfig.getString("dataset")
-    val dataset = Await.result(storeFactory.metaStore.getDataset(datasetStr), 30.seconds)
+    val dataset = Dataset.fromConfig(sourceConfig)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding

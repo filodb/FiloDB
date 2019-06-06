@@ -3,7 +3,6 @@ package filodb.core.store
 import scala.concurrent.Future
 
 import filodb.core._
-import filodb.core.metadata.Dataset
 
 abstract class MetaStoreError(msg: String) extends Exception(msg)
 
@@ -26,38 +25,6 @@ trait MetaStore {
   /**
    * ** Dataset API ***
    */
-
-  /**
-   * Writes new dataset metadata to the MetaStore.  If the dataset ref already existed, then nothing
-   * should be modified and AlreadyExists returned.  This is to prevent dataset definition from changing
-   * after it has been created.
-   * @param dataset the Dataset to create.
-   * @return Success, or AlreadyExists, or StorageEngineException
-   */
-  def newDataset(dataset: Dataset): Future[Response]
-
-  /**
-   * Retrieves a Dataset object of the given name, with all the existing column definitions
-   * @param ref the DatasetRef defining the dataset to retrieve details for
-   * @return a Dataset
-   */
-  def getDataset(ref: DatasetRef): Future[Dataset]
-
-  def getDataset(dataset: String): Future[Dataset] = getDataset(DatasetRef(dataset))
-
-  /**
-   * Retrieves the names of all datasets registered in the metastore
-   * @param database the name of the database/keyspace to retrieve datasets for.  If None, return all
-   *                 datasets across all databases.
-   */
-  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]]
-
-  /**
-   * Deletes all dataset metadata.  Does not delete column store data.
-   * @param ref the DatasetRef defining the dataset to delete
-   * @return Success, or MetadataException, or StorageEngineException; NotFound if dataset not there before
-   */
-  def deleteDataset(ref: DatasetRef): Future[Response]
 
   /**
    * Shuts down the MetaStore, including any threads that might be hanging around
@@ -113,27 +80,4 @@ trait MetaStore {
   def readHighestIndexTimeBucket(dataset: DatasetRef,
                                  shardNum: Int): Future[Option[Int]]
 
-  /**
-   * Writes the ingestion state to the metaStore so it could be recovered later.
-   * Note that the entry is keyed on the DatasetRef, so if this is called for the same DatasetRef then the data
-   * will be overwritten (perhaps use a different database to distinguish?)
-   *
-   * @param config the IngestionConfig to write
-   * @return Success, or MetadataException, or StorageEngineException
-   */
-  def writeIngestionConfig(config: IngestionConfig): Future[Response]
-
-  /**
-   * Reads back all previously defined IngestionConfigs.
-   *
-   * @return a Seq of IngestionConfig's, or Nil if no states exist in the table
-   */
-  def readIngestionConfigs(): Future[Seq[IngestionConfig]]
-
-  /**
-   * Removes a previously persisted IngestionConfig.  This might be useful say if one wanted to stop streaming a dataset
-   *
-   * @return Success if the IngestionConfig was removed successfully, NotFound if it did not exist
-   */
-  def deleteIngestionConfig(ref: DatasetRef): Future[Response]
 }
