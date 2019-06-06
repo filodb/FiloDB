@@ -1,7 +1,8 @@
 package filodb.memory.data
 
-import scala.collection.mutable.HashMap
-import scala.collection.mutable.Map
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.mutable.{HashMap, Map}
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -9,6 +10,7 @@ import kamon.Kamon
 
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
+import filodb.memory.OutOfOffheapMemoryException
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -48,15 +50,23 @@ object ChunkMap extends StrictLogging {
     classOf[ChunkMap].getDeclaredField("lockState"))
 
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
-  private val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
+  private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
 
   private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
   private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
+  private val chunkEvictions = Kamon.counter("memory-chunk-evictions")
 
   // Tracks all the shared locks held, by each thread.
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
     override def initialValue() = new HashMap[ChunkMap, Int]
   }
+
+  /**
+    * FIXME: Remove this after debugging is done.
+    * This keeps track of which thread is running which execPlan.
+    * Entry is added on lock acquisition, removed when lock is released.
+    */
+  private val execPlanTracker = new ConcurrentHashMap[Thread, String]
 
   // Returns true if the current thread has acquired the shared lock at least once.
   private def hasSharedLock(inst: ChunkMap): Boolean = sharedLockCounts.get.contains(inst)
@@ -83,6 +93,7 @@ object ChunkMap extends StrictLogging {
    */
   //scalastyle:off null
   def releaseAllSharedLocks(): Int = {
+    execPlanTracker.remove(Thread.currentThread())
     var total = 0
     val countMap = sharedLockCounts.get
     if (countMap != null) {
@@ -109,12 +120,18 @@ object ChunkMap extends StrictLogging {
     * consumption from a query iterator. If there are lingering locks,
     * it is quite possible a lock acquire or release bug exists
     */
-  def validateNoSharedLocks(): Unit = {
+  def validateNoSharedLocks(execPlan: String): Unit = {
+    val t = Thread.currentThread()
+    if (execPlanTracker.containsKey(t)) {
+      logger.debug(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
+    }
+
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
       logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
     }
+    execPlanTracker.put(t, execPlan)
   }
 }
 
@@ -122,13 +139,13 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
+class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogging {
   require(capacity > 0)
 
   private var lockState: Int = 0
   private var size: Int = 0
   private var first: Int = 0
-  private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero=true)
+  private var arrayPtr = memFactory.allocateOffheap(capacity << 3, zero = true)
 
   import ChunkMap._
 
@@ -238,6 +255,8 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     var timeoutNanos = InitialExclusiveRetryTimeoutNanos
     var warned = false
 
+    // scalastyle:off null
+    var locks1: ConcurrentHashMap[Thread, String] = null
     while (true) {
       if (tryAcquireExclusive(timeoutNanos)) {
         return
@@ -254,7 +273,16 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
         }
         exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
+        locks1 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         warned = true
+      } else if (warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
+        val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
+        locks2.entrySet().retainAll(locks1.entrySet())
+        val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
+        logger.error(s"Following execPlan locks have not been released for a while: " +
+          s"$locks2 $locks1 $execPlanTracker $lockState")
+        logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
+        Runtime.getRuntime.halt(1)
       }
     }
   }
@@ -376,10 +404,15 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
    * exclusive lock.
    * @param element the native pointer to the offheap element; must be able to apply
    * chunkmapKeyRetrieve to it to get the key
+   * @param evictKey The highest key which can be evicted (removed) if necessary to make room
+   * if no additional native memory can be allocated. The memory for the evicted chunks isn't
+   * freed here, under the assumption that the chunk is a part of a Block, which gets evicted
+   * later. This in turn calls chunkmapDoRemove, which does nothing because the chunk reference
+   * was already removed.
    */
-  final def chunkmapDoPut(element: NativePointer): Unit = {
+  final def chunkmapDoPut(element: NativePointer, evictKey: Long = Long.MinValue): Unit = {
     require(element != 0)
-    chunkmapDoPut(chunkmapKeyRetrieve(element), element)
+    chunkmapDoPut(chunkmapKeyRetrieve(element), element, evictKey)
   }
 
   /**
@@ -387,18 +420,18 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
    * already in the map. Caller must hold exclusive lock.
    * @return true if the element was inserted, false otherwise
    */
-  final def chunkmapDoPutIfAbsent(element: NativePointer): Boolean = {
+  final def chunkmapDoPutIfAbsent(element: NativePointer, evictKey: Long = Long.MinValue): Boolean = {
     require(element != 0)
     val key = chunkmapKeyRetrieve(element)
     if (doBinarySearch(key) >= 0) {
       return false
     }
-    chunkmapDoPut(key, element)
+    chunkmapDoPut(key, element, evictKey)
     true
   }
 
   //scalastyle:off
-  private def chunkmapDoPut(key: Long, element: NativePointer): Unit = {
+  private def chunkmapDoPut(key: Long, element: NativePointer, evictKey: Long): Unit = {
     if (size == 0) {
       arraySet(0, element)
       first = 0
@@ -409,20 +442,36 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     // Ensure enough capacity, under the assumption that in most cases the element is
     // inserted and not simply replaced.
     if (size >= capacity) {
-      val newArrayPtr = memFactory.allocateOffheap(capacity << 4, zero=true)
-      if (first == 0) {
-        // No wraparound.
-        UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr, size << 3)
-      } else {
-        // Wraparound correction.
-        val len = (capacity - first) << 3
-        UnsafeUtils.unsafe.copyMemory(arrayPtr + (first << 3), newArrayPtr, len)
-        UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr + len, first << 3)
-        first = 0
+      try {
+        val newArrayPtr = memFactory.allocateOffheap(capacity << 4, zero=true)
+        if (first == 0) {
+          // No wraparound.
+          UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr, size << 3)
+        } else {
+          // Wraparound correction.
+          val len = (capacity - first) << 3
+          UnsafeUtils.unsafe.copyMemory(arrayPtr + (first << 3), newArrayPtr, len)
+          UnsafeUtils.unsafe.copyMemory(arrayPtr, newArrayPtr + len, first << 3)
+          first = 0
+        }
+        memFactory.freeMemory(arrayPtr)
+        arrayPtr = newArrayPtr
+        capacity <<= 1
+      } catch {
+        case e: OutOfOffheapMemoryException => {
+          // Try to evict the first entry instead of expanding the array.
+          if (evictKey == Long.MinValue || chunkmapKeyRetrieve(arrayGet(first)) > evictKey) {
+            throw e
+          }
+          chunkEvictions.increment()
+          first += 1
+          if (first >= capacity) {
+            // Wraparound.
+            first = 0
+          }
+          size -= 1
+        }
       }
-      memFactory.freeMemory(arrayPtr)
-      arrayPtr = newArrayPtr
-      capacity <<= 1
     }
 
     {

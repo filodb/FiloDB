@@ -59,12 +59,12 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
     checkpointTable.writeCheckpoint(dataset, shardNum, groupNum, offset)
   }
 
-  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]] = {
+  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]] = {
     checkpointTable.readCheckpoints(dataset, shardNum)
   }
 
   def readEarliestCheckpoint(dataset: DatasetRef, shardNum: Int): Future[Long] = {
-    readCheckpoints(dataset,shardNum) map { m =>
+    readCheckpoints(dataset, shardNum) map { m =>
       if (m.values.isEmpty) Long.MinValue else m.values.min
     }
   }

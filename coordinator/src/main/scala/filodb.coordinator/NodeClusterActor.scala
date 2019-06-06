@@ -206,7 +206,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val shardManager = new ShardManager(settings, assignmentStrategy)
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
-  val shardUpdates = new MutableHashSet[DatasetRef]
 
   // Counter is incremented each time shardmapper snapshot is published.
   // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
@@ -258,7 +257,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     }
 
   private def memberUp(member: Member): Future[Unit] = {
-    logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
     val memberCoordActor = nodeCoordinatorPath(member.address)
     context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
       .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
@@ -272,12 +270,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def membershipHandler: Receive = LoggingReceive {
     case s: CurrentClusterState =>
       logger.info(s"Initial Cluster State was: $s")
+      shardManager.logAllMappers("After receiving initial cluster state")
       val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).map(memberUp(_))
       Future.sequence(memberUpFutures.toSeq).onComplete { _ =>
         self ! RemoveStaleCoordinators
       }
 
     case MemberUp(member) =>
+      logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
       memberUp(member)
 
     case UnreachableMember(member) =>
@@ -337,6 +337,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       // never includes downed nodes, which come through cluster.subscribe event replay
       mappers foreach { case (ref, map) => shardManager.recoverShards(ref, map) }
       shardManager.recoverSubscriptions(subscriptions)
+      shardManager.logAllMappers("After NCA shard state/subscription recovery")
 
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Subscribing to cluster events and switching to normalReceive")
@@ -350,7 +351,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   // handleEventEnvelope() currently acks right away, so there is a chance that this actor dies between receiving
   // a new event and the new snapshot is published.
   private def scheduleSnapshotPublishes() = {
-    pubTask = Some(context.system.scheduler.schedule(1.second, publishInterval, self, PublishSnapshot))
+    pubTask = Some(context.system.scheduler.schedule(1.minute, publishInterval, self, PublishSnapshot))
   }
 
   def shardMapHandler: Receive = LoggingReceive {
@@ -364,19 +365,16 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def subscriptionHandler: Receive = LoggingReceive {
     case e: ShardEvent            => handleShardEvent(e)
     case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
-    case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+    case PublishSnapshot          => datasets.keys.foreach(shardManager.publishSnapshot)
                                      //This counter gets published from ShardManager,
                                      // > 0 means this node is shardmanager
                                      iamShardManager.increment()
-                                     shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
     case Terminated(subscriber)   => context unwatch subscriber
   }
 
   private def handleShardEvent(e: ShardEvent) = {
-    logger.debug(s"Received ShardEvent $e from $sender")
-    shardUpdates += e.ref
     shardManager.updateFromExternalShardEvent(sender(), e)
   }
 
@@ -466,7 +464,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       logger.info("Resetting all dataset state except membership.")
       datasets.clear()
       sources.clear()
-      shardUpdates.clear()
 
       implicit val timeout: Timeout = DefaultTaskTimeout
       shardManager.reset()

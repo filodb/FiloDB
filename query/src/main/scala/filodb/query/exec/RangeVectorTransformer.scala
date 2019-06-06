@@ -8,7 +8,7 @@ import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.InstantFunctionId.HistogramQuantile
-import filodb.query.MiscellaneousFunctionId.LabelReplace
+import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
 
@@ -180,6 +180,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   val miscFunction: MiscellaneousFunction = {
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
+      case LabelJoin => LabelJoinFunction(funcParams)
       case _ => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }

@@ -39,11 +39,11 @@ object TestData {
   val sourceConf = ConfigFactory.parseString("""
     store {
       max-chunks-size = 100
-      buffer-alloc-step-size = 50
       demand-paged-chunk-retention-period = 10 hours
-      shard-mem-size = 50MB
+      shard-mem-size = 100MB
       groups-per-shard = 4
-      ingestion-buffer-mem-size = 10MB
+      ingestion-buffer-mem-size = 80MB
+      max-buffer-pool-size = 250
       flush-interval = 10 minutes
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
@@ -58,7 +58,7 @@ object NamesTestData {
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
   val dataColSpecs = Seq("first:string", "last:string", "age:long:interval=10")
-  val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age")
+  val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
   // or the data column rowReader
@@ -91,7 +91,7 @@ object NamesTestData {
   val sortedFirstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
   val sortedUtf8Firsts = sortedFirstNames.map(_.utf8)
 
-  val largeDataset = Dataset("dataset", Seq("league:string"), dataColSpecs, "age")
+  val largeDataset = Dataset("dataset", Seq("league:string"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
 
   val lotLotNames = {
     for { league <- Seq("nfc", "afc")
@@ -170,7 +170,7 @@ object GdeltTestData {
   val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID
-  val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), "GLOBALEVENTID")
+  val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), "GLOBALEVENTID", DatasetOptions.DefaultOptions)
 
   // Dataset2: Partition key (MonthYear) / Row keys (GLOBALEVENTID, Actor2Code)
   val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1), Seq("GLOBALEVENTID", "Actor2Code"))
@@ -185,7 +185,9 @@ object GdeltTestData {
   // val partBuilder4 = new RecordBuilder(TestData.nativeMem, dataset4.partKeySchema, 10240)
 
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
-  val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID")
+  val datasetOptions = DatasetOptions.DefaultOptions.copy(
+    shardKeyColumns = Seq( "__name__","_ns"))
+  val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID", datasetOptions)
 }
 
 // A simulation of machine metrics data

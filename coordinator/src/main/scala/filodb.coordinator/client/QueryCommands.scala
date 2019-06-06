@@ -45,6 +45,8 @@ object QueryCommands {
     }
   }
 
+  case class SpreadAssignment(shardKeysMap: collection.Map[String, String], spread: Int)
+
   /**
     * Serialize with care! would be based on the provided function.
     * @param f  a function that would act as the spread provider
@@ -60,37 +62,42 @@ object QueryCommands {
     * This class provides general query processing parameters
     * @param spreadFunc a function that returns chronologically ordered spread changes for the filter
     */
-  final case class QueryOptions(spreadProvider: SpreadProvider = StaticSpreadProvider(),
+  final case class QueryOptions(spreadProvider: Option[SpreadProvider] = None,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
                                 shardOverrides: Option[Seq[Int]] = None)
 
   object QueryOptions {
-    def apply(constSpread: Int, sampleLimit: Int): QueryOptions =
-      QueryOptions(spreadProvider = StaticSpreadProvider(SpreadChange(0, constSpread)), sampleLimit = sampleLimit)
+    def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryOptions =
+      QueryOptions(spreadProvider = constSpread, sampleLimit = sampleLimit)
 
     /**
      * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
      * present in the spreadMap to specific spread values, with a default if the filter/value not present in the map
      */
     def simpleMapSpreadFunc(keyName: String,
-                            spreadMap: collection.Map[String, Int],
+                            spreadMap: collection.mutable.Map[collection.Map[String, String], Int],
                             defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
       filters: Seq[ColumnFilter] =>
         filters.collectFirst {
           case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
         }.map { tagValue =>
-          Seq(SpreadChange(spread = spreadMap.getOrElse(tagValue, defaultSpread)))
+          Seq(SpreadChange(spread = spreadMap.getOrElse(collection.mutable.Map(keyName->tagValue), defaultSpread)))
         }.getOrElse(Seq(SpreadChange(defaultSpread)))
     }
 
     import collection.JavaConverters._
 
     def simpleMapSpreadFunc(keyName: String,
-                            spreadMap: java.util.Map[String, Int],
-                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] =
-      simpleMapSpreadFunc(keyName, spreadMap.asScala, defaultSpread)
+                            spreadMap: java.util.Map[java.util.Map[String, String], Integer],
+                            defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
+      val spreadAssignment: collection.mutable.Map[collection.Map[String, String], Int]= spreadMap.asScala.map {
+        case (d, v) => d.asScala -> v.toInt
+      }
+
+      simpleMapSpreadFunc(keyName, spreadAssignment, defaultSpread)
+    }
   }
 
   /**
@@ -107,6 +114,10 @@ object QueryCommands {
                                      queryOptions: QueryOptions = QueryOptions(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
+  final case class ExplainPlan2Query(dataset: DatasetRef,
+                                     logicalPlan: LogicalPlan2,
+                                     queryOptions: QueryOptions = QueryOptions(),
+                                     submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse

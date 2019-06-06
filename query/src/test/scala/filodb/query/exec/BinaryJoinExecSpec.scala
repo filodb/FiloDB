@@ -53,6 +53,27 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
+  val samplesLhsGrouping: Array[RangeVector] = Array.tabulate(2) { i =>
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricLhs".utf8,
+          "tag1".utf8 -> s"tag1-$i".utf8,
+          "tag2".utf8 -> s"tag2-1".utf8,
+          "job".utf8 -> s"somejob".utf8))
+      val rows: Iterator[RowReader] = data(i).iterator
+    }
+  }
+
+  val samplesRhsGrouping: Array[RangeVector] = Array.tabulate(2) { i =>
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"someMetricRhs".utf8,
+          "tag1".utf8 -> s"tag1-$i".utf8,
+          "job".utf8 -> s"somejob".utf8))
+      val rows: Iterator[RowReader] = data(i).iterator
+    }
+  }
+
   it("should join one-to-one without on or ignoring") {
 
     val samplesRhs2 = scala.util.Random.shuffle(samplesRhs.toList) // they may come out of order
@@ -184,5 +205,67 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     ScalaFutures.whenReady(fut.failed) { e =>
       e shouldBe a[BadQueryException]
     }
+  }
+  it("should join one-to-one with ignoring") {
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Nil, Seq("tag2"))
+
+    val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.foreach { rv =>
+      rv.key.labelValues.contains("__name__".utf8) shouldEqual false
+      rv.key.labelValues.contains("tag1".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag2".utf8) shouldEqual false
+      val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
+      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+    }
+
+    result.map(_.key).toSet.size shouldEqual 2
+  }
+
+  it("should join one-to-one with on") {
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Seq("tag1", "job"), Nil)
+
+    val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.foreach { rv =>
+      rv.key.labelValues.contains("__name__".utf8) shouldEqual false
+      rv.key.labelValues.contains("tag1".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag2".utf8) shouldEqual false
+      val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
+      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+    }
+
+    result.map(_.key).toSet.size shouldEqual 2
   }
 }

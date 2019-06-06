@@ -118,6 +118,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3, 4)
     mapper1.numAssignedShards shouldEqual 3
+    println(mapper1.prettyPrint)
 
     mapper1.updateFromEvent(ShardDown(dataset, 4, ref1)).isSuccess shouldEqual true
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)

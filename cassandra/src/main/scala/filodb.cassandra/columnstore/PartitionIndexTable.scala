@@ -6,7 +6,7 @@ import java.nio.ByteBuffer
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.ConsistencyLevel
+import com.datastax.driver.core.{ConsistencyLevel, SimpleStatement}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -40,17 +40,18 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
        |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val readCql = session.prepare(s"SELECT segmentid, segment " +
-    s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc")
+  lazy val readCql = s"SELECT segmentid, segment " +
+    s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc"
 
   lazy val writePartitionCql = session.prepare(
     s"INSERT INTO $tableString (shard, timebucket, segmentid, segment) VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
 
   def getPartKeySegments(shard: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
-    val it = session.execute(readCql.bind(shard: JInt, timeBucket: JInt))
+    // fetch size should be low since each row is about an MB. Default fetchSize can result in ReadTimeouts at server
+    val it = session.execute(new SimpleStatement(readCql, shard: JInt, timeBucket: JInt).setFetchSize(15))
       .asScala.toIterator.map(row => {
-      PartKeyTimeBucketSegment(row.getInt("segmentid"),  row.getBytes("segment"))
+      PartKeyTimeBucketSegment(row.getInt("segmentid"), row.getBytes("segment"))
     })
     Observable.fromIterator(it)
   }

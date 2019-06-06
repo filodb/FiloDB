@@ -30,6 +30,10 @@ import filodb.memory.format.ZeroCopyUTF8String
  */
 class KryoInit {
   def customize(kryo: Kryo): Unit = {
+    // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
+    // even if it gets filtered out by the logging framework.
+    com.esotericsoftware.minlog.Log.WARN()
+
     kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }

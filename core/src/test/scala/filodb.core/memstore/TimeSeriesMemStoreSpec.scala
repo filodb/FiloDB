@@ -341,14 +341,15 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     memStore.setup(dataset1, 0, TestData.storeConf)
     val initChunksWritten = chunksetsWritten
-    val checkpoints = Map(0 -> 2L, 1 -> 4L, 2 -> 6L, 3 -> 8L)
+    val checkpoints = Map(0 -> 2L, 1 -> 21L, 2 -> 6L, 3 -> 8L)
 
     // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
-    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
-    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, checkpoints, 4L)
-                          .until(_ >= 50L).toListL.runAsync.futureValue
+    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), 200))
+    // recover from checkpoints.min to checkpoints.max
+    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, 2, 21, checkpoints, 4L)
+                          .until(_ >= 21L).toListL.runAsync.futureValue
 
-    offsets shouldEqual Seq(7L, 11L, 15L, 19L)
+    offsets shouldEqual Seq(7L, 11L, 15L, 19L, 21L) // last offset is always reported
     // no flushes
     chunksetsWritten shouldEqual initChunksWritten
 
@@ -358,7 +359,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val data1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
                         .map(_.getDouble(0)).toSeq
-    data1.length shouldEqual 71
+    data1.length shouldEqual 47
   }
 
   it("should truncate shards properly") {
@@ -538,5 +539,40 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
     parts.map(_.partID).toSet shouldEqual (0 to 20).toSet
+  }
+
+  it("should return extra WriteBuffers to memoryManager properly") {
+    val numSeries = 300
+    val policy2 = new FixedMaxPartitionsEvictionPolicy(numSeries * 2)
+    val store2 = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy2))
+
+    try {
+      // Ingest >250 partitions.  Note how much memory is left after all the allocations
+      store2.setup(dataset1, 0, TestData.storeConf)
+      val shard = store2.getShardE(dataset1.ref, 0)
+
+      // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
+      val data = records(dataset1, linearMultiSeries(numSeries = numSeries).take(numSeries))
+      store2.ingest(dataset1.ref, 0, data)
+      store2.commitIndexForTesting(dataset1.ref)
+
+      store2.numPartitions(dataset1.ref, 0) shouldEqual numSeries
+      shard.bufferPool.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100
+      val afterIngestFree = shard.bufferMemoryManager.numFreeBytes
+
+      // Switch buffers, encode and release/return buffers for all partitions
+      val blockFactory = shard.overflowBlockFactory
+      for { n <- 0 until numSeries } {
+        val part = shard.partitions.get(n)
+        part.switchBuffers(blockFactory, encode = true)
+      }
+
+      // Ensure queue length does not get beyond 250, and some memory was freed (free bytes increases)
+      shard.bufferPool.poolSize shouldEqual 250
+      val nowFree = shard.bufferMemoryManager.numFreeBytes
+      nowFree should be > (afterIngestFree)
+    } finally {
+      store2.shutdown()    // release snd free the memory
+    }
   }
 }

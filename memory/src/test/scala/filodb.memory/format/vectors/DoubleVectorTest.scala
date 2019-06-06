@@ -2,7 +2,7 @@ package filodb.memory.format.vectors
 
 import debox.Buffer
 
-import filodb.memory.format.{BinaryVector, GrowableVector}
+import filodb.memory.format.{ArrayStringRowReader, BinaryVector, GrowableVector}
 
 class DoubleVectorTest extends NativeVectorTest {
   describe("DoubleMaskedAppendableVector") {
@@ -75,6 +75,18 @@ class DoubleVectorTest extends NativeVectorTest {
       DoubleVector(optimized)(optimized, 0) shouldEqual 0.0
       DoubleVector(optimized)(optimized, 2) shouldEqual 2.0
       BinaryVector.totalBytes(optimized) shouldEqual 24   // Const DeltaDeltaVector (since this is linearly increasing)
+    }
+
+    it("should encode some edge cases correctly to DDV") {
+      val orig = Seq(55.0, 60.0) ++ Seq.fill(10)(60.0)
+      val appender = DoubleVector.appendingVectorNoNA(memFactory, 100)
+      orig.foreach(appender.addData)
+      appender.length shouldEqual orig.length
+
+      val optimized = appender.optimize(memFactory)
+      DoubleVector(optimized).length(optimized) shouldEqual orig.length
+      DoubleVector(optimized).toBuffer(optimized).toList shouldEqual orig
+      BinaryVector.totalBytes(optimized) should be > (24)   // Not const DDV!
     }
 
     it("should be able to optimize off-heap No NA integral vector to DeltaDeltaVector") {
@@ -150,6 +162,34 @@ class DoubleVectorTest extends NativeVectorTest {
       val opt2 = cb.optimize(memFactory)
       DoubleVector(opt2).toBuffer(opt2).toList shouldEqual orig2
       cb.copyToBuffer.toList shouldEqual orig2
+    }
+  }
+
+  describe("bugs") {
+    it("should enumerate same samples regardless of where start enumeration from") {
+      val data = scala.io.Source.fromURL(getClass.getResource("/timeseries_bug1.txt"))
+                      .getLines.map(_.split(' '))
+                      .map(ArrayStringRowReader).toSeq
+      val origValues = data.map(_.getDouble(1))
+      val timestampAppender = LongBinaryVector.appendingVectorNoNA(memFactory, data.length)
+      val valuesAppender = DoubleVector.appendingVectorNoNA(memFactory, data.length)
+      data.foreach { reader =>
+        timestampAppender.addData(reader.getLong(0))
+        valuesAppender.addData(reader.getDouble(1))
+      }
+
+      val tsEncoded = timestampAppender.optimize(memFactory)
+      val valuesEncoded = valuesAppender.optimize(memFactory)
+      val tsReader = LongBinaryVector(tsEncoded)
+      val dReader = DoubleVector(valuesEncoded)
+
+      val samples = new collection.mutable.ArrayBuffer[Double]
+      for { i <- 0 until timestampAppender.length by 10 } {
+        samples.clear()
+        val iter = dReader.iterate(valuesEncoded, i)
+        (i until timestampAppender.length).foreach(_ => samples.append(iter.next))
+        samples shouldEqual origValues.drop(i)
+      }
     }
   }
 }

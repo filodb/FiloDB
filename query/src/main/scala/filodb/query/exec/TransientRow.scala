@@ -148,10 +148,10 @@ final class QuantileAggTransientRow() extends MutableRowReader {
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = ???
   def getAny(columnNo: Int): Any = ???
-  def getBlobBase(columnNo: Int): Any =     if (columnNo == 1) blobBase
-                                            else throw new IllegalArgumentException()
-  def getBlobOffset(columnNo: Int): Long =  if (columnNo == 1) blobOffset
-                                            else throw new IllegalArgumentException()
+  def getBlobBase(columnNo: Int): Any = if (columnNo == 1) blobBase
+                                        else throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) blobOffset
+                                           else throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
                                             else throw new IllegalArgumentException()
 

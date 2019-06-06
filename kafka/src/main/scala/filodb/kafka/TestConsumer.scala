@@ -18,8 +18,9 @@ import filodb.core.store.IngestionConfig
  * To launch: java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf \
  *                 -cp <path>/standalone-assembly-0.7.0.jar filodb.kafka.TestConsumer  \
  *                    my-kafka-sourceconfig.conf <partition#>
- * It will read 10 records and then quit, printing out the offsets of each record.
+ * It will keep reading records, printing out the offsets of each record.
  * Optional: pass in a second arg which is the offset to seek to.
+ * Optional: third arg which is key=value, allows filtering output by contents of any stringColumn
  */
 object TestConsumer extends App {
   val settings = new FilodbSettings()
@@ -28,6 +29,7 @@ object TestConsumer extends App {
   val sourceConfPath = args(0)
   val offsetOpt = args.drop(1).headOption.map(_.toLong)
   val shard = if (args.length > 1) args(1).toInt else 0
+  val filterArg = if (args.length > 2) Some(args(2)) else None
 
   val sourceConf = ConfigFactory.parseFile(new java.io.File(sourceConfPath))
   //scalastyle:off
@@ -41,13 +43,33 @@ object TestConsumer extends App {
   val ctor = Class.forName(ingestConf.streamFactoryClass).getConstructors.head
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
 
+  // Figure out filter.  What field # in BinaryRecord to filter by?
+  val (filterField, filterVal) =
+    filterArg.map { filt =>
+      val parts = filt.split('=')
+      if (parts.size == 2) {
+        val partColIndex = dataset.partitionColumns.indexWhere(_.name == parts(0))
+        if (partColIndex >= 0) { (dataset.ingestionSchema.partitionFieldStart.get + partColIndex, parts(1)) }
+        else                   { (-1, "") }
+      } else {
+        (-1, "")
+      }
+    }.getOrElse((-1, ""))
+
   val stream = streamFactory.create(sourceConf, dataset, shard, offsetOpt)
-  val fut = stream.get.take(10)
+  val fut = stream.get//.take(10)
                   .foreach { case SomeData(container, offset) =>
                     println(s"\n----- Offset $offset -----")
-                    container.foreach { case (base, offset) =>
-                      println(s"   ${dataset.ingestionSchema.stringify(base, offset)}")
-                    }
+                    // Use record reader to filter?  Or maybe just use ingestionSchema getString etc.
+                    if (filterField >= 0)
+                      container.foreach { case (base, offset) =>
+                        if (dataset.ingestionSchema.asJavaString(base, offset, filterField) == filterVal)
+                          println(s"   ${dataset.ingestionSchema.stringify(base, offset)}")
+                      }
+                    else
+                      container.foreach { case (base, offset) =>
+                        println(s"   ${dataset.ingestionSchema.stringify(base, offset)}")
+                      }
                   }
   Await.result(fut, 10.minutes)
 }

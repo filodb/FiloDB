@@ -232,25 +232,25 @@ object Dataset {
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumns: Seq[String]): Dataset =
-    apply(name, partitionColumns, dataColumns, keyColumns, Nil)
+    apply(name, partitionColumns, dataColumns, keyColumns, Nil, DatasetOptions.DefaultOptions)
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumns: Seq[String],
-            downsamplers: Seq[String]): Dataset =
-    make(name, partitionColumns, dataColumns, keyColumns, downsamplers).badMap(BadSchemaError).toTry.get
+            downsamplers: Seq[String], options : DatasetOptions): Dataset =
+    make(name, partitionColumns, dataColumns, keyColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
-            keyColumn: String): Dataset =
-    apply(name, partitionColumns, dataColumns, Seq(keyColumn), Nil)
+            keyColumn: String, options: DatasetOptions): Dataset =
+    apply(name, partitionColumns, dataColumns, Seq(keyColumn), Nil, options)
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String]): Dataset =
-    apply(name, partitionColumns, dataColumns, "timestamp")
+    apply(name, partitionColumns, dataColumns, "timestamp", DatasetOptions.DefaultOptions)
 
   sealed trait BadSchema
   case class BadDownsampler(msg: String) extends BadSchema

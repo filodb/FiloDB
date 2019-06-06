@@ -15,6 +15,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
+import filodb.memory.MemFactory
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -24,13 +25,14 @@ import filodb.memory.format.UnsafeUtils
 class OnDemandPagingShard(dataset: Dataset,
                           storeConfig: StoreConfig,
                           shardNum: Int,
+                          bufferMemoryManager: MemFactory,
                           rawStore: ColumnStore,
                           metastore: MetaStore,
                           evictionPolicy: PartitionEvictionPolicy,
                           downsampleConfig: DownsampleConfig,
                           downsamplePublisher: DownsamplePublisher)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy,
+TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
 
@@ -80,7 +82,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       } else {
         // in the very rare case that partition literally *just* got evicted
         // we do not want to thrash by paging this partition back in.
-        logger.warn(s"Skipped ODP of partId $pId in dataset=${dataset.ref} " +
+        logger.warn(s"Skipped ODP of partId=$pId in dataset=${dataset.ref} " +
           s"shard=$shardNum since we are very likely thrashing")
       }
     }
@@ -168,6 +170,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, 4)) } yield {
             val stamp = partSetLock.writeLock()
             try {
+              part.ingesting = false
               partSet.add(part)
             } finally {
               partSetLock.unlockWrite(stamp)

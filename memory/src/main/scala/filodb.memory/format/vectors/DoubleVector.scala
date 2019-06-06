@@ -20,8 +20,8 @@ object DoubleVector {
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
     val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(addr)
-    GrowableVector(memFactory,new MaskedDoubleAppendingVector(addr, bytesRequired, maxElements, dispose))
+    val dispose = () => memFactory.freeMemory(addr)
+    GrowableVector(memFactory, new MaskedDoubleAppendingVector(addr, bytesRequired, maxElements, dispose))
   }
 
   /**
@@ -32,7 +32,7 @@ object DoubleVector {
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
     val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(addr)
+    val dispose = () => memFactory.freeMemory(addr)
     new DoubleAppendingVector(addr, bytesRequired, dispose)
   }
 
@@ -54,8 +54,8 @@ object DoubleVector {
    * DoubleVectorDataReader object for parsing it
    */
   def apply(vector: BinaryVectorPtr): DoubleVectorDataReader = BinaryVector.vectorType(vector) match {
-    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK) => DoubleLongWrapDataReader
-    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_REPEATED)   => DoubleLongWrapDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK) => DoubleLongWrapDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)   => DoubleLongWrapDataReader
     case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
     case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
   }
