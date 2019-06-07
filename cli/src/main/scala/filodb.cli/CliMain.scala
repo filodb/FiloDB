@@ -27,13 +27,7 @@ class Arguments extends FieldArgs {
   var command: Option[String] = None
   var filename: Option[String] = None
   var configPath: Option[String] = None
-  var dataColumns: Seq[String] = Nil
-  var partitionColumns: Seq[String] = Nil
-  var downsamplers: Seq[String] = Nil
-  var rowKeys: Seq[String] = Seq("timestamp")
-  var partitionKeys: Seq[String] = Nil
-  var select: Option[Seq[String]] = None
-  // max # of RangeVectors returned. Don't make it too high.
+  // max # of results returned. Don't make it too high.
   var limit: Int = 200
   var sampleLimit: Int = 1000000
   var timeoutSeconds: Int = 60
@@ -51,12 +45,6 @@ class Arguments extends FieldArgs {
   var minutes: Option[String] = None
   var step: Long = 10 // in seconds
   var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
-  var metricColumn: String = "__name__"
-  var shardKeyColumns: Seq[String] = Nil
-  // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
-  var ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty
-  // Ignores the given Tags while calculating partitionKeyHash
-  var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
   var shards: Option[Seq[String]] = None
   var spread: Option[Integer] = None
