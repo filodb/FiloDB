@@ -80,7 +80,8 @@ object CustomRangeVectorKey {
     UTF8Str(str)
   }
 
-  val emptyAsZcUtf8 = toZcUtf8(CustomRangeVectorKey(Map.empty))
+  val empty = CustomRangeVectorKey(Map.empty)
+  val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
 /**
@@ -175,20 +176,22 @@ object SerializableRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector,
             builder: RecordBuilder,
-            schema: RecordSchema): SerializableRangeVector = {
+            schema: RecordSchema,
+            execPlan: String): SerializableRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      ChunkMap.validateNoSharedLocks()
+      ChunkMap.validateNoSharedLocks(execPlan)
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
         builder.addFromReader(rows.next)
       }
     } finally {
+      // clear exec plan
       // When the query is done, clean up lingering shared locks caused by iterator limit.
       ChunkMap.releaseAllSharedLocks()
     }
@@ -207,7 +210,7 @@ object SerializableRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, toBuilder(schema), schema)
+    apply(rv, toBuilder(schema), schema, "Test-Only-Plan")
   }
 
   // TODO: make this configurable....

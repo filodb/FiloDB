@@ -542,7 +542,7 @@ extends BinaryAppendableVector[A] {
 
   UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
 
-  UnsafeUtils.setInt(addr,     8 + bitmapMaskBufferSize)
+  UnsafeUtils.setInt(addr, 8 + bitmapMaskBufferSize)
   BinaryVector.writeMajorAndSubType(addr, vectMajorType, vectSubType)
   val subVectOffset = 12 + bitmapMaskBufferSize
   UnsafeUtils.setInt(addr + 8, subVectOffset)

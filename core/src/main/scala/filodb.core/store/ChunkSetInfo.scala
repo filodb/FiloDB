@@ -41,7 +41,7 @@ object ChunkSet {
   def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, newChunkID(startTime), rows.length,
+    val info = ChunkSetInfo(factory, dataset, chunkID(startTime), rows.length,
                             startTime,
                             dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
@@ -102,6 +102,10 @@ final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
       None
     }
   }
+
+  def debugString: String =
+    if (infoAddr == 0) "ChunkSetInfo(NULL)"
+    else s"ChunkSetInfo(id=$id numRows=$numRows startTime=$startTime endTime=$endTime)"
 }
 
 case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)

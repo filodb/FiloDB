@@ -164,6 +164,11 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   def numAssignedShards: Int = numShards - unassignedShards.length
 
+  def isAnIngestionState(shard: Int): Boolean = statusMap(shard) match {
+    case ShardStatusStopped | ShardStatusDown => false
+    case _ => true
+  }
+
   /**
    * Find out if a shard is active (Normal or Recovery status) or filter a list of shards
    */
@@ -250,6 +255,23 @@ class ShardMapper(val numShards: Int) extends Serializable {
   private[coordinator] def clear(): Unit = {
     for { i <- 0 until numShards } { shardMap(i) = ActorRef.noSender }
   }
+
+  /**
+   * Gives a pretty grid-view summary of the status of each shard, plus a sorted view of shards owned by each
+   * coordinator.
+   */
+  def prettyPrint: String = {
+    val sortedCoords = allNodes.toSeq.sorted
+    "Status legend: U=Unassigned N=Assigned A=Active E=Error R=Recovery S=Stopped D=Down\n----- Status Map-----\n" +
+    statusMap.toSeq.grouped(16).zipWithIndex.map { case (statGroup, i) =>
+      f"  ${i * 16}%4d-${Math.min(i * 16 + 15, numShards)}%4d   " +
+      statGroup.grouped(8).map(_.map(statusToLetter).mkString("")).mkString("  ")
+    }.mkString("\n") +
+    "\n----- Coordinators -----\n" +
+    sortedCoords.map { coord =>
+      f"  $coord%40s\t${shardsForCoord(coord).mkString(", ")}"
+    }.mkString("\n")
+  }
 }
 
 private[filodb] object ShardMapper extends StrictLogging {
@@ -271,4 +293,14 @@ private[filodb] object ShardMapper extends StrictLogging {
 
   final case class ShardError(event: ShardEvent, context: String)
     extends Exception(s"$context [shard=${event.shard}, event=$event]")
+
+  def statusToLetter(status: ShardStatus): String = status match {
+    case ShardStatusUnassigned  => "."
+    case ShardStatusAssigned    => "N"
+    case ShardStatusActive      => "A"
+    case ShardStatusError       => "E"
+    case s: ShardStatusRecovery => "R"
+    case ShardStatusStopped     => "S"
+    case ShardStatusDown        => "D"
+  }
 }

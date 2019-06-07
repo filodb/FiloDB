@@ -71,7 +71,7 @@ object TestTimeseriesProducer extends StrictLogging {
       s"""--promql 'heap_usage{dc="DC0",_ns="App-0"}' --start $startQuery --end $endQuery --limit 15"""
     logger.info(s"Periodic Samples CLI Query : \n$query")
 
-    val q = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}[2m]""", StandardCharsets.UTF_8.toString)
+    val q = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}""", StandardCharsets.UTF_8.toString)
     val periodicSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query_range?" +
       s"query=$q&start=$startQuery&end=$endQuery&step=15"
     logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
@@ -147,6 +147,8 @@ object TestTimeseriesProducer extends StrictLogging {
    * Generate a stream of random Histogram data, with the metric name "http_request_latency"
    * Schema:  (timestamp:ts, sum:long, count:long, h:hist) for data, plus (metric:string, tags:map)
    * The dataset must match the above schema
+   * Note: the set of "instance" tags is unique for each invocation of genHistogramData.  This helps increase
+   * the cardinality of time series for testing purposes.
    */
   def genHistogramData(startTime: Long, dataset: Dataset, numTimeSeries: Int = 16): Stream[InputRecord] = {
     require(dataset.dataColumns.map(_.columnType) == Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn))
@@ -160,8 +162,10 @@ object TestTimeseriesProducer extends StrictLogging {
       }
     }
 
+    val instanceBase = System.currentTimeMillis
+
     Stream.from(0).map { n =>
-      val instance = n % numTimeSeries
+      val instance = n % numTimeSeries + instanceBase
       val dc = instance & oneBitMask
       val partition = (instance >> 1) & twoBitMask
       val app = (instance >> 3) & twoBitMask

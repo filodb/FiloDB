@@ -14,7 +14,9 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.MemFactory
+import filodb.memory.NativeMemoryManager
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -24,6 +26,7 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
+  private val datasetMemFactories = new HashMap[DatasetRef, MemFactory]
 
   /**
     * The Downsample Publisher is per dataset on the memstore and is shared among all shards of the dataset
@@ -51,8 +54,15 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
+      val memFactory = datasetMemFactories.getOrElseUpdate(dataset.ref, {
+        val bufferMemorySize = storeConf.ingestionBufferMemSize
+        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
+        val tags = Map("dataset" -> dataset.ref.toString)
+        new NativeMemoryManager(bufferMemorySize, tags)
+      })
+
       val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore,
+      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, memFactory, store, metastore,
                               partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
@@ -130,15 +140,22 @@ extends MemStore with StrictLogging {
   def recoverStream(dataset: DatasetRef,
                     shardNum: Int,
                     stream: Observable[SomeData],
+                    startOffset: Long,
+                    endOffset: Long,
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
     shard.setGroupWatermarks(checkpoints)
-    var targetOffset = checkpoints.values.min + reportingInterval
-    stream.map(shard.ingest(_)).collect {
-      case offset: Long if offset > targetOffset =>
-        targetOffset += reportingInterval
-        offset
+    if (endOffset < startOffset) Observable.empty
+    else {
+      var targetOffset = startOffset + reportingInterval
+      stream.map(shard.ingest(_)).collect {
+        case offset: Long if offset >= endOffset => // last offset reached
+          offset
+        case offset: Long if offset > targetOffset => // reporting interval reached
+          targetOffset += reportingInterval
+          offset
+      }
     }
   }
 
@@ -174,8 +191,15 @@ extends MemStore with StrictLogging {
   def scanPartitions(dataset: Dataset,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] =
-    datasets(dataset.ref).get(partMethod.shard).scanPartitions(columnIDs, partMethod, chunkMethod)
+                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
+    val shard = datasets(dataset.ref).get(partMethod.shard)
+
+    if (shard == UnsafeUtils.ZeroPointer) {
+      throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset ${dataset.ref} is not assigned to " +
+        s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
+    }
+    shard.scanPartitions(columnIDs, partMethod, chunkMethod)
+  }
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)

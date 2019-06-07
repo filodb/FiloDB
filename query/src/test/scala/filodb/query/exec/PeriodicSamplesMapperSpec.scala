@@ -37,5 +37,8 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
 
+    val outSchema = periodicSamplesVectorFnMapper.schema(MetricsTestData.timeseriesDataset, resultSchema)
+    outSchema.columns shouldEqual resultSchema.columns
+    outSchema.fixedVectorLen shouldEqual Some(6)
   }
 }

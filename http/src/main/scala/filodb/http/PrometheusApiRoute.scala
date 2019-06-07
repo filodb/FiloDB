@@ -14,26 +14,24 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions, SpreadChange, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands._
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.Sampl
 import filodb.query.{LogicalPlan, QueryError, QueryResult}
-
+import filodb.query.exec.ExecPlan
 
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
            extends FiloRoute with StrictLogging {
 
   import FailFastCirceSupport._
   import io.circe.generic.auto._
-
+  // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
+  // Needed to override Sampl case class Encoder.
+  import PromCirceSupport._
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
-
-  val spreadProvider = new StaticSpreadProvider(SpreadChange(0, settings.queryDefaultSpread))
-
-  val queryOptions = QueryOptions(spreadProvider, settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -43,9 +41,11 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query_range") {
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double],
-                  'step.as[Int], 'verbose.as[Boolean].?) { (query, start, end, step, verbose) =>
+                  'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
+        { (query, start, end, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
-          askQueryAndRespond(dataset, logicalPlan, verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
+            spread)
         }
       }
     } ~
@@ -55,9 +55,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Double], 'verbose.as[Boolean].?) { (query, time, verbose) =>
+        parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
+          'spread.as[Int].?)
+        { (query, time, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          askQueryAndRespond(dataset, logicalPlan, verbose.getOrElse(false))
+          askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
+            verbose.getOrElse(false), spread)
         }
       }
     } ~
@@ -79,7 +82,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))
             }
             Future.sequence(asks)
           }
@@ -103,11 +106,19 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     }
   }
 
-  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, verbose: Boolean) = {
-    val command = LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, queryOptions)
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
+                                 spread: Option[Int]) = {
+    val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
+    val command = if (explainOnly) {
+      ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
+    }
+    else {
+      LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
+    }
     onSuccess(asyncAsk(nodeCoord, command)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
+      case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
         ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
     }

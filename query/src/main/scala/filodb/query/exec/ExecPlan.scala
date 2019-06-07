@@ -124,7 +124,7 @@ trait ExecPlan extends QueryCommand {
             srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            val srv = SerializableRangeVector(rv, builder, recSchema)
+            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (numResultSamples > limit)
@@ -189,13 +189,25 @@ trait ExecPlan extends QueryCommand {
     * @param useNewline pass false if the result string needs to be in one line
     */
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
-    val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
-    }
+    val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr = children.map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
+  }
+
+  final def getPlan(level: Int = 0): Seq[String] = {
+    val transf = printRangeVectorTransformersForLevel(level)
+    val nextLevel = rangeVectorTransformers.size + level
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
+    ((transf :+ curNode) ++ childr)
+  }
+
+  protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
+     rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
+      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+    }
   }
 
   protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {

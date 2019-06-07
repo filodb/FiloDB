@@ -19,8 +19,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              shardMemSize: Long,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
-                             // Number of WriteBuffers to allocate at once
-                             allocStepSize: Int,
+                             maxBufferPoolSize: Int,
                              numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
@@ -32,7 +31,9 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              multiPartitionODP: Boolean,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
-                             evictedPkBfCapacity: Int) {
+                             evictedPkBfCapacity: Int,
+                             // filters on ingested records to log in detail
+                             traceFilters: Map[String, String]) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -42,7 +43,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-blob-buffer-size" -> maxBlobBufferSize,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
-                               "buffer-alloc-step-size" -> allocStepSize,
+                               "max-buffer-pool-size" -> maxBufferPoolSize,
                                "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock,
@@ -68,7 +69,7 @@ object StoreConfig {
                                            |max-chunks-size = 400
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
-                                           |buffer-alloc-step-size = 1000
+                                           |max-buffer-pool-size = 10000
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
@@ -80,6 +81,7 @@ object StoreConfig {
                                            |demand-paging-parallelism = 4
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
+                                           |trace-filters = {}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -91,7 +93,7 @@ object StoreConfig {
                 config.getInt("max-blob-buffer-size"),
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
-                config.getInt("buffer-alloc-step-size"),
+                config.getInt("max-buffer-pool-size"),
                 config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
@@ -102,7 +104,8 @@ object StoreConfig {
                 config.getBoolean("multi-partition-odp"),
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
-                config.getInt("evicted-pk-bloom-filter-capacity"))
+                config.getInt("evicted-pk-bloom-filter-capacity"),
+                config.as[Map[String, String]]("trace-filters"))
   }
 }
 

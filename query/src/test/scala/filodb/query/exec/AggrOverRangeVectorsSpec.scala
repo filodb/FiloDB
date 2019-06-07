@@ -225,7 +225,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializableRangeVector.toBuilder(recSchema)
-    val srv = SerializableRangeVector(result7(0), builder, recSchema)
+    val srv = SerializableRangeVector(result7(0), builder, recSchema, "Unit-Test")
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue
@@ -334,6 +334,26 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
+  }
+
+  it("topK should not have any trailing value ") {
+
+    // The value before NaN should not get carried over. Topk result for timestamp 1556744173L should have Double.NaN
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1556744143L, 42d), (1556744158L, 42d),(1556744173L, Double.NaN)))
+    )
+
+    val agg6 = RowAggregator(AggregationOperator.TopK, Seq(5.0), ColumnType.DoubleColumn)
+    val resultObs6a = RangeVectorAggregator.mapReduce(agg6, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs6 = RangeVectorAggregator.mapReduce(agg6, true, resultObs6a, rv=>rv
+      .key)
+    val resultObs6b = RangeVectorAggregator.present(agg6, resultObs6, 1000)
+    val result6 = resultObs6.toListL.runAsync.futureValue
+    result6(0).key shouldEqual noKey
+    val result6b = resultObs6b.toListL.runAsync.futureValue
+    result6b.size shouldEqual 1
+    result6b(0).key shouldEqual ignoreKey
+    compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(42d,42d).iterator)
   }
 
   import filodb.memory.format.{vectors => bv}

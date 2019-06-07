@@ -52,6 +52,7 @@ and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) goo
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
   - [Debugging serialization and queries](#debugging-serialization-and-queries)
+  - [Other debugging tips](#other-debugging-tips)
   - [Benchmarking](#benchmarking)
 - [You can help!](#you-can-help)
 
@@ -707,6 +708,13 @@ Right now both Java and Kryo serialization are used for Akka messaging.  Kryo is
 To dynamically change the log level, you can use the `/admin/loglevel` HTTP API (per host).  Example:
 
     curl -d 'trace' http://localhost:8080/admin/loglevel/com.esotericsoftware.minlog
+
+### Other debugging tips
+
+To debug raw record ingestion and data mismatches:
+
+* Set the `trace-filters` source config setting... see `timeseries-dev-source.conf` and `TimeSeriesShard` `tracedPartFilters`.  This will log every sample for time series matching criteria set in trace-filters.
+* Use the filtering capability in `filodb.kafka.TestConsumer` to print out raw records received from Kafka.
 
 ### Benchmarking
 

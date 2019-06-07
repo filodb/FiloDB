@@ -194,22 +194,36 @@ trait Join extends Numeric {
 ////////////////////// SELECTORS ///////////////////////////////////////////
 trait Selector extends Operator with Unit with BaseParser {
   protected lazy val simpleSeries: PackratParser[InstantExpression] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(str, Seq.empty, None) }
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => InstantExpression(Some(str), Seq.empty, None) }
 
 
   lazy val instantVectorSelector: PackratParser[InstantExpression]
   = labelIdentifier ~ labelSelection.? ~ offset.? ^^ {
     case metricName ~ ls ~ opt =>
-      InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
+      InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty), opt.map(_.duration))
+  }
+
+  lazy val instantVectorSelector2: PackratParser[InstantExpression]
+  = labelSelection ~ offset.? ^^ {
+    case ls ~ opt =>
+      InstantExpression(None, ls, opt.map(_.duration))
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     labelIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
       case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
-        RangeExpression(metricName.str, ls.getOrElse(Seq.empty), td, opt.map(_.duration))
+        RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), td, opt.map(_.duration))
     }
 
-  lazy val vector: PackratParser[Vector] = rangeVectorSelector | instantVectorSelector
+  lazy val rangeVectorSelector2: PackratParser[RangeExpression] =
+    labelSelection ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
+      case ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
+        RangeExpression(None, ls, td, opt.map(_.duration))
+    }
+
+  lazy val vector: PackratParser[Vector] =
+    rangeVectorSelector2 | rangeVectorSelector | instantVectorSelector2 | instantVectorSelector
+
 }
 
 ////////////////////// END SELECTORS ///////////////////////////////////////////
@@ -304,7 +318,7 @@ object Parser extends Expression {
     */
   override lazy val skipWhitespace: Boolean = true
 
-  override val whiteSpace = "[ \t\r\f]+".r
+  override val whiteSpace = "[ \t\r\f\n]+".r
 
   val FiveMinutes = Duration(5, Minute).millis
 
@@ -319,7 +333,7 @@ object Parser extends Expression {
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
-      case p: InstantExpression => MetadataExpression(p).toMetadataQueryPlan(timeParams)
+      case p: InstantExpression => p.toMetadataPlan(timeParams)
       case _ => throw new UnsupportedOperationException()
     }
   }

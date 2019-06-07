@@ -103,7 +103,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   }
 
-  it("should add part keys and fetch startTimes correctly") {
+  it("should add part keys and fetch startTimes correctly for more than 1024 keys") {
     val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
     val start = System.currentTimeMillis()
     // we dont care much about the partKey here, but the startTime against partId.
@@ -118,6 +118,31 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     for { i <- 0 until numPartIds} {
       startTimes(i) shouldEqual start + i
     }
+  }
+
+  it("should add part keys and fetch partIdsEndedBefore and removePartKeys correctly for more than 1024 keys") {
+    val numPartIds = 3000 // needs to be more than 1024 to test the lucene term limit
+    val start = 1000
+    // we dont care much about the partKey here, but the startTime against partId.
+    val partKeys = Stream.continually(readers.head).take(numPartIds).toList
+    partKeyFromRecords(dataset6, records(dataset6, partKeys), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, start + i, start + i + 100)()
+    }
+    keyIndex.commitBlocking()
+
+    val pIds = keyIndex.partIdsEndedBefore(start + 200)
+    for { i <- 0 until numPartIds} {
+      pIds.get(i) shouldEqual (if (i <= 100) true else false)
+    }
+
+    keyIndex.removePartKeys(pIds)
+    keyIndex.commitBlocking()
+
+    for { i <- 0 until numPartIds} {
+      keyIndex.partKeyFromPartId(i).isDefined shouldEqual (if (i <= 100) false else true)
+    }
+
   }
 
   it("should update part keys with endtime and parse filters correctly") {

@@ -176,12 +176,23 @@ Used to issue a promQL query for a time range with a `start` and `end` timestamp
 For more details, see Prometheus HTTP API Documentation
 [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
 
+```
+params:
+• `explainOnly` -- returns an ExecPlan instead of the query results
+• `spread` -- override default spread
+```
 
 #### GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}
 
 Used to issue a promQL query for a single time instant `time`.  Can also be used to query raw data by issuing a PromQL
 range expression. For more details, see Prometheus HTTP API Documentation
 [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
+
+```
+params:
+• `explainOnly` -- returns an ExecPlan instead of the query results
+• `spread` -- override default spread
+```
 
 #### POST /promql/{dataset}/api/v1/read
 
