@@ -87,7 +87,7 @@ object DictUTF8Vector {
     codeVect.addVector(info.codes)
 
     // Write 12 bytes of metadata at beginning
-    UnsafeUtils.setInt(addr,     bytesRequired - 4)
+    UnsafeUtils.setInt(addr, bytesRequired - 4)
     UnsafeUtils.setInt(addr + 4, WireFormat(VECTORTYPE_BINDICT, SUBTYPE_UTF8))
     UnsafeUtils.setInt(addr + 8, 12 + dictVectSize)
     addr

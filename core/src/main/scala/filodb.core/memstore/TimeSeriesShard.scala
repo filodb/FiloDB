@@ -44,6 +44,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
   val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes).refine(tags)
+  val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes).refine(tags)
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").refine(tags)
   val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").refine(tags)
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").refine(tags)

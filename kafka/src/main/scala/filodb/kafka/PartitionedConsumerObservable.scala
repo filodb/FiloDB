@@ -51,7 +51,7 @@ private[filodb] class PartitionedConsumerObservable[K, V] private
  consumer: Task[KafkaConsumer[K, V]])
   extends Observable[ConsumerRecord[K, V]] {
 
-  override def unsafeSubscribeFn(out: Subscriber[ConsumerRecord[K,V]]): Cancelable = {
+  override def unsafeSubscribeFn(out: Subscriber[ConsumerRecord[K, V]]): Cancelable = {
     import out.scheduler
 
     feedTask(out).runAsync(new Callback[Unit] {

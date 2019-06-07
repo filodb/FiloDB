@@ -179,6 +179,7 @@ For more details, see Prometheus HTTP API Documentation
 ```
 params:
 • `explainOnly` -- returns an ExecPlan instead of the query results
+• `spread` -- override default spread
 ```
 
 #### GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}
@@ -190,6 +191,7 @@ range expression. For more details, see Prometheus HTTP API Documentation
 ```
 params:
 • `explainOnly` -- returns an ExecPlan instead of the query results
+• `spread` -- override default spread
 ```
 
 #### POST /promql/{dataset}/api/v1/read

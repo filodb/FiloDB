@@ -46,7 +46,7 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
     }
   }
 
-  private def formatTags(tags: Map[String, String]) = tags.view.map { case (k,v) => s"$k=$v" }.mkString(" ")
+  private def formatTags(tags: Map[String, String]) = tags.view.map { case (k, v) => s"$k=$v" }.mkString(" ")
 
   private def normalizeLabelName(label: String): String =
     label.map(charOrUnderscore)

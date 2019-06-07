@@ -51,7 +51,7 @@ class KafkaDownsamplePublisher(downsampleConfig: Config) extends DownsamplePubli
 
   override def start(): Unit = {
     logger.info(s"Starting Kafka Downsampling Publisher. Will be publishing to $topics with config: $kafkaConfig")
-    producer =  new KafkaProducer(kafkaConfig.asJava)
+    producer = new KafkaProducer(kafkaConfig.asJava)
   }
 
   override def stop(): Unit = {

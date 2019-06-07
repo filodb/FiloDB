@@ -26,7 +26,7 @@ object ConstVector {
    */
   def make(memFactory: MemFactory, len: Int, neededBytes: Int)(fillBytes: NativePointer => Unit): BinaryVectorPtr = {
     val (_, addr, _) = memFactory.allocate(12 + neededBytes)
-    UnsafeUtils.setInt(ZeroPointer, addr,     8 + neededBytes)
+    UnsafeUtils.setInt(ZeroPointer, addr, 8 + neededBytes)
     UnsafeUtils.setInt(ZeroPointer, addr + 4, WireFormat(WireFormat.VECTORTYPE_BINSIMPLE, WireFormat.SUBTYPE_REPEATED))
     UnsafeUtils.setInt(ZeroPointer, addr + 8, len)
     fillBytes(addr + DataOffset)

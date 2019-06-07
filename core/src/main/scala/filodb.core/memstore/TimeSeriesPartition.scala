@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.Types._
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
 import filodb.memory.data.ChunkMap
@@ -134,7 +134,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
           // So we do not call ingest again unless switcing buffers succeeds.
           // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode=true)) { ingest(row, blockHolder) }
+          if (switchBuffers(blockHolder, encode = true)) { ingest(row, blockHolder) }
           else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
                            s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
@@ -203,6 +203,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
       shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
+      if (dataset.dataColumns(i).columnType == Column.ColumnType.HistogramColumn)
+        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
       optimized
     }
     shardStats.numSamplesEncoded.increment(info.numRows)
