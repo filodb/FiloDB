@@ -38,11 +38,13 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(FormatConversion.dataset, DatasetResourceSpec(2, 1), noOpSource, TestData.storeConf)
+    val command = SetupDataset(FormatConversion.dataset, DatasetResourceSpec(4, 1), noOpSource, TestData.storeConf)
     probe.send(cluster.coordinatorActor, command)
-    val mapper = new ShardMapper(2)
+    val mapper = new ShardMapper(4)
     mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 0, cluster.coordinatorActor))
     mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 1, cluster.coordinatorActor))
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 2, cluster.coordinatorActor))
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 3, cluster.coordinatorActor))
     probe.send(cluster.coordinatorActor, CurrentShardSnapshot(FormatConversion.dataset.ref, mapper))
   }
 
