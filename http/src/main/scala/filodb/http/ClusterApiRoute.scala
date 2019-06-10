@@ -1,7 +1,5 @@
 package filodb.http
 
-import scala.util.{Failure, Success}
-
 import akka.actor.ActorRef
 import akka.http.scaladsl.model.{StatusCodes => Codes}
 import akka.http.scaladsl.server.Directives._
@@ -10,12 +8,13 @@ import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
 import filodb.coordinator.{CurrentShardSnapshot, NodeClusterActor}
 import filodb.core.{DatasetRef, ErrorResponse, Success => SuccessResponse}
-import filodb.core.store.{AssignShardConfig, IngestionConfig, UnassignShardConfig}
+import filodb.core.store.{AssignShardConfig, UnassignShardConfig}
 import filodb.http.apiv1.{HttpSchema, HttpShardDetails, HttpShardState, HttpShardStateByAddress}
 
 class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLogging {
   import FailFastCirceSupport._
   import io.circe.generic.auto._
+
   import HttpSchema._
   import filodb.coordinator.client.Client._
   import NodeClusterActor._
@@ -72,27 +71,6 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
             case DatasetUnknown(_) =>
               complete(Codes.NotFound -> httpErr("DatasetUnknown", s"Dataset $dataset is not registered"))
           }
-      }
-    } ~
-    // POST /api/v1/cluster/<dataset> - set up dataset for streaming ingestion
-    path(Segment) { dataset =>
-      post {
-        entity(as[String]) { sourceConfig =>
-          IngestionConfig(sourceConfig, noOpSource.streamFactoryClass) match {
-            case Success(ingestionConfig) =>
-              try onSuccess(asyncAsk(clusterProxy, SetupDataset(ingestionConfig))) {
-                case DatasetVerified  => complete(httpList(Seq.empty[String]))
-                case e: ErrorResponse => complete(Codes.Conflict -> httpErr(e.toString, e.toString))
-              }
-              catch { case e: Exception =>
-                complete(Codes.InternalServerError -> httpErr(e))
-              }
-
-            case Failure(e) =>
-              logger.error(s"Unable to parse configuration to setup dataset.", e)
-              complete(Codes.BadRequest -> httpErr(s"Configuration parsing error: ${e.getClass.getName}", e.getMessage))
-          }
-        }
       }
     } ~
     // POST /api/v1/cluster/<dataset>/stopshards - shard reassignment request

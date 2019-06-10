@@ -149,12 +149,14 @@ trait ExecPlan extends QueryCommand {
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
+      if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+        qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       QueryError(id, ex)
     }
   }

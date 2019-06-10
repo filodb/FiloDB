@@ -7,20 +7,21 @@ import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 
 import filodb.coordinator.NodeClusterActor._
-import filodb.coordinator.client.IngestionCommands.DatasetSetup
 import filodb.core.{DatasetRef, Success, TestData}
+import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
-import filodb.core.store.{AssignShardConfig, UnassignShardConfig}
+import filodb.core.store.{AssignShardConfig, IngestionConfig, UnassignShardConfig}
 
 class ReassignShardsSpec extends AkkaSpec {
-  import NodeClusterActor.{DatasetResourceSpec, IngestionSource, SetupDataset}
+  import NodeClusterActor.IngestionSource
 
   protected val dataset1 = DatasetRef("one")
   protected val datasetObj1 = Dataset(dataset1.dataset, Seq("seg:int"), Seq("timestamp:long"))
   protected val dataset2 = DatasetRef("two")
   protected val datasetObj2 = Dataset(dataset2.dataset, Seq("tags:map"), Seq("timestamp:long"))
 
-  protected val resources1 = DatasetResourceSpec(8, 3)
+  protected val resources1 = ConfigFactory.parseString("""num-shards=8
+                                                          min-num-nodes=3""")
 
   val settings = new FilodbSettings(ConfigFactory.load("application_test.conf"))
   protected val shardManager = new ShardManager(settings, DefaultShardAssignmentStrategy)
@@ -50,15 +51,8 @@ class ReassignShardsSpec extends AkkaSpec {
   val subscriber = makeTestProbe("subscriber")
 
   val noOpSource1 = IngestionSource(classOf[NoOpStreamFactory].getName)
-  val setupDs1 = SetupDataset(dataset1, resources1, noOpSource1, TestData.storeConf)
-
-  private def expectDataset(coord: TestProbe, dataset: Dataset): TestProbe = {
-    coord.expectMsgPF() { case ds: DatasetSetup =>
-      ds.compactDatasetStr shouldEqual dataset.asCompactString
-      ds.source shouldEqual noOpSource1
-    }
-    coord
-  }
+  val ingestionConfig1 = IngestionConfig(dataset1, resources1, noOpSource1.streamFactoryClass,
+                                         ConfigFactory.empty, TestData.storeConf, DownsampleConfig.disabled)
 
   private def expectNoMessage(coord: TestProbe): Unit = {
     coord.expectNoMessage(100.milliseconds)
@@ -96,14 +90,14 @@ class ReassignShardsSpec extends AkkaSpec {
     }
 
     "fail when minnumnodes not available" in {
-      val assignments = shardManager.addDataset(setupDs1, datasetObj1, self)
+      val assignments = shardManager.addDataset(datasetObj1, ingestionConfig1, noOpSource1, Some(self))
 
       shardManager.datasetInfo.size shouldBe 1
       assignments shouldEqual Map(coord4.ref -> Seq(0, 1, 2), coord3.ref -> Seq(3, 4, 5))
       expectMsg(DatasetVerified)
 
       for (coord <- Seq(coord3, coord4)) {
-        expectDataset(coord, datasetObj1).expectMsgPF() { case s: ShardIngestionState =>
+        coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
           s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 1, 2)
           s.map.shardsForCoord(coord3.ref) shouldEqual Seq(3, 4, 5)
@@ -154,8 +148,6 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.coordinators shouldBe Seq(coord3.ref, coord4.ref, coord2.ref)
       shardManager.datasetInfo.size shouldBe 1
 
-      expectDataset(coord2, datasetObj1)
-
       for (coord <- Seq(coord2, coord3, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
@@ -199,8 +191,6 @@ class ReassignShardsSpec extends AkkaSpec {
 
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
-
-      expectDataset(coord2, datasetObj1)
 
       for (coord <- Seq(coord2, coord3, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
@@ -299,8 +289,6 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
 
-      expectDataset(coord1, datasetObj1)
-
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
@@ -343,8 +331,6 @@ class ReassignShardsSpec extends AkkaSpec {
 
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
-
-      expectDataset(coord3, datasetObj1)
 
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
@@ -392,8 +378,6 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
 
-      expectDataset(coord1, datasetObj1)
-
       for (coord <- Seq(coord1, coord2, coord3, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
           s.ref shouldEqual dataset1
@@ -418,9 +402,6 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.removeMember(coord3Address)
       shardManager.coordinators shouldBe Seq(coord4.ref, coord2.ref, coord1.ref)
       shardManager.datasetInfo.size shouldBe 1
-
-      expectDataset(coord4, datasetObj1)
-      expectDataset(coord2, datasetObj1)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
@@ -468,8 +449,6 @@ class ReassignShardsSpec extends AkkaSpec {
 
       shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
-
-      expectDataset(coord4, datasetObj1)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
@@ -520,15 +499,11 @@ class ReassignShardsSpec extends AkkaSpec {
 
     "succeed after adding dataset back" in {
 
-      val assignments = shardManager.addDataset(setupDs1, datasetObj1, self)
+      val assignments = shardManager.addDataset(datasetObj1, ingestionConfig1, noOpSource1, Some(self))
 
       shardManager.datasetInfo.size shouldBe 1
       assignments shouldEqual Map(coord1.ref -> Seq(0, 1, 2), coord2.ref -> Seq(3, 4, 5), coord4.ref -> Seq(6, 7))
       expectMsg(DatasetVerified)
-
-      expectDataset(coord4, datasetObj1)
-      expectDataset(coord2, datasetObj1)
-      expectDataset(coord1, datasetObj1)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>
@@ -580,8 +555,6 @@ class ReassignShardsSpec extends AkkaSpec {
       assignments2 shouldEqual Array((coord1.ref, ShardStatusAssigned), (coord1.ref, ShardStatusAssigned),
         (coord1.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned),
         (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned), (coord4.ref, ShardStatusAssigned))
-
-      expectDataset(coord4, datasetObj1)
 
       for (coord <- Seq(coord1, coord2, coord4)) {
         coord.expectMsgPF() { case s: ShardIngestionState =>

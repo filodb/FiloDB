@@ -62,7 +62,6 @@ class QueryAndIngestBenchmark extends StrictLogging {
   private val shardMapper = new ShardMapper(numShards)
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
-  Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 10s     # Ensure regular flushes so we can clear out old blocks
@@ -71,8 +70,9 @@ class QueryAndIngestBenchmark extends StrictLogging {
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
-  val command = SetupDataset(dataset.ref, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
+  coordinator ! command
 
   import monix.execution.Scheduler.Implicits.global
 

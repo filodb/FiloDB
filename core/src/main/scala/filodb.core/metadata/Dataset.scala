@@ -130,15 +130,20 @@ final case class Dataset(name: String,
   def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
     ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
 
-  /** Returns a compact String for easy serialization */
-  def asCompactString: String =
-      Seq(database.getOrElse(""),
-          name,
-          partitionColumns.map(_.toString).mkString(":"),
-          dataColumns.map(_.toString).mkString(":"),
-          rowKeyIDs.mkString(":"),
-          downsamplers.map(_.encoded).mkString(":"),
-          options.toString).mkString("\u0001")
+  def toConfig: Config = {
+
+    val c = Map[String, Any] (
+      "dataset" -> name,
+      "definition.partition-columns" -> partitionColumns.map(_.toStringNotation).asJava,
+      "definition.data-columns" -> dataColumns.map(_.toStringNotation).asJava,
+      "definition.row-key-columns" -> rowKeyIDs.map(dataColumns(_).name).asJava,
+      "definition.downsamplers" -> downsamplers.map(_.encoded).asJava
+    ).asJava
+
+    ConfigFactory.parseMap(c).withFallback(ConfigFactory.parseString(
+           s""" options ${options} """))
+
+  }
 }
 
 /**
@@ -155,16 +160,19 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           // For each key, copy the tag to the value if the value is absent
                           copyTags: Map[String, String] = Map.empty) {
   override def toString: String = {
+    toConfig.root.render(ConfigRenderOptions.concise)
+  }
+
+  def toConfig: Config = {
     val map: Map[String, Any] = Map(
-                   "shardKeyColumns" -> shardKeyColumns.asJava,
-                   "metricColumn" -> metricColumn,
-                   "valueColumn" -> valueColumn,
-                   "ignoreShardKeyColumnSuffixes" ->
-                     ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
-                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
-                   "copyTags" -> copyTags.asJava)
-    val config = ConfigFactory.parseMap(map.asJava)
-    config.root.render(ConfigRenderOptions.concise)
+      "shardKeyColumns" -> shardKeyColumns.asJava,
+      "metricColumn" -> metricColumn,
+      "valueColumn" -> valueColumn,
+      "ignoreShardKeyColumnSuffixes" ->
+        ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
+      "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
+      "copyTags" -> copyTags.asJava)
+    ConfigFactory.parseMap(map.asJava)
   }
 
   val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
@@ -204,19 +212,17 @@ object DatasetOptions {
  * Contains many helper functions especially pertaining to Dataset creation and validation.
  */
 object Dataset {
-  /**
-   * Re-creates a Dataset from the output of `asCompactString`
-   */
-  def fromCompactString(compactStr: String): Dataset = {
-    val Array(database, name, partColStr, dataColStr, rowKeyIndices, downsamplersStr, optStr) =
-      compactStr.split('\u0001')
-    val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
-    val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
-    val rowKeyIDs = rowKeyIndices.split(':').toSeq.map(_.toInt)
-    val downsamplers = downsamplersStr.split(':').filterNot(_.isEmpty).toSeq.map(ChunkDownsampler.downsampler(_))
-    val databaseOption = if (database == "") None else Some(database)
-    val options = DatasetOptions.fromString(optStr)
-    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, downsamplers, databaseOption, options)
+  def fromConfig(config: Config): Dataset = {
+    val dataset = config.getString("dataset")
+    val defn = config.getConfig("definition")
+    val options = config.getConfig("options")
+
+    val partitionCols = defn.as[Seq[String]]("partition-columns")
+    val dataCols = defn.as[Seq[String]]("data-columns")
+    val downsamplers = defn.as[Seq[String]]("downsamplers")
+    val rowKeyColumns = defn.as[Seq[String]]("row-key-columns")
+
+    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers, DatasetOptions.fromConfig(options)).get
   }
 
   /**

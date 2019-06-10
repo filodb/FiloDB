@@ -79,11 +79,6 @@ class ClusterNodeDriverSpec extends FilodbClusterNodeSpec {
   override val role = ClusterRole.Driver
 
   "Driver" must {
-    "have the expected config for ClusterRole.Driver" in {
-      val roles = akka.japi.Util.immutableSeq(cluster.settings.allConfig.getStringList("akka.cluster.roles"))
-      roles.size shouldEqual 1
-      roles.forall(_ == ClusterRole.Driver.roleName) shouldEqual true
-    }
     "not become initialized or joined until cluster singleton proxy exists on node" in {
       assertInitialized()
     }

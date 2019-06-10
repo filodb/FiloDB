@@ -10,7 +10,7 @@ import org.scalatest.FunSpec
 import scala.concurrent.duration._
 
 import filodb.coordinator._
-import filodb.core.{AsyncTest, Success, TestData}
+import filodb.core.{AsyncTest, TestData}
 import filodb.prometheus.FormatConversion
 import filodb.prometheus.query.PrometheusModel.ExplainPlanResponse
 
@@ -38,21 +38,14 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(FormatConversion.dataset.ref, DatasetResourceSpec(4, 1), noOpSource, TestData.storeConf)
-    probe.send(clusterProxy, command)
-    probe.expectMsg(DatasetVerified)
-    // Give the coordinator nodes some time to get started
-    Thread sleep 5000
-  }
-
-  before {
-    probe.send(cluster.coordinatorActor, NodeProtocol.ResetState)
-    probe.expectMsg(NodeProtocol.StateReset)
-    // Note: at this point all ingestor actors are shut down
-    cluster.metaStore.clearAllData().futureValue
-    cluster.metaStore.newDataset(FormatConversion.dataset).futureValue shouldEqual Success
-    probe.send(clusterProxy, NodeProtocol.ResetState)
-    probe.expectMsg(NodeProtocol.StateReset)
+    val command = SetupDataset(FormatConversion.dataset, DatasetResourceSpec(4, 1), noOpSource, TestData.storeConf)
+    probe.send(cluster.coordinatorActor, command)
+    val mapper = new ShardMapper(4)
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 0, cluster.coordinatorActor))
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 1, cluster.coordinatorActor))
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 2, cluster.coordinatorActor))
+    mapper.updateFromEvent(IngestionStarted(FormatConversion.dataset.ref, 3, cluster.coordinatorActor))
+    probe.send(cluster.coordinatorActor, CurrentShardSnapshot(FormatConversion.dataset.ref, mapper))
   }
 
   it("should get explainPlan for query") {
