@@ -63,8 +63,10 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
                        0x0000007654300000L, 0L, 0L)
 
     val inbuf = new UnsafeBuffer(compressed)
-    val outarray = new Array[Long](8)
-    val res = NibblePack.unpack8(inbuf, outarray)
+    var outarray: Array[Long] = null
+    val res = NibblePack.unpack8(inbuf, new NibblePack.Sink {
+      def process(data: Array[Long]): Unit = { outarray = data }
+    })
     res shouldEqual NibblePack.Ok
 
     inbuf.capacity shouldEqual 0

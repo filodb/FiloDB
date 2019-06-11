@@ -158,6 +158,7 @@ class HistogramIngestBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def nibbleUnpackDelta64(): Unit = {
     bufSlice.wrap(buf, 0, bytesWritten)
+    sink.reset()
     val res = NibblePack.unpackToSink(bufSlice, sink, inputs.size)
     require(res == NibblePack.Ok)
   }
