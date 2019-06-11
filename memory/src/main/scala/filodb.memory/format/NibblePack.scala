@@ -258,7 +258,7 @@ object NibblePack {
     // True if a packed value dropped
     var valueDropped: Boolean = false
     private var i: Int = 0
-    private val packArray = tempArray
+    private val packArray = new Array[Long](8)
     var writePos: Int = pos
 
     def reset(): Unit = {
@@ -271,20 +271,14 @@ object NibblePack {
       for { n <- 0 until numElems optimized } {
         val diff = data(n) - lastHistDeltas(i + n)
         if (diff < 0) valueDropped = true
-        lastHistDeltas(i + n) = data(n)   // This needs to happen  before next step
         packArray(n) = diff
       }
+      // Copy in bulk current data to lastHistDeltas
+      System.arraycopy(data, 0, lastHistDeltas, i, numElems)
+      // if numElems < 8, zero out remainder of packArray
+      if (numElems < 8) java.util.Arrays.fill(packArray, numElems, 8, 0L)
       writePos = pack8(packArray, outBuf, writePos)
       i += 8
-    }
-
-    // Finish packing any remainder bits that weren't packed before, then reset the state for another go
-    // Returns the final write position or length of the write buffer
-    final def finish(): Int = {
-      val finalPos = packRemainder(packArray, outBuf, writePos, i)
-      reset()
-      writePos = finalPos
-      finalPos
     }
   }
 

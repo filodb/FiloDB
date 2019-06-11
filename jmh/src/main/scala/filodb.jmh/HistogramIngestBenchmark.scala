@@ -192,7 +192,7 @@ class HistogramIngestBenchmark {
       val res = NibblePack.unpackToSink(ddSlice, ddsink, inputs.size)
       require(res == NibblePack.Ok)
       lastPos = increasingHistPos(i)
-      ddsink.finish
+      ddsink.reset()
     }
   }
 }

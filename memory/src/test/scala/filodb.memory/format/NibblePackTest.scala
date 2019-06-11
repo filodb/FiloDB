@@ -146,7 +146,7 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
     val res0 = NibblePack.unpackToSink(bufSlice0, sink, inputs.head.size)
     res0 shouldEqual NibblePack.Ok
 
-    val finalWritten0 = sink.finish
+    val finalWritten0 = sink.writePos
     finalWritten0 shouldEqual firstBufSize
     unpackAndCompare(writeBuf, 0, finalWritten0, inputs.head)
 
@@ -155,11 +155,12 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
     sink.writePos shouldEqual initPos
 
     bufsAndSize.drop(1).zip(diffs).foreach { case ((origCompressedBuf, origSize), diff) =>
+      sink.reset()
       val bufSlice = new UnsafeBuffer(origCompressedBuf, 0, origSize)
       val res = NibblePack.unpackToSink(bufSlice, sink, inputs.head.size)
       res shouldEqual NibblePack.Ok
 
-      val finalWritten = sink.finish
+      val finalWritten = sink.writePos
       unpackAndCompare(writeBuf, initPos, finalWritten - initPos, diff)
       initPos = finalWritten
       sink.writePos shouldEqual finalWritten

@@ -161,7 +161,7 @@ object HistogramIngestBench extends App with CompressorAnalyzer {
       val res = NibblePack.unpackToSink(ddSlice, ddsink, bucketDef.numBuckets)
       require(res == NibblePack.Ok)
       lastPos = increasingHistPos(i)
-      ddsink.finish
+      ddsink.reset()
     }
   }
 

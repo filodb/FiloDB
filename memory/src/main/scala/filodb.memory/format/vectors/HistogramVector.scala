@@ -348,7 +348,8 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
     // TODO: if value dropped, instead of writing diff, start new section and mark as a reset/correction
     // TODO2: write both orig value AND diff, unless this is the first one?
     } else {
-      val repackedLen = repackSink.finish()
+      val repackedLen = repackSink.writePos
+      repackSink.reset()
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
   }
