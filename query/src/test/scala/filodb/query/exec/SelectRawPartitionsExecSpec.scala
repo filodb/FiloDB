@@ -10,8 +10,8 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.MetricsTestData._
 import filodb.core.{TestData, Types}
+import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
@@ -313,7 +313,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     infosRead.map(_._2) shouldEqual startTimes
   }
 
-  it ("should fail with exception ResponseTooLargeException") {
+  it ("should fail with exception BadQueryException") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
@@ -325,7 +325,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
-    result.t.getClass shouldEqual classOf[ResponseTooLargeException]
+    result.t.getClass shouldEqual classOf[BadQueryException]
   }
 
 }
