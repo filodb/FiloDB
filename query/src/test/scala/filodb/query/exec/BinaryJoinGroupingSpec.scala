@@ -1,0 +1,335 @@
+package filodb.query.exec
+
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Random
+
+import com.typesafe.config.ConfigFactory
+import monix.eval.Task
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
+import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.query._
+
+class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
+
+  import SelectRawPartitionsExecSpec._
+
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val queryConfig = new QueryConfig(config.getConfig("query"))
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+  val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
+
+  val rand = new Random()
+  val error = 0.00000001d
+
+  val dummyDispatcher = new PlanDispatcher {
+    override def dispatch(plan: ExecPlan)
+                         (implicit sched: ExecutionContext,
+                          timeout: FiniteDuration): Task[QueryResponse] = ???
+  }
+
+  val sampleNodeCpu: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_cpu".utf8,
+          "instance".utf8 -> "abc".utf8,
+          "job".utf8 -> s"node".utf8,
+          "mode".utf8 -> s"idle".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 3)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_cpu".utf8,
+          "instance".utf8 -> "abc".utf8,
+          "job".utf8 -> s"node".utf8,
+          "mode".utf8 -> s"user".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 1)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_cpu".utf8,
+          "instance".utf8 -> "def".utf8,
+          "job".utf8 -> s"node".utf8,
+          "mode".utf8 -> s"idle".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 8)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_cpu".utf8,
+          "instance".utf8 -> "def".utf8,
+          "job".utf8 -> s"node".utf8,
+          "mode".utf8 -> s"user".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 2)).iterator
+    }
+  )
+  val sampleNodeRole: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_role".utf8,
+          "instance".utf8 -> "abc".utf8,
+            "job".utf8 -> "node".utf8,
+          "role".utf8 -> s"prometheus".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 1)).iterator
+    }
+  )
+
+  val sampleNodeVar: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"node_var".utf8,
+          "instance".utf8 -> "abc".utf8,
+          "job".utf8 -> "node".utf8
+      ))
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 2)).iterator
+    }
+  )
+
+  it("should join many-to-one with on ") {
+
+    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.MUL,
+      Cardinality.ManyToOne,
+      Seq("instance"), Nil, Some(Seq("role")))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+      ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle"),
+      ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus")
+    ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user"),
+        ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus"))
+    )
+
+    result.size shouldEqual 2
+    result.map(_.key.labelValues) sameElements(expectedLabels)
+    result.foreach(_.rows.size shouldEqual(1))
+    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
+    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
+
+
+    result.map(_.key).toSet.size
+  }
+
+  it("should join many-to-one with ignoring ") {
+
+    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.MUL,
+      Cardinality.ManyToOne,
+      Nil,  Seq("role", "mode"), Some(Seq("role")))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+      ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle"),
+      ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus")
+    ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user"),
+        ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus"))
+    )
+
+    result.size shouldEqual 2
+    result.map(_.key.labelValues) sameElements(expectedLabels)
+    result.foreach(_.rows.size shouldEqual(1))
+    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
+    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
+
+
+    result.map(_.key).toSet.size
+  }
+
+  it("should join many-to-one with by and grouping without arguments") {
+
+    //val samplesRhs = scala.util.Random.shuffle(sampleNodeCpu.toList) // they may come out of order
+
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
+
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.DIV,
+      Cardinality.ManyToOne,
+      Seq("instance"), Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+      ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
+    ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
+    ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
+      ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
+      )
+    )
+    result.size shouldEqual 4
+    result.map(_.key.labelValues) sameElements(expectedLabels)
+    result.foreach(_.rows.size shouldEqual(1))
+    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.75))
+    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.25))
+    result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
+    result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
+
+
+    result.map(_.key).toSet.size
+  }
+
+  it("copy sample role to node using group right ") {
+
+    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeVar.toList) // they may come out of order
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.MUL,
+      Cardinality.OneToMany,
+      Nil, Seq("role"),
+      Some(Seq("role")))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+      ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus")
+    ))
+
+    result.size shouldEqual 1
+    result.map(_.key.labelValues) sameElements(expectedLabels)
+    result.foreach(_.rows.size shouldEqual(1))
+    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(2))
+
+    result.map(_.key).toSet.size
+  }
+
+  it("should join many-to-one when group left label does not exist") {
+
+    //val samplesRhs = scala.util.Random.shuffle(sampleNodeCpu.toList) // they may come out of order
+
+    val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
+    val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
+
+    val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
+    val samplesRhs = resultObs4.toListL.runAsync.futureValue
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.DIV,
+      Cardinality.ManyToOne, Nil,
+      Seq("mode"), Some(Seq("dummy")))
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+      ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
+    ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
+      ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle")
+      ),
+      Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("def"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
+        ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user")
+      )
+    )
+    result.size shouldEqual 4
+    result.map(_.key.labelValues) sameElements(expectedLabels)
+    result.foreach(_.rows.size shouldEqual(1))
+    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.75))
+    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.25))
+    result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
+    result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
+
+
+    result.map(_.key).toSet.size
+  }
+}
