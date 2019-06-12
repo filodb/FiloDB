@@ -113,7 +113,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
-                      ignoring: Seq[String] = Nil) extends PeriodicSeriesPlan
+                      ignoring: Seq[String] = Nil, grouping: Option[Seq[String]] = None) extends PeriodicSeriesPlan
 
 /**
   * Apply Scalar Binary operation to a collection of RangeVectors

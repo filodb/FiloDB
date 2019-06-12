@@ -182,7 +182,7 @@ class QueryEngine(dataset: Dataset,
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-                                    lp.on, lp.ignoring))
+                                    lp.on, lp.ignoring, lp.grouping))
     PlanResult(joined, false)
   }
 

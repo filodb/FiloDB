@@ -39,11 +39,10 @@ final case class BinaryJoinExec(id: String,
                                 binaryOp: BinaryOperator,
                                 cardinality: Cardinality,
                                 on: Seq[String],
-                                ignoring: Seq[String]) extends NonLeafExecPlan {
+                                ignoring: Seq[String], grouping: Option[Seq[String]] = None ) extends NonLeafExecPlan {
   require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
     "Many To Many cardinality is supported only for comparison binary operators")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(cardinality == Cardinality.OneToOne, "Currently only one-to-one cardinality is supported")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
@@ -119,7 +118,17 @@ final case class BinaryJoinExec(id: String,
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
                else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
     }
-    // TODO handle one-to-many case
+
+    if (grouping.isDefined) {
+      grouping.get.foreach { x =>
+        val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
+        if (labelVal.isDefined && !labelVal.get.toString.equals("")) {
+          result += (Utf8Str(x) -> labelVal.get)
+        }
+        else
+          result -= Utf8Str(x)
+      }
+    }
     CustomRangeVectorKey(result)
   }
 
