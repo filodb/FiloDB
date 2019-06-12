@@ -34,6 +34,7 @@ object WireFormat {
 
   val SUBTYPE_H_SIMPLE = 0x10         // Histograms, stored as is (Long/u64 values)
   val SUBTYPE_H_2DDELTA = 0x11        // Histograms, 2D-Delta encoded
+  val SUBTYPE_H_SECTDELTA = 0x12      // Histograms, Section-Delta encoded
 
   def vectorSubType(headerBytes: Int): Int = (headerBytes & 0x00ff00) >> 8
 

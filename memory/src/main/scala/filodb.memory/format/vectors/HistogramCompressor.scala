@@ -81,7 +81,7 @@ object HistogramCompressor extends App with CompressorAnalyzer {
   val inputBuffer = new ExpandableArrayBuffer(4096)
 
   val maxBytes = 60 * 300   // Maximum allowable histogram writebuffer size
-  val appender = HistogramVector.appending(memFactory, maxBytes)
+  val appender = HistogramVector.appendingSect(memFactory, maxBytes)
 
   histograms.foreach { h =>
     val buf = h.serialize()

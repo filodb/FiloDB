@@ -167,6 +167,47 @@ class NibblePackTest extends FunSpec with Matchers with PropertyChecks {
     }
   }
 
+  it("should repack increasing deltas to section-relative diffs using DeltaSectDiffPackSink") {
+    val inputs = Seq(Array(0L, 1000, 1001, 1002, 1003, 2005, 2010, 3034, 4045, 5056, 6067, 7078),
+                     Array(3L, 1004, 1006, 1008, 1009, 2010, 2020, 3056, 4070, 5090, 6101, 7150),
+                     Array(7L, 1010, 1016, 1018, 1019, 2020, 2030, 3078, 4101, 5112, 6134, 7195))
+    val diffs = inputs.drop(1).map { in =>
+      in.clone.zipWithIndex.map { case (num, i) => num - inputs.head(i) }
+    }.toSeq
+
+    val writeBuf = new ExpandableArrayBuffer()
+
+    // Compress each individual input into its own buffer
+    val bufsAndSize = inputs.map { in =>
+      val buf = new ExpandableArrayBuffer()
+      val bytesWritten = NibblePack.packDelta(in, buf, 0)
+      (buf, bytesWritten)
+    }
+
+    // Now, use DeltaDiffPackSink to recompress to deltas from initial input
+    val sink = new NibblePack.DeltaSectDiffPackSink(inputs.head.size, writeBuf)
+
+    // Feed in initial delta/histogram
+    val bufSlice0 = new UnsafeBuffer(bufsAndSize.head._1, 0, bufsAndSize.head._2)
+    val res = NibblePack.unpackToSink(bufSlice0, sink, inputs.head.size)
+    res shouldEqual NibblePack.Ok
+    sink.setOriginal()
+    var initPos = sink.writePos
+
+    // Verify delta on subsequent ones yields diff
+    bufsAndSize.drop(1).zip(diffs).foreach { case ((origCompressedBuf, origSize), diff) =>
+      sink.reset()
+      val bufSlice = new UnsafeBuffer(origCompressedBuf, 0, origSize)
+      val res = NibblePack.unpackToSink(bufSlice, sink, inputs.head.size)
+      res shouldEqual NibblePack.Ok
+
+      val finalWritten = sink.writePos
+      unpackAndCompare(writeBuf, initPos, finalWritten - initPos, diff)
+      initPos = finalWritten
+      sink.writePos shouldEqual finalWritten
+    }
+  }
+
   import org.scalacheck._
 
   // Generate a list of increasing integers, every time bound it slightly differently

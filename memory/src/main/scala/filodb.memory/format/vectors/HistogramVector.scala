@@ -90,6 +90,7 @@ object BinaryHistogram extends StrictLogging {
   }
 
   val empty2DSink = NibblePack.DeltaDiffPackSink(Array[Long](), histBuf)
+  val emptySectSink = UnsafeUtils.ZeroPointer.asInstanceOf[NibblePack.DeltaSectDiffPackSink]
 
   val HistFormat_Null = 0x00.toByte
   val HistFormat_Geometric_Delta = 0x03.toByte
@@ -191,6 +192,11 @@ object HistogramVector {
     new Appendable2DDeltaHistVector(factory, Ptr.U8(addr), maxBytes)
   }
 
+  def appendingSect(factory: MemFactory, maxBytes: Int): AppendableHistogramVector = {
+    val addr = factory.allocateOffheap(maxBytes)
+    new AppendableSectDeltaHistVector(factory, Ptr.U8(addr), maxBytes)
+  }
+
   def apply(buffer: ByteBuffer): HistogramReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
 
   import WireFormat._
@@ -233,7 +239,7 @@ class AppendableHistogramVector(factory: MemFactory,
   reset()
 
   final def addr: BinaryVectorPtr = vectPtr.addr
-  final def maxElementsPerSection: Int = 64
+  def maxElementsPerSection: Int = 64
 
   val dispose = () => {
     // free our own memory
@@ -318,6 +324,7 @@ class AppendableHistogramVector(factory: MemFactory,
  * It stores deltas between successive histograms to save space, but the histograms are assumed to be always
  * increasing.  If they do not increase, then that is considered a "reset" and recorded as such for
  * counter correction during queries.
+ * Great for compression but recovering original value means summing up all the diffs  :(
  */
 class Appendable2DDeltaHistVector(factory: MemFactory,
                                   vectPtr: Ptr.U8,
@@ -346,7 +353,46 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
       repackSink.reset()
       appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
     // TODO: if value dropped, instead of writing diff, start new section and mark as a reset/correction
-    // TODO2: write both orig value AND diff, unless this is the first one?
+    } else {
+      val repackedLen = repackSink.writePos
+      repackSink.reset()
+      appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
+    }
+  }
+}
+
+/**
+ * Appender for Prom-style increasing counter histograms of fixed buckets.
+ * Unlike 2DDelta, it stores deltas from the first (original) histogram of a section, so that the original
+ * histogram can easily be recovered just by one add.
+ */
+class AppendableSectDeltaHistVector(factory: MemFactory,
+                                    vectPtr: Ptr.U8,
+                                    maxBytes: Int) extends AppendableHistogramVector(factory, vectPtr, maxBytes) {
+  import BinaryHistogram._
+  import HistogramVector._
+
+  override def vectSubType: Int = WireFormat.SUBTYPE_H_SECTDELTA
+  private var repackSink = BinaryHistogram.emptySectSink
+
+  // Default to smaller section sizes to maximize compression
+  override final def maxElementsPerSection: Int = 16
+
+  override def appendHist(buf: DirectBuffer, h: BinHistogram, numItems: Int): AddResponse = {
+    // Initial histogram: set up new sink with first=true flag / just init with # of buckets
+    if (repackSink == BinaryHistogram.emptySectSink)
+      repackSink = new NibblePack.DeltaSectDiffPackSink(h.numBuckets, encodingBuf)
+
+    // Recompress hist based on original delta.  Do this for ALL histograms so drop detection works correctly
+    repackSink.writePos = 0
+    NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
+
+    // If need new section, append blob.  Reset state for originalDeltas as needed.
+    if (numItems == 0 || needNewSection(h.valuesNumBytes)) {
+      repackSink.reset()
+      repackSink.setOriginal()
+      appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
+    // TODO: if value dropped, instead of writing diff, start new section and mark as a reset/correction
     } else {
       val repackedLen = repackSink.writePos
       repackSink.reset()

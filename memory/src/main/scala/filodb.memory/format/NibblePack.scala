@@ -243,6 +243,9 @@ object NibblePack {
    * - Packs the subtracted values
    * - Updates lastHistValues to the latest unpacked values so this sink can be used again
    *
+   * Basically the delta from the last histogram is stored. This is great for compression, but not so great at
+   * query time as it means arriving at the original value requires adding up most of the histograms in a section.
+   *
    * It is designed to be reused for delta repacking successive histograms.  Thus, the initial write position
    * pos is not reset after finish(), instead it keeps increasing.  writePos may be adjusted by users, make sure
    * you know what you are doing.
@@ -281,6 +284,50 @@ object NibblePack {
       i += 8
     }
   }
+
+  /**
+   * Very similar to the DeltaDiffPackSink, except that instead of storing deltas from the last histogram, it
+   * stores the delta from the originalDeltas.  This allows any original histogram to be reconstructed just by adding
+   * originalDeltas to the stored value.  Doesn't compress quite as well but much less work needs to be done
+   * at query time.
+   * It still checks for any drops.
+   * This sink is initialized with the number of buckets and fed the FIRST histogram.  After that reset() is called.
+   * If a new section is to be started or after first histogram then setOriginal() should be called.
+   */
+  final class DeltaSectDiffPackSink(numBuckets: Int, outBuf: MutableDirectBuffer, pos: Int = 0)
+  extends Sink {
+    val originalDeltas = new Array[Long](numBuckets)
+    val lastHistDeltas = new Array[Long](numBuckets)
+    var valueDropped: Boolean = false
+    private var i: Int = 0
+    private val packArray = new Array[Long](8)
+    var writePos: Int = pos
+
+    def reset(): Unit = {
+      i = 0
+      valueDropped = false
+    }
+
+    final def process(data: Array[Long]): Unit = {
+      val numElems = Math.min(numBuckets - i, 8)
+      for { n <- 0 until numElems optimized } {
+        if (data(n) < lastHistDeltas(i + n)) valueDropped = true
+        packArray(n) = data(n) - originalDeltas(i + n)
+      }
+      System.arraycopy(data, 0, lastHistDeltas, i, numElems)
+      // if numElems < 8, zero out remainder of packArray
+      if (numElems < 8) java.util.Arrays.fill(packArray, numElems, 8, 0L)
+      writePos = pack8(packArray, outBuf, writePos)
+      i += 8
+    }
+
+    /**
+     * After process(), call this method if it was the start of a new section or first histogram
+     */
+    def setOriginal(): Unit = {
+      System.arraycopy(lastHistDeltas, 0, originalDeltas, 0, numBuckets)
+    }
+ }
 
   /**
    * Generic unpack function which outputs values to a Sink which can process raw 64-bit values from unpack8.
