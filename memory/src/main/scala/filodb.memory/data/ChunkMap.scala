@@ -259,6 +259,10 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
     var locks1: ConcurrentHashMap[Thread, String] = null
     while (true) {
       if (tryAcquireExclusive(timeoutNanos)) {
+        if (arrayPtr == 0) {
+          chunkmapReleaseExclusive()
+          throw new IllegalStateException("ChunkMap is freed");
+        }
         return
       }
 
@@ -563,7 +567,14 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
   }
 
   final def chunkmapFree(): Unit = {
-    chunkmapWithExclusive({
+    try {
+      chunkmapAcquireExclusive()
+    } catch {
+      // Already freed.
+      case e: IllegalStateException => return
+    }
+
+    try {
       if (arrayPtr != 0) {
         memFactory.freeMemory(arrayPtr)
         capacity = 0
@@ -571,14 +582,21 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
         first = 0
         arrayPtr = 0
       }
-    })
+    } finally {
+      chunkmapReleaseExclusive()
+    }
   }
 
   /**
    * Method which retrieves a pointer to the key/ID within the element. It just reads the first
    * eight bytes from the element as the ID. Please override to implement custom functionality.
    */
-  private def chunkmapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
+  private def chunkmapKeyRetrieve(elementPtr: NativePointer): Long = {
+    if (elementPtr == 0) {
+      throw new NullPointerException()
+    }
+    UnsafeUtils.getLong(elementPtr)
+  }
 
   /**
    * Does a binary search for the element with the given key. Caller must hold any lock.
