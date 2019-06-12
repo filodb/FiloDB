@@ -25,6 +25,8 @@ final case class PartKeysDistConcatExec(id: String,
 
   require(!children.isEmpty)
 
+  override def enforceLimit: Boolean = false
+
   /**
     * Schema of the RangeVectors returned by compose() method
     */
@@ -59,6 +61,8 @@ final case class LabelValuesDistConcatExec(id: String,
                                     children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
+
+  override def enforceLimit: Boolean = false
 
   /**
     * Schema of the RangeVectors returned by compose() method
@@ -109,6 +113,8 @@ final case class PartKeysExec(id: String,
                               start: Long,
                               end: Long) extends LeafExecPlan {
 
+  override def enforceLimit: Boolean = false
+
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
@@ -148,6 +154,8 @@ final case class  LabelValuesExec(id: String,
                                   filters: Seq[ColumnFilter],
                                   columns: Seq[String],
                                   lookBackInMillis: Long) extends LeafExecPlan {
+
+  override def enforceLimit: Boolean = false
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
