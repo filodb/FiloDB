@@ -146,7 +146,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
     result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
 
-
     result.map(_.key).toSet.size
   }
 
@@ -186,13 +185,10 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
     result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
 
-
     result.map(_.key).toSet.size
   }
 
   it("should join many-to-one with by and grouping without arguments") {
-
-    //val samplesRhs = scala.util.Random.shuffle(sampleNodeCpu.toList) // they may come out of order
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
@@ -241,7 +237,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
     result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
 
-
     result.map(_.key).toSet.size
   }
 
@@ -279,8 +274,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should join many-to-one when group left label does not exist") {
-
-    //val samplesRhs = scala.util.Random.shuffle(sampleNodeCpu.toList) // they may come out of order
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
@@ -328,7 +321,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.25))
     result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
     result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
-
 
     result.map(_.key).toSet.size
   }
