@@ -190,7 +190,7 @@ class QueryEngine(dataset: Dataset,
                                    submitTime: Long,
                                    options: QueryOptions,
                                    lp: Aggregate, spreadProvider : SpreadProvider): PlanResult = {
-    val toReduce = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider )
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider )
     // Now we have one exec plan per shard
     /*
      * Note that in order for same overlapping RVs to not be double counted when spread is increased,
@@ -203,10 +203,22 @@ class QueryEngine(dataset: Dataset,
      *
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
-    toReduce.plans.foreach(_.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by)))
-    // One could do another level of aggregation per node too. Ignoring for now
-    val reduceDispatcher = pickDispatcher(toReduce.plans)
-    val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduce.plans, lp.operator, lp.params)
+    toReduceLevel1.plans.foreach(
+      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by))
+    )
+
+    val toReduceLevel2 =
+      if (toReduceLevel1.plans.size >= 16) {
+        // If number of children is above a threshold, parallelize aggregation
+        val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
+        toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
+          val reduceDispatcher = nodePlans.head.dispatcher
+          ReduceAggregateExec(queryId, reduceDispatcher, nodePlans, lp.operator, lp.params)
+        }.toList
+      } else toReduceLevel1.plans
+
+    val reduceDispatcher = pickDispatcher(toReduceLevel2)
+    val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
     reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
