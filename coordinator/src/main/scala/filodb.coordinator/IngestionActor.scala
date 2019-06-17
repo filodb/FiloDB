@@ -62,7 +62,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   import IngestionActor._
 
   final val streamSubscriptions = (new ConcurrentHashMap[Int, CancelableFuture[Unit]]).asScala
-  final val streams = new HashMap[Int, IngestionStream]
+  final val streams = (new ConcurrentHashMap[Int, IngestionStream]).asScala
   final val nodeCoord = context.parent
   var shardStateVersion: Long = 0
 
@@ -228,7 +228,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
-      streamSubscriptions(shard) = shardIngestionEnd
       shardIngestionEnd.onComplete {
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
@@ -239,6 +238,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           // We also have some tests that validate after finite ingestion is complete
           if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
       }
+      streamSubscriptions(shard) = shardIngestionEnd
     } recover { case t: Throwable =>
       logger.error(s"Error occurred when setting up ingestion pipeline for dataset=${dataset.ref} shard=$shard ", t)
       handleError(dataset.ref, shard, t)
