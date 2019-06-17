@@ -5,7 +5,7 @@ import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, QueryOptions, SpreadChange, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands._
 import filodb.core.MetricsTestData
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.TimeStepParams
