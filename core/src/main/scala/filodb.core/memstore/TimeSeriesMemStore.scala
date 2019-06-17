@@ -231,6 +231,10 @@ extends MemStore with StrictLogging {
     store.truncate(dataset)
   }
 
+  def removeShard(dataset: DatasetRef, shard: Int): Unit = {
+    datasets.get(dataset).foreach(_.remove(shard))
+  }
+
   // Release memory etc.
   def shutdown(): Unit = {
     datasets.values.foreach(_.values.asScala.foreach(_.shutdown()))

@@ -331,7 +331,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
   private def stopIngestion(shard: Int): Unit = {
-    streamSubscriptions.get(shard).foreach { s =>
+    val shardIngestion = streamSubscriptions.get(shard)
+    shardIngestion.foreach { s =>
       s.onComplete {
         case Success(_) =>
           // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
@@ -342,7 +343,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           // release of resources on failure is already handled in the normalIngestion method
       }
     }
-    streamSubscriptions.get(shard).foreach(_.cancel())
+    shardIngestion.foreach(_.cancel())
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
@@ -355,16 +356,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     logger.error(s"Stopped dataset=${dataset.ref} shard=$shard after error was thrown")
   }
 
-  private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {
-    if (streamSubscriptions.contains(shard)) {
-      // TODO: Wait for all the queries to stop
-      streamSubscriptions.remove(shard).foreach(_.cancel)
-      streams.remove(shard).foreach(_.teardown())
-      // Release memory for shard in MemStore
-      memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
-        .foreach { shard =>
-          shard.shutdown()
-        }
-    }
+  private def removeAndReleaseResources(ref: DatasetRef, shardNum: Int): Unit = {
+    // TODO: Wait for all the queries to stop
+    streamSubscriptions.remove(shardNum).foreach(_.cancel)
+    streams.remove(shardNum).foreach(_.teardown())
+    // Release memory for shard in MemStore
+    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shardNum)
+      .foreach { shard =>
+        shard.shutdown()
+        memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum)
+      }
   }
 }
