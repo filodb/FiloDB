@@ -231,8 +231,8 @@ extends MemStore with StrictLogging {
     store.truncate(dataset)
   }
 
-  def removeShard(dataset: DatasetRef, shard: Int): Unit = {
-    datasets.get(dataset).foreach(_.remove(shard))
+  def removeShard(dataset: DatasetRef, shardNum: Int, shard: TimeSeriesShard): Unit = {
+    datasets.get(dataset).foreach(_.remove(shardNum, shard))
   }
 
   // Release memory etc.

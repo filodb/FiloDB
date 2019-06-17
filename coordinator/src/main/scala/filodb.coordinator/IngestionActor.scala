@@ -364,7 +364,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shardNum)
       .foreach { shard =>
         shard.shutdown()
-        memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum)
+        memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum, shard)
       }
   }
 }
