@@ -1,5 +1,8 @@
 package filodb.coordinator
 
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.JavaConverters._
 import scala.collection.mutable.{HashMap, HashSet}
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
@@ -58,7 +61,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   import IngestionActor._
 
-  final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
+  final val streamSubscriptions = (new ConcurrentHashMap[Int, CancelableFuture[Unit]]).asScala
   final val streams = new HashMap[Int, IngestionStream]
   final val nodeCoord = context.parent
   var shardStateVersion: Long = 0
@@ -216,7 +219,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       logger.info(s"Starting normal/active ingestion for dataset=${dataset.ref} shard=$shard at offset $offset")
       statusActor ! IngestionStarted(dataset.ref, shard, nodeCoord)
 
-      streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
+      val shardIngestionEnd = memStore.ingestStream(dataset.ref,
         shard,
         stream,
         flushSched,
@@ -225,7 +228,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
-      streamSubscriptions(shard).onComplete {
+      streamSubscriptions(shard) = shardIngestionEnd
+      shardIngestionEnd.onComplete {
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
         case Success(_) =>
