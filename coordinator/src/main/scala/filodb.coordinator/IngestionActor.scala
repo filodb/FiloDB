@@ -3,7 +3,7 @@ package filodb.coordinator
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.{HashMap, HashSet}
+import scala.collection.mutable.HashSet
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal

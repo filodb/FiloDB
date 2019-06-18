@@ -1278,8 +1278,7 @@ class TimeSeriesShard(val dataset: Dataset,
       partSetLock.unlockWrite(stamp)
     }
     if (partitions.remove(partitionObj.partID, partitionObj)) {
-      bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
-      partitions.remove(partitionObj.partID)
+      partitionObj.shutdown()
     }
   }
 
