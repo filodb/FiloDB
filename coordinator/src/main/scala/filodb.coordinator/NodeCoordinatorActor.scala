@@ -61,6 +61,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   var clusterActor: Option[ActorRef] = None
   val shardMaps = new ConcurrentHashMap[DatasetRef, ShardMapper]
   var statusActor: Option[ActorRef] = None
+  var datasetsInitialized = false
 
   private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
@@ -204,7 +205,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
 
   private def registered(e: CoordinatorRegistered): Unit = {
-    logger.info(s"${e.clusterActor} said hello!")
+    logger.info(s"Registering new ClusterActor ${e.clusterActor}")
     clusterActor = Some(e.clusterActor)
     if (!statusActor.isDefined) {
       statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
@@ -212,11 +213,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       statusActor.get ! e.clusterActor    // update proxy.  NOTE: this is temporary fix
     }
 
-    settings.datasets.foreach { d =>
-      val config = ConfigFactory.parseFile(new java.io.File(d))
-      val dataset = Dataset.fromConfig(config)
-      val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
-      initializeDataset(dataset, ingestion)
+    if (!datasetsInitialized) {
+      settings.datasets.foreach { d =>
+        val config = ConfigFactory.parseFile(new java.io.File(d))
+        val dataset = Dataset.fromConfig(config)
+        val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
+        initializeDataset(dataset, ingestion)
+      }
+      datasetsInitialized = true
     }
 
   }

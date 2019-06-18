@@ -86,7 +86,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
-    logger.info("Cancelling all streams and calling teardown")
+    logger.info(s"Cancelling all streams and calling teardown for dataset=${dataset.ref}")
     streamSubscriptions.keys.foreach(stopIngestion(_))
   }
 
@@ -108,7 +108,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     }
 
     if (state.version != 0 && state.version <= shardStateVersion) {
-      logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion")
+      logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion " +
+        s"for dataset=${dataset.ref}")
       return
     }
 
@@ -135,7 +136,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           }
         } else {
           val status = state.map.statuses(shard)
-          logger.info(s"Will stop ingestion of shard $shard due to status ${status}")
+          logger.info(s"Will stop ingestion of for dataset=${dataset.ref} shard=$shard due to status ${status}")
         }
       }
     }
@@ -158,6 +159,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     }
 
     logger.info(s"Initiating ingestion for dataset=${dataset.ref} shard=${shard}")
+    logger.info(s"Metastore is ${memStore.metastore}")
     val ingestion = for {
       _ <- memStore.recoverIndex(dataset.ref, shard)
       checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, shard) }
@@ -228,6 +230,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
+      logger.info(s"shardIngestionEnd is ${shardIngestionEnd}")
       shardIngestionEnd.onComplete {
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
@@ -335,10 +338,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     shardIngestion.foreach { s =>
       s.onComplete {
         case Success(_) =>
+          logger.info(s"StopIngestion called for dataset=${dataset.ref} shard=$shard")
           // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
           removeAndReleaseResources(dataset.ref, shard)
           // ingestion stopped event is already handled in the normalIngestion method
-          logger.info(s"Stopped streaming ingestion for dataset=${dataset.ref} shard=$shard and released resources")
         case Failure(_) =>
           // release of resources on failure is already handled in the normalIngestion method
       }
@@ -366,5 +369,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         shard.shutdown()
         memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum, shard)
       }
+    logger.info(s"Released resources for dataset=${dataset.ref} shard=$shardNum")
   }
 }
