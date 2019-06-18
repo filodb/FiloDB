@@ -1277,9 +1277,10 @@ class TimeSeriesShard(val dataset: Dataset,
     } finally {
       partSetLock.unlockWrite(stamp)
     }
-    partitionObj.shutdown()
-    bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
-    partitions.remove(partitionObj.partID)
+    if (partitions.remove(partitionObj.partID, partitionObj)) {
+      bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
+      partitions.remove(partitionObj.partID)
+    }
   }
 
   private def partitionsToEvict(): EWAHCompressedBitmap = {
