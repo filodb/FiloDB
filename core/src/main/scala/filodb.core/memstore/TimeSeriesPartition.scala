@@ -399,6 +399,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
   def shutdown(): Unit = {
     chunkmapFree()
+  }
+
+  override protected def finalize(): Unit = {
+    memFactory.freeMemory(partKeyOffset)
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }

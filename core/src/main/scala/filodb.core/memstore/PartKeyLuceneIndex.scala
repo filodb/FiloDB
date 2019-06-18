@@ -141,7 +141,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
     }
   }.toArray
 
-  def reset(): Unit = indexWriter.deleteAll()
+  def reset(): Unit = {
+    indexWriter.deleteAll()
+    indexWriter.commit()
+  }
 
   def startFlushThread(): Unit = {
     flushThread.start()
