@@ -203,9 +203,9 @@ class QueryEngine(dataset: Dataset,
      *
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
-    toReduceLevel1.plans.foreach(
+    toReduceLevel1.plans.foreach {
       _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by))
-    )
+    }
 
     val toReduceLevel2 =
       if (toReduceLevel1.plans.size >= 16) {
