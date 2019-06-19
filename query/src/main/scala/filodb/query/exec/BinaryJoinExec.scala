@@ -1,15 +1,18 @@
 package filodb.query.exec
 
-import scala.collection.mutable
-
-import monix.reactive.Observable
-
 import filodb.core.metadata.Dataset
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
+import filodb.query.BinaryOperator.LAND
 import filodb.query._
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
+import monix.reactive.Observable
+
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
+
+//import scala.collection.mutable.ListBuffer
 
 /**
   * Binary join operator between results of lhs and rhs plan.
@@ -40,10 +43,13 @@ final case class BinaryJoinExec(id: String,
                                 cardinality: Cardinality,
                                 on: Seq[String],
                                 ignoring: Seq[String]) extends NonLeafExecPlan {
-  require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
-    "Many To Many cardinality is supported only for comparison binary operators")
+  //to do check why
+//  require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
+  //  "Many To Many cardinality is supported only for comparison binary operators")
+  if (binaryOp.isInstanceOf[SetOperator]) {
+    require(cardinality == Cardinality.ManyToMany, "set operations must only use many-to-many matching")
+  }
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(cardinality == Cardinality.OneToOne, "Currently only one-to-one cardinality is supported")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
@@ -69,35 +75,13 @@ final case class BinaryJoinExec(id: String,
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
-      // figure out which side is the "one" side
-      val (oneSide, otherSide, lhsIsOneSide) =
-        if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
-        else (rhsRvs, lhsRvs, false)
+      val results: List[IteratorBackedRangeVector] = binaryOp  match {
 
-      // load "one" side keys in a hashmap
-      val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
-      oneSide.foreach { rv =>
-        val jk = joinKeys(rv.key)
-        if (oneSideMap.contains(jk))
-          throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
-        oneSideMap.put(joinKeys(rv.key), rv)
+        case LAND=> setOpAnd(lhsRvs, rhsRvs)
+        case _ => vectorBinary(lhsRvs, rhsRvs)
       }
 
-      // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
-      val resultKeySet = new mutable.HashSet[RangeVectorKey]()
-      // iterate across the the "other" side which could be one or many and perform the binary operation
-      val results = otherSide.flatMap { rvOther =>
-        val jk = joinKeys(rvOther.key)
-        oneSideMap.get(jk).map { rvOne =>
-          val resKey = resultKeys(rvOne.key, rvOther.key)
-          if (resultKeySet.contains(resKey))
-            throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
-              s"Use grouping to create unique matching")
-          resultKeySet.add(resKey)
-          val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
-          IteratorBackedRangeVector(resKey, res)
-        }
-      }
+      //results
       Observable.fromIterable(results)
     }
     Observable.fromTask(taskOfResults).flatten
@@ -122,6 +106,43 @@ final case class BinaryJoinExec(id: String,
     // TODO handle one-to-many case
     CustomRangeVectorKey(result)
   }
+  private def vectorBinary(lhsRvs: List[SerializableRangeVector]
+                   , rhsRvs: List[SerializableRangeVector]) : List[IteratorBackedRangeVector] = {
+    // figure out which side is the "one" side
+    val (oneSide, otherSide, lhsIsOneSide) =
+      if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
+      else (rhsRvs, lhsRvs, false)
+
+    // load "one" side keys in a hashmap
+    val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
+    oneSide.foreach { rv =>
+      val jk = joinKeys(rv.key)
+      if (oneSideMap.contains(jk))
+        throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+      oneSideMap.put(joinKeys(rv.key), rv)
+    }
+
+    // if (binaryOp.isInstanceOf[SetOperator])
+    // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
+    val resultKeySet = new mutable.HashSet[RangeVectorKey]()
+    // iterate across the the "other" side which could be one or many and perform the binary operation
+//    val results = //if (binaryOp.isInstanceOf[SetOperator]){}
+//    // else
+//    {
+      otherSide.flatMap { rvOther =>
+      val jk = joinKeys(rvOther.key)
+      oneSideMap.get(jk).map { rvOne =>
+        val resKey = resultKeys(rvOne.key, rvOther.key)
+        if (resultKeySet.contains(resKey))
+          throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
+            s"Use grouping to create unique matching")
+        resultKeySet.add(resKey)
+        val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
+        IteratorBackedRangeVector(resKey, res)
+      }
+    }
+   // }
+  }
 
   private def binOp(lhsRows: Iterator[RowReader], rhsRows: Iterator[RowReader]): Iterator[RowReader] = {
     new Iterator[RowReader] {
@@ -135,6 +156,24 @@ final case class BinaryJoinExec(id: String,
         cur
       }
     }
+  }
+
+  private def setOpAnd(lhsRvs: List[SerializableRangeVector]
+                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
+    var result = new ListBuffer[IteratorBackedRangeVector]()
+    rhsRvs.foreach { rv =>
+      val jk = joinKeys(rv.key)
+      if (!jk.isEmpty)
+        rhsKeysSet += jk
+    }
+    lhsRvs.foreach { lhs =>
+      val jk = joinKeys(lhs.key)
+      if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
+        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
+      }
+    }
+    result.toList
   }
 }
 
