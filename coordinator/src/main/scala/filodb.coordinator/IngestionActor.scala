@@ -75,7 +75,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   // they are allocated by the implicit ExecutionScheduler that Futures use and/or what C* etc uses.
   // The only thing that flushSched really does is tie up all these Futures together.  Thus we use the global one.
   // TODO: re-examine doFlushSteps and thread usage in flush tasks.
-  import context.dispatcher
+  implicit val ec = context.dispatcher
   val flushSched = GlobalScheduler.globalImplicitScheduler
 
   // TODO: add and remove per-shard ingestion sources?
