@@ -29,7 +29,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     ColumnInfo("value", ColumnType.DoubleColumn))
 
   val rand = new Random()
-  val error = 0.00000001d
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
@@ -142,11 +141,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements(expectedLabels)
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
-    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
-
-    result.map(_.key).toSet.size
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
   }
 
   it("should join many-to-one with ignoring ") {
@@ -164,7 +160,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
@@ -181,11 +176,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements(expectedLabels)
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(3))
-    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(1))
-
-    result.map(_.key).toSet.size
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(3)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(1)
   }
 
   it("should join many-to-one with by and grouping without arguments") {
@@ -231,13 +223,11 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     )
     result.size shouldEqual 4
     result.map(_.key.labelValues) sameElements(expectedLabels)
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.75))
-    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.25))
-    result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
-    result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
 
-    result.map(_.key).toSet.size
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
   }
 
   it("copy sample role to node using group right ") {
@@ -256,7 +246,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
@@ -269,8 +258,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result.map(_.key.labelValues) sameElements(expectedLabels)
     result.foreach(_.rows.size shouldEqual(1))
     result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(2))
-
-    result.map(_.key).toSet.size
   }
 
   it("should join many-to-one when group left label does not exist") {
@@ -293,7 +280,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
@@ -316,12 +302,10 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     )
     result.size shouldEqual 4
     result.map(_.key.labelValues) sameElements(expectedLabels)
-    result.foreach(_.rows.size shouldEqual(1))
-    result(0).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.75))
-    result(1).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.25))
-    result(2).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.8))
-    result(3).rows.map(_.getDouble(1)).foreach(_ shouldEqual(0.2))
 
-    result.map(_.key).toSet.size
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(0.75)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(0.25)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(0.8)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
   }
 }
