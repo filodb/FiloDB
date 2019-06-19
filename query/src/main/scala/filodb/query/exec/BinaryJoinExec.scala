@@ -1,18 +1,17 @@
 package filodb.query.exec
 
-import filodb.core.metadata.Dataset
-import filodb.core.query._
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
-import filodb.query.BinaryOperator.LAND
-import filodb.query._
-import filodb.query.exec.binaryOp.BinaryOperatorFunction
-import monix.reactive.Observable
-
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-//import scala.collection.mutable.ListBuffer
+import monix.reactive.Observable
+
+import filodb.core.metadata.Dataset
+import filodb.core.query._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
+import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.query._
+import filodb.query.BinaryOperator.LAND
+import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
   * Binary join operator between results of lhs and rhs plan.
@@ -43,9 +42,6 @@ final case class BinaryJoinExec(id: String,
                                 cardinality: Cardinality,
                                 on: Seq[String],
                                 ignoring: Seq[String]) extends NonLeafExecPlan {
-  //to do check why
-//  require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
-  //  "Many To Many cardinality is supported only for comparison binary operators")
   if (binaryOp.isInstanceOf[SetOperator]) {
     require(cardinality == Cardinality.ManyToMany, "set operations must only use many-to-many matching")
   }

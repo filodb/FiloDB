@@ -1,23 +1,5 @@
 package filodb.query.exec
 
-//import com.typesafe.config.ConfigFactory
-//
-//import filodb.core.MetricsTestData
-//import filodb.core.metadata.Column.ColumnType
-//import filodb.core.query._
-//import filodb.memory.format.ZeroCopyUTF8String._
-//import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-//import filodb.query._
-//
-//import monix.eval.Task
-//import monix.execution.Scheduler.Implicits.global
-//import monix.reactive.Observable
-//import org.scalatest.concurrent.ScalaFutures
-//import org.scalatest.{FunSpec, Matchers}
-//
-//import scala.concurrent.ExecutionContext
-//import scala.concurrent.duration.FiniteDuration
-//import scala.util.Random
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
