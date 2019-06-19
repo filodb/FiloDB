@@ -203,6 +203,7 @@ object HistogramVector {
 
   def apply(p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(p) match {
     case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) => new SectDeltaHistogramReader(Ptr.U8(p))
   }
 
   // Thread local buffer used as temp buffer for histogram vector encoding ONLY
@@ -239,7 +240,7 @@ class AppendableHistogramVector(factory: MemFactory,
   reset()
 
   final def addr: BinaryVectorPtr = vectPtr.addr
-  def maxElementsPerSection: Int = 64
+  def maxElementsPerSection: IntU8 = IntU8(64)
 
   val dispose = () => {
     // free our own memory
@@ -349,10 +350,12 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
     NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
 
     // See if we are at beginning of section.  If so, write the original histogram.  If not, repack and write diff
-    if (numItems == 0 || needNewSection(h.valuesNumBytes)) {
+    if (repackSink.valueDropped) {
+      repackSink.reset()
+      newSectionWithBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes, Section.TypeDrop)
+    } else if (numItems == 0 || needNewSection(h.valuesNumBytes)) {
       repackSink.reset()
       appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
-    // TODO: if value dropped, instead of writing diff, start new section and mark as a reset/correction
     } else {
       val repackedLen = repackSink.writePos
       repackSink.reset()
@@ -376,7 +379,7 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
   private var repackSink = BinaryHistogram.emptySectSink
 
   // Default to smaller section sizes to maximize compression
-  override final def maxElementsPerSection: Int = 16
+  override final def maxElementsPerSection: IntU8 = IntU8(16)
 
   override def appendHist(buf: DirectBuffer, h: BinHistogram, numItems: Int): AddResponse = {
     // Initial histogram: set up new sink with first=true flag / just init with # of buckets
@@ -388,17 +391,22 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
     NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
 
     // If need new section, append blob.  Reset state for originalDeltas as needed.
-    if (numItems == 0 || needNewSection(h.valuesNumBytes)) {
+    if (repackSink.valueDropped) {
+      repackSink.reset()
+      repackSink.setOriginal()
+      newSectionWithBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes, Section.TypeDrop)
+    } else if (numItems == 0 || needNewSection(h.valuesNumBytes)) {
       repackSink.reset()
       repackSink.setOriginal()
       appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
-    // TODO: if value dropped, instead of writing diff, start new section and mark as a reset/correction
     } else {
       val repackedLen = repackSink.writePos
       repackSink.reset()
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
   }
+
+  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(vectPtr)
 }
 
 trait HistogramReader extends VectorDataReader {
@@ -411,72 +419,17 @@ trait HistogramReader extends VectorDataReader {
  * A reader for row-based Histogram vectors.  Mostly contains logic to skip around the vector to find the right
  * record pointer.
  */
-class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader {
+class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader with SectionReader {
   import HistogramVector._
 
   final def length: Int = getNumHistograms(histVect)
   val numBuckets = if (length > 0) getNumBuckets(histVect) else 0
-  var curSection: Section = _
-  var curElemNo = 0
-  var sectStartingElemNo = 0
-  var curHist: Ptr.U8 = _
-  if (length > 0) setFirstSection()
 
   val buckets = HistogramBuckets(bucketDefAddr(histVect).add(-2), formatCode(histVect))
   val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
   val endAddr = histVect + histVect.asI32.getI32 + 4
 
-  private def setFirstSection(): Unit = {
-    curSection = Section.fromPtr(afterBucketDefAddr(histVect))
-    curHist = curSection.firstElem
-    curElemNo = 0
-    sectStartingElemNo = 0
-  }
-
-  // Assume that most read patterns move the "cursor" or element # forward.  Since we track the current section
-  // moving forward or jumping to next section is easy.  Jumping backwards within current section is not too bad -
-  // we restart at beg of current section.  Going back before current section is expensive, then we start over.
-  // TODO: split this out into a SectionReader trait
-  private def locate(elemNo: Int): Ptr.U8 = {
-    require(elemNo >= 0 && elemNo < length, s"$elemNo is out of vector bounds [0, $length)")
-    if (elemNo == curElemNo) {
-      curHist
-    } else if (elemNo > curElemNo) {
-      // Jump forward to next section until we are in section containing elemNo.  BUT, don't jump beyond cur length
-      while (elemNo >= (sectStartingElemNo + curSection.numElements) && curSection.endAddr.addr < endAddr.addr) {
-        curElemNo = sectStartingElemNo + curSection.numElements
-        curSection = Section.fromPtr(curSection.endAddr)
-        sectStartingElemNo = curElemNo
-        curHist = curSection.firstElem
-      }
-
-      curHist = skipAhead(curHist, elemNo - curElemNo)
-      curElemNo = elemNo
-      curHist
-    } else {  // go backwards then go forwards
-      // Is it still within current section?  If so restart search at beg of section
-      if (elemNo >= sectStartingElemNo) {
-        curElemNo = sectStartingElemNo
-        curHist = curSection.firstElem
-      } else {
-        // Otherwise restart search at beginning
-        setFirstSection()
-      }
-      locate(elemNo)
-    }
-  }
-
-  // Skips ahead numElems elements starting at startPtr and returns the new pointer.  NOTE: numElems might be 0.
-  private def skipAhead(startPtr: Ptr.U8, numElems: Int): Ptr.U8 = {
-    require(numElems >= 0)
-    var togo = numElems
-    var ptr = startPtr
-    while (togo > 0) {
-      ptr += ptr.asU16.getU16 + 2
-      togo -= 1
-    }
-    ptr
-  }
+  def firstSectionAddr: Ptr.U8 = afterBucketDefAddr(histVect)
 
   /**
    * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
@@ -495,14 +448,17 @@ class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader {
 
   def length(addr: BinaryVectorPtr): Int = length
 
+  protected val dSink = NibblePack.DeltaSink(returnHist.values)
+
   // WARNING: histogram returned is shared between calls, do not reuse!
-  final def apply(index: Int): HistogramWithBuckets = {
+  def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16
     val buf = BinaryHistogram.valuesBuf
     buf.wrap(histPtr.add(2).addr, histLen)
-    NibblePack.unpackToSink(buf, NibblePack.DeltaSink(returnHist.values), numBuckets)
+    dSink.reset()
+    NibblePack.unpackToSink(buf, dSink, numBuckets)
     returnHist
   }
 
@@ -516,4 +472,46 @@ class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader {
     }
     summedHist
   }
+}
+
+/**
+ * A reader for SectDelta encoded histograms
+ */
+class SectDeltaHistogramReader(histVect: Ptr.U8) extends RowHistogramReader(histVect) {
+  // baseHist is section base histogram; summedHist used to compute base + delta or other sums
+  private val summedHist = MutableHistogram.empty(buckets)
+  private val baseHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  private val baseSink = NibblePack.DeltaSink(baseHist.values)
+
+  // override setSection: also set the base histogram for getting real value
+  override def setSection(sectAddr: Ptr.U8, newElemNo: Int = 0): Unit = {
+    super.setSection(sectAddr, newElemNo)
+    // unpack to baseHist
+    baseSink.reset()
+    val buf = BinaryHistogram.valuesBuf
+    buf.wrap(curHist.add(2).addr, curHist.asU16.getU16)
+    NibblePack.unpackToSink(buf, baseSink, numBuckets)
+  }
+
+  override def apply(index: Int): HistogramWithBuckets = {
+    require(length > 0)
+    val histPtr = locate(index)
+
+    // Just return the base histogram if we are at start of section
+    if (index == sectStartingElemNo) baseHist
+    else {
+      val histLen = histPtr.asU16.getU16
+      val buf = BinaryHistogram.valuesBuf
+      buf.wrap(histPtr.add(2).addr, histLen)
+      dSink.reset()
+      NibblePack.unpackToSink(buf, dSink, numBuckets)
+
+      summedHist.populateFrom(baseHist)
+      summedHist.add(returnHist)
+      summedHist
+    }
+  }
+
+  // TODO: optimized summing.  It's wasteful to apply the base + delta math so many times ...
+  // instead add delta + base * n if possible.   However, do we care about sum performance on increasing histograms?
 }

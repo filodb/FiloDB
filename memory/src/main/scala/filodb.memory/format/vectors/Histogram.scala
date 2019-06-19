@@ -165,6 +165,21 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
 
   /**
+   * Copies the values of this histogram from another histogram.  Other histogram must have same bucket scheme.
+   */
+  final def populateFrom(other: HistogramWithBuckets): Unit = {
+    require(other.buckets == buckets)
+    other match {
+      case m: MutableHistogram =>
+        System.arraycopy(m.values, 0, values, 0, values.size)
+      case l: LongHistogram    =>
+        for { n <- 0 until values.size optimized } {
+          values(n) = l.values(n).toDouble
+        }
+    }
+  }
+
+  /**
    * Adds the values from another Histogram.
    * If the other histogram has the same bucket scheme, then the values are just added per bucket.
    * If the scheme is different, then an approximation is used so that the resulting histogram has

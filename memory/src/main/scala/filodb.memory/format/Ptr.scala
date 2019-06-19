@@ -1,5 +1,8 @@
 package filodb.memory.format
 
+// A value class for unsigned 8-bit numbers, intended for safe byte/low-level access
+final case class IntU8 private(n: Int) extends AnyVal
+
 /**
  * Strongly typed native memory pointer types / value classes.
  * Do not incur allocations as long as value class rules are followed.

@@ -16,6 +16,10 @@ object HistogramTest {
     MutableHistogram(bucketScheme, buckets)
   }
 
+  val incrHistBuckets = rawHistBuckets.scanLeft(Array.fill(8)(0.0)) { case (acc, h) =>
+                          acc.zip(h).map { case (a, b) => a + b }
+                        }.drop(1)
+
   val customHistograms = rawHistBuckets.map { buckets =>
     LongHistogram(customScheme, buckets.take(customScheme.numBuckets).map(_.toLong))
   }
