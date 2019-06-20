@@ -39,7 +39,8 @@ final case class BinaryJoinExec(id: String,
                                 binaryOp: BinaryOperator,
                                 cardinality: Cardinality,
                                 on: Seq[String],
-                                ignoring: Seq[String], grouping: Option[Seq[String]] = None ) extends NonLeafExecPlan {
+                                ignoring: Seq[String],
+                                include: Seq[String]) extends NonLeafExecPlan {
   require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
     "Many To Many cardinality is supported only for comparison binary operators")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
@@ -117,16 +118,17 @@ final case class BinaryJoinExec(id: String,
     if (cardinality == Cardinality.OneToOne) {
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
                else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
-    }
-
-    if (grouping.isDefined) {
-      grouping.get.foreach { x =>
-        val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
-        if (labelVal.isDefined && !labelVal.get.toString.equals("")) {
-          result += (Utf8Str(x) -> labelVal.get)
-        }
-        else
-          result -= Utf8Str(x)
+    } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
+      include.foreach { x =>
+          val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
+          labelVal.foreach { v =>
+            if (v.toString.equals(""))
+              // If label value is empty do not propagate to result and
+              // also delete from result
+             result -= Utf8Str(x)
+            else
+              result += (Utf8Str(x) -> v)
+          }
       }
     }
     CustomRangeVectorKey(result)

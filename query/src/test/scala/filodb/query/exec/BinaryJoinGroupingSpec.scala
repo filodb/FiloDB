@@ -118,13 +118,12 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Some(Seq("role")))
+      Seq("instance"), Nil, Seq("role"))
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
@@ -150,11 +149,11 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Nil,  Seq("role", "mode"), Some(Seq("role")))
+      Nil,  Seq("role", "mode"), Seq("role"))
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
@@ -190,17 +189,16 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil)
+      Seq("instance"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
@@ -235,12 +233,12 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeVar.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
       BinaryOperator.MUL,
       Cardinality.OneToMany,
       Nil, Seq("role"),
-      Some(Seq("role")))
+      Seq("role"))
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
@@ -270,11 +268,11 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne, Nil,
-      Seq("mode"), Some(Seq("dummy")))
+      Seq("mode"), Seq("dummy"))
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
