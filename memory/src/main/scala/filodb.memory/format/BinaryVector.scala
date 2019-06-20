@@ -128,6 +128,10 @@ trait VectorDataReader extends AvailableReader {
   def asHistReader: vectors.HistogramReader = this.asInstanceOf[vectors.HistogramReader]
 }
 
+/**
+ * CorrectionMeta stores the type-specific correction amount for counter vectors.
+ * It is also used to propagate and accumulate corrections as one iterates through vectors.
+ */
 trait CorrectionMeta {
   def correction: Double
 }
@@ -477,7 +481,7 @@ object PrimitiveVector {
 
   val NBitsMask = 0x07f
   val SignMask  = 0x080
-  val ResetMask = 0x08000
+  val DropMask = 0x08000
 }
 
 object PrimitiveVectorReader {
@@ -486,11 +490,11 @@ object PrimitiveVectorReader {
   final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
   final def signed(vector: BinaryVectorPtr): Boolean =
     (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
-  final def resetted(vector: BinaryVectorPtr): Boolean =
-    (UnsafeUtils.getShort(vector + OffsetNBits) & ResetMask) != 0
+  final def dropped(vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getShort(vector + OffsetNBits) & DropMask) != 0
 
-  final def markReset(vector: BinaryVectorPtr): Unit =
-    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | ResetMask).toShort)
+  final def markDrop(vector: BinaryVectorPtr): Unit =
+    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | DropMask).toShort)
 }
 
 /**

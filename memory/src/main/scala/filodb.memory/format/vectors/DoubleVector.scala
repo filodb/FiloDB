@@ -63,8 +63,8 @@ object DoubleVector {
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
     }
-    if (PrimitiveVectorReader.resetted(vector)) new CorrectingDoubleVectorReader(reader, vector)
-    else                                        reader
+    if (PrimitiveVectorReader.dropped(vector)) new CorrectingDoubleVectorReader(reader, vector)
+    else                                       reader
   }
 
   /**
@@ -347,14 +347,14 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data < last) PrimitiveVectorReader.markReset(addr)
+    if (data < last) PrimitiveVectorReader.markDrop(addr)
     last = data
     super.addData(data)
   }
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
     val newChunk = DoubleVector.optimize(memFactory, this)
-    if (PrimitiveVectorReader.resetted(addr)) PrimitiveVectorReader.markReset(newChunk)
+    if (PrimitiveVectorReader.dropped(addr)) PrimitiveVectorReader.markDrop(newChunk)
     newChunk
   }
 

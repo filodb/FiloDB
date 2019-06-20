@@ -233,20 +233,20 @@ class DoubleVectorTest extends NativeVectorTest {
       cb.addData(102.5)
 
       // So far, no drops
-      PrimitiveVectorReader.resetted(cb.addr) shouldEqual false
+      PrimitiveVectorReader.dropped(cb.addr) shouldEqual false
 
       // Add dropped value, flag should be set to true
       cb.addData(9)
-      PrimitiveVectorReader.resetted(cb.addr) shouldEqual true
+      PrimitiveVectorReader.dropped(cb.addr) shouldEqual true
 
       // Add more values, no drops, flag should still be true
       cb.addData(13.3)
       cb.addData(21.1)
-      PrimitiveVectorReader.resetted(cb.addr) shouldEqual true
+      PrimitiveVectorReader.dropped(cb.addr) shouldEqual true
 
       // Optimize, flag should still be true in optimized version
       val sc = cb.optimize(memFactory)
-      PrimitiveVectorReader.resetted(sc) shouldEqual true
+      PrimitiveVectorReader.dropped(sc) shouldEqual true
 
       DoubleVector(sc).toBuffer(sc) shouldEqual Buffer(101, 102.5, 9, 13.3, 21.1)
 
