@@ -126,6 +126,29 @@ class HistogramVectorTest extends NativeVectorTest {
     }
   }
 
+  it("SectDelta vectors should detect and handle drops correctly") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual incrHistBuckets.length*2
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    // One normal section, one dropped section
+    reader.iterateSections.toSeq.map(_.sectionType) shouldEqual Seq(SectionType(0), SectionType(1))
+
+    (0 until incrHistBuckets.length).foreach { i =>
+      verifyHistogram(reader(i), i, incrHistBuckets)
+      verifyHistogram(reader(4 + i), i, incrHistBuckets)
+    }
+  }
+
   it("should reject BinaryHistograms of schema different from first schema ingested") {
     val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>

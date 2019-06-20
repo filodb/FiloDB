@@ -44,7 +44,7 @@ final case class Section private(addr: Long) extends AnyVal {
     val newNumElements = numElements + addedElements
     val newNumBytes = sectionNumBytes + addedBytes
     require(newNumElements <= 255 && newNumBytes <= 65535)
-    Ptr.I32(addr).asMut.set(newNumBytes | (newNumElements << 16))
+    Ptr.I32(addr).asMut.set(newNumBytes | (newNumElements << 16) | (sectionType.n << 24))
   }
 
   final def setNumElements(num: Int): Unit = {
