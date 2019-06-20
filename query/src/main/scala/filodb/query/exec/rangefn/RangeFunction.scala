@@ -277,6 +277,7 @@ object RangeFunction {
     case None                 => () => new LastSampleChunkedFunctionD
     case Some(Rate)           => () => new ChunkedRateFunction
     case Some(Increase)       => () => new ChunkedIncreaseFunction
+    case Some(Delta)          => () => new ChunkedDeltaFunction
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD

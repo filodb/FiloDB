@@ -36,7 +36,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
                             8132570L->5000.00,
                             8142822L->3095.00,
                             8152858L->5102.00,
-                            8163000L->8201.00)
+                            8162999L->8201.00)
 
   val q2 = new IndexedArrayQueue[TransientRow]()
   gaugeSamples.foreach { case (t, v) =>
@@ -316,7 +316,13 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val expected = (q2.last.value - q2.head.value) / (q2.last.timestamp - q2.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
     DeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val gaugeRV = timeValueRV(gaugeSamples)
+    val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedDeltaFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("idelta should work when start and end are outside window") {

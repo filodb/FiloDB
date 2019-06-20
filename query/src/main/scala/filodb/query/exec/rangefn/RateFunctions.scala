@@ -197,3 +197,26 @@ class ChunkedIncreaseFunction extends ChunkedRateFunctionBase {
   def isCounter: Boolean = true
   def isRate: Boolean    = false
 }
+
+class ChunkedDeltaFunction extends ChunkedRateFunctionBase {
+  def isCounter: Boolean = false
+  def isRate: Boolean    = false
+
+  // We have to override addTimeChunks as delta function does not care about corrections
+  override def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+                             startRowNum: Int, endRowNum: Int,
+                             startTime: Long, endTime: Long): Unit = {
+    val dblReader = reader.asDoubleReader
+    if (startTime < lowestTime || endTime > highestTime) {
+      numSamples += endRowNum - startRowNum + 1
+      if (startTime < lowestTime) {
+        lowestTime = startTime
+        lowestValue = dblReader(vector, startRowNum)
+      }
+      if (endTime > highestTime) {
+        highestTime = endTime
+        highestValue = dblReader(vector, endRowNum)
+      }
+    }
+  }
+}
