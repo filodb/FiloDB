@@ -106,7 +106,8 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
   val corr2 = resetChunk2(1)._2
 
-  it("should compute rate correctly when resets occur in middle of chunks") {
+  it("should compute rate correctly when drops occur in middle of chunks") {
+    // One drop in each chunk
     val rv = timeValueRV(resetChunk1)
     addChunkToRV(rv, resetChunk2)
 
@@ -120,6 +121,34 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, queryConfig)
     it.next.getDouble(1) shouldEqual expected +- errorOk
+
+    // Two drops in one chunk
+    val rv2 = timeValueRV(resetChunk1 ++ resetChunk2)
+    val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
+                                         new ChunkedRateFunction, queryConfig)
+    it2.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  it("should return NaN for rate when window only contains one sample") {
+    val startTs = 8101215L
+    val endTs =   8103215L
+
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1).isNaN shouldEqual true
+  }
+
+  it("should return rate of 0 when counter samples do not increase") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val flatSamples = counterSamples.map { case (t, v) => t -> counterSamples.head._2 }
+    val flatRV = timeValueRV(flatSamples)
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual 0.0
+
   }
 
   // Also ensures that chunked rate works across chunk boundaries
