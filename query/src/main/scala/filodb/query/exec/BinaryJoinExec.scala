@@ -31,6 +31,7 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * @param cardinality the cardinality of the join relationship as a hint
   * @param on fields from range vector keys to include while performing the join
   * @param ignoring fields from range vector keys to exclude while performing the join
+  * @param include labels specified in group_left/group_right to be included from one side
   */
 final case class BinaryJoinExec(id: String,
                                 dispatcher: PlanDispatcher,
@@ -119,6 +120,7 @@ final case class BinaryJoinExec(id: String,
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
                else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
     } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
+      // For group_left/group_right add labels in include from one side. Result should have all keys from many side
       include.foreach { x =>
           val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
           labelVal.foreach { v =>
