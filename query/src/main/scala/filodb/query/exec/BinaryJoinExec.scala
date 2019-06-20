@@ -125,7 +125,7 @@ final case class BinaryJoinExec(id: String,
             if (v.toString.equals(""))
               // If label value is empty do not propagate to result and
               // also delete from result
-             result -= Utf8Str(x)
+              result -= Utf8Str(x)
             else
               result += (Utf8Str(x) -> v)
           }
