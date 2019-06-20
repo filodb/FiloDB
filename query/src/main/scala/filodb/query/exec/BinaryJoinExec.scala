@@ -121,10 +121,6 @@ final case class BinaryJoinExec(id: String,
     // if (binaryOp.isInstanceOf[SetOperator])
     // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
     val resultKeySet = new mutable.HashSet[RangeVectorKey]()
-    // iterate across the the "other" side which could be one or many and perform the binary operation
-//    val results = //if (binaryOp.isInstanceOf[SetOperator]){}
-//    // else
-//    {
       otherSide.flatMap { rvOther =>
       val jk = joinKeys(rvOther.key)
       oneSideMap.get(jk).map { rvOne =>
@@ -167,6 +163,24 @@ final case class BinaryJoinExec(id: String,
       val jk = joinKeys(lhs.key)
       if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
         result += IteratorBackedRangeVector(lhs.key, lhs.rows)
+      }
+    }
+    result.toList
+  }
+
+  private def setOpOr(lhsRvs: List[SerializableRangeVector]
+                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+    val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
+    var result = new ListBuffer[IteratorBackedRangeVector]()
+    lhsRvs.foreach { rv =>
+      val jk = joinKeys(rv.key)
+      lhsKeysSet += jk
+      result += IteratorBackedRangeVector(rv.key, rv.rows)
+    }
+    rhsRvs.foreach { rhs =>
+      val jk = joinKeys(rhs.key)
+      if (!lhsKeysSet.contains(jk)) {
+        result += IteratorBackedRangeVector(rhs.key, rhs.rows)
       }
     }
     result.toList
