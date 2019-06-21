@@ -132,16 +132,9 @@ trait VectorDataReader extends AvailableReader {
  * CorrectionMeta stores the type-specific correction amount for counter vectors.
  * It is also used to propagate and accumulate corrections as one iterates through vectors.
  */
-trait CorrectionMeta {
-  def correction: Double
-}
+trait CorrectionMeta
 
-object NoCorrection extends CorrectionMeta {
-  def correction: Double = 0.0
-}
-
-// TODO: move to DoubleVector
-final case class DoubleCorrection(lastValue: Double, correction: Double = 0.0) extends CorrectionMeta
+object NoCorrection extends CorrectionMeta
 
 /**
  * Trait that extends VectorDataReaders with methods assisting counter-like vectors that may reset or need correction
