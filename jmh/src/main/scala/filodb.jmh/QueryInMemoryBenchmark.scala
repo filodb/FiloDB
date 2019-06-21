@@ -115,7 +115,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     sumRateQuery,
                     """quantile(0.75, heap_usage{_ns="App-2"})""",
                     sumQuery)
-  val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
+  val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>

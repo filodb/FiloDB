@@ -207,15 +207,15 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
   it("should calculate the rate of given samples matching the prometheus rate function") {
     val samples = Seq(
-      1548191486000L -> 84,
-      1548191496000L -> 152,
-      1548191506000L -> 195,
-      1548191516000L -> 222,
-      1548191526000L -> 245,
-      1548191536000L -> 251,
-      1548191546000L -> 329,
-      1548191556000L -> 374,
-      1548191566000L -> 431
+      1548191486000L -> 84d,
+      1548191496000L -> 152d,
+      1548191506000L -> 195d,
+      1548191516000L -> 222d,
+      1548191526000L -> 245d,
+      1548191536000L -> 251d,
+      1548191546000L -> 329d,
+      1548191556000L -> 374d,
+      1548191566000L -> 431d
     )
     val windowResults = Seq(
       1548191496000L -> 0.34,
@@ -225,11 +225,19 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1548191556000L -> 1.0357142857142858
     )
     val rawRows = samples.map(s => new TransientRow(s._1, s._2))
-    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L,300000,
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(Some(RangeFunctionId.Rate), ColumnType.DoubleColumn, useChunked = false).asSliding, queryConfig)
-    slidingWinIterator.foreach{ v =>
-      windowResults.find(a => a._1 == v.timestamp).foreach(b => Math.abs(b._2 - v.value) should be < 0.0000000001)
+    slidingWinIterator.foreach { v =>
+      windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
     }
+
+    val rv = timeValueRV(samples)
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191496000L, 15000, 1548191796000L, 300000,
+      RangeFunction(Some(RangeFunctionId.Rate), ColumnType.DoubleColumn, useChunked = true).asChunkedD, queryConfig)
+    chunkedIt.foreach { v =>
+      windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
+    }
+
   }
 
   it ("should calculate lastSample when ingested samples are more than 5 minutes apart") {

@@ -5,7 +5,7 @@ import scala.util.Random
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
-import filodb.core.memstore.{TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.core.{MachineMetricsData => MMD, MetricsTestData, TestData}
@@ -57,6 +57,16 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
     val tuples = data.zipWithIndex.map { case (d, t) => (startTS + t * pubFreq, d) }
     timeValueRV(tuples)
+  }
+
+  // Adds more Time-Value tuples to a RawRangeVector as a new chunk
+  def addChunkToRV(rv: RawDataRangeVector, tuples: Seq[(Long, Double)]): Unit = {
+    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
+    val startingNumChunks = part.numChunks
+    val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
+    readers.foreach { row => part.ingest(row, ingestBlockHolder) }
+    part.switchBuffers(ingestBlockHolder, encode = true)
+    part.numChunks shouldEqual (startingNumChunks + 1)
   }
 
   // Call this only after calling histogramRV
