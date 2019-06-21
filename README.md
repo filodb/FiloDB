@@ -154,7 +154,7 @@ Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
-./filodb-dev-start.sh -s
+./filodb-dev-start.sh
 ```
 
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
