@@ -83,7 +83,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -116,7 +116,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -156,7 +156,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag1"))
+      Nil, Seq("tag1"), Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -190,7 +190,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag1"))
+      Nil, Seq("tag1"), Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -213,7 +213,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag2"))
+      Nil, Seq("tag2"), Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -245,7 +245,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Seq("tag1", "job"), Nil)
+      Seq("tag1", "job"), Nil, Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))

@@ -31,6 +31,7 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * @param cardinality the cardinality of the join relationship as a hint
   * @param on fields from range vector keys to include while performing the join
   * @param ignoring fields from range vector keys to exclude while performing the join
+  * @param include labels specified in group_left/group_right to be included from one side
   */
 final case class BinaryJoinExec(id: String,
                                 dispatcher: PlanDispatcher,
@@ -39,11 +40,11 @@ final case class BinaryJoinExec(id: String,
                                 binaryOp: BinaryOperator,
                                 cardinality: Cardinality,
                                 on: Seq[String],
-                                ignoring: Seq[String]) extends NonLeafExecPlan {
+                                ignoring: Seq[String],
+                                include: Seq[String]) extends NonLeafExecPlan {
   require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
     "Many To Many cardinality is supported only for comparison binary operators")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(cardinality == Cardinality.OneToOne, "Currently only one-to-one cardinality is supported")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
@@ -118,8 +119,20 @@ final case class BinaryJoinExec(id: String,
     if (cardinality == Cardinality.OneToOne) {
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
                else result.filterNot(lv => ignoringLabels.contains(lv._1)) // remove the labels in ignoring label list
+    } else if (cardinality == Cardinality.OneToMany || cardinality == Cardinality.ManyToOne) {
+      // For group_left/group_right add labels in include from one side. Result should have all keys from many side
+      include.foreach { x =>
+          val labelVal = oneSideKey.labelValues.get(Utf8Str(x))
+          labelVal.foreach { v =>
+            if (v.toString.equals(""))
+              // If label value is empty do not propagate to result and
+              // also delete from result
+              result -= Utf8Str(x)
+            else
+              result += (Utf8Str(x) -> v)
+          }
+      }
     }
-    // TODO handle one-to-many case
     CustomRangeVectorKey(result)
   }
 
