@@ -2,15 +2,13 @@ package filodb.query.exec
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
-
 import monix.reactive.Observable
-
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.BinaryOperator.LAND
+import filodb.query.BinaryOperator.{LAND, LOR}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -73,7 +71,8 @@ final case class BinaryJoinExec(id: String,
 
       val results: List[IteratorBackedRangeVector] = binaryOp  match {
 
-        case LAND=> setOpAnd(lhsRvs, rhsRvs)
+        case LAND => setOpAnd(lhsRvs, rhsRvs)
+        case LOR => setOpOr(lhsRvs, rhsRvs)
         case _ => vectorBinary(lhsRvs, rhsRvs)
       }
 
@@ -172,11 +171,13 @@ final case class BinaryJoinExec(id: String,
                        , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
     val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
     var result = new ListBuffer[IteratorBackedRangeVector]()
+    // Add everything from left hand side range vector
     lhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       lhsKeysSet += jk
       result += IteratorBackedRangeVector(rv.key, rv.rows)
     }
+    // Add range vectors from right hand side which are not present on lhs
     rhsRvs.foreach { rhs =>
       val jk = joinKeys(rhs.key)
       if (!lhsKeysSet.contains(jk)) {

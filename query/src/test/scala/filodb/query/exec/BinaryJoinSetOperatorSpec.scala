@@ -139,19 +139,44 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
         new TransientRow(1L, 1)).iterator
     }
   )
+
+  val sampleVectorMatching: Array[RangeVector] = Array(
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"vector_matching_a".utf8,
+          "l".utf8 -> "x".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 100)).iterator
+    },
+    new RangeVector {
+      val key: RangeVectorKey = CustomRangeVectorKey(
+        Map("__name__".utf8 -> s"vector_matching_a".utf8,
+          "l".utf8 -> "y".utf8)
+      )
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 200)).iterator
+    }
+  )
   val sampleCanary = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
     toString.equals("canary"))
+  val sampleProduction = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
+    toString.equals("production"))
   val sampleInstance0 = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("instance")).get.
     toString.equals("0"))
+  val sampleInstance1 = sampleHttpRequests.filter(_.key.labelValues.get(ZeroCopyUTF8String("instance")).get.
+    toString.equals("1"))
   val sampleProductionInstance0 = sampleInstance0.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
     toString.equals("production"))
 
-  val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-    Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-    new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-    BinaryOperator.ADD,
-    Cardinality.ManyToMany,
-    Nil, Nil)
+//  val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+//    Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+//    new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+//    BinaryOperator.ADD,
+//    Cardinality.ManyToMany,
+//    Nil, Nil)
 
   val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, 1.0, false)
 
@@ -186,11 +211,9 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(300)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(700)
-
-    result.map(_.key).toSet.size
   }
 
   it("should join many-to-many with and between vector having scalar operation ") {
@@ -225,7 +248,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
 
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
@@ -266,7 +289,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
 
@@ -307,10 +330,9 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       ))
 
     result.size shouldEqual 2
-    result.map(_.key.labelValues) sameElements (expectedLabels)
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-
   }
 
   it("should do LAND with ignoring having one label") {
@@ -350,8 +372,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     result.map(_.key.labelValues) sameElements (expectedLabels)
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
     result(1).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-
-    result.map(_.key).toSet.size
   }
 
   it("should do LAND with ignoring having multiple labels") {
@@ -372,8 +392,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
-    //            result.map(_.key.labelValues).foreach(println(_))
-    //            val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
@@ -385,7 +403,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
       ))
-
 
     result.size shouldEqual 2
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
@@ -421,11 +438,9 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       ))
 
     result.size shouldEqual 8
-
-    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList)
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList) shouldEqual true
     sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
       sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
-
   }
 
   it("should return Lhs when LAND is done with vector having no labels and ignoring is used om Lhs labels") {
@@ -444,23 +459,250 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
+
+    result.size shouldEqual 8
+    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues)) shouldEqual true
+    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
+      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
+  }
+
+  it("should join many-to-many with or") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleProduction.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Nil, Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.size shouldEqual 8
+
+    // Result should equal sampleHttpRequests as it has only 2 groups - production & canary
+    result.flatMap(_.key.labelValues.values.toSet).sorted sameElements
+      (sampleHttpRequests.flatMap(_.key.labelValues.values.toSet)).sorted shouldEqual true
+    result.flatMap(_.key.labelValues.keySet).sorted sameElements
+      (sampleHttpRequests.flatMap(_.key.labelValues.keySet)).sorted shouldEqual true
+    (sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toSet)).toSet.diff(result.
+      flatMap(_.rows.map(_.getDouble(1)).toSet).toSet).isEmpty shouldEqual (true)
+  }
+
+  it("should drop overlapping samples from rhs when performing LOR ") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance1.toList)
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Nil, Nil)
+
+    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+      toListL.runAsync.futureValue
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
       ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
     ),
       Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
         ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
         ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ))
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("production")
+      )
 
-    result.size shouldEqual 8
+    )
 
-    result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList)
-    sampleHttpRequests.flatMap(_.rows.map(_.getDouble(1)).toList).
-      sameElements(result.flatMap(_.rows.map(_.getDouble(1)).toList)) shouldEqual true
+    result.size shouldEqual 6
+    //    result.map(_.key.labelValues).foreach(println(_))
+    //    val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
 
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
+    result(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
+    result(5).rows.map(_.getDouble(1)).toList shouldEqual List(600)
   }
 
+  it("should excludes everything that has instance=0/1 but includes entries without " +
+    "the instance label when performing LOR on instance") {
+
+    // Query (http_requests{group="canary"} + 1) or on(instance) (http_requests or vector_matching_a)
+    val execPlan1 = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Nil, Nil)
+
+    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+      toListL.runAsync.futureValue
+    // scalastyle:off
+    val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result1 = execPlan1.compose(dataset, Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val execPlan2 = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Seq("instance"), Nil)
+
+    // scalastyle:off
+    val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs2 = QueryResult("someId", null, result1.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result2 = execPlan2.compose(dataset, Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("x")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("y")
+      )
+    )
+
+    result2.size shouldEqual 6
+    result2.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
+    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(200)
+  }
+
+  it("should excludes everything that has instance=0/1 but includes entries without " +
+    "the instance label when performing LOR with ignoring on l, group and job") {
+
+    // Query (http_requests{group="canary"} + 1) or ignoring(l, group, job) (http_requests or vector_matching_a)
+    val execPlan1 = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Nil, Nil)
+
+    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+      toListL.runAsync.futureValue
+    // scalastyle:off
+    val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result1 = execPlan1.compose(dataset, Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val execPlan2 = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LOR,
+      Cardinality.ManyToMany,
+      Nil, Seq("l", "group", "job"))
+
+    // scalastyle:off
+    val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs2 = QueryResult("someId", null, result1.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result2 = execPlan2.compose(dataset, Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("x")
+      ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("vector_matching_a"),
+        ZeroCopyUTF8String("l") -> ZeroCopyUTF8String("y")
+      )
+    )
+
+    result2.size shouldEqual 6
+    result2.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+
+    result2(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
+    result2(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
+    result2(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
+    result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
+    result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(100)
+    result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(200)
+  }
 }
