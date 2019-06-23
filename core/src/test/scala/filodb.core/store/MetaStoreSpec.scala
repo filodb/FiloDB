@@ -24,46 +24,6 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   before { metaStore.clearAllData().futureValue }
 
-  describe("dataset API") {
-    it("should write a new Dataset if one doesn't exist") {
-      metaStore.newDataset(dataset).futureValue shouldEqual Success
-      metaStore.getDataset(dataset.ref).futureValue.copy(database=None) shouldEqual dataset
-    }
-
-    it("should return AlreadyExists if try to rewrite dataset with different data") {
-      val badDataset = dataset.copy(options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job")))
-      metaStore.newDataset(dataset).futureValue shouldEqual Success
-      metaStore.newDataset(badDataset).futureValue shouldEqual AlreadyExists
-      metaStore.getDataset(dataset.ref).futureValue.copy(database=None) shouldEqual dataset
-    }
-
-    it("should return NotFound if getDataset on nonexisting dataset") {
-      metaStore.getDataset(DatasetRef("notThere")).failed.futureValue shouldBe a[NotFoundError]
-    }
-
-    it("should return all datasets created") {
-      for { i <- 0 to 2 } {
-        val ds = dataset.copy(name = i.toString, database = Some((i % 2).toString))
-        metaStore.newDataset(ds).futureValue should equal (Success)
-      }
-
-      metaStore.getAllDatasets(Some("0")).futureValue.toSet should equal (
-        Set(DatasetRef("0", Some("0")), DatasetRef("2", Some("0"))))
-      metaStore.getAllDatasets(None).futureValue.toSet should equal (
-        Set(DatasetRef("0", Some("0")), DatasetRef("1", Some("1")), DatasetRef("2", Some("0"))))
-    }
-
-    it("deleteDatasets should delete dataset") {
-      val ds = dataset.copy(name = "gdelt")
-      metaStore.deleteDataset(ds.ref).futureValue should equal (NotFound)
-
-      metaStore.newDataset(ds).futureValue should equal (Success)
-
-      metaStore.deleteDataset(ds.ref).futureValue should equal (Success)
-      metaStore.getDataset(ds.ref).failed.futureValue shouldBe a [NotFoundError]
-    }
-  }
-
   describe("checkpoint api") {
     it("should allow reading and writing checkpoints for shard") {
       val ds = dataset.copy(name = "gdelt-" + UUID.randomUUID()) // Add uuid so tests can be rerun
@@ -113,28 +73,6 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                                                  min-num-nodes=10""")
     val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1, TestData.storeConf)
     val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1, TestData.storeConf)
-
-    it("should return Nil if no IngestionConfig persisted yet") {
-      metaStore.readIngestionConfigs().futureValue shouldEqual Nil
-    }
-
-    it("should write and read back IngestionConfigs") {
-      metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Seq(source1)
-
-      metaStore.writeIngestionConfig(source2).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf).toSet shouldEqual Set(source1, source2)
-    }
-
-    it("should be able to delete ingestion configs") {
-      metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual NotFound
-
-      metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Seq(source1)
-
-      metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Nil
-    }
 
     it("should be able to parse source config with no sourceFactory") {
       val sourceConf = """

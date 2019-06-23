@@ -11,7 +11,7 @@ import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.Dataset
-import filodb.core.store.{AssignShardConfig, StoreConfig}
+import filodb.core.store.{AssignShardConfig, IngestionConfig, StoreConfig}
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -377,23 +377,24 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     * Adds new dataset to cluster, thereby initiating new shard assignments to existing nodes
     * @return new assignments that were made. Empty if dataset already exists.
     */
-  def addDataset(setup: SetupDataset,
-                 dataset: Dataset,
-                 ackTo: ActorRef): Map[ActorRef, Seq[Int]] = {
-    logger.info(s"Initiated setup for dataset=${setup.ref}")
-    val answer: Map[ActorRef, Seq[Int]] = mapperOpt(setup.ref) match {
+  def addDataset(dataset: Dataset,
+                 ingestConfig: IngestionConfig,
+                 source: IngestionSource,
+                 ackTo: Option[ActorRef]): Map[ActorRef, Seq[Int]] = {
+    logger.info(s"Initiated setup for dataset=${dataset.ref}")
+    val answer: Map[ActorRef, Seq[Int]] = mapperOpt(dataset.ref) match {
       case Some(_) =>
-        logger.info(s"dataset=${setup.ref} already exists - skipping addDataset workflow")
-        ackTo ! DatasetExists(setup.ref)
+        logger.info(s"dataset=${dataset.ref} already exists - skipping addDataset workflow")
+        ackTo.foreach(_ ! DatasetExists(dataset.ref))
         Map.empty
       case None =>
-        val mapper = new ShardMapper(setup.resources.numShards)
+        val resources = DatasetResourceSpec(ingestConfig.numShards, ingestConfig.minNumNodes)
+        val mapper = new ShardMapper(resources.numShards)
         _shardMappers(dataset.ref) = mapper
         // Access the shardmapper through the HashMap so even if it gets replaced it will update the shard stats
-        val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
-        val resources = setup.resources
-        val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, setup.downsampleConfig, setup.storeConfig, dataset)
+        val metrics = new ShardHealthStats(dataset.ref, _shardMappers(dataset.ref))
+        val state = DatasetInfo(resources, metrics, source, ingestConfig.downsampleConfig,
+                                ingestConfig.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
@@ -402,11 +403,11 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Add dataset to subscribers and send initial ShardMapper snapshot
         _subscriptions :+= ShardSubscription(dataset.ref, Set.empty)
         _subscriptions.watchers foreach (subscribe(_, dataset.ref))
-        logger.info(s"Completed Setup for dataset=${setup.ref}")
-        ackTo ! DatasetVerified
+        logger.info(s"Completed Setup for dataset=${dataset.ref}")
+        ackTo.foreach(_ ! DatasetVerified)
         assignments
     }
-    publishChanges(setup.ref)
+    publishChanges(dataset.ref)
     answer
   }
 
@@ -538,12 +539,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   private def doAssignShards(dataset: DatasetRef,
                              coord: ActorRef,
                              shards: Seq[Int]): Unit = {
-    val state = _datasetInfo(dataset)
-    logger.info(s"Sending setup message for dataset=${state.dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString,
-      state.storeConfig, state.source, state.downsample)
-    coord ! setupMsg
-
     logger.info(s"Assigning shards for dataset=$dataset to " +
       s"coordinator $coord for shards $shards")
     for { shard <- shards }  {

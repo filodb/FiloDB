@@ -58,7 +58,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   val strategy = DefaultShardAssignmentStrategy
   protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
-
   val clusterActor = system.actorOf(Props(new Actor {
     import StatusActor._
     def receive: Receive = {
@@ -98,8 +97,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
     val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName, TestData.sourceConf)
-    val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
-    shardManager.addDataset(sd, dataset, self)
+    val sd = SetupDataset(dataset, resources, noOpSource, TestData.storeConf)
+    coordinatorActor ! sd
+    shardManager.addDataset(dataset, sd.config, sd.source, Some(self))
     shardManager.subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => } // for subscription
     for { i <- 0 until numShards } { // for each shard assignment
@@ -113,17 +113,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     keyValue.toSeq.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }
 
   describe("NodeCoordinatorActor DatasetOps commands") {
-    it("should be able to create new dataset") {
+    it("should be able to create new dataset (really for unit testing only)") {
       probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
-    }
-
-    it("should return DatasetAlreadyExists creating dataset that already exists") {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetCreated)
-
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetAlreadyExists)
     }
   }
 
@@ -143,14 +135,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       dataset1.ref
     }
 
-    ignore("should reach out to NodeGuardian if attempting to query before ingestion set up") {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetCreated)
-
+    it("should return UnknownDataset if attempting to query before ingestion set up") {
       val ref = MachineMetricsData.dataset1.ref
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")))
       probe.send(coordinatorActor, q1)
-      probe.expectMsgClass(classOf[NodeProtocol.ForwardMsg])
+      probe.expectMsg(UnknownDataset)
     }
 
     it("should return chunks when querying all samples after ingesting rows") {

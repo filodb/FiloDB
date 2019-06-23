@@ -113,20 +113,20 @@ object FiloBuild extends Build {
       cassandra, kafka, http, bootstrapper, gateway % Test)
     .configs(MultiJvm)
 
-  lazy val spark = project
-    .in(file("spark"))
-    .settings(name := "filodb-spark")
-    .settings(commonSettings: _*)
-    .settings(libraryDependencies ++= sparkDeps)
-    .settings(itSettings: _*)
-    .settings(jvmPerTestSettings: _*)
-    .settings(assemblyExcludeScala: _*)
-    // Disable tests for now since lots of work remaining to enable Spark
-    .settings(test := {})
-    .dependsOn(core % "compile->compile; test->test; it->test",
-      coordinator % "compile->compile; test->test",
-      cassandra % "compile->compile; test->test; it->test")
-    .configs( IntegrationTest )
+//  lazy val spark = project
+//    .in(file("spark"))
+//    .settings(name := "filodb-spark")
+//    .settings(commonSettings: _*)
+//    .settings(libraryDependencies ++= sparkDeps)
+//    .settings(itSettings: _*)
+//    .settings(jvmPerTestSettings: _*)
+//    .settings(assemblyExcludeScala: _*)
+//    // Disable tests for now since lots of work remaining to enable Spark
+//    .settings(test := {})
+//    .dependsOn(core % "compile->compile; test->test; it->test",
+//      coordinator % "compile->compile; test->test",
+//      cassandra % "compile->compile; test->test; it->test")
+//    .configs( IntegrationTest )
 
   lazy val jmh = project
     .in(file("jmh"))
@@ -135,15 +135,15 @@ object FiloBuild extends Build {
     .settings(libraryDependencies ++= jmhDeps)
     .settings(publish := {})
     .enablePlugins(JmhPlugin)
-    .dependsOn(core % "compile->compile; compile->test", spark, gateway)
+    .dependsOn(core % "compile->compile; compile->test", gateway)
 
-  lazy val stress = project
-    .in(file("stress"))
-    .settings(commonSettings: _*)
-    .settings(name := "filodb-stress")
-    .settings(libraryDependencies ++= stressDeps)
-    .settings(assemblyExcludeScala: _*)
-    .dependsOn(spark)
+//  lazy val stress = project
+//    .in(file("stress"))
+//    .settings(commonSettings: _*)
+//    .settings(name := "filodb-stress")
+//    .settings(libraryDependencies ++= stressDeps)
+//    .settings(assemblyExcludeScala: _*)
+//    .dependsOn(spark)
 
   lazy val gateway = project
     .in(file("gateway"))
@@ -315,25 +315,25 @@ object FiloBuild extends Build {
     scalaTest   % Test
   )
 
-  lazy val sparkDeps = Seq(
-    // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-    "org.apache.spark" %% "spark-hive"              % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-    "org.apache.spark" %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-    "org.apache.spark" %% "spark-streaming"         % sparkVersion % "provided",
-    scalaTest % "it"
-  )
+//  lazy val sparkDeps = Seq(
+//    // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
+//    "org.apache.spark" %% "spark-hive"              % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+//    "org.apache.spark" %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+//    "org.apache.spark" %% "spark-streaming"         % sparkVersion % "provided",
+//    scalaTest % "it"
+//  )
 
   lazy val jmhDeps = Seq(
     scalaxyDep,
     "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey)
   )
 
-  lazy val stressDeps = Seq(
-    "com.databricks"       %% "spark-csv"         % "1.3.0",
-    scalaxyDep,
-    "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK),
-    "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
-  )
+//  lazy val stressDeps = Seq(
+//    "com.databricks"       %% "spark-csv"         % "1.3.0",
+//    scalaxyDep,
+//    "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK),
+//    "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
+//  )
 }
 
 

@@ -2,7 +2,6 @@ package filodb.prometheus.parse
 
 import org.scalatest.{FunSpec, Matchers}
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.BinaryJoin
 
 //noinspection ScalaStyle
 // scalastyle:off

@@ -1,6 +1,7 @@
 package filodb.http
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
@@ -16,6 +17,8 @@ trait FiloRoute {
 class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
 
   val settings = new HttpSettings(actorSystem.settings.config)
+
+  private var binding: Http.ServerBinding = _
 
   /**
     * Starts the HTTP Server, blocks until it is up.
@@ -39,9 +42,14 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
     val bindingFuture = Http().bindAndHandle(finalRoute,
       settings.httpServerBindHost,
       settings.httpServerBindPort)
-    val bind = Await.result(bindingFuture,
+    binding = Await.result(bindingFuture,
       scala.concurrent.duration.Duration.fromNanos(settings.httpServerStartTimeout.toNanos))
-    logger.info("FiloDB HTTP server is live at http:/{}/", bind.localAddress)
+    logger.info("FiloDB HTTP server is live at http:/{}/", binding.localAddress)
+  }
+
+  def shutdown(hardDeadline: FiniteDuration): Future[Http.HttpTerminated] = {
+    logger.info("Shutting down HTTP server")
+    binding.terminate(hardDeadline)
   }
 }
 

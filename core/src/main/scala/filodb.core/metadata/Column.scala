@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
 
@@ -27,6 +28,11 @@ trait Column {
   // More type safe than just using ==, if we ever change the type of ColumnId
   // TODO(velvia): remove this and just use id
   def hasId(_id: ColumnId): Boolean = name == _id
+
+  def toStringNotation: String = {
+    val paramStrs = params.entrySet.asScala.map { e => s"${e.getKey}=${e.getValue.render}" }
+    s"$name:${columnType.typeName}:${paramStrs.mkString(":")}"
+  }
 }
 
 /**
@@ -36,7 +42,6 @@ case class DataColumn(id: Int,
                       name: String,
                       columnType: Column.ColumnType,
                       params: Config = ConfigFactory.empty) extends Column {
-  import collection.JavaConverters._
 
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.

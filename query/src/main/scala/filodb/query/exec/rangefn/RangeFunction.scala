@@ -2,7 +2,7 @@ package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.{QueryConfig, RangeFunctionId}
 import filodb.query.exec._
@@ -103,9 +103,59 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
                 startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit
 
   /**
+   * Return the computed result in sampleToEmit for the given window.
+   */
+  def apply(windowStart: Long, windowEnd: Long, sampleToEmit: R): Unit =
+    apply(windowEnd, sampleToEmit)
+
+  /**
    * Return the computed result in the sampleToEmit
+   * @param endTimestamp the ending timestamp of the current window
    */
   def apply(endTimestamp: Long, sampleToEmit: R): Unit
+}
+
+/**
+ * A ChunkedRangeFunction for Prom-style counters dealing with resets/corrections.
+ * The algorithm relies on logic in the chunks to detect corrections, and carries over correction
+ * values from chunk to chunk for correctness.  Data is assumed to be ordered.
+ * For more details see [doc/query_engine.md]
+ */
+trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
+  var correctionMeta: CorrectionMeta = NoCorrection
+
+  // reset is called before first chunk.  Reset correction metadata
+  override def reset(): Unit = { correctionMeta = NoCorrection }
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    val ccReader = valueReader.asInstanceOf[CounterVectorReader]
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // For each chunk:
+    // Check if any dropoff from end of last chunk to beg of this chunk (unless it's the first chunk)
+    // Compute the carryover (ie adjusted correction amount)
+    correctionMeta = ccReader.detectDropAndCorrection(valueVector, correctionMeta)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      addTimeChunks(valueVector, ccReader, startRowNum, endRowNum,
+                    tsReader(tsVector, startRowNum), tsReader(tsVector, endRowNum))
+    }
+
+    // Add any corrections from this chunk, pass on lastValue also to next chunk computation
+    correctionMeta = ccReader.updateCorrection(valueVector, startRowNum, correctionMeta)
+  }
+
+  /**
+   * Implements the logic for processing chunked data given row numbers and times for the
+   * start and end.
+   */
+  def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+                    startRowNum: Int, endRowNum: Int,
+                    startTime: Long, endTime: Long): Unit
 }
 
 /**
@@ -225,6 +275,9 @@ object RangeFunction {
   def doubleChunkedFunction(func: Option[RangeFunctionId],
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
+    case Some(Rate)           => () => new ChunkedRateFunction
+    case Some(Increase)       => () => new ChunkedIncreaseFunction
+    case Some(Delta)          => () => new ChunkedDeltaFunction
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD

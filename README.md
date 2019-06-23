@@ -144,21 +144,23 @@ Build the required projects
 sbt standalone/assembly cli/assembly gateway/assembly
 ```
 
-First set up the dataset. This should create the keyspaces and tables in Cassandra. 
+First initialize the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
-NOTE: if you have already gone through the procedure above, you may need to clear out the existing metadata: `./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command clearMetadata`, then repeat the steps above.  Otherwise you will not be in a clean state and may have stale schemas especially if the code has changed.
 
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
 ./filodb-dev-start.sh -s
 ```
+
+Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
+file refers to the following datasets that will be loaded on bootstrap:
+* `conf/timeseries-dev-source.conf`
+* `conf/timeseries-ds-1m-dev-source.conf`
 
 For queries to work properly you'll want to start a second server to serve all the shards:
 
@@ -325,16 +327,32 @@ The **partition key** differentiates time series and also controls distribution 
 
 The data points use a configurable schema consisting of multiple columns.  Each column definition consists of `name:columntype`, with optional parameters. For examples, see the examples below, or see the introductory walk-through above where two datasets are created.
 
+### Dataset Configuration
+
+THIS IS IMPORTANT TO READ AND UNDERSTAND.
+
+Datasets are setup and loaded into the server via configuration files referred to by application.conf loaded by the server.
+See `conf/timeseries-dev-source.conf` for an example. It is important to note that some aspects of the dataset,
+like its column definition are immutable. This is primarily because the data columns are used to populate persistent
+cassandra store. Once created, it should not be changed. If altered, it may render cassandra unreadable. 
+ 
+However, some aspects of the dataset which relate to runtime configuration are mutable. For example, amount of chunk
+and buffer memory allocated, flush interval etc. That said, these are advanced settings and one needs to know
+implications of the configuration before changing them. If a rolling bounce is being done, one needs to remember
+that part of the cluster could be with the old config and the rest could have new config applied.
+
 ### Prometheus FiloDB Schema for Operational Metrics
 
 * Partition key = `tags:map`
 * Row key = `timestamp`
-* Columns: `timestamp:ts,value:double`
+* Columns: `timestamp:ts,value:double:counter=true`
 
 The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
 
 Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
 
+NOTE: `counter=true` allows for proper and efficient rate calculation on Prometheus counters.
+ 
 ### Traditional, Multi-Column Schema
 
 Let's say that one had a metrics client, such as CodaHale metrics, which pre-aggregates percentiles and sends them along with the metric.  If we used the Prometheus schema, each percentile would wind up in its own time series.  This is fine, but incurs significant overhead as the partition key has to then be sent with each percentile over the wire.  Instead we can have a schema which includes all the percentiles together when sending the data:

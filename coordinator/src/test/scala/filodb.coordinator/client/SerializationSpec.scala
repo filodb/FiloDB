@@ -1,18 +1,16 @@
 package filodb.coordinator.client
 
-import scala.collection.mutable.Set
-
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
+import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryengine2.QueryEngine
-import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
+import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.store._
+import filodb.core.store.IngestionConfig
 import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -33,9 +31,7 @@ object SerializationSpecConfig extends ActorSpecConfig {
  * You probably want to play around with config in filodb-defaults.conf
  */
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
-  import IngestionCommands._
   import NamesTestData._
-  import NodeClusterActor._
   import QueryCommands._
 
   val serialization = SerializationExtension(system)
@@ -43,14 +39,6 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   private def roundTrip(thing: AnyRef): AnyRef = {
     val serializer = serialization.findSerializerFor(thing)
     serializer.fromBinary(serializer.toBinary(thing))
-  }
-
-  it("should be able to serialize different IngestionCommands messages") {
-    val setupMsg = DatasetSetup(dataset.asCompactString, TestData.storeConf)
-    Seq(setupMsg,
-        IngestionCommands.UnknownDataset,
-        BadSchema("no match foo blah"),
-        Ack(123L)).foreach { thing => roundTrip(thing) shouldEqual thing }
   }
 
   it("should be able to serialize IngestionConfig, SetupDataset, DatasetResourceSpec, IngestionSource") {
@@ -85,7 +73,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                   """.stripMargin
 
     val source3 = """
-                    |dataset = "a.b.c"
+                    |dataset = "a.b"
                     |num-shards = 32
                     |min-num-nodes = 10
                     |sourceconfig {
@@ -108,10 +96,10 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                     |}
                   """.stripMargin
 
-    val command1 = SetupDataset(IngestionConfig(source1, "a.backup").get)
-    val command2 = SetupDataset(IngestionConfig(source2, "a.backup").get)
-    val command3 = SetupDataset(IngestionConfig(source2, "a.backup").get)
-    val command4 = SetupDataset(IngestionConfig(source4, "a.backup").get)
+    val command1 = IngestionConfig(source1, "a.backup").get
+    val command2 = IngestionConfig(source2, "a.backup").get
+    val command3 = IngestionConfig(source3, "a.backup").get
+    val command4 = IngestionConfig(source4, "a.backup").get
     Set(command1, command2, command3, command4) forall(cmd => roundTrip(cmd) === cmd) shouldEqual true
   }
 

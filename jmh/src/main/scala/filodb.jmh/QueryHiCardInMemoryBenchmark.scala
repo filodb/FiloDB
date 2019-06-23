@@ -62,7 +62,6 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   }
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
-  Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
@@ -71,8 +70,9 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
-  val command = SetupDataset(dataset.ref, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
+  coordinator ! command
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -108,7 +108,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
 
 
   private def toExecPlan(query: String): ExecPlan = {
-    val queryStartTime = ingestionStartTime + 5.minutes.toMillis  // 5 minutes from start until 60 minutes from start
+    val queryStartTime = ingestionStartTime + 7.minutes.toMillis  // 7 minutes from start until 60 minutes from start
     val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
     val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams),
       QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000))
@@ -137,7 +137,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
-  @OperationsPerInvocation(500)
+  @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
       Await.result(scanSumSumOverTime.execute(store, dataset, queryConfig).runAsync, 60.seconds)
