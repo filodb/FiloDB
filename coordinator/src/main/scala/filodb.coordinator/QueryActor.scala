@@ -121,7 +121,8 @@ final class QueryActor(memStore: MemStore,
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
-        logger.error(s"Exception while materializing logical plan", ex)
+        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+          logger.error(s"Exception while materializing logical plan", ex)
         replyTo ! QueryError("unknown", ex)
     }
   }
@@ -132,7 +133,8 @@ final class QueryActor(memStore: MemStore,
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>
-        logger.error(s"Exception while materializing logical plan", ex)
+        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+          logger.error(s"Exception while materializing logical plan", ex)
         replyTo ! QueryError("unknown", ex)
     }
   }

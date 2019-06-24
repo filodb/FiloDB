@@ -128,6 +128,47 @@ trait VectorDataReader extends AvailableReader {
   def asHistReader: vectors.HistogramReader = this.asInstanceOf[vectors.HistogramReader]
 }
 
+/**
+ * CorrectionMeta stores the type-specific correction amount for counter vectors.
+ * It is also used to propagate and accumulate corrections as one iterates through vectors.
+ */
+trait CorrectionMeta {
+  def correction: Double
+}
+
+object NoCorrection extends CorrectionMeta {
+  def correction: Double = 0.0
+}
+
+// TODO: move to DoubleVector
+final case class DoubleCorrection(lastValue: Double, correction: Double = 0.0) extends CorrectionMeta
+
+/**
+ * Trait that extends VectorDataReaders with methods assisting counter-like vectors that may reset or need correction
+ */
+trait CounterVectorReader extends VectorDataReader {
+  /**
+   * Detects if there is a drop/reset from end of last chunk to the first value of this chunk.
+   * Returns a new CorrectionMeta with a new correction value, which should be equal to the old value
+   * plus any detected drop.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param meta CorrectionMeta obtained from updateCorrection()
+   * @return a new CorrectionMeta with adjusted correction value if needed
+   */
+  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+
+  /**
+   * Updates the CorrectionMeta from this vector from startElement to the end,
+   * namely the total correction over that period plus the last value of the vector.
+   * Returns a new CorrectionMeta which has lastValue plus the total running correction including prev correction.
+   * IE this method should upward adjust the correction in meta based on any new corrections detected in this chunk.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param startElement the starting element # to seek out correction metadata
+   * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
+   */
+  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta
+}
+
 // An efficient iterator for the bitmap mask, rotating a mask as we go
 class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
   var bitmapAddr: Long = vector + 12 + (startElement >> 6) * 8
@@ -440,6 +481,7 @@ object PrimitiveVector {
 
   val NBitsMask = 0x07f
   val SignMask  = 0x080
+  val DropMask = 0x08000
 }
 
 object PrimitiveVectorReader {
@@ -448,6 +490,11 @@ object PrimitiveVectorReader {
   final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
   final def signed(vector: BinaryVectorPtr): Boolean =
     (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
+  final def dropped(vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getShort(vector + OffsetNBits) & DropMask) != 0
+
+  final def markDrop(vector: BinaryVectorPtr): Unit =
+    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | DropMask).toShort)
 }
 
 /**
@@ -456,9 +503,10 @@ object PrimitiveVectorReader {
  * +0000 length word
  * +0004 WireFormat(16 bits)
  * +0006 nbits/signed:
- *    xxBBBBBBSNNNNNNN  bits 0-6:  nbits
+ *    RxBBBBBBSNNNNNNN  bits 0-6:  nbits
  *                      bits 7:    signed 0 or 1
  *                      bits 8-13: bitshift
+ *                      bit  15:   1=reset/drop within chunk
  */
 abstract class PrimitiveAppendableVector[@specialized(Int, Long, Double, Boolean) A]
   (val addr: BinaryRegion.NativePointer, val maxBytes: Int, val nbits: Short, signed: Boolean)

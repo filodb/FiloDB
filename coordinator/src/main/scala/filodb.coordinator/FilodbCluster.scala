@@ -36,13 +36,14 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
 /**
   * Coordinator Extension Id and factory for creating a basic Coordinator extension.
   */
-final class FilodbCluster(val system: ExtendedActorSystem) extends Extension with StrictLogging {
+final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Config = ConfigFactory.empty())
+  extends Extension with StrictLogging {
 
   import ActorName.{NodeGuardianName => guardianName}
   import NodeProtocol._
   import akka.pattern.ask
 
-  val settings = new FilodbSettings(system.settings.config)
+  val settings = new FilodbSettings(ConfigFactory.load(overrideConfig).withFallback(system.settings.config))
   import settings._
 
   implicit lazy val timeout: Timeout = DefaultTaskTimeout

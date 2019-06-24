@@ -4,11 +4,12 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import org.scalatest.{BeforeAndAfterEach, Ignore}
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
 object IngestionStreamSpec extends ActorSpecConfig
@@ -17,7 +18,7 @@ object IngestionStreamSpec extends ActorSpecConfig
 // Most of the tests use the automated DatasetSetup where the coordinators set up the IngestionStream, but
 // some set them up manually by invoking the factories directly.
 // TODO disabled since this test is flaky in Travis.
-@Ignore
+@org.scalatest.Ignore
 class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) with StrictLogging
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -56,8 +57,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     memStore.reset()
     // Make sure checkpoints are reset
     metaStore.clearAllData().futureValue
-    metaStore.newDataset(dataset6).futureValue shouldEqual Success
-    metaStore.newDataset(dataset33).futureValue shouldEqual Success
     coordinatorActor ! NodeProtocol.ResetState
     expectMsg(NodeProtocol.StateReset)
     clusterActor ! NodeProtocol.ResetState
@@ -65,7 +64,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     Thread sleep 2000
   }
 
-  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
+  def setup(dataset: Dataset, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
@@ -79,24 +78,26 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     val storeConf = StoreConfig(config.getConfig("store"))
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
-    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
+    val command = SetupDataset(dataset, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
     clusterActor ! command
     expectMsg(within, DatasetVerified)
 
-    clusterActor ! SubscribeShardUpdates(command.ref)
+    clusterActor ! SubscribeShardUpdates(command.dataset.ref)
     expectMsgPF(within) {
       case CurrentShardSnapshot(ds, mapper) =>
         shardMap = mapper
         shardMap.numShards shouldEqual command.resources.numShards
         mapper.statuses.head shouldEqual ShardStatusAssigned
     }
+
+    coordinatorActor ! command
   }
 
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
   // happens until the IngestionActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
-    setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
 
     var latestStatus: ShardStatus = ShardStatusAssigned
     // sometimes we receive multiple status snapshots
@@ -116,7 +117,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
   it("should not start ingestion, raise a IngestionError vs IngestionStopped, " +
     "if incorrect shard is sent for the creation of the stream") {
-    setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
     expectMsgPF(within) {
@@ -137,7 +138,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
     // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
-    setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
     expectMsgPF(within) {
@@ -177,7 +178,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.writeCheckpoint(dataset33.ref, 0, 2, 3L).futureValue shouldEqual Success
     metaStore.writeCheckpoint(dataset33.ref, 0, 3, 4L).futureValue shouldEqual Success
 
-    setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 0))
 

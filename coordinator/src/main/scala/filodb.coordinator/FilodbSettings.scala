@@ -44,6 +44,8 @@ final class FilodbSettings(val conf: Config) {
   /** The timeout to use to resolve an actor ref for new nodes. */
   val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
 
+  val datasets = config.as[Seq[String]]("dataset-configs")
+
 }
 
 /** Consistent naming: allows other actors to accurately filter

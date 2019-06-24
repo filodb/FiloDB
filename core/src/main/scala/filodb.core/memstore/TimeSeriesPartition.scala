@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.Types._
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
 import filodb.memory.data.ChunkMap
@@ -203,6 +203,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
       shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
+      if (dataset.dataColumns(i).columnType == Column.ColumnType.HistogramColumn)
+        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
       optimized
     }
     shardStats.numSamplesEncoded.increment(info.numRows)
@@ -397,6 +399,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
   def shutdown(): Unit = {
     chunkmapFree()
+  }
+
+  override protected def finalize(): Unit = {
+    memFactory.freeMemory(partKeyOffset)
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }

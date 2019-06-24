@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core._
@@ -9,6 +10,37 @@ class DatasetSpec extends FunSpec with Matchers {
   import Column.ColumnType._
   import Dataset._
   import NamesTestData._
+
+  describe("Dataset creation") {
+    it("should load/write dataset from/to config") {
+      val config = ConfigFactory.parseString(
+        """
+          |    dataset = "prometheus"
+          |
+          |    definition {
+          |      partition-columns = ["tags:map"]
+          |      data-columns = ["timestamp:ts", "value:double"]
+          |      row-key-columns = [ "timestamp" ]
+          |      downsamplers = [ "tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)"]
+          |    }
+          |
+          |    options {
+          |      shardKeyColumns = [ "__name__", "_ns" ]
+          |      ignoreShardKeyColumnSuffixes = { "__name__" = ["_bucket", "_count", "_sum"] }
+          |      valueColumn = "value"
+          |      metricColumn = "__name__"
+          |      ignoreTagsOnPartitionKeyHash = [ "le" ]
+          |      copyTags = { }
+          |    }
+        """.stripMargin)
+      val dataset = Dataset.fromConfig(config)
+
+      val config2 = dataset.toConfig
+      val dataset2 = Dataset.fromConfig(config2)
+
+      dataset shouldEqual dataset2
+    }
+  }
 
   describe("Dataset validation") {
     it("should return NotNameColonType if column specifiers not name:type format") {
@@ -167,19 +199,6 @@ class DatasetSpec extends FunSpec with Matchers {
       val options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job", "__name__"))
       options.nonMetricShardColumns shouldEqual Seq("job")
       options.nonMetricShardKeyBytes.size shouldEqual 1
-    }
-  }
-
-  describe("Dataset serialization") {
-    it("should serialize and deserialize") {
-      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, Seq("age"), Seq("dMin(1)"),
-        DatasetOptions.DefaultOptions)
-                 .copy(options = DatasetOptions.DefaultOptions.copy(
-                   copyTags = Map("exporter" -> "_ns")))
-      Dataset.fromCompactString(ds.asCompactString) shouldEqual ds
-
-      val ds2 = ds.copy(options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("metric")))
-      Dataset.fromCompactString(ds2.asCompactString) shouldEqual ds2
     }
   }
 

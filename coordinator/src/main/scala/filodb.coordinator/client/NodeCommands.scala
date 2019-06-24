@@ -1,11 +1,8 @@
 package filodb.coordinator.client
 
 import filodb.core._
-import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
-import filodb.core.store.StoreConfig
-
 
 // NOTE: need to inherit java.io.Serializable to ensure Kryo will serialize subclasses
 trait QueryResponse extends NodeResponse with java.io.Serializable
@@ -39,27 +36,6 @@ object MiscCommands {
 }
 
 object IngestionCommands {
-  import filodb.coordinator.NodeClusterActor._
-
-  /**
-   * Sets up ingestion and querying for a given dataset and version.
-   * The dataset and columns must have been previously defined.
-   * Internally sets up IngestionActors and QueryActors and starts the ingestion stream.
-   * It is the IngestionStream's job to translate incoming schema to the Dataset's dataColumns schema.
-   * NOTE: this is not meant for external APIs but an internal one.  It is sent by the NodeClusterActor
-   * after verifying the dataset.
-   *
-   * @param compactDatasetStr Dataset.asCompactString serialized representation of dataset
-   * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
-   *               manually push records into NodeCoordinator.
-   * @return no response. Instead the ClusterActor will get an update to the node status when ingestion
-   *                      and querying are ready.
-   */
-  private[coordinator] final case class DatasetSetup(compactDatasetStr: String,
-                                                     storeConfig: StoreConfig,
-                                                     source: IngestionSource = noOpSource,
-                                                     downsampleConfig: DownsampleConfig = DownsampleConfig.disabled)
-              extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.
