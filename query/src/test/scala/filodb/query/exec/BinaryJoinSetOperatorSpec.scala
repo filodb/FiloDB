@@ -181,7 +181,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, 1.0, false)
 
 
-  it("should join many-to-many with and ") {
+  it("should join many-to-many with and") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
@@ -257,7 +257,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should do LAND with on having multiple labels") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
-    //scala.util.Random.shuffle(sampleHttpRequests.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan),
@@ -274,8 +273,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
-    //        result.map(_.key.labelValues).foreach(println(_))
-    //        val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
@@ -298,7 +295,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should do LAND with on having one matching label") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
-    //scala.util.Random.shuffle(sampleHttpRequests.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan),
@@ -315,8 +311,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
-    //        result.map(_.key.labelValues).foreach(println(_))
-    //        val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
@@ -354,8 +348,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
-    //            result.map(_.key.labelValues).foreach(println(_))
-    //            val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
@@ -426,16 +418,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     // scalastyle:on
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
-    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
-      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-    ),
-      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
-        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
-        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
-        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
-      ))
 
     result.size shouldEqual 8
     result.map(_.key.labelValues) sameElements (sampleHttpRequests.map(_.key.labelValues).toList) shouldEqual true
@@ -548,8 +530,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     )
 
     result.size shouldEqual 6
-    //    result.map(_.key.labelValues).foreach(println(_))
-    //    val s = result.flatMap(_.rows.map(_.getDouble(1))).foreach(println(_))
     result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
 
     result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
@@ -704,5 +684,177 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     result2(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
     result2(4).rows.map(_.getDouble(1)).toList shouldEqual List(100)
     result2(5).rows.map(_.getDouble(1)).toList shouldEqual List(200)
+  }
+
+  it("should join many-to-many with unless") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LUnless,
+      Cardinality.ManyToMany,
+      Nil, Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    result.size shouldEqual 2
+
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+  }
+
+  it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LUnless,
+      Cardinality.ManyToMany,
+      Seq("job"), Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    // group=canary and instance=0 have same jobs. We are joining on Job so no result
+    result.size shouldEqual 0
+  }
+
+  it("LUnless should return lhs samples which are not present in rhs and where on labels are not equal") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LUnless,
+      Cardinality.ManyToMany,
+      Seq("job", "instance"), Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    result.size shouldEqual 2
+
+    // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
+  }
+
+  it("should not return any results when rhs has same vector on joining without ignoring labels with LUnless") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LUnless,
+      Cardinality.ManyToMany,
+      Seq("job"), Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    // group=canary and instance=0 have same jobs. We are joining on Job so no result
+    result.size shouldEqual 0
+  }
+
+  it("LUnless should return lhs samples which are not present in rhs and where labels other than " +
+    "ignoring labels are not equal") {
+
+    val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),
+      new Array[ExecPlan](1),
+      BinaryOperator.LUnless,
+      Cardinality.ManyToMany,
+      Seq("job", "instance"), Nil)
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+      .toListL.runAsync.futureValue
+
+    val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+      ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
+      ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+      ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+    ),
+      Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
+        ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("app-server"),
+        ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("1"),
+        ZeroCopyUTF8String("group") -> ZeroCopyUTF8String("canary")
+      ))
+
+    result.size shouldEqual 2
+
+    // Joining on job and instance both so vectors which have instance = 1 will come in result as instance=0 is in LHS
+    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(400)
+    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(800)
   }
 }

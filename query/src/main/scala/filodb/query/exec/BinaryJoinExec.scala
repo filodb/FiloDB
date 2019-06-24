@@ -8,7 +8,7 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.BinaryOperator.{LAND, LOR}
+import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -70,13 +70,12 @@ final case class BinaryJoinExec(id: String,
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
       val results: List[IteratorBackedRangeVector] = binaryOp  match {
-
         case LAND => setOpAnd(lhsRvs, rhsRvs)
         case LOR => setOpOr(lhsRvs, rhsRvs)
+        case LUnless => setOpUnless(lhsRvs, rhsRvs)
         case _ => vectorBinary(lhsRvs, rhsRvs)
       }
 
-      //results
       Observable.fromIterable(results)
     }
     Observable.fromTask(taskOfResults).flatten
@@ -117,7 +116,6 @@ final case class BinaryJoinExec(id: String,
       oneSideMap.put(joinKeys(rv.key), rv)
     }
 
-    // if (binaryOp.isInstanceOf[SetOperator])
     // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
     val resultKeySet = new mutable.HashSet[RangeVectorKey]()
       otherSide.flatMap { rvOther =>
@@ -132,7 +130,6 @@ final case class BinaryJoinExec(id: String,
         IteratorBackedRangeVector(resKey, res)
       }
     }
-   // }
   }
 
   private def binOp(lhsRows: Iterator[RowReader], rhsRows: Iterator[RowReader]): Iterator[RowReader] = {
@@ -158,8 +155,11 @@ final case class BinaryJoinExec(id: String,
       if (!jk.isEmpty)
         rhsKeysSet += jk
     }
+
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
+      // Add range vectors from lhs which are present in lhs and rhs both
+      // Result should also have range vectors for which rhs does not have any keys
       if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
         result += IteratorBackedRangeVector(lhs.key, lhs.rows)
       }
@@ -182,6 +182,24 @@ final case class BinaryJoinExec(id: String,
       val jk = joinKeys(rhs.key)
       if (!lhsKeysSet.contains(jk)) {
         result += IteratorBackedRangeVector(rhs.key, rhs.rows)
+      }
+    }
+    result.toList
+  }
+
+  private def setOpUnless(lhsRvs: List[SerializableRangeVector]
+                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
+    var result = new ListBuffer[IteratorBackedRangeVector]()
+    rhsRvs.foreach { rv =>
+      val jk = joinKeys(rv.key)
+      rhsKeysSet += jk
+    }
+    // Add range vectors which are not present in rhs
+    lhsRvs.foreach { lhs =>
+      val jk = joinKeys(lhs.key)
+      if (!rhsKeysSet.contains(jk)) {
+        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
       }
     }
     result.toList
