@@ -7,7 +7,6 @@ function showHelp {
         echo "   -h help"
         echo "   -c takes server config path as argument"
         echo "   -l takes log file suffix as argument"
-        echo "   -s enables setting up dataset after server start"
         echo "   -p selects a randomly available akka tcp and http port"
 }
 
@@ -41,12 +40,3 @@ fi
 
 echo "Starting FiloDB standalone server..."
 java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer  &
-
-if [ "$SETUP_DATASET" = "YES" ]; then
-    echo "Waiting 20s so server can come up ..."
-    sleep 20
-
-    echo "Configuring the timeseries dataset..."
-    ./filo-cli -Dakka.remote.netty.tcp.hostname=127.0.0.1 --host 127.0.0.1 --dataset prometheus --command setup --filename conf/timeseries-dev-source.conf
-    ./filo-cli -Dakka.remote.netty.tcp.hostname=127.0.0.1 --host 127.0.0.1 --dataset prometheus_ds_1m --command setup --filename conf/timeseries-ds-1m-dev-source.conf
-fi

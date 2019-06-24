@@ -1,1 +1,1 @@
--Dmultijvm.node=sing-fail-node2 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=logback-multijvm-test.xml -Dkamon.prometheus.embedded-server.port=0
+-Dmultijvm.node=sing-fail-node2 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf  -Dfilodb.dataset-configs.0=conf/timeseries-standalonetest-source.conf -Dlogback.configurationFile=logback-multijvm-test.xml -Dkamon.prometheus.embedded-server.port=0

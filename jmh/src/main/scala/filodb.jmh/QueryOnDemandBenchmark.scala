@@ -67,7 +67,6 @@ class QueryOnDemandBenchmark extends StrictLogging {
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
   Await.result(cluster.metaStore.clearAllData(), 5.seconds)  // to clear IngestionConfig
-  Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
   Await.result(cluster.memStore.store.initialize(dataset.ref), 5.seconds)
   Await.result(cluster.memStore.store.truncate(dataset.ref), 5.seconds)
 
@@ -86,8 +85,9 @@ class QueryOnDemandBenchmark extends StrictLogging {
                   | multi-partition-odp = false
                   | demand-paging-parallelism = 4
                   """.stripMargin))
-  val command = SetupDataset(dataset.ref, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
+  coordinator ! command
 
   import monix.execution.Scheduler.Implicits.global
 

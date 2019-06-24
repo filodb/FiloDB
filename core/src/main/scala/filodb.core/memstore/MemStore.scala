@@ -4,6 +4,7 @@ import scala.concurrent.Future
 
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
@@ -221,7 +222,8 @@ object MemStore {
         // to save memory and CPU
         case IntColumn       => bv.IntBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
-        case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
+        case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements,
+                                  counter = col.params.as[Option[Boolean]]("counter").getOrElse(false))
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
         case HistogramColumn => bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)

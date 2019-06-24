@@ -64,7 +64,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   }
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
-  Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
@@ -73,8 +72,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
-  val command = SetupDataset(dataset.ref, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
+  val command = SetupDataset(dataset, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
+  coordinator ! command
 
   import monix.execution.Scheduler.Implicits.global
 
@@ -115,7 +115,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     sumRateQuery,
                     """quantile(0.75, heap_usage{_ns="App-2"})""",
                     sumQuery)
-  val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
+  val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>

@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, QueryOptions, SpreadChange}
+import filodb.coordinator.client.QueryCommands._
 import filodb.core.MetricsTestData
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.prometheus.ast.TimeStepParams
@@ -15,16 +15,10 @@ import filodb.query.exec._
 class QueryEngineSpec extends FunSpec with Matchers {
 
   implicit val system = ActorSystem()
-  val node0 = TestProbe().ref
-  val node1 = TestProbe().ref
-  val node2 = TestProbe().ref
-  val node3 = TestProbe().ref
+  val node = TestProbe().ref
 
-  val mapper = new ShardMapper(4)
-  mapper.registerNode(Seq(0), node0)
-  mapper.registerNode(Seq(1), node1)
-  mapper.registerNode(Seq(2), node2)
-  mapper.registerNode(Seq(3), node3)
+  val mapper = new ShardMapper(32)
+  for { i <- 0 until 32 } mapper.registerNode(Seq(i), node)
 
   private def mapperRef = mapper
 
@@ -90,13 +84,36 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
     execPlan.children.foreach { l1 =>
+      // Now there should be single level of reduce because we have 2 shards
       l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
-        val l3 = l2.asInstanceOf[ExecPlan]
-        l3.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-        l3.rangeVectorTransformers.size shouldEqual 2
-        l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l2.rangeVectorTransformers.size shouldEqual 2
+        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+      }
+    }
+  }
+
+  it ("should parallelize aggregation") {
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan,
+      QueryOptions(), spreadProvider = StaticSpreadProvider(SpreadChange(0, 4)))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+
+    // Now there should be multiple levels of reduce because we have 16 shards
+    execPlan.children.foreach { l1 =>
+      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.children.foreach { l2 =>
+        l2.isInstanceOf[ReduceAggregateExec] shouldEqual true
+        l2.children.foreach { l3 =>
+          l3.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+          l3.rangeVectorTransformers.size shouldEqual 2
+          l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+          l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+        }
       }
     }
   }

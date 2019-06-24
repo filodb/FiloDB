@@ -55,8 +55,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
 }
 
-final class TransientHistRow(var timestamp: Long = 0L,
-                             var value: bv.HistogramWithBuckets = bv.Histogram.empty) extends MutableRowReader {
+class TransientHistRow(var timestamp: Long = 0L,
+                       var value: bv.HistogramWithBuckets = bv.Histogram.empty) extends MutableRowReader {
   def setValues(ts: Long, hist: bv.HistogramWithBuckets): Unit = {
     timestamp = ts
     value = hist
@@ -85,6 +85,14 @@ final class TransientHistRow(var timestamp: Long = 0L,
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 
   override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
+}
+
+// 0: Timestamp, 1: Histogram, 2: Max/Double
+final class TransientHistMaxRow(var max: Double = 0.0) extends TransientHistRow() {
+  override def setDouble(columnNo: Int, valu: Double): Unit =
+    if (columnNo == 2) max = valu else throw new IllegalArgumentException()
+  override def getDouble(columnNo: Int): Double =
+    if (columnNo == 2) max else throw new IllegalArgumentException()
 }
 
 final class AvgAggTransientRow extends MutableRowReader {

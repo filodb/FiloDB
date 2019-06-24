@@ -2,18 +2,11 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
-import com.typesafe.config.ConfigFactory
-import org.scalatest.{FunSpec, Matchers}
-
-import filodb.query.QueryConfig
-import filodb.query.exec.{QueueBasedWindow, TransientRow}
+import filodb.query.exec.{ChunkedWindowIteratorD, QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
-class RateFunctionsSpec extends FunSpec with Matchers {
-
+class RateFunctionsSpec extends RawDataWindowingSpec {
   val rand = new Random()
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val counterSamples = Seq(  8072000L->4419.00,
                       8082100L->4511.00,
@@ -24,7 +17,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
                       8132570L->5000.00,
                       8142822L->5095.00,
                       8152858L->5102.00,
-                      8163000L->5201.00)
+                      8162999L->5201.00)
 
   val q = new IndexedArrayQueue[TransientRow]()
   counterSamples.foreach { case (t, v) =>
@@ -32,6 +25,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     q.add(s)
   }
   val counterWindow = new QueueBasedWindow(q)
+  val counterRV = timeValueRV(counterSamples)
 
   val gaugeSamples = Seq(   8072000L->7419.00,
                             8082100L->5511.00,
@@ -42,7 +36,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
                             8132570L->5000.00,
                             8142822L->3095.00,
                             8152858L->5102.00,
-                            8163000L->8201.00)
+                            8162999L->8201.00)
 
   val q2 = new IndexedArrayQueue[TransientRow]()
   gaugeSamples.foreach { case (t, v) =>
@@ -56,13 +50,138 @@ class RateFunctionsSpec extends FunSpec with Matchers {
   // Basic test cases covered
   // TODO Extrapolation special cases not done
 
-  it ("rate should work when start and end are outside window") {
+  it("rate should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * 1000
     val toEmit = new TransientRow
     RateFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  it("should compute rate correctly when reset occurs at chunk boundaries") {
+    val chunk2Data = Seq(8173000L->325.00,
+                         8183000L->511.00,
+                         8193000L->614.00,
+                         8203000L->724.00,
+                         8213000L->909.00)
+    val rv = timeValueRV(counterSamples)
+
+    // Add data and chunkify chunk2Data
+    addChunkToRV(rv, chunk2Data)
+
+    val startTs = 8071950L
+    val endTs =   8213070L
+    val correction = q.last.value
+    val expected = (chunk2Data.last._2 + correction - q.head.value) / (chunk2Data.last._1 - q.head.timestamp) * 1000
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  val resetChunk1 = Seq(8072000L->4419.00,
+                        8082100L->4511.00,
+                        8092196L->4614.00,
+                        8102215L->4724.00,
+                        8112223L->4909.00,
+                        8122388L->948.00,
+                        8132570L->1000.00,
+                        8142822L->1095.00,
+                        8152858L->1102.00,
+                        8162999L->1201.00)
+  val correction1 = resetChunk1(4)._2
+
+  val resetChunk2 = Seq(8173000L->1325.00,
+                        8183000L->1511.00,
+                        8193000L->214.00,
+                        8203000L->324.00,
+                        8213000L->409.00)
+
+  val corr2 = resetChunk2(1)._2
+
+  it("should compute rate correctly when drops occur in middle of chunks") {
+    // One drop in each chunk
+    val rv = timeValueRV(resetChunk1)
+    addChunkToRV(rv, resetChunk2)
+
+    val startTs = 8071950L
+    val endTs =   8213070L
+    val corrections = correction1 + corr2
+    val expected = (resetChunk2.last._2 + corrections - resetChunk1.head._2) /
+                   (resetChunk2.last._1 - resetChunk1.head._1) * 1000
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
+
+    // Two drops in one chunk
+    val rv2 = timeValueRV(resetChunk1 ++ resetChunk2)
+    val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
+                                         new ChunkedRateFunction, queryConfig)
+    it2.next.getDouble(1) shouldEqual expected +- errorOk
+  }
+
+  it("should return NaN for rate when window only contains one sample") {
+    val startTs = 8101215L
+    val endTs =   8103215L
+
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1).isNaN shouldEqual true
+  }
+
+  it("should return rate of 0 when counter samples do not increase") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val flatSamples = counterSamples.map { case (t, v) => t -> counterSamples.head._2 }
+    val flatRV = timeValueRV(flatSamples)
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedRateFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual 0.0
+
+  }
+
+  // Also ensures that chunked rate works across chunk boundaries
+  it("rate should work for variety of window and step sizes") {
+    val data = (1 to 500).map(_ * 10 + rand.nextInt(10)).map(_.toDouble)
+    val tuples = data.zipWithIndex.map { case (d, t) => (defaultStartTS + t * pubFreq, d) }
+    val rv = timeValueRV(tuples)  // should be a couple chunks
+
+    (0 until 10).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val slidingRate = slidingWindowIt(data, rv, RateFunction, windowSize, step)
+      val slidingResults = slidingRate.map(_.getDouble(1)).toBuffer
+
+      val rateChunked = chunkedWindowIt(data, rv, new ChunkedRateFunction, windowSize, step)
+      val resultRows = rateChunked.map { r => (r.getLong(0), r.getDouble(1)) }.toBuffer
+      val rates = resultRows.map(_._2)
+
+      // Since the input data and window sizes are randomized, it is not possible to precompute results
+      // beforehand.  Coming up with a formula to figure out the right rate is really hard.
+      // Thus we take an approach of comparing the sliding and chunked results to ensure they are identical.
+
+      // val windowTime = (windowSize.toLong - 1) * pubFreq
+      // val expected = tuples.sliding(windowSize, step).toBuffer
+      //                      .zip(resultRows).map { case (w, (ts, _)) =>
+      //   // For some reason rate is based on window, not timestamps  - so not w.last._1
+      //   (w.last._2 - w.head._2) / (windowTime) * 1000
+      //   // (w.last._2 - w.head._2) / (w.last._1 - w.head._1) * 1000
+      // }
+      rates shouldEqual slidingResults
+    }
   }
 
   it ("irate should work when start and end are outside window") {
@@ -183,7 +302,12 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
     IncreaseFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedIncreaseFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("delta should work when start and end are outside window") {
@@ -192,7 +316,13 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val expected = (q2.last.value - q2.head.value) / (q2.last.timestamp - q2.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
     DeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
-    Math.abs(toEmit.value - expected) should be < errorOk
+    toEmit.value shouldEqual expected +- errorOk
+
+    // One window, start=end=endTS
+    val gaugeRV = timeValueRV(gaugeSamples)
+    val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
+                                        new ChunkedDeltaFunction, queryConfig)
+    it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
   it ("idelta should work when start and end are outside window") {
