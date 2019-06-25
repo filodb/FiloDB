@@ -171,15 +171,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   val sampleProductionInstance0 = sampleInstance0.filter(_.key.labelValues.get(ZeroCopyUTF8String("group")).get.
     toString.equals("production"))
 
-//  val execPlan = BinaryJoinExec("someID", dummyDispatcher,
-//    Array(dummyPlan), // cannot be empty as some compose's rely on the schema
-//    new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-//    BinaryOperator.ADD,
-//    Cardinality.ManyToMany,
-//    Nil, Nil)
-
   val scalarOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, 1.0, false)
-
 
   it("should join many-to-many with and") {
 
@@ -189,7 +181,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -225,7 +217,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -263,7 +255,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Seq("instance", "job"), Nil)
+      Seq("instance", "job"), Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -301,7 +293,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Seq("instance"), Nil)
+      Seq("instance"), Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -338,7 +330,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Nil, Seq("group"))
+      Nil, Seq("group"), Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -374,7 +366,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Nil, Seq("group", "job"))
+      Nil, Seq("group", "job"), Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -410,7 +402,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Seq("dummy"), Nil)
+      Seq("dummy"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
@@ -433,7 +425,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
       Cardinality.ManyToMany,
-      Nil, Seq("group", "instance", "job"))
+      Nil, Seq("group", "instance", "job"), Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
@@ -456,7 +448,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -485,7 +477,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -496,6 +488,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
+    val expectedResult = (canaryPlusOne.toArray ++ sampleInstance1).distinct
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("api-server"),
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("0"),
@@ -529,15 +522,11 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     )
 
-    result.size shouldEqual 6
-    result.map(_.key.labelValues) sameElements (expectedLabels) shouldEqual true
+    val expectedValues = List(301.0, 401.0, 701.0, 801.0, 200.0, 600.0)
 
-    result(0).rows.map(_.getDouble(1)).toList shouldEqual List(301)
-    result(1).rows.map(_.getDouble(1)).toList shouldEqual List(401)
-    result(2).rows.map(_.getDouble(1)).toList shouldEqual List(701)
-    result(3).rows.map(_.getDouble(1)).toList shouldEqual List(801)
-    result(4).rows.map(_.getDouble(1)).toList shouldEqual List(200)
-    result(5).rows.map(_.getDouble(1)).toList shouldEqual List(600)
+    result.size shouldEqual 6
+    result.flatMap(_.key.labelValues.values.toSet).sorted sameElements expectedLabels.flatMap(_.toSet).sorted
+    expectedValues.toSet.diff(result.flatMap(_.rows.map(_.getDouble(1)).toSet).toSet).isEmpty shouldEqual true
   }
 
   it("should excludes everything that has instance=0/1 but includes entries without " +
@@ -549,7 +538,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -565,7 +554,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Seq("instance"), Nil)
+      Seq("instance"), Nil, Nil)
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -622,7 +611,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
@@ -638,7 +627,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
       Cardinality.ManyToMany,
-      Nil, Seq("l", "group", "job"))
+      Nil, Seq("l", "group", "job"), Nil)
 
     // scalastyle:off
     val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -694,7 +683,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
       Cardinality.ManyToMany,
-      Nil, Nil)
+      Nil, Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -729,7 +718,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
       Cardinality.ManyToMany,
-      Seq("job"), Nil)
+      Seq("job"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -761,7 +750,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
       Cardinality.ManyToMany,
-      Seq("job", "instance"), Nil)
+      Seq("job", "instance"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -797,7 +786,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
       Cardinality.ManyToMany,
-      Seq("job"), Nil)
+      Seq("job"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
@@ -830,7 +819,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
       Cardinality.ManyToMany,
-      Seq("job", "instance"), Nil)
+      Seq("job", "instance"), Nil, Nil)
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))

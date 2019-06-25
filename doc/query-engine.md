@@ -13,7 +13,7 @@
   - [Execution Detail](#execution-detail)
     - [Periodic Samples and Range Functions](#periodic-samples-and-range-functions)
     - [ChunkedWindowIterator Details](#chunkedwindowiterator-details)
-      - [Alternate Design Approaches to Consider](#alternate-design-approaches-to-consider)
+    - [Efficient Counter Correction and Rate Calculation](#efficient-counter-correction-and-rate-calculation)
     - [Aggregation across Range Vectors](#aggregation-across-range-vectors)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -259,15 +259,10 @@ The `ChunkedWindowIterator` applies `ChunkedRangeFunctions` to each time window,
 
 Note that `ChunkedWindowIterator` support different types of `RowReader` outputs for different types of output columns.  One version is for `TransientRow` which has Double values, and another is for `TransientHistRow` which supports Histogram values as output.
 
-#### Alternate Design Approaches to Consider
-1. With sliding window periodic sample generation can happen as a O(n) time, and O(w) memory where n is number
-   of raw samples, and w is samples per window. The alternate approach to compare performance with later is to
-   look up the windows each time without using additional memory. This will be O(nw) time, but will result
-   in constant memory. We can consider this if windowing operations are proving to be memory intensive.
-2. Another design decision is to not iterate across all raw samples, and instead fetch the window data for each
-   step by looking up data for the window interval explicitly. This can save some memory and time especially
-   when step >> window where we may end up iterating across samples that we should be ideally ignoring. That
-   said, one would expect queries to not ignore data and keep step <= window.
+### Efficient Counter Correction and Rate Calculation
+
+The naive way to do counter correction would be to iterate through each sample of the entire time series data covering all windows, and detect and correct the samples one by one.  This however costs O(n) with every query.  We take an alternative approach where we detect any corrections or resets at ingestion time and store some metadata with each chunk of data.  Then, at query time, a quick check is done on the chunk to see if it needs correction or not.  Corrections are carried over and adjusted from chunk to chunk.  This allows us to do corrections at query time only for chunks that actually need correction.
+In addition, the rate is calculated quickly by examining the start and end of the time window within each chunk.
 
 ### Aggregation across Range Vectors
 
