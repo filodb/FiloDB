@@ -7,8 +7,7 @@ import debox.Buffer
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
-import monix.execution.Scheduler
-import monix.reactive.{Observable, OverflowStrategy}
+import monix.reactive.Observable
 
 import filodb.core.Types
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
@@ -35,10 +34,6 @@ class OnDemandPagingShard(dataset: Dataset,
 TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
-
-  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}-$shardNum")
-  // TODO: make this configurable
-  private val strategy = OverflowStrategy.BackPressure(1000)
 
   private def startODPSpan(): Span = Kamon.buildSpan(s"odp-cassandra-latency")
     .withTag("dataset", dataset.name)
@@ -102,12 +97,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
-              // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
-              // In the future optimize this if needed.
-              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .map { rawPart => partitionMaker.populateRawChunks(rawPart) }
               .doOnTerminate(ex => span.finish())
-              // This is needed so future computations happen in a different thread
-              .asyncBoundary(strategy)
           } else { Observable.empty }
         }
       } else {
@@ -118,7 +109,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .map { rawPart => partitionMaker.populateRawChunks(rawPart) }
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
@@ -146,7 +137,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
       shardStats.partitionsRestored.increment
-    }).executeOn(ingestSched)
+    }).executeOn(ingestSched).asyncBoundary
+    // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
+    // as opposed to ingestSched
+
   // No need to execute the task on ingestion thread if it's empty / no ODP partitions
   } else Task.now(Nil)
 

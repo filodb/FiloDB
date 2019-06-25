@@ -5,7 +5,6 @@ import java.nio.ByteBuffer
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.store._
@@ -61,7 +60,7 @@ extends RawToPartitionMaker with StrictLogging {
   /**
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
-  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
+  def populateRawChunks(rawPartition: RawPartData): ReadablePartition = {
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       tsShard.shardStats.partitionsPagedFromColStore.increment()
