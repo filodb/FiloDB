@@ -51,7 +51,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with AsyncTest {
     for { partNo <- 0 to 9 } {
       val chunkStream = filterByPartAndMakeStream(rawData, partNo)
       val rawPartition = TestData.toRawPartData(chunkStream).runAsync.futureValue
-      val tsPartition = onDemandPartMaker.populateRawChunks(rawPartition).runAsync.futureValue
+      val tsPartition = onDemandPartMaker.populateRawChunks(rawPartition)
 
       tsPartition.appendingChunkLen shouldEqual 2   // 2 samples ingested into write buffers
       tsPartition.numChunks shouldEqual 10          // write buffers + 9 chunks above
@@ -69,6 +69,6 @@ class DemandPagedChunkStoreSpec extends FunSpec with AsyncTest {
     val data2 = linearMultiSeries(start - 2.hours.toMillis, timeStep=100000).take(20)
     val stream2 = filterByPartAndMakeStream(data2, 0)
     val rawPart2 = TestData.toRawPartData(stream2).runAsync.futureValue
-    val tsPart2 = onDemandPartMaker.populateRawChunks(rawPart2).runAsync.futureValue
+    val tsPart2 = onDemandPartMaker.populateRawChunks(rawPart2)
   }
 }
