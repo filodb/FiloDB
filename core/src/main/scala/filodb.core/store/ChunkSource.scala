@@ -146,7 +146,7 @@ trait DefaultChunkSource extends ChunkSource {
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
       .mapAsync { rawPart => partMaker(dataset, partMethod.shard).populateRawChunks(rawPart)
-                               .executeOn(singleThreadPool) }
+                               .executeOn(singleThreadPool).asyncBoundary }
   }
 }
 

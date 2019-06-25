@@ -104,7 +104,9 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
-              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .mapAsync { rawPart =>
+                partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).asyncBoundary
+              }
               .doOnTerminate(ex => span.finish())
               // This is needed so future computations happen in a different thread
               .asyncBoundary(strategy)
@@ -118,7 +120,9 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .mapAsync { rawPart =>
+                    partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).asyncBoundary
+                  }
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
@@ -146,7 +150,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
       shardStats.partitionsRestored.increment
-    }).executeOn(ingestSched)
+    }).executeOn(ingestSched).asyncBoundary
+    // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
+    // as opposed to ingestSched
+
   // No need to execute the task on ingestion thread if it's empty / no ODP partitions
   } else Task.now(Nil)
 
