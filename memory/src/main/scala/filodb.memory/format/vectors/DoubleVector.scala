@@ -170,7 +170,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   }
 
   // Default implementation for vectors with no correction
-  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta =
+  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta =
     meta match {
       // Return the last value and simply pass on the previous correction value
       case DoubleCorrection(_, corr) => DoubleCorrection(apply(vector, length(vector) - 1), corr)
@@ -285,7 +285,7 @@ extends DoubleVectorDataReader {
     }
   }
 
-  override def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta = {
+  override def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
     assert(vector == vect)
     val lastValue = apply(vector, length(vector) - 1)
     // Return the last (original) value and all corrections onward

@@ -221,10 +221,10 @@ class DoubleVectorTest extends NativeVectorTest {
     }
 
     it("should updateCorrections correctly") {
-      reader.updateCorrection(frozen, 0, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
+      reader.updateCorrection(frozen, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
 
       val corr1 = DoubleCorrection(999.9, 50.0)
-      reader.updateCorrection(frozen, 0, corr1) shouldEqual DoubleCorrection(7678, 50.0)
+      reader.updateCorrection(frozen, corr1) shouldEqual DoubleCorrection(7678, 50.0)
     }
 
     it("should detect resets with DoubleCounterAppender and carry flag to optimized version") {
@@ -273,7 +273,7 @@ class DoubleVectorTest extends NativeVectorTest {
       reader.correctedValue(sc, 2, corr1) shouldEqual 161.5
       reader.correctedValue(sc, 4, corr1) shouldEqual (21.1 + 102.5 + 50)
 
-      reader.updateCorrection(sc, 0, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
+      reader.updateCorrection(sc, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
     }
 
     it("should read out length and values correctly for corrected vectors") {

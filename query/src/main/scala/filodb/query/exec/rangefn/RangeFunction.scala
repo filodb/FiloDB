@@ -146,7 +146,7 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
     }
 
     // Add any corrections from this chunk, pass on lastValue also to next chunk computation
-    correctionMeta = ccReader.updateCorrection(valueVector, startRowNum, correctionMeta)
+    correctionMeta = ccReader.updateCorrection(valueVector, correctionMeta)
   }
 
   /**

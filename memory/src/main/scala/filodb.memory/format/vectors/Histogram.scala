@@ -138,6 +138,27 @@ final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) e
     BinaryHistogram.writeDelta(buckets, values, buf)
     buf
   }
+
+  /**
+   * Adds the buckets from other into this LongHistogram
+   */
+  final def add(other: LongHistogram): Unit = {
+    assert(other.buckets == buckets)
+    for { b <- 0 until numBuckets optimized } {
+      values(b) += other.values(b)
+    }
+  }
+
+  final def populateFrom(other: LongHistogram): Unit = {
+    require(other.buckets == buckets)
+    System.arraycopy(other.values, 0, values, 0, values.size)
+  }
+
+  final def copy: LongHistogram = {
+    val newHist = LongHistogram.empty(buckets)
+    newHist.populateFrom(this)
+    newHist
+  }
 }
 
 object LongHistogram {
@@ -146,6 +167,9 @@ object LongHistogram {
     val res = NibblePack.unpackToSink(packedValues, NibblePack.DeltaSink(values), bucketDef.numBuckets)
     if (res == NibblePack.Ok) Some(LongHistogram(bucketDef, values)) else None
   }
+
+  def empty(bucketDef: HistogramBuckets): LongHistogram =
+    LongHistogram(bucketDef, new Array[Long](bucketDef.numBuckets))
 }
 
 /**

@@ -24,6 +24,9 @@ object HistogramTest {
     LongHistogram(customScheme, buckets.take(customScheme.numBuckets).map(_.toLong))
   }
 
+  val correction1 = LongHistogram(bucketScheme, Array(1, 2, 3, 4, 5, 6, 7, 8))
+  val correction2 = LongHistogram(bucketScheme, Array(2, 4, 6, 8, 10, 12, 14, 18))
+
   val quantile50Result = Seq(37.333333333333336, 10.8, 8.666666666666666, 28.75)
 }
 
