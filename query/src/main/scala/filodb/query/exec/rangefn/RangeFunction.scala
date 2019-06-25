@@ -275,9 +275,11 @@ object RangeFunction {
   def doubleChunkedFunction(func: Option[RangeFunctionId],
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
-    case Some(Rate)           => () => new ChunkedRateFunction
-    case Some(Increase)       => () => new ChunkedIncreaseFunction
-    case Some(Delta)          => () => new ChunkedDeltaFunction
+    // NOTE: temporarily commented out to allow data with drop detection to collect for multiple days before
+    // chunk optimizations kick in
+    // case Some(Rate)           => () => new ChunkedRateFunction
+    // case Some(Increase)       => () => new ChunkedIncreaseFunction
+    // case Some(Delta)          => () => new ChunkedDeltaFunction
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
