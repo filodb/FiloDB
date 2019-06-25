@@ -145,8 +145,10 @@ trait DefaultChunkSource extends ChunkSource {
     readRawPartitions(dataset, columnIDs, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
-      .mapAsync { rawPart => partMaker(dataset, partMethod.shard).populateRawChunks(rawPart)
-                               .executeOn(singleThreadPool).asyncBoundary }
+      .mapAsync { rawPart =>
+        partMaker(dataset, partMethod.shard).populateRawChunks(rawPart).executeOn(singleThreadPool).asyncBoundary
+        // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+      }
   }
 }
 

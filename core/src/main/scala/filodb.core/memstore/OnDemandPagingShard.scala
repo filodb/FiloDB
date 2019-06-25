@@ -104,12 +104,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
-              .mapAsync { rawPart =>
-                partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).asyncBoundary
-              }
+              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart) }
               .doOnTerminate(ex => span.finish())
-              // This is needed so future computations happen in a different thread
-              .asyncBoundary(strategy)
           } else { Observable.empty }
         }
       } else {
@@ -120,9 +116,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-                  .mapAsync { rawPart =>
-                    partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool).asyncBoundary
-                  }
+                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart) }
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
