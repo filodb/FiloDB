@@ -3,7 +3,9 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import kamon.Kamon
-import monix.reactive.Observable
+import monix.eval.Task
+import monix.execution.Scheduler
+import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core._
 import filodb.core.memstore.TimeSeriesShard
@@ -120,7 +122,7 @@ final case class PartKeyTimeBucketSegment(segmentId: Int, segment: ByteBuffer)
  * Responsible for uploading RawPartDatas to offheap memory and creating a queryable ReadablePartition
  */
 trait RawToPartitionMaker {
-  def populateRawChunks(rawPartition: RawPartData): ReadablePartition
+  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition]
 }
 
 /**
@@ -133,6 +135,10 @@ trait DefaultChunkSource extends ChunkSource {
    */
   def partMaker(dataset: Dataset, shard: Int): RawToPartitionMaker
 
+  val singleThreadPool = Scheduler.singleThread("make-partition")
+  // TODO: make this configurable
+  private val strategy = OverflowStrategy.BackPressure(1000)
+
   // Default implementation takes every RawPartData and turns it into a regular TSPartition
   def scanPartitions(dataset: Dataset,
                      columnIDs: Seq[Types.ColumnId],
@@ -141,7 +147,10 @@ trait DefaultChunkSource extends ChunkSource {
     readRawPartitions(dataset, columnIDs, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
-      .map { rawPart => partMaker(dataset, partMethod.shard).populateRawChunks(rawPart) }
+      .mapAsync { rawPart =>
+          partMaker(dataset, partMethod.shard).populateRawChunks(rawPart).executeOn(singleThreadPool)
+       }
+      .asyncBoundary(strategy)
   }
 }
 

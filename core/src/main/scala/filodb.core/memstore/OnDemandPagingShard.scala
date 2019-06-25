@@ -7,7 +7,8 @@ import debox.Buffer
 import kamon.Kamon
 import kamon.trace.Span
 import monix.eval.Task
-import monix.reactive.Observable
+import monix.execution.Scheduler
+import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.Types
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
@@ -34,6 +35,10 @@ class OnDemandPagingShard(dataset: Dataset,
 TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
+
+  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}-$shardNum")
+  // TODO: make this configurable
+  private val strategy = OverflowStrategy.BackPressure(1000)
 
   private def startODPSpan(): Span = Kamon.buildSpan(s"odp-cassandra-latency")
     .withTag("dataset", dataset.name)
@@ -97,7 +102,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
-              .map { rawPart => partitionMaker.populateRawChunks(rawPart) }
+              // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
+              // In the future optimize this if needed.
+              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
               .doOnTerminate(ex => span.finish())
           } else { Observable.empty }
         }
@@ -109,7 +117,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-                  .map { rawPart => partitionMaker.populateRawChunks(rawPart) }
+                  .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
