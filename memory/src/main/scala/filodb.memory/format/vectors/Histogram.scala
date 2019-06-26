@@ -131,6 +131,11 @@ trait HistogramWithBuckets extends Histogram {
   }
 }
 
+object HistogramWithBuckets {
+  // Can be used for an initial "empty" or "null" Histogram.  No buckets - can't aggregate or do anything
+  val empty = LongHistogram(HistogramBuckets.emptyBuckets, Array[Long]())
+}
+
 final case class LongHistogram(buckets: HistogramBuckets, values: Array[Long]) extends HistogramWithBuckets {
   final def bucketValue(no: Int): Double = values(no).toDouble
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
