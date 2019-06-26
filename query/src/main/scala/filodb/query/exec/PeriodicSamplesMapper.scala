@@ -47,7 +47,7 @@ final case class PeriodicSamplesMapper(start: Long,
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
                    sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
-    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, funcParams, maxCol)
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, queryConfig, funcParams, maxCol)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
