@@ -230,21 +230,23 @@ object RangeFunction {
    */
   def apply(func: Option[RangeFunctionId],
             columnType: ColumnType,
+            config: QueryConfig,
             funcParams: Seq[Any] = Nil,
             maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(func, columnType, funcParams, maxCol, useChunked)()
+    generatorFor(func, columnType, config, funcParams, maxCol, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
    */
   def generatorFor(func: Option[RangeFunctionId],
                    columnType: ColumnType,
+                   config: QueryConfig,
                    funcParams: Seq[Any] = Nil,
                    maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator =
     if (useChunked) columnType match {
-      case ColumnType.DoubleColumn => doubleChunkedFunction(func, funcParams)
+      case ColumnType.DoubleColumn => doubleChunkedFunction(func, config, funcParams)
       case ColumnType.LongColumn   => longChunkedFunction(func, funcParams)
       case ColumnType.TimestampColumn => longChunkedFunction(func, funcParams)
       case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
@@ -273,11 +275,12 @@ object RangeFunction {
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
   def doubleChunkedFunction(func: Option[RangeFunctionId],
+                            config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
-    case Some(Rate)           => () => new ChunkedRateFunction
-    case Some(Increase)       => () => new ChunkedIncreaseFunction
-    case Some(Delta)          => () => new ChunkedDeltaFunction
+    case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
+    case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
+    case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
     case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
     case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
