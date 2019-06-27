@@ -154,7 +154,7 @@ Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
-./filodb-dev-start.sh -s
+./filodb-dev-start.sh
 ```
 
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
@@ -345,13 +345,13 @@ that part of the cluster could be with the old config and the rest could have ne
 
 * Partition key = `tags:map`
 * Row key = `timestamp`
-* Columns: `timestamp:ts,value:double:counter=true`
+* Columns: `timestamp:ts,value:double:detectDrops=true`
 
 The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
 
 Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
 
-NOTE: `counter=true` allows for proper and efficient rate calculation on Prometheus counters.
+NOTE: `detectDrops=true` allows for proper and efficient rate calculation on Prometheus counters.
  
 ### Traditional, Multi-Column Schema
 

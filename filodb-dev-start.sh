@@ -3,7 +3,7 @@ set -e
 # set -x
 
 function showHelp {
-        echo "`basename $0` [-h] [-c arg] [-l arg] [-p] [-s]"
+        echo "`basename $0` [-h] [-c arg] [-l arg] [-p]"
         echo "   -h help"
         echo "   -c takes server config path as argument"
         echo "   -l takes log file suffix as argument"
@@ -12,7 +12,6 @@ function showHelp {
 
 CONFIG=conf/timeseries-filodb-server.conf
 LOG_SUFFIX=1
-SETUP_DATASET=NO
 AKKA_PORT_ARG=""
 
 while getopts "hc:l:ps" opt; do
@@ -25,8 +24,6 @@ while getopts "hc:l:ps" opt; do
     l)  LOG_SUFFIX=$OPTARG
         ;;
     p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0"
-        ;;
-    s)  SETUP_DATASET=YES
         ;;
     esac
 done

@@ -105,9 +105,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
               .doOnTerminate(ex => span.finish())
-              // This is needed so future computations happen in a different thread
-              .asyncBoundary(strategy)
           } else { Observable.empty }
         }
       } else {
@@ -119,6 +118,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
                   .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+                  .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
               }
@@ -146,7 +146,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
       shardStats.partitionsRestored.increment
-    }).executeOn(ingestSched)
+    }).executeOn(ingestSched).asyncBoundary
+    // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
+    // as opposed to ingestSched
+
   // No need to execute the task on ingestion thread if it's empty / no ODP partitions
   } else Task.now(Nil)
 

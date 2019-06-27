@@ -24,6 +24,7 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
+    checkpointTable.createKeyspace(checkpointTable.keyspace)
     checkpointTable.initialize()
   }
 
