@@ -12,6 +12,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.UnsafeUtils
+//import filodb.
 
 object TimeSeriesPartitionSpec {
   import MachineMetricsData._
@@ -429,5 +430,16 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     infos1.head.startTime shouldEqual initTS
     val data1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0)).toBuffer
     data1 shouldEqual (minData take 10)
+  }
+
+  it("should reject samples with Nano/Micro second timestamps") {
+    part = makePart(0, dataset1)
+    val data = singleSeriesReadersMicroSeconds().take(5)
+    part.ingest(data(0), ingestBlockHolder)
+
+    part.numChunks shouldEqual 0
+    part.appendingChunkLen shouldEqual 0
+    part.unflushedChunksets shouldEqual 0
+
   }
 }

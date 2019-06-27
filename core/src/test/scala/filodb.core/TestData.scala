@@ -208,6 +208,8 @@ object MachineMetricsData {
   }
 
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
+  def singleSeriesReadersMicroSeconds(): Stream[RowReader] = singleSeriesData(System.currentTimeMillis() * 1000).
+    map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
   val dataset1 = Dataset("metrics", Seq("series:string"), columns)

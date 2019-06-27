@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.time.Instant
+
 import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
@@ -119,8 +121,17 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
+    val currentEpochTime : Long = Instant.now.getEpochSecond()
+    // Reject samples before 1 month and after 1 day from current time
+    val lowerLimit = currentEpochTime - (31 * 24 * 60 * 60)
+    val upperLimit = currentEpochTime + (24 * 60 * 60 )
+
     if (ts < timestampOfLatestSample) {
       shardStats.outOfOrderDropped.increment
+      return
+    }
+     else if (((ts/1000) < lowerLimit) || ((ts/1000) > upperLimit)) {
+      _log.error(s"Rejecting row as timestamp: ${row.getLong(0)} is not within limits" )
       return
     }
 
