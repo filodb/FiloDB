@@ -345,12 +345,42 @@ object Parser extends Expression {
   }
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
-    val expression = parseQuery(query)
+    var expression = parseQuery(query)
+    if (expression.isInstanceOf[BinaryExpression]) {
+      val binaryExpression = expression.asInstanceOf[BinaryExpression]
+      expression = assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
+        binaryExpression.vectorMatch, binaryExpression.rhs)
+    }
     expression match {
       case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)
       case r: SimpleSeries => r.toRawSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
     }
+  }
+
+  def assignPrecedence(lhs: Expression,
+                       operator: Operator,
+                       vectorMatch: Option[VectorMatch],
+                       rhs: Expression): Expression = {
+
+    if (rhs.isInstanceOf[BinaryExpression]) {
+      val rhsWithoutPrecedence1 = rhs.asInstanceOf[BinaryExpression]
+      val rhsWithPrecedence = assignPrecedence(rhsWithoutPrecedence1.lhs, rhsWithoutPrecedence1.operator,
+        rhsWithoutPrecedence1.vectorMatch, rhsWithoutPrecedence1.rhs)
+      if (rhsWithPrecedence.isInstanceOf[BinaryExpression]) {
+
+        val rhsWithPrecedenceBE = rhsWithPrecedence.asInstanceOf[BinaryExpression]
+        val rhsOp = rhsWithPrecedenceBE.asInstanceOf[BinaryExpression].operator
+        val precd = rhsOp.precedence - operator.precedence
+        if ((precd < 0) || (precd == 0 && rhsOp.isRightAssociative())) {
+          val balanced: Expression = assignPrecedence(lhs, operator, vectorMatch, rhsWithPrecedenceBE.lhs)
+          return BinaryExpression(balanced, rhsWithPrecedenceBE.operator, rhsWithPrecedenceBE.vectorMatch,
+            rhsWithPrecedenceBE.rhs)
+        }
+      }
+      return BinaryExpression(lhs, operator, vectorMatch, rhsWithPrecedence)
+    }
+    return BinaryExpression(lhs, operator, vectorMatch, rhs)
   }
 
   private def handleError(e: Error, input: String) = {

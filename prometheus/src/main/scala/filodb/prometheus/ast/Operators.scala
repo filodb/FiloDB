@@ -26,7 +26,30 @@ trait Operators {
 
   sealed trait Operator extends PromToken {
     def getPlanOperator: BinaryOperator
+    def precedence : Int = {
+      getPlanOperator match {
+        case BinaryOperator.LOR                                                                             => return 1
+        case BinaryOperator.LAND | BinaryOperator.LUnless                                                   => return 2
+        case BinaryOperator.EQL | BinaryOperator.EQL_BOOL | BinaryOperator.NEQ |
+             BinaryOperator.NEQ_BOOL | BinaryOperator.LSS | BinaryOperator.LSS_BOOL |
+             BinaryOperator.LTE | BinaryOperator.LTE_BOOL | BinaryOperator.GTE | BinaryOperator.GTE_BOOL |
+             BinaryOperator.GTR | BinaryOperator.GTR_BOOL                                                   => return 3
+        case BinaryOperator.ADD | BinaryOperator.SUB                                                        => return 4
+        case BinaryOperator.MUL | BinaryOperator.DIV | BinaryOperator.MOD                                   => return 5
+        case BinaryOperator.POW                                                                             => return 6
+        case _                                                                                              => return 0
+      }
+    }
+
+    def isRightAssociative(): Boolean = {
+      getPlanOperator match {
+        case BinaryOperator.POW => return true
+        case _ => return false
+      }
+    }
   }
+
+
 
   case object EqualMatch extends Operator {
     override def getPlanOperator: BinaryOperator = BinaryOperator.EQL
