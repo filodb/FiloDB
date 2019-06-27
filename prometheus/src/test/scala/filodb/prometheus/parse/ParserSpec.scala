@@ -295,7 +295,7 @@ class ParserSpec extends FunSpec with Matchers {
         "BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),DIV,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
 
      // Binary Expressions should generate Logical Plan according to precedence
-     // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets
+     // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets which are according to precedence
       "(10 % http_requests_total) + 5" ->
         "ScalarVectorBinaryOperation(ADD,5.0,ScalarVectorBinaryOperation(MOD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "10 % http_requests_total + 5" ->
@@ -306,10 +306,17 @@ class ParserSpec extends FunSpec with Matchers {
       "http_requests_total % http_requests_total + http_requests_total" ->
         "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),MOD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
 
-      "(foo and (bar unless baz)) or qux" ->
-        "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),LUnless,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List()),LOR,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
-     "foo and bar unless baz or qux" ->
-      "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),LUnless,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List()),LOR,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+      // "unless" and "and" have same priority but are not right associative so "and" should be evaluated first
+      "((foo and bar) unless baz) or qux" ->
+        "BinaryJoin(BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LUnless,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+      "foo and bar unless baz or qux" ->
+      "BinaryJoin(BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LUnless,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+
+      // Pow is right associative so (bar ^ baz) should be evaluated first
+      "(foo ^ (bar ^ baz))" ->
+        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+      "foo ^ bar ^ baz" ->
+        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
 
       "(foo + bar) or (bla and blub)" ->
         "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),LAND,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
@@ -330,22 +337,21 @@ class ParserSpec extends FunSpec with Matchers {
     }
   }
 
-  private def printBinaryJoin( lp: LogicalPlan) : scala.Unit =  {
+  private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
     if (!lp.isInstanceOf[BinaryJoin]) {
-      info(lp.toString)
-
+      info(s"${"  "*level}" + lp.toString)
     }
     else {
       val binaryJoin = lp.asInstanceOf[BinaryJoin]
-      info("lhs:" )
-      printBinaryJoin(binaryJoin.lhs)
-      info("Cardinality:" + binaryJoin.cardinality)
-      info("Operator:" + binaryJoin.operator)
-      info("On labels:" + binaryJoin.on )
-      info("Include labels" + binaryJoin.include)
-      info("Ignoring labels:" + binaryJoin.ignoring)
-      info("rhs:")
-      printBinaryJoin(binaryJoin.rhs)
+      info(s"${"  "*level}" + "lhs:" )
+      printBinaryJoin(binaryJoin.lhs, level + 1)
+      info(s"${"  "*level}" + "Cardinality: " + binaryJoin.cardinality)
+      info(s"${"  "*level}" + "Operator: " + binaryJoin.operator)
+      info(s"${"  "*level}" + "On labels: " + binaryJoin.on )
+      info(s"${"  "*level}" + "Include labels: " + binaryJoin.include)
+      info(s"${"  "*level}" + "Ignoring labels: " + binaryJoin.ignoring)
+      info(s"${"  "*level}" + "rhs: ")
+      printBinaryJoin(binaryJoin.rhs, level + 1)
     }
   }
 

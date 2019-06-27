@@ -364,17 +364,17 @@ object Parser extends Expression {
                        rhs: Expression): Expression = {
 
     if (rhs.isInstanceOf[BinaryExpression]) {
-      val rhsWithoutPrecedence1 = rhs.asInstanceOf[BinaryExpression]
-      val rhsWithPrecedence = assignPrecedence(rhsWithoutPrecedence1.lhs, rhsWithoutPrecedence1.operator,
-        rhsWithoutPrecedence1.vectorMatch, rhsWithoutPrecedence1.rhs)
+      val rhsWithoutPrecedence = rhs.asInstanceOf[BinaryExpression]
+      val rhsWithPrecedence = assignPrecedence(rhsWithoutPrecedence.lhs, rhsWithoutPrecedence.operator,
+        rhsWithoutPrecedence.vectorMatch, rhsWithoutPrecedence.rhs)
       if (rhsWithPrecedence.isInstanceOf[BinaryExpression]) {
 
         val rhsWithPrecedenceBE = rhsWithPrecedence.asInstanceOf[BinaryExpression]
         val rhsOp = rhsWithPrecedenceBE.asInstanceOf[BinaryExpression].operator
         val precd = rhsOp.precedence - operator.precedence
-        if ((precd < 0) || (precd == 0 && rhsOp.isRightAssociative())) {
-          val balanced: Expression = assignPrecedence(lhs, operator, vectorMatch, rhsWithPrecedenceBE.lhs)
-          return BinaryExpression(balanced, rhsWithPrecedenceBE.operator, rhsWithPrecedenceBE.vectorMatch,
+        if ((precd < 0) || (precd == 0 && !rhsOp.isRightAssociative())) {
+          val lhsWithPrecedence: Expression = assignPrecedence(lhs, operator, vectorMatch, rhsWithPrecedenceBE.lhs)
+          return BinaryExpression(lhsWithPrecedence, rhsWithPrecedenceBE.operator, rhsWithPrecedenceBE.vectorMatch,
             rhsWithPrecedenceBE.rhs)
         }
       }
