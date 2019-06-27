@@ -12,7 +12,6 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.UnsafeUtils
-//import filodb.
 
 object TimeSeriesPartitionSpec {
   import MachineMetricsData._
