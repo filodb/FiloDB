@@ -245,6 +245,12 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val expected = Seq(0.8, 1.6, 2.4, 3.2, 4.0, 5.6, 7.2, 9.6)
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
                                  InstantFunctionId.HistogramQuantile, Seq(0.4), histSchema)
+
+    // check output schema
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile,
+                                                                 Seq(0.99))
+    val outSchema = instantVectorFnMapper.schema(MMD.histDataset, histSchema)
+    outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
   }
 
   it("should compute histogram_max_quantile on Histogram RV") {
@@ -261,6 +267,13 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     }
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
                                  InstantFunctionId.HistogramMaxQuantile, Seq(0.9), histMaxSchema)
+  }
+
+  it("should return proper schema after applying histogram_max_quantile") {
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile,
+                                                                 Seq(0.99))
+    val outSchema = instantVectorFnMapper.schema(MMD.histMaxDS, histMaxSchema)
+    outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
   }
 
   it("should compute histogram_bucket on Histogram RV") {

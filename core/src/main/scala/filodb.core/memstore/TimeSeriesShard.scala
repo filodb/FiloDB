@@ -337,13 +337,10 @@ class TimeSeriesShard(val dataset: Dataset,
   private var evictedPartKeysDisposed = false
 
   /**
-   * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
-   * logs, use at your own risk.
-   */
-  val tracedPartFilters =
-    storeConfig.traceFilters.toSeq
-      .map { case (k, v) => (dataset.partitionColumns.indexWhere(_.name == k), v) }
-      .filter { case (i, v) => i >= 0 && dataset.partitionColumns(i).columnType == ColumnType.StringColumn }
+    * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
+    * logs, use at your own risk.
+    */
+  val tracedPartFilters = storeConfig.traceFilters
 
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -1115,9 +1112,10 @@ class TimeSeriesShard(val dataset: Dataset,
                                              s"shard=$shardNum", e); disableAddPartitions()
     }
 
-  private def shouldTrace(partKeyAddr: Long): Boolean = tracedPartFilters.nonEmpty && {
-    tracedPartFilters.forall { case (i, filtVal) =>
-      dataset.partKeySchema.asJavaString(UnsafeUtils.ZeroPointer, partKeyAddr, i) == filtVal
+  private def shouldTrace(partKeyAddr: Long): Boolean = {
+    tracedPartFilters.nonEmpty && {
+      val partKeyPairs = dataset.partKeySchema.toStringPairs(UnsafeUtils.ZeroPointer, partKeyAddr)
+      tracedPartFilters.forall(p => partKeyPairs.contains(p))
     }
   }
 

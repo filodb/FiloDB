@@ -100,10 +100,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     RangeVectorTransformer.valueColumnType(source) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function, funcParams)
-        if (instantFunction.isHToDoubleFunc) {
+        if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
           // Hist to Double function, so output schema is double
-          source.copy(columns = Seq(source.columns.head,
-                                    source.columns(1).copy(colType = ColumnType.DoubleColumn)))
+          source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
         } else { source }
       case cType: ColumnType          =>
         source
