@@ -131,7 +131,8 @@ extends MemStore with StrictLogging {
                                                                 diskTimeToLiveSeconds, flushTimeBucket))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
-                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
+                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
+                           // asyncBoundary so subsequent computations in pipeline happen in default threadpool
                   .foreach({ x => })(shard.ingestSched)
   }
 

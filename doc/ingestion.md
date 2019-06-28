@@ -42,7 +42,7 @@ definition {
   # defines the unique identifier for partition
   partition-columns = ["tags:map"]
   # Schema of all of the values stored against the partition key. This includes the row-keys as well
-  data-columns = ["timestamp:ts", "value:double"]
+  data-columns = ["timestamp:ts", "value:double:detectDrops=true"]
   # Clustering key for each row. Together with partition key, they form the primary key.
   row-key-columns = [ "timestamp" ]
   # List of downsamplers for the data columns

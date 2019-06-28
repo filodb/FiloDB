@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 
-import filodb.coordinator.{GlobalConfig, IngestionStream, IngestionStreamFactory}
+import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
@@ -49,7 +49,7 @@ class KafkaIngestionStream(config: Config,
   override def get: Observable[SomeData] =
     consumer.map { record =>
       SomeData(record.value.asInstanceOf[RecordContainer], record.offset)
-    }.executeOn(GlobalConfig.ioPool)
+    }
 
   override def teardown(): Unit = {
     logger.info(s"Shutting down stream $tp")

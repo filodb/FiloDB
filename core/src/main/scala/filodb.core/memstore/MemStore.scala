@@ -223,7 +223,7 @@ object MemStore {
         case IntColumn       => bv.IntBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements,
-                                  counter = col.params.as[Option[Boolean]]("counter").getOrElse(false))
+                                  detectDrops = col.params.as[Option[Boolean]]("detectDrops").getOrElse(false))
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
         case HistogramColumn => val counter = col.params.as[Option[Boolean]]("counter").getOrElse(false)

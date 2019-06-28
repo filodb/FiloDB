@@ -405,7 +405,7 @@ object CustomMetricsData {
 object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
-                                  Seq("timestamp:ts", "value:double:counter=true"),
+                                  Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq("timestamp"),
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get

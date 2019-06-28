@@ -27,15 +27,15 @@ object DoubleVector {
    * Creates a DoubleAppendingVector - does not grow and does not have bit mask. All values are marked
    * as available.
    * @param maxElements the max number of elements the vector will hold.  Not expandable
-   * @param counter if true, then use a DoubleCounterAppender instead
+   * @param detectDrops if true, then use a DoubleCounterAppender instead to detect drops
    */
-  def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int, counter: Boolean = false):
+  def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int, detectDrops: Boolean = false):
   BinaryAppendableVector[Double] = {
     val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose = () => memFactory.freeMemory(addr)
-    if (counter) new DoubleCounterAppender(addr, bytesRequired, dispose)
-    else         new DoubleAppendingVector(addr, bytesRequired, dispose)
+    if (detectDrops) new DoubleCounterAppender(addr, bytesRequired, dispose)
+    else             new DoubleAppendingVector(addr, bytesRequired, dispose)
   }
 
   /**
