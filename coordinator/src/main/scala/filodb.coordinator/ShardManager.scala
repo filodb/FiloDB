@@ -151,6 +151,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   def addMember(address: Address, coordinator: ActorRef): Unit = {
     logger.info(s"Initiated addMember for coordinator $coordinator")
     _coordinators(address) = coordinator
+    subscribeAll(coordinator)
 
     for ((dataset, resources, mapper) <- datasetShardMaps) {
       val assignable = strategy.shardAssignments(coordinator, dataset, resources, mapper)

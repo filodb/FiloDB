@@ -146,7 +146,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
-        nca.tell(SubscribeShardUpdates(ref), self)
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
@@ -200,6 +199,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       logger.debug(s"Received ShardSnapshot $mapper")
       shardMaps.put(ds, mapper)
       // NOTE: QueryActor has AtomicRef so no need to forward message to it
+    case s: ShardSubscriptions        =>
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
