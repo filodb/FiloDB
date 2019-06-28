@@ -189,17 +189,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case e: ShardIngestionState       => forward(e, e.ref, sender())
+    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+                                         shardMaps.put(s.ref, s.map)
+                                         forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
     case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
     case ClearState(ref)              => clearState(ref)
     case NodeProtocol.ResetState      => reset(sender())
-    case CurrentShardSnapshot(ds, mapper) =>
-      logger.debug(s"Received ShardSnapshot $mapper")
-      shardMaps.put(ds, mapper)
-      // NOTE: QueryActor has AtomicRef so no need to forward message to it
-    case s: ShardSubscriptions        =>
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive

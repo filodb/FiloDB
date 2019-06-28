@@ -106,7 +106,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       logger.error(s"$state is invalid for this ingester '${dataset.ref}'.")
       return
     }
-    logger.debug(s"resync: Got new state $state from $origin...")
 
     if (state.version != 0 && state.version <= shardStateVersion) {
       logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion " +

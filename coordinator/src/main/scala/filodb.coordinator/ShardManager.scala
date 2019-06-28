@@ -151,7 +151,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
   def addMember(address: Address, coordinator: ActorRef): Unit = {
     logger.info(s"Initiated addMember for coordinator $coordinator")
     _coordinators(address) = coordinator
-    subscribeAll(coordinator)
 
     for ((dataset, resources, mapper) <- datasetShardMaps) {
       val assignable = strategy.shardAssignments(coordinator, dataset, resources, mapper)
@@ -579,6 +578,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
 
         // Also send a complete ingestion state command to all ingestion actors. Without this,
         // they won't start or stop ingestion.
+        // Note that all coordinators also get latest snapshot through this.
 
         // TODO: Need to provide a globally consistent version, incremented when anything
         //       changes, for any dataset.

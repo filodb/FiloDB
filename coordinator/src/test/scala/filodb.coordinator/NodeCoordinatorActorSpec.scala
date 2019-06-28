@@ -130,7 +130,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
-      Thread.sleep(1000) // wait for Lucene index flush to happen correctly.  Wish there was a listener for this
       dataset1.ref
     }
 
