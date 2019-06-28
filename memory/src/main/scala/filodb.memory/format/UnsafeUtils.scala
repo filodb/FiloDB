@@ -55,6 +55,12 @@ object UnsafeUtils {
     }
   }
 
+  def printBytes(buf: DirectBuffer, numBytes: Int = 16): Unit = {
+    //scalastyle:off
+    println((0 until numBytes).map(buf.getByte).map(i => f"$i%02x").mkString(" "))
+    //scalastyle:on
+  }
+
   /**
    * Generic methods to read and write data to any offset from a base object location.  Be careful, this
    * can easily crash the system!
