@@ -1,13 +1,13 @@
 package filodb.jmh
 
-import scala.language.postfixOps
-
 import java.util.concurrent.TimeUnit
+
+import scala.language.postfixOps
 
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
-import org.agrona.concurrent.UnsafeBuffer
 import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
+import org.agrona.concurrent.UnsafeBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 import scalaxy.loops._
 
