@@ -225,8 +225,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
-    settings.datasets.foreach { d =>
-      val config = ConfigFactory.parseFile(new java.io.File(d))
+    settings.streamConfigs.foreach { config =>
       val dataset = Dataset.fromConfig(config)
       val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       initializeDataset(dataset, ingestion, None)

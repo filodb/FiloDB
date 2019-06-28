@@ -84,6 +84,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
   logger.info(s"Using stream factory $streamFactory with config ${source.config}, storeConfig $storeConfig")
 
+  val shutdownAfterStop = source.config.as[Option[Boolean]]("shutdown-ingest-after-stopped").getOrElse(true)
+
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
     logger.info(s"Cancelling all streams and calling teardown for dataset=${dataset.ref}")
@@ -119,7 +121,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
-        if (state.map.isAnIngestionState(shard)) {
+        if (state.map.isAnIngestionState(shard) || !shutdownAfterStop) {
           if (shardsToStop.contains(shard)) {
             // Is aready ingesting, and it must not be stopped.
             shardsToStop.remove(shard)

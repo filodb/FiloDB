@@ -8,7 +8,6 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
-import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
@@ -41,13 +40,13 @@ object NodeCoordinatorActor {
 
   def props(metaStore: MetaStore,
             memStore: MemStore,
-            config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, config)
+            settings: FilodbSettings): Props =
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, settings)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
-                                                 config: Config) extends NamingAwareBaseActor {
+                                                 settings: FilodbSettings) extends NamingAwareBaseActor {
   import context.dispatcher
 
   import NodeClusterActor._
@@ -55,7 +54,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   import client.DatasetCommands._
   import client.IngestionCommands._
 
-  val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
   val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
@@ -63,7 +61,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   var statusActor: Option[ActorRef] = None
   var datasetsInitialized = false
 
-  private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
+  private val statusAckTimeout = settings.config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
@@ -211,8 +209,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     }
 
     if (!datasetsInitialized) {
-      settings.datasets.foreach { d =>
-        val config = ConfigFactory.parseFile(new java.io.File(d))
+      logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
+      settings.streamConfigs.foreach { config =>
         val dataset = Dataset.fromConfig(config)
         val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
         initializeDataset(dataset, ingestion)

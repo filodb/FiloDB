@@ -69,7 +69,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
-  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, config)
+  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, cluster.settings)
 
   override def beforeAll(): Unit = {
     super.beforeAll()

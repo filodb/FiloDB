@@ -190,6 +190,11 @@ trait MemStore extends ChunkSource {
   def activeShards(dataset: DatasetRef): Seq[Int]
 
   /**
+   * Commits the index immediately so that queries can pick up the latest changes.  Used for testing.
+   */
+  def commitIndexForTesting(dataset: DatasetRef): Unit
+
+  /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
