@@ -145,12 +145,12 @@ extends MemStore with StrictLogging {
                     endOffset: Long,
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long] = {
-    var startOffsetValidated = false
     val shard = getShardE(dataset, shardNum)
     shard.setGroupWatermarks(checkpoints)
     if (endOffset < startOffset) Observable.empty
     else {
       var targetOffset = startOffset + reportingInterval
+      var startOffsetValidated = false
       stream.map { r =>
         if (!startOffsetValidated) {
           if (r.offset > startOffset) {
