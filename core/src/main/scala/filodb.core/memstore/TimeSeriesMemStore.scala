@@ -156,7 +156,8 @@ extends MemStore with StrictLogging {
           if (r.offset > startOffset) {
             val offsetsNotRecovered = r.offset - startOffset
             logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
-                         s"because of retention issues. offsetsNotRecovered=$offsetsNotRecovered")
+                         s"because of retention issues. recoveryStartOffset=$startOffset " +
+                         s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
             shard.shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
           }
           startOffsetValidated = true
