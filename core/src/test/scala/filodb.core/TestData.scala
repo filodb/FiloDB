@@ -53,6 +53,17 @@ object TestData {
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
   val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
+
+  val optionsString = """
+  options {
+    copyTags = {}
+    ignoreShardKeyColumnSuffixes = {}
+    ignoreTagsOnPartitionKeyHash = ["le"]
+    metricColumn = "__name__"
+    valueColumn = "value"
+    shardKeyColumns = ["__name__", "_ns"]
+  }
+  """
 }
 
 object NamesTestData {
