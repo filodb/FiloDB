@@ -68,7 +68,7 @@ final case class SetOperatorExec(id: String,
         case LAND => setOpAnd(lhsRvs, rhsRvs)
         case LOR => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
-        case _ => throw new IllegalArgumentException("requirement failed: " + "Only and, oR and unless are supported ")
+        case _ => throw new IllegalArgumentException("requirement failed: " + "Only and, or and unless are supported ")
       }
 
       Observable.fromIterable(results)
