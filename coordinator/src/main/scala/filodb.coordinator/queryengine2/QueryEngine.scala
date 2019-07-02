@@ -5,10 +5,12 @@ import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
 import filodb.core.Types
