@@ -431,7 +431,7 @@ object HistMaxSumAggregator extends RowAggregator {
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }
-    acc.m = if (acc.m == Double.NaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
+    acc.m = if (acc.m.isNaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)

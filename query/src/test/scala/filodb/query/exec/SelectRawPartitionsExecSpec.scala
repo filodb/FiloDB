@@ -240,6 +240,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
                                          Some(RangeFunctionId.SumOverTime), Nil))
+    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
 
     val resp = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -253,7 +254,21 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+      res._3.isNaN shouldEqual false
       res._3 should be >= origData._3.asInstanceOf[Double]
+    }
+
+    // Add the histogram_max_quantile function to ExecPlan and make sure results are OK
+    execPlan.addRangeVectorTransformer(
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(0.99)))
+    val resp2 = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
+    val result2 = resp2.asInstanceOf[QueryResult]
+    result2.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    result2.result.size shouldEqual 1
+    val resultIt2 = result2.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toBuffer
+
+    resultIt2.foreach { case (t, v) =>
+      v.isNaN shouldEqual false
     }
   }
 
