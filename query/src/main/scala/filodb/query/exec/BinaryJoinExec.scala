@@ -1,7 +1,6 @@
 package filodb.query.exec
 
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
 
 import monix.reactive.Observable
 
@@ -10,7 +9,6 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -21,7 +19,6 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * dictated by `on` or `ignoring` fields passed as params.
   *
   * Joins can be one-to-one or one-to-many. One-to-One is currently supported using a hash based join.
-  * One-to-Many is yet to be implemented. Many-to-Many is not supported for math based joins.
   *
   * The performance is going to be not-so-optimal since it will involve moving possibly lots of matching range vector
   * data across machines. Histogram based joins can and will be optimized by co-location of bucket, count and sum
@@ -44,9 +41,7 @@ final case class BinaryJoinExec(id: String,
                                 on: Seq[String],
                                 ignoring: Seq[String],
                                 include: Seq[String]) extends NonLeafExecPlan {
-  if (binaryOp.isInstanceOf[SetOperator]) {
-    require(cardinality == Cardinality.ManyToMany, "set operations must only use many-to-many matching")
-  }
+
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
@@ -73,13 +68,35 @@ final case class BinaryJoinExec(id: String,
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
-      val results: List[IteratorBackedRangeVector] = binaryOp  match {
-        case LAND => setOpAnd(lhsRvs, rhsRvs)
-        case LOR => setOpOr(lhsRvs, rhsRvs)
-        case LUnless => setOpUnless(lhsRvs, rhsRvs)
-        case _ => vectorBinary(lhsRvs, rhsRvs)
+      // figure out which side is the "one" side
+      val (oneSide, otherSide, lhsIsOneSide) =
+        if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
+        else (rhsRvs, lhsRvs, false)
+
+      // load "one" side keys in a hashmap
+      val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
+      oneSide.foreach { rv =>
+        val jk = joinKeys(rv.key)
+        if (oneSideMap.contains(jk))
+          throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+        oneSideMap.put(joinKeys(rv.key), rv)
       }
 
+      // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
+      val resultKeySet = new mutable.HashSet[RangeVectorKey]()
+      // iterate across the the "other" side which could be one or many and perform the binary operation
+      val results = otherSide.flatMap { rvOther =>
+        val jk = joinKeys(rvOther.key)
+        oneSideMap.get(jk).map { rvOne =>
+          val resKey = resultKeys(rvOne.key, rvOther.key)
+          if (resultKeySet.contains(resKey))
+            throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
+              s"Use grouping to create unique matching")
+          resultKeySet.add(resKey)
+          val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
+          IteratorBackedRangeVector(resKey, res)
+        }
+      }
       Observable.fromIterable(results)
     }
     Observable.fromTask(taskOfResults).flatten
@@ -116,37 +133,6 @@ final case class BinaryJoinExec(id: String,
     }
     CustomRangeVectorKey(result)
   }
-  private def vectorBinary(lhsRvs: List[SerializableRangeVector]
-                   , rhsRvs: List[SerializableRangeVector]) : List[IteratorBackedRangeVector] = {
-    // figure out which side is the "one" side
-    val (oneSide, otherSide, lhsIsOneSide) =
-      if (cardinality == Cardinality.OneToMany) (lhsRvs, rhsRvs, true)
-      else (rhsRvs, lhsRvs, false)
-
-    // load "one" side keys in a hashmap
-    val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
-    oneSide.foreach { rv =>
-      val jk = joinKeys(rv.key)
-      if (oneSideMap.contains(jk))
-        throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
-      oneSideMap.put(joinKeys(rv.key), rv)
-    }
-
-    // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
-    val resultKeySet = new mutable.HashSet[RangeVectorKey]()
-      otherSide.flatMap { rvOther =>
-      val jk = joinKeys(rvOther.key)
-      oneSideMap.get(jk).map { rvOne =>
-        val resKey = resultKeys(rvOne.key, rvOther.key)
-        if (resultKeySet.contains(resKey))
-          throw new BadQueryException(s"Non-unique result vectors found for $resKey. " +
-            s"Use grouping to create unique matching")
-        resultKeySet.add(resKey)
-        val res = if (lhsIsOneSide) binOp(rvOne.rows, rvOther.rows) else binOp(rvOther.rows, rvOne.rows)
-        IteratorBackedRangeVector(resKey, res)
-      }
-    }
-  }
 
   private def binOp(lhsRows: Iterator[RowReader], rhsRows: Iterator[RowReader]): Iterator[RowReader] = {
     new Iterator[RowReader] {
@@ -160,65 +146,6 @@ final case class BinaryJoinExec(id: String,
         cur
       }
     }
-  }
-
-  private def setOpAnd(lhsRvs: List[SerializableRangeVector]
-                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
-    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
-    rhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
-      if (!jk.isEmpty)
-        rhsKeysSet += jk
-    }
-
-    lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
-      // Add range vectors from lhs which are present in lhs and rhs both
-      // Result should also have range vectors for which rhs does not have any keys
-      if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
-        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
-      }
-    }
-    result.toList
-  }
-
-  private def setOpOr(lhsRvs: List[SerializableRangeVector]
-                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
-    val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
-    // Add everything from left hand side range vector
-    lhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
-      lhsKeysSet += jk
-      result += IteratorBackedRangeVector(rv.key, rv.rows)
-    }
-    // Add range vectors from right hand side which are not present on lhs
-    rhsRvs.foreach { rhs =>
-      val jk = joinKeys(rhs.key)
-      if (!lhsKeysSet.contains(jk)) {
-        result += IteratorBackedRangeVector(rhs.key, rhs.rows)
-      }
-    }
-    result.toList
-  }
-
-  private def setOpUnless(lhsRvs: List[SerializableRangeVector]
-                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
-    val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
-    rhsRvs.foreach { rv =>
-      val jk = joinKeys(rv.key)
-      rhsKeysSet += jk
-    }
-    // Add range vectors which are not present in rhs
-    lhsRvs.foreach { lhs =>
-      val jk = joinKeys(lhs.key)
-      if (!rhsKeysSet.contains(jk)) {
-        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
-      }
-    }
-    result.toList
   }
 }
 

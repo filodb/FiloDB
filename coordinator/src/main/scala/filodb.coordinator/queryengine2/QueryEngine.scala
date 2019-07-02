@@ -5,12 +5,10 @@ import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
 import filodb.core.Types
@@ -181,8 +179,12 @@ class QueryEngine(dataset: Dataset,
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
-    val joined = Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-                                    lp.on, lp.ignoring, lp.include))
+    val joined = if (lp.operator.isInstanceOf[SetOperator])
+      Seq(exec.SetOperatorExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+        lp.on, lp.ignoring))
+    else
+      Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+        lp.on, lp.ignoring, lp.include))
     PlanResult(joined, false)
   }
 
