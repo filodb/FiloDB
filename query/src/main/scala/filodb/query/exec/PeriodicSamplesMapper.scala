@@ -9,10 +9,38 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
 import filodb.memory.format.{vectors => bv, _}
-import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
-import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
+import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query.RangeFunctionId._
+import filodb.query.exec.rangefn._
 import filodb.query.util.IndexedArrayQueue
+
+
+final case object PeriodicSamplesMapper {
+  def downsampleColFromRangeFunction(f: Option[RangeFunctionId]): String = {
+    f match {
+      case None                   => "avg"
+      case Some(Rate)             => "counter"
+      case Some(Delta)            => "counter"
+      case Some(Irate)            => "counter"
+      case Some(Increase)         => "counter"
+      case Some(Resets)           => "counter"
+      case Some(CountOverTime)    => "count"
+      case Some(Delta)            => "avg"
+      case Some(Idelta)           => "avg"
+      case Some(Deriv)            => "avg"
+      case Some(HoltWinters)      => "avg"
+      case Some(PredictLinear)    => "avg"
+      case Some(SumOverTime)      => "sum"
+      case Some(AvgOverTime)      => "avg"
+      case Some(StdDevOverTime)   => "avg"
+      case Some(StdVarOverTime)   => "avg"
+      case Some(QuantileOverTime) => "avg"
+      case Some(MinOverTime)      => "min"
+      case Some(MaxOverTime)      => "max"
+    }
+  }
+}
 
 /**
   * Transforms raw reported samples to samples with

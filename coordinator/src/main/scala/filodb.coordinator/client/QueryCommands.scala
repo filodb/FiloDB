@@ -65,6 +65,7 @@ object QueryCommands {
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
+                                downsampleMode: Boolean = false,
                                 shardOverrides: Option[Seq[Int]] = None)
 
   object QueryOptions {

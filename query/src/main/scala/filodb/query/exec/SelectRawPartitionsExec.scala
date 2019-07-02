@@ -35,6 +35,7 @@ final case class SelectRawPartitionsExec(id: String,
                                          shard: Int,
                                          filters: Seq[ColumnFilter],
                                          chunkMethod: ChunkScanMethod,
+                                         downsample: Boolean,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
@@ -59,6 +60,16 @@ final case class SelectRawPartitionsExec(id: String,
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
+
+    val selectColIds = if (colIds.size > dataset.rowKeyIDs.size) {
+      colIds // query is selecting specific columns
+    } else if (!downsample) {
+      colIds ++ dataset.colIDs(dataset.options.valueColumn).get
+    } else {
+      rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
+        PeriodicSamplesMapper.downsampleColFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
+      }.getOrElse("avg")
+    }
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)

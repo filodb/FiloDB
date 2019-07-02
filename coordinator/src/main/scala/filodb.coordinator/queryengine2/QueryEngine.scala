@@ -249,8 +249,9 @@ class QueryEngine(dataset: Dataset,
 
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
-                                       options: QueryOptions,
-                                       lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
+                                        options: QueryOptions,
+                                        lp: PeriodicSeries,
+                                        spreadProvider : SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
@@ -260,7 +261,8 @@ class QueryEngine(dataset: Dataset,
   private def materializeRawSeries(queryId: String,
                                    submitTime: Long,
                                    options: QueryOptions,
-                                   lp: RawSeries, spreadProvider : SpreadProvider): PlanResult = {
+                                   lp: RawSeries,
+                                   spreadProvider: SpreadProvider): PlanResult = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
     val spreadChanges = spreadProvider.spreadFunc(renamedFilters)
@@ -277,9 +279,10 @@ class QueryEngine(dataset: Dataset,
   }
 
   private def materializeLabelValues(queryId: String,
-                                      submitTime: Long,
-                                      options: QueryOptions,
-                                      lp: LabelValues, spreadProvider : SpreadProvider): PlanResult = {
+                                     submitTime: Long,
+                                     options: QueryOptions,
+                                     lp: LabelValues,
+                                     spreadProvider: SpreadProvider): PlanResult = {
     val filters = lp.labelConstraints.map { case (k, v) =>
       new ColumnFilter(k, Filter.Equals(v))
     }.toSeq
@@ -368,8 +371,7 @@ class QueryEngine(dataset: Dataset,
     * as those are automatically prepended.
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
-    val realCols = if (cols.isEmpty) Seq(dataset.options.valueColumn) else cols
-    val ids = dataset.colIDs(realCols: _*)
+    val ids = dataset.colIDs(cols: _*)
       .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
       .get
     // avoid duplication if first ids are already row keys
