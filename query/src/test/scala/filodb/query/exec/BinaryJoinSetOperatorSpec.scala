@@ -180,7 +180,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     // scalastyle:off
@@ -216,7 +215,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -254,7 +252,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Seq("instance", "job"), Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -292,7 +289,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Seq("instance"), Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -329,7 +325,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Nil, Seq("group"))
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -365,7 +360,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Nil, Seq("group", "job"))
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -401,7 +395,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Seq("dummy"), Nil)
 
     // scalastyle:off
@@ -424,7 +417,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
-      Cardinality.ManyToMany,
       Nil, Seq("group", "instance", "job"))
 
     // scalastyle:off
@@ -447,7 +439,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     // scalastyle:off
@@ -476,7 +467,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -537,7 +527,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -553,7 +542,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Seq("instance"), Nil)
 
     // scalastyle:off
@@ -610,7 +598,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
@@ -626,7 +613,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
-      Cardinality.ManyToMany,
       Nil, Seq("l", "group", "job"))
 
     // scalastyle:off
@@ -682,7 +668,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Cardinality.ManyToMany,
       Nil, Nil)
 
     // scalastyle:off
@@ -717,7 +702,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Cardinality.ManyToMany,
       Seq("job"), Nil)
 
     // scalastyle:off
@@ -749,7 +733,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Cardinality.ManyToMany,
       Seq("job", "instance"), Nil)
 
     // scalastyle:off
@@ -785,7 +768,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Cardinality.ManyToMany,
       Seq("job"), Nil)
 
     // scalastyle:off
@@ -818,7 +800,6 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
-      Cardinality.ManyToMany,
       Seq("job", "instance"), Nil)
 
     // scalastyle:off

@@ -182,7 +182,7 @@ class QueryEngine(dataset: Dataset,
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
-      Seq(exec.SetOperatorExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+      Seq(exec.SetOperatorExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         lp.on, lp.ignoring))
     else
       Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,

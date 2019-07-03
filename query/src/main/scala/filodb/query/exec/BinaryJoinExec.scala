@@ -79,7 +79,7 @@ final case class BinaryJoinExec(id: String,
         val jk = joinKeys(rv.key)
         if (oneSideMap.contains(jk))
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
-        oneSideMap.put(joinKeys(rv.key), rv)
+        oneSideMap.put(jk, rv)
       }
 
       // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors

@@ -33,11 +33,8 @@ final case class SetOperatorExec(id: String,
                                 lhs: Seq[ExecPlan],
                                 rhs: Seq[ExecPlan],
                                 binaryOp: BinaryOperator,
-                                cardinality: Cardinality,
                                 on: Seq[String],
                                 ignoring: Seq[String]) extends NonLeafExecPlan {
-  require(cardinality == Cardinality.ManyToMany, "set operations must only use many-to-many matching")
-
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
@@ -64,7 +61,7 @@ final case class SetOperatorExec(id: String,
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
-      val results: List[IteratorBackedRangeVector] = binaryOp  match {
+      val results: List[SerializableRangeVector] = binaryOp  match {
         case LAND => setOpAnd(lhsRvs, rhsRvs)
         case LOR => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
@@ -82,9 +79,9 @@ final case class SetOperatorExec(id: String,
   }
 
   private def setOpAnd(lhsRvs: List[SerializableRangeVector]
-                       , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+                       , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
+    var result = new ListBuffer[SerializableRangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       if (!jk.isEmpty)
@@ -96,36 +93,36 @@ final case class SetOperatorExec(id: String,
       // Add range vectors from lhs which are present in lhs and rhs both
       // Result should also have range vectors for which rhs does not have any keys
       if (rhsKeysSet.contains(jk) || rhsKeysSet.isEmpty) {
-        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
+        result += lhs
       }
     }
     result.toList
   }
 
   private def setOpOr(lhsRvs: List[SerializableRangeVector]
-                      , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+                      , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
     val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
+    var result = new ListBuffer[SerializableRangeVector]()
     // Add everything from left hand side range vector
     lhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       lhsKeysSet += jk
-      result += IteratorBackedRangeVector(rv.key, rv.rows)
+      result += rv
     }
     // Add range vectors from right hand side which are not present on lhs
     rhsRvs.foreach { rhs =>
       val jk = joinKeys(rhs.key)
       if (!lhsKeysSet.contains(jk)) {
-        result += IteratorBackedRangeVector(rhs.key, rhs.rows)
+        result += rhs
       }
     }
     result.toList
   }
 
   private def setOpUnless(lhsRvs: List[SerializableRangeVector]
-                          , rhsRvs: List[SerializableRangeVector]): List[IteratorBackedRangeVector] = {
+                          , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[IteratorBackedRangeVector]()
+    var result = new ListBuffer[SerializableRangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       rhsKeysSet += jk
@@ -134,7 +131,7 @@ final case class SetOperatorExec(id: String,
     lhsRvs.foreach { lhs =>
       val jk = joinKeys(lhs.key)
       if (!rhsKeysSet.contains(jk)) {
-        result += IteratorBackedRangeVector(lhs.key, lhs.rows)
+        result += lhs
       }
     }
     result.toList
