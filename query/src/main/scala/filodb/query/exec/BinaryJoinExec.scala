@@ -42,6 +42,8 @@ final case class BinaryJoinExec(id: String,
                                 ignoring: Seq[String],
                                 include: Seq[String]) extends NonLeafExecPlan {
 
+  require(cardinality != Cardinality.ManyToMany,
+    "Many To Many cardinality is not supported for BinaryJoinExec")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
