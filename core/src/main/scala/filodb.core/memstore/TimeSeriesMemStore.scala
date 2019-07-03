@@ -150,7 +150,20 @@ extends MemStore with StrictLogging {
     if (endOffset < startOffset) Observable.empty
     else {
       var targetOffset = startOffset + reportingInterval
-      stream.map(shard.ingest(_)).collect {
+      var startOffsetValidated = false
+      stream.map { r =>
+        if (!startOffsetValidated) {
+          if (r.offset > startOffset) {
+            val offsetsNotRecovered = r.offset - startOffset
+            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
+                         s"because of retention issues. recoveryStartOffset=$startOffset " +
+                         s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
+            shard.shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
+          }
+          startOffsetValidated = true
+        }
+        shard.ingest(r)
+      }.collect {
         case offset: Long if offset >= endOffset => // last offset reached
           offset
         case offset: Long if offset > targetOffset => // reporting interval reached

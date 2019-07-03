@@ -39,6 +39,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").refine(tags)
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
