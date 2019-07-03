@@ -54,7 +54,7 @@ final class FilodbSettings(val conf: Config) {
     if (datasets.nonEmpty) {
       datasets.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
     } else {
-      config.as[Seq[Config]]("streams")
+      config.as[Seq[Config]]("inline-dataset-configs")
     }
 }
 

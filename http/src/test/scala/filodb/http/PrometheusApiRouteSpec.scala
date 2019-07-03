@@ -16,7 +16,7 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
   override lazy val configString = s"""
   filodb {
     memstore.groups-per-shard = 4
-    streams = [
+    inline-dataset-configs = [
       {
         dataset = "prometheus"
         definition {

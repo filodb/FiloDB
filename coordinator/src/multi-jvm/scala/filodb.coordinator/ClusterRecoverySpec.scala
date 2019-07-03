@@ -24,7 +24,7 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
   val ourConf = s"""
   filodb {
     memstore.groups-per-shard = 4
-    streams = [
+    inline-dataset-configs = [
       {
         dataset = "gdelt"
         definition {
