@@ -5,12 +5,10 @@ import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
 import filodb.core.Types
@@ -18,6 +16,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
@@ -61,6 +60,25 @@ class QueryEngine(dataset: Dataset,
                   options: QueryOptions, spreadProvider: SpreadProvider = StaticSpreadProvider()): ExecPlan = {
     val queryId = UUID.randomUUID().toString
 
+    /*1 Get startTime endtime from logicalplan using periodicseriesplan
+    2. Break down into remote an local query plans based on failover times
+    3. Timerange => seq[pod, timerange1] -  timerange1 is failur times in pod
+
+ if (requested Time Range has a gap in current DC) {
+    val parent = createStitchExecPlan()
+    val leftChild = walkTree (modified logical plan 1)
+    val rightChild = createExecPlanToRunLogicalPlanRemotely( modified logical plan 2)
+        // link children
+    return parent;
+  } else {
+       // current logic
+  }
+
+    */
+    val instance = "PeriodicSeriesPlan"
+    rootLogicalPlan.asInstanceOf[instance]
+
+
     val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(),
       options, spreadProvider)
     match {
@@ -81,6 +99,28 @@ class QueryEngine(dataset: Dataset,
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
       s" $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
+  }
+
+  //to do make class for TimeF
+  private def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeStepParams = {
+
+    logicalPlan match {
+//      case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
+//      case lp: RawChunkMeta                => materializeRawChunkMeta(queryId, submitTime, options, lp, spreadProvider)
+      case lp: PeriodicSeries              => val st = lp.asInstanceOf[PeriodicSeries]
+                                              TimeStepParams(st.start, st.step, st.end)
+      case lp: PeriodicSeriesWithWindowing => lp.asInstanceOf[PeriodicSeriesWithWindowing].start
+      case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.asInstanceOf[ApplyInstantFunction].vectors)
+      case lp: Aggregate                   => getTimeFromLogicalPlan(lp.asInstanceOf[Aggregate].vectors)
+      case lp: BinaryJoin                  => getTimeFromLogicalPlan(lp.asInstanceOf[BinaryJoin].lhs) // can assume lhs & rhs have same timr
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
+        spreadProvider)
+      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
+      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+        spreadProvider)
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+        spreadProvider)
+    }
   }
 
   val shardColumns = dataset.options.shardKeyColumns.sorted
