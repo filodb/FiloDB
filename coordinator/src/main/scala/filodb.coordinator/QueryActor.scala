@@ -15,6 +15,7 @@ import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
+import filodb.core.query.ColumnFilter
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
@@ -57,7 +58,7 @@ final class QueryActor(memStore: MemStore,
   val config = context.system.settings.config
 
   var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
-  val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
+  val applicationShardKeyName = dataset.options.nonMetricShardColumns.headOption
   val defaultSpread = config.getInt("filodb.spread-default")
 
   implicit val spreadOverrideReader: ValueReader[SpreadAssignment] = ValueReader.relative { spreadAssignmentConfig =>
@@ -70,7 +71,9 @@ final class QueryActor(memStore: MemStore,
   val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
   spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
-  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
+  val spreadFunc = applicationShardKeyName.map { appKey =>
+                     QueryOptions.simpleMapSpreadFunc(appKey, filodbSpreadMap, defaultSpread)
+                   }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)

@@ -18,7 +18,6 @@ object IngestionStreamSpec extends ActorSpecConfig
 // Most of the tests use the automated DatasetSetup where the coordinators set up the IngestionStream, but
 // some set them up manually by invoking the factories directly.
 // TODO disabled since this test is flaky in Travis.
-@org.scalatest.Ignore
 class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) with StrictLogging
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -64,6 +63,20 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     Thread sleep 2000
   }
 
+  def waitForStatus(ref: DatasetRef, waitFor: ShardStatus): Unit = {
+    var latestStatus: ShardStatus = ShardStatusAssigned
+    // sometimes we receive multiple status snapshots
+    while (latestStatus != waitFor) {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(ref, mapper) =>
+          latestStatus = mapper.statuses.head
+          if (latestStatus != ShardStatusError)
+            mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+      }
+      info(s"Latest status = $latestStatus")
+    }
+  }
+
   def setup(dataset: Dataset, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
@@ -79,6 +92,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     val storeConf = StoreConfig(config.getConfig("store"))
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
     val command = SetupDataset(dataset, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
+    coordinatorActor ! command  // have to send command to coordinator to help initialize it
+    Thread sleep 2000
     clusterActor ! command
     expectMsg(within, DatasetVerified)
 
@@ -89,8 +104,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
         shardMap.numShards shouldEqual command.resources.numShards
         mapper.statuses.head shouldEqual ShardStatusAssigned
     }
-
-    coordinatorActor ! command
   }
 
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
@@ -98,18 +111,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
     setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-
-    var latestStatus: ShardStatus = ShardStatusAssigned
-    // sometimes we receive multiple status snapshots
-    while (latestStatus != ShardStatusError) {
-      expectMsgPF(within) {
-        case CurrentShardSnapshot(dataset33.ref, mapper) =>
-          latestStatus = mapper.statuses.head
-          if (latestStatus != ShardStatusError)
-            mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-      }
-      info(s"Latest status = $latestStatus")
-    }
+    waitForStatus(dataset33.ref, ShardStatusError)
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -120,19 +122,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    waitForStatus(dataset6.ref, ShardStatusActive)
 
     // then it becomes stopped
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
-
+    waitForStatus(dataset6.ref, ShardStatusStopped)
   }
 
   it("should ingest all rows directly into MemStore") {
@@ -141,18 +134,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    waitForStatus(dataset33.ref, ShardStatusActive)
 
     // Wait for all messages to be ingested
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
+    waitForStatus(dataset33.ref, ShardStatusStopped)
 
     coordinatorActor ! GetIngestionStats(dataset33.ref)
     expectMsg(IngestionActor.IngestionStatus(99))
@@ -201,17 +186,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     }
     */
 
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    // first it becomes active
+    waitForStatus(dataset33.ref, ShardStatusActive)
 
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
+    // Wait for all messages to be ingested
+    waitForStatus(dataset33.ref, ShardStatusStopped)
 
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)
