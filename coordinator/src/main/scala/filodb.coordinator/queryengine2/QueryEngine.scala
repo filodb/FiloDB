@@ -6,6 +6,8 @@ import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import akka.actor.ActorRef
+import akka.japi
+import com.sun.tools.javadoc.Start
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
@@ -18,16 +20,22 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query.{exec, _}
+import filodb.query.{BinaryJoin, exec, _}
 import filodb.query.exec._
 
+case class TimeRange (start: Long, end: Long)
+case class FailureTimeRange(pod: String, dataset: String , timeRange: TimeRange, dispatcher: Option[PlanDispatcher])
+trait FailureProvider {
+def getFailures(dataset: String, queryTimeRange: TimeRange): List[FailureTimeRange]
+}
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
 class QueryEngine(dataset: Dataset,
-                  shardMapperFunc: => ShardMapper)
+                  shardMapperFunc: => ShardMapper, failureProvider: FailureProvider,
+                  LocalDispatcher: PlanDispatcher)
                    extends StrictLogging {
 
   /**
@@ -37,6 +45,26 @@ class QueryEngine(dataset: Dataset,
     * Not for runtime use.
     */
   private case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
+
+  trait FailureProvider {
+    def getFailures(dataset: String, queryTimeRange: TimeRange): List[FailureTimeRange]
+  }
+
+  trait Route
+    case class LocalRoute( tr: Option[TimeRange]) extends Route
+    case class RemoteRoute(tr: Option[TimeRange], dispatcher: PlanDispatcher) extends Route
+
+  trait RoutingPlanner {
+    def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange]): Seq[Route]
+  }
+  class QueryRoutingPlanner extends  RoutingPlanner{
+    def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange]): Seq[Route] = {
+
+      if (isPeriodicSeriesPlan (lp))
+        new LocalRoute()
+      return Nil
+    }
+  }
 
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
@@ -53,11 +81,51 @@ class QueryEngine(dataset: Dataset,
     }
   }
 
+
+  def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
+    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan])
+     return  false;
+   true
+  }
+
+  def getRoute(logicalPlan: LogicalPlan) : Route = {
+
+
+  }
+  case class FailureTimeRange(pod: String, dataset: String , timeRange: TimeRange, dispatcher: Option[PlanDispatcher])
+  private  def splitQuery( failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long) : Seq[Route] = {
+    // sort failure
+    // traverse query range time from left to right , break at failure start
+    var i = index
+    failure(index + 1).timeRange
+    // current failure is in Remote
+      if (failure(index).dispatcher.isDefined) {
+        do {
+          i = index + 1
+        } while ((failure(index).dispatcher.isDefined))
+        splitQuery(failure, i + 1, failure(i + 1).timeRange.start, end) :+
+          RemoteRoute( Some(TimeRange(start, failure(i + 1).timeRange.start)), failure(i).dispatcher.get)
+      }
+    else
+        {
+
+          do {
+            i = index + 1
+          } while ((!failure(index).dispatcher.isDefined)) // till we get a remote failure
+          splitQuery(failure, i + 1, failure(i + 1).timeRange.start, end) :+
+          new LocalRoute(Some(TimeRange(start, failure(i + 1).timeRange.start)))
+        }
+
+  }
   /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
                   options: QueryOptions, spreadProvider: SpreadProvider = StaticSpreadProvider()): ExecPlan = {
+
+val failures = failureProvider.getFailures()
+
+RoutingPl
     val queryId = UUID.randomUUID().toString
 
     /*1 Get startTime endtime from logicalplan using periodicseriesplan
@@ -75,9 +143,9 @@ class QueryEngine(dataset: Dataset,
   }
 
     */
-    val instance = "PeriodicSeriesPlan"
-    rootLogicalPlan.asInstanceOf[instance]
-
+//    val instance = "PeriodicSeriesPlan"
+//    rootLogicalPlan.asInstanceOf[instance]
+//rootLogicalPlan.cl
 
     val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(),
       options, spreadProvider)
@@ -102,24 +170,55 @@ class QueryEngine(dataset: Dataset,
   }
 
   //to do make class for TimeF
-  private def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeStepParams = {
+  private def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
 
     logicalPlan match {
-//      case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
-//      case lp: RawChunkMeta                => materializeRawChunkMeta(queryId, submitTime, options, lp, spreadProvider)
-      case lp: PeriodicSeries              => val st = lp.asInstanceOf[PeriodicSeries]
-                                              TimeStepParams(st.start, st.step, st.end)
-      case lp: PeriodicSeriesWithWindowing => lp.asInstanceOf[PeriodicSeriesWithWindowing].start
+      case lp: PeriodicSeries              => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
+                                              TimeRange(periodicSeries.start, periodicSeries.end)
+      case lp: PeriodicSeriesWithWindowing => val periodicSeriesWithWindowing = lp.
+                                              asInstanceOf[PeriodicSeriesWithWindowing]
+                                              TimeRange(periodicSeriesWithWindowing.start,
+                                                periodicSeriesWithWindowing.end)
       case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.asInstanceOf[ApplyInstantFunction].vectors)
       case lp: Aggregate                   => getTimeFromLogicalPlan(lp.asInstanceOf[Aggregate].vectors)
-      case lp: BinaryJoin                  => getTimeFromLogicalPlan(lp.asInstanceOf[BinaryJoin].lhs) // can assume lhs & rhs have same timr
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
-        spreadProvider)
-      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
-        spreadProvider)
+      case lp: BinaryJoin                  => // can assume lhs & rhs have same timr
+                                              getTimeFromLogicalPlan(lp.asInstanceOf[BinaryJoin].lhs)
+      //To do take care of oteger logical plans
+//      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
+//        spreadProvider)
+//      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
+//      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+//        spreadProvider)
+//      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+//        spreadProvider)
+    }
+  }
+
+  private def updateTimeLogicalPlan(logicalPlan: LogicalPlan, timeRange: TimeRange): PeriodicSeriesPlan = {
+
+    logicalPlan match {
+      case lp: PeriodicSeries              => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
+                                              periodicSeries.copy(start = timeRange.start, end = timeRange.end )
+      case lp: PeriodicSeriesWithWindowing => lp.asInstanceOf[PeriodicSeriesWithWindowing].
+                                              copy(start = timeRange.start, end = timeRange.end)
+      case lp: ApplyInstantFunction        => val applyInstantFunction = lp.asInstanceOf[ApplyInstantFunction]
+                                              applyInstantFunction.copy(vectors = updateTimeLogicalPlan
+                                              (applyInstantFunction.vectors, timeRange))
+      case lp: Aggregate                   => val aggregate = lp.asInstanceOf[Aggregate]
+                                              aggregate.copy(vectors = updateTimeLogicalPlan
+                                              (aggregate.vectors, timeRange))
+      case lp: BinaryJoin                  => val binaryJoin = lp.asInstanceOf[BinaryJoin]
+                                              binaryJoin.copy(lhs = updateTimeLogicalPlan(binaryJoin.lhs,
+                                                timeRange), rhs =
+                                                updateTimeLogicalPlan(binaryJoin.rhs, timeRange))
+        //To do take care of oteger logical plans
+//      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
+//        spreadProvider)
+//      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
+//      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+//        spreadProvider)
+//      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+     //   spreadProvider)
     }
   }
 
