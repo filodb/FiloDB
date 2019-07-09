@@ -108,6 +108,19 @@ class SchemasSpec extends FunSpec with Matchers {
     }
   }
 
+  val partSchemaStr = """{
+                      columns = ["tags:map"]
+                      predefined-keys = ["_ns", "app", "__name__", "instance", "dc"]
+                      options {
+                        copyTags = {}
+                        ignoreShardKeyColumnSuffixes = {}
+                        ignoreTagsOnPartitionKeyHash = ["le"]
+                        metricColumn = "__name__"
+                        valueColumn = "value"   # TODO: remove this when it's not needed anymore
+                        shardKeyColumns = ["__name__", "_ns"]
+                      }
+                    }"""
+
   describe("PartitionSchema") {
     it("should allow MapColumns only in last position of partition key") {
       val mapCol = "tags:map"
@@ -124,6 +137,110 @@ class SchemasSpec extends FunSpec with Matchers {
       val resp3 = PartitionSchema.make(Seq(mapCol, "first:string"), DatasetOptions.DefaultOptions)
       resp3.isBad shouldEqual true
       resp3.swap.get shouldBe an[IllegalMapColumn]
+    }
+
+    it("should return BadColumnType if unsupported type specified in column spec") {
+      val resp1 = PartitionSchema.make(Seq("first:strolo"), DatasetOptions.DefaultOptions)
+      resp1.isBad shouldEqual true
+      val errors = resp1.swap.get match {
+        case ColumnErrors(errs) => errs
+        case x => throw new RuntimeException(s"Did not expect $x")
+      }
+      errors should have length (1)
+      errors.head shouldEqual BadColumnType("strolo")
+    }
+
+    it("should parse config with options") {
+      val conf2 = ConfigFactory.parseString(partSchemaStr)
+      val schema = PartitionSchema.fromConfig(conf2).get
+
+      schema.columns.map(_.columnType) shouldEqual Seq(MapColumn)
+      schema.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
+    }
+  }
+
+  describe("Schemas") {
+    it("should return all errors from every data schema") {
+      val conf2 = ConfigFactory.parseString(s"""
+                    {
+                      partition-schema $partSchemaStr
+                      schemas {
+                        prom1 {
+                          columns = ["timestamp:tsa", "code:long", "event:string"]
+                          value-column = "event"
+                          downsamplers = []
+                        }
+                        prom2 {
+                          columns = ["timestamp:ts", "code:long", "ev. ent:string"]
+                          value-column = "foo"
+                          downsamplers = []
+                        }
+                        prom3 {
+                          columns = ["timestamp:ts", "code:long", "event:string"]
+                          value-column = "event"
+                          downsamplers = []
+                        }
+                      }
+                    }""")
+      val resp = Schemas.fromConfig(conf2)
+      resp.isBad shouldEqual true
+      val errors = resp.swap.get
+      errors should have length (2)
+      errors.map(_._1).toSet shouldEqual Set("prom1", "prom2")
+      errors.map(_._2.getClass).toSet shouldEqual Set(classOf[ColumnErrors])
+    }
+
+    it("should detect and report hash conflicts") {
+      val conf2 = ConfigFactory.parseString(s"""
+                    {
+                      partition-schema $partSchemaStr
+                      schemas {
+                        prom {
+                          columns = ["timestamp:ts", "value:double"]
+                          value-column = "value"
+                          downsamplers = []
+                        }
+                        prom2 {
+                          columns = ["timestamp:ts", "value:double"]
+                          value-column = "timestamp"
+                          downsamplers = []
+                        }
+                      }
+                    }""")
+      val resp = Schemas.fromConfig(conf2)
+      resp.isBad shouldEqual true
+      val errors = resp.swap.get
+      errors.map(_._2.getClass) shouldEqual Seq(classOf[HashConflict])
+    }
+
+    it("should return Schemas instance with every schema parsed") {
+      val conf2 = ConfigFactory.parseString(s"""
+                    {
+                      partition-schema $partSchemaStr
+                      schemas {
+                        prom {
+                          columns = ["timestamp:ts", "value:double"]
+                          value-column = "value"
+                          downsamplers = []
+                        }
+                        hist {
+                          columns = ["timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"]
+                          value-column = "h"
+                          downsamplers = []
+                        }
+                      }
+                    }""")
+      val schemas = Schemas.fromConfig(conf2).get
+
+      schemas.part.columns.map(_.columnType) shouldEqual Seq(MapColumn)
+      schemas.part.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
+
+      val promRef = DatasetRef("prom")
+      val histRef = DatasetRef("hist")
+      schemas.data.keySet shouldEqual Set(promRef, histRef)
+      schemas.schemas.keySet shouldEqual Set(promRef, histRef)
+      schemas.data(DatasetRef("prom")).columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      // println(schemas.data.values.map(_.hash))
     }
   }
 }

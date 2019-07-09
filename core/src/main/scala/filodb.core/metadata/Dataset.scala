@@ -268,6 +268,7 @@ object Dataset {
   case class UnknownRowKeyColumn(keyColumn: String) extends BadSchema
   case class IllegalMapColumn(reason: String) extends BadSchema
   case class NoTimestampRowKey(colName: String, colType: String) extends BadSchema
+  case class HashConflict(detail: String) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 

@@ -8,6 +8,7 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
+import filodb.core.DatasetRef
 import filodb.core.Types._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.BinaryVector
@@ -95,7 +96,7 @@ object DataSchema {
     for { dataColumns  <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
           downsamplers <- validateDownsamplers(downsamplerNames)
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
-          _ <- validateTimeSeries(dataColumns, Seq(0)) }
+          _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
       DataSchema(name, dataColumns, downsamplers, genHash(dataColumns), valueColID)
     }
@@ -173,10 +174,64 @@ final case class Schema(partition: PartitionSchema, data: DataSchema) {
   val partKeySchema   = comparator.partitionKeySchema
 }
 
+final case class Schemas(part: PartitionSchema,
+                         data: Map[DatasetRef, DataSchema],
+                         schemas: Map[DatasetRef, Schema])
+
 /**
  * Singleton with code to load all schemas from config, verify no conflicts, and ensure there is only
- * one PartitionSchema.
+ * one PartitionSchema.   Config schema:
+ * {{{
+ *   filodb {
+ *     partition-schema {
+ *       columns = ["tags:map"]
+ *     }
+ *     schemas {
+ *       prometheus { ... }
+ *       # etc
+ *     }
+ *   }
+ * }}}
  */
 object Schemas {
-  // function to initialize all the data schemas and partition schemas
+  import Dataset._
+  import Accumulation._
+
+  // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
+  def validateDataSchemas(schemas: Map[String, Config]): Seq[DataSchema] Or Seq[(String, BadSchema)] = {
+    // get all data schemas parsed, combining errors
+    val parsed = schemas.toSeq.map { case (schemaName, schemaConf) =>
+                   DataSchema.fromConfig(schemaName, schemaConf)
+                             .badMap(err => One((schemaName, err)))
+                 }.combined.badMap(_.toSeq)
+
+    // Check for no hash conflicts
+    parsed.filter { schemas =>
+      val uniqueHashes = schemas.map(_.hash).toSet
+      if (uniqueHashes.size == schemas.length) Pass
+      else Fail(Seq(("", HashConflict(s"${schemas.length - uniqueHashes.size + 1} schemas have the same hash"))))
+    }
+  }
+
+  /**
+   * Parse and initialize all the data schemas and single partition schema from config.
+   * Verifies that all of the schemas are conflict-free (no conflicting hash) and config parses correctly.
+   * @param config a Config object at the filodb config level, ie "partition-schema" is an entry
+   */
+  def fromConfig(config: Config): Schemas Or Seq[(String, BadSchema)] = {
+    for {
+      partSchema <- PartitionSchema.fromConfig(config.getConfig("partition-schema"))
+                                   .badMap(e => Seq(("<partition>", e)))
+      dataSchemas <- validateDataSchemas(config.as[Map[String, Config]]("schemas"))
+    } yield {
+      val data = new collection.mutable.HashMap[DatasetRef, DataSchema]
+      val schemas = new collection.mutable.HashMap[DatasetRef, Schema]
+      dataSchemas.foreach { schema =>
+        val ref = DatasetRef(schema.name)
+        data(ref) = schema
+        schemas(ref) = Schema(partSchema, schema)
+      }
+      Schemas(partSchema, data.toMap, schemas.toMap)
+    }
+  }
 }
