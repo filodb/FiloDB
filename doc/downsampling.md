@@ -108,3 +108,20 @@ filters in the query needs to include the `__col__` tag with the value of the do
 chosen in the downsample dataset. For example `heap_usage{_ns="myApp" __col__="avg"}`
 
 Coming soon in subsequent PR: Automatic selection of column based on the time window function applied in the query.
+
+## Validation of Downsample Results
+
+Run main class filodb.prom.downsample.GaugeDownsampleValidator with following system property arguments:
+
+```
+-Dquery-endpoint=https://myFiloDbEndpoint.com
+-Draw-data-promql=jvm_threads{_ns=\"myApplication\",measure=\"daemon\",__col__=\"value\"}[@@@@s]
+-Dflush-interval=12h
+-Dquery-range=6h
+
+raw-data-promql property value should end with ',__col__="value"}[@@@@s]'.
+The lookback window is replaced by validation tool when running the query.
+```
+
+This will perform validation of min, max,, sum and count downsamplers by issuing same query to both datasets
+and making sure results are consistent.

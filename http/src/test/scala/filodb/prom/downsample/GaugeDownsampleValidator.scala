@@ -18,7 +18,18 @@ import filodb.http.PromCirceSupport
 import filodb.prometheus.query.PrometheusModel.SuccessResponse
 
 /**
-  * Use this tool to validate raw data against downsampled data for gauges
+  * Use this tool to validate raw data against downsampled data for gauges.
+  *
+  *
+  * Run as main class with following system properties:
+  *
+  * -Dquery-endpoint=https://myFiloDbEndpoint.com
+  * -Draw-data-promql=jvm_threads{_ns=\"myApplication\",measure=\"daemon\",__col__=\"value\"}[@@@@s]
+  * -Dflush-interval=12h
+  * -Dquery-range=6h
+  *
+  * raw-data-promql property value should end with ',__col__="value"}[@@@@s]'.
+  * The lookback window is replaced by validation tool when running the query.
   *
   */
 object GaugeDownsampleValidator extends App with StrictLogging {
@@ -29,6 +40,9 @@ object GaugeDownsampleValidator extends App with StrictLogging {
   import PromCirceSupport._
   import io.circe.generic.auto._
 
+  case class DownsampleValidation(name: String, rawQuery: String, dsQuery: String)
+  case class DownsampleLevel(step: Duration, endpoint: String)
+
   val config = ConfigFactory.load()
   val rawPromql = config.getString("raw-data-promql")
   val filodbHttpEndpoint = config.getString("query-endpoint")
@@ -38,15 +52,16 @@ object GaugeDownsampleValidator extends App with StrictLogging {
   require((rawPromql.endsWith(""",__col__="value"}[@@@@s]""")),
     """Raw Data PromQL should end with ,__col__="value"}[@@@@s]""")
 
-  val rawToDsPromQl = Map (
-    s"""min_over_time($rawPromql)""" ->
-      s"""min_over_time(${rawPromql.replace("\"value\"", "\"min\"")})""",
-    s"""max_over_time($rawPromql)""" ->
-      s"""max_over_time(${rawPromql.replace("\"value\"", "\"max\"")})""",
-    s"""sum_over_time($rawPromql)""" ->
-      s"""sum_over_time(${rawPromql.replace("\"value\"", "\"sum\"")})""",
-    s"""count_over_time($rawPromql)""" ->
-      s"""sum_over_time(${rawPromql.replace("\"value\"", "\"count\"")})"""
+  // List of validations to perform
+  val validations = Seq (
+    DownsampleValidation("min", s"""min_over_time($rawPromql)""",
+      s"""min_over_time(${rawPromql.replace("\"value\"", "\"min\"")})"""),
+    DownsampleValidation("max", s"""max_over_time($rawPromql)""",
+      s"""max_over_time(${rawPromql.replace("\"value\"", "\"max\"")})"""),
+      DownsampleValidation("sum", s"""sum_over_time($rawPromql)""",
+      s"""sum_over_time(${rawPromql.replace("\"value\"", "\"sum\"")})"""),
+        DownsampleValidation("count", s"""count_over_time($rawPromql)""",
+      s"""sum_over_time(${rawPromql.replace("\"value\"", "\"count\"")})""")
   )
 
   val now = System.currentTimeMillis()
@@ -59,28 +74,25 @@ object GaugeDownsampleValidator extends App with StrictLogging {
   implicit val as = ActorSystem()
   implicit val materializer = ActorMaterializer()
 
-  // TODO configure
-  val urlPrefixes = Array (s"$filodbHttpEndpoint/promql/prometheus_ds_1m/api",
-                           s"$filodbHttpEndpoint/promql/prometheus_ds_15m/api",
-                           s"$filodbHttpEndpoint/promql/prometheus_ds_1hr/api")
-
-  // TODO configure
-  val steps = Array(1.minute.toSeconds,
-                    15.minutes.toSeconds,
-                    1.hour.toSeconds)
+  // TODO configure dataset name etc.
+  val downsampleLevels = Seq (
+    DownsampleLevel(1.minute, s"$filodbHttpEndpoint/promql/prometheus_ds_1m/api"),
+    DownsampleLevel(15.minutes, s"$filodbHttpEndpoint/promql/prometheus_ds_15m/api"),
+    DownsampleLevel(60.minutes, s"$filodbHttpEndpoint/promql/prometheus_ds_1hr/api"))
 
   val params = Map( "start" -> startTime.toString, "end" -> endTime.toString)
 
+  // validation loop:
   val results = for {
-    (step, urlPrefix) <- steps.zip(urlPrefixes)
-    (rawPromQL, dsPromQL) <- rawToDsPromQl
+    level <- downsampleLevels // for each downsample dataset
+    validation <- validations // for each validation
   } yield {
 
-    val dsPromQLFull = dsPromQL.replace("@@@@", step.toString)
-    val rawPromQLFull = rawPromQL.replace("@@@@", step.toString)
-
+    val step = level.step.toSeconds
+    // invoke query on downsample dataset
+    val dsPromQLFull = validation.dsQuery.replace("@@@@", step.toString)
     val dsParams = params ++ Map("step" -> step.toString, "query" -> dsPromQLFull)
-    val dsUrl = Uri(s"$urlPrefix/v1/query_range").withQuery(Query(dsParams))
+    val dsUrl = Uri(s"${level.endpoint}/v1/query_range").withQuery(Query(dsParams))
     val dsRespFut = Http().singleRequest(HttpRequest(uri = dsUrl)).flatMap(Unmarshal(_).to[SuccessResponse])
     val dsResp = try {
       Some(Await.result(dsRespFut, 10.seconds))
@@ -90,6 +102,8 @@ object GaugeDownsampleValidator extends App with StrictLogging {
         None
     }
 
+    // invoke query on raw dataset
+    val rawPromQLFull = validation.rawQuery.replace("@@@@", step.toString)
     val rawParams = params ++ Map("step" -> step.toString, "query" -> rawPromQLFull)
     val rawUrl = Uri(s"$urlPrefixRaw/v1/query_range").withQuery(Query(rawParams))
     val rawRespFut = Http().singleRequest(HttpRequest(uri = rawUrl)).flatMap(Unmarshal(_).to[SuccessResponse])
@@ -101,25 +115,30 @@ object GaugeDownsampleValidator extends App with StrictLogging {
         None
     }
 
+    // normalize the results by sorting the range vectors so we can do comparison
     val dsNorm = dsResp.get.data.copy(result =
       dsResp.get.data.result.sortWith((a, b) => a.metric("instance").compareTo(b.metric("instance")) > 0))
     val rawNorm = rawResp.get.data.copy(result =
       rawResp.get.data.result.sortWith((a, b) => a.metric("instance").compareTo(b.metric("instance")) > 0))
 
-    logger.info(s"Step=${step}s testStatus=${dsNorm == rawNorm} rawUrl=$rawUrl  dsUrl=$dsUrl")
+    logger.info(s"Downsampler=${validation.name} step=${step}s validationResult=${dsNorm == rawNorm} " +
+      s"rawUrl=$rawUrl dsUrl=$dsUrl")
 
     if (dsNorm != rawNorm) {
       logger.error(s"Raw results: $rawNorm")
-      logger.error(s"DS results: $dsNorm")
+      logger.error(s"DS  results: $dsNorm")
     }
     dsNorm == rawNorm
   }
 
-  if (results.exists(b => !b))
-    logger.info("***There was a failure. See logs for details")
-  else
-    logger.info("Success")
-
   CoordinatedShutdown(as).run(CoordinatedShutdown.UnknownReason)
+
+  if (results.exists(b => !b)) {
+    logger.info("Validation had a failure. See logs for details.")
+    System.exit(10)
+  }
+  else
+    logger.info("Validation was a success")
+
 
 }
