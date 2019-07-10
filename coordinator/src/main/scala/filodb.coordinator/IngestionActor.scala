@@ -117,7 +117,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     // Start with the full set of all shards being ingested, and remove shards from this set
     // which must continue being ingested.
-    val shardsToStop = HashSet() ++ streams.keySet
+    val shardsToStop = HashSet() ++ streamSubscriptions.keySet
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
@@ -336,7 +336,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
   private def stopIngestion(shard: Int): Unit = {
-    val shardIngestion = streamSubscriptions.get(shard)
+    val shardIngestion = streamSubscriptions.remove(shard)
     shardIngestion.foreach { s =>
       s.onComplete {
         case Success(_) =>
