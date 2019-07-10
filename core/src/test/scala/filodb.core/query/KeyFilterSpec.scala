@@ -12,15 +12,15 @@ class KeyFilterSpec extends FunSpec with Matchers {
   import Filter._
 
   it("should parse values for regular KeyTypes") {
-    KeyFilter.parseSingleValue(dataset.dataColumns.head, "abc") should equal ("abc".utf8)
-    KeyFilter.parseSingleValue(dataset.dataColumns.head, "abc".utf8) should equal ("abc".utf8)
+    KeyFilter.parseSingleValue(dataset.dataColumns(1), "abc") should equal ("abc".utf8)
+    KeyFilter.parseSingleValue(dataset.dataColumns(1), "abc".utf8) should equal ("abc".utf8)
     KeyFilter.parseSingleValue(dataset.partitionColumns.head, -15) should equal (-15)
 
-    KeyFilter.parseValues(dataset.dataColumns.head, Set("abc", "def")) should equal (Set("abc".utf8, "def".utf8))
+    KeyFilter.parseValues(dataset.dataColumns(1), Set("abc", "def")) should equal (Set("abc".utf8, "def".utf8))
   }
 
   it("should validate equalsFunc for string and other types") {
-    val eqFunc1 = Equals(KeyFilter.parseSingleValue(dataset.dataColumns.head, "abc")).filterFunc
+    val eqFunc1 = Equals(KeyFilter.parseSingleValue(dataset.dataColumns(1), "abc")).filterFunc
     eqFunc1("abc".utf8) should equal (true)
     eqFunc1("abc") should equal (false)
     eqFunc1(15) should equal (false)
@@ -30,7 +30,7 @@ class KeyFilterSpec extends FunSpec with Matchers {
   }
 
   it("should validate inFunc for string and other types") {
-    val inFunc1 = In(KeyFilter.parseValues(dataset.dataColumns.head, Set("abc", "def")).toSet).filterFunc
+    val inFunc1 = In(KeyFilter.parseValues(dataset.dataColumns(1), Set("abc", "def")).toSet).filterFunc
     inFunc1("abc".utf8) should equal (true)
     inFunc1("aaa".utf8) should equal (false)
     inFunc1(15) should equal (false)

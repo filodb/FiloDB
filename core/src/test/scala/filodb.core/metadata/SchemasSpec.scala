@@ -88,7 +88,7 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return NoTimestampRowKey if non timestamp used for row key / first column") {
-      val ds1 = DataSchema.make("dataset", dataColSpecs, Nil, "first")
+      val ds1 = DataSchema.make("dataset", Seq("first:string", "age:long"), Nil, "first")
       ds1.isBad shouldEqual true
       ds1.swap.get shouldBe a[NoTimestampRowKey]
     }
@@ -116,7 +116,6 @@ class SchemasSpec extends FunSpec with Matchers {
                         ignoreShardKeyColumnSuffixes = {}
                         ignoreTagsOnPartitionKeyHash = ["le"]
                         metricColumn = "__name__"
-                        valueColumn = "value"   # TODO: remove this when it's not needed anymore
                         shardKeyColumns = ["__name__", "_ns"]
                       }
                     }"""
@@ -233,13 +232,17 @@ class SchemasSpec extends FunSpec with Matchers {
       val schemas = Schemas.fromConfig(conf2).get
 
       schemas.part.columns.map(_.columnType) shouldEqual Seq(MapColumn)
+      schemas.part.columns.map(_.id) shouldEqual Seq(PartColStartIndex)
       schemas.part.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
+      Dataset.isPartitionID(schemas.part.columns.head.id) shouldEqual true
 
       val promRef = DatasetRef("prom")
       val histRef = DatasetRef("hist")
       schemas.data.keySet shouldEqual Set(promRef, histRef)
       schemas.schemas.keySet shouldEqual Set(promRef, histRef)
-      schemas.data(DatasetRef("prom")).columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      schemas.data(promRef).columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      schemas.data(promRef).columns.map(_.id) shouldEqual Seq(0, 1)
+      schemas.data(promRef).timestampColumn.name shouldEqual "timestamp"
       // println(schemas.data.values.map(_.hash))
     }
   }
