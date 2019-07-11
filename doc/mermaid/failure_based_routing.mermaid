@@ -1,0 +1,40 @@
+sequenceDiagram
+    participant C as Client
+    participant QE as QueryEngine[pod1]
+    participant FD1 as FiloDB[pod1]
+    participant QE2 as QueryEngine[pod2]
+    participant MP as def materializePlan
+    participant FP as trait FailureProvider
+    participant RP as trait RoutingPlanner
+    C->>QE: Paser.queryToLogicalPlan
+    QE-->>C: LogicalPlan
+    C->>QE: materializePlan
+    QE->>MP: materializePlan
+    MP->>FP: getFailures
+    FP-->>MP: Seq[FailureTimeRange]
+    MP->>RP: plan(Seq[FailureTimeRange])
+    RP-->>MP: Seq[Route]
+    loop for each Route
+        alt is LocalRoute
+            MP ->> MP: updateLogicalPlanWithTimeRange
+            MP ->> MP: walkLogicalPlanTree
+            MP ->> MP: lhs: ExecPlan
+        else is RemoteRoute
+            MP ->> MP: updateLogicalPlanWithTimeRange
+            MP ->> MP: createRemoteExecPlan
+            MP ->> MP: rhs: ExecPlan
+       end
+    end
+    MP -->> MP: createStitchExecPlan(InProcessDispatcher)
+    MP -->> QE: StitchExecPlan
+    QE -->> C: StitchExecPlan
+    C -->> C: execute stitch plan in process
+    alt is Local ExecPlan
+       C ->> FD1: execute ExecPlan
+       FD1 -->> C: QueryResponse
+    else is Remote ExecPlan
+       C ->> QE2: execute ExecPlan
+       QE2 -->> C: QueryResponse
+    end
+    C -->> C:  stitch QueryResponse
+
