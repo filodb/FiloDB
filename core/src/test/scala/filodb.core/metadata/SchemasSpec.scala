@@ -236,13 +236,13 @@ class SchemasSpec extends FunSpec with Matchers {
       schemas.part.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
       Dataset.isPartitionID(schemas.part.columns.head.id) shouldEqual true
 
-      val promRef = DatasetRef("prom")
-      val histRef = DatasetRef("hist")
-      schemas.data.keySet shouldEqual Set(promRef, histRef)
-      schemas.schemas.keySet shouldEqual Set(promRef, histRef)
-      schemas.data(promRef).columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
-      schemas.data(promRef).columns.map(_.id) shouldEqual Seq(0, 1)
-      schemas.data(promRef).timestampColumn.name shouldEqual "timestamp"
+      schemas.data.keySet shouldEqual Set("prom", "hist")
+      schemas.schemas.keySet shouldEqual Set("prom", "hist")
+      schemas.data("prom").columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      schemas.data("prom").columns.map(_.id) shouldEqual Seq(0, 1)
+      schemas.data("prom").timestampColumn.name shouldEqual "timestamp"
+      schemas.data("hist").columns.map(_.columnType) shouldEqual
+        Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn)
       // println(schemas.data.values.map(_.hash))
     }
   }

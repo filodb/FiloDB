@@ -328,7 +328,7 @@ class QueryEngine(dataset: Dataset,
                                       options: QueryOptions,
                                       lp: RawChunkMeta, spreadProvider : SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
-    val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
+    val colName = if (lp.column.isEmpty) dataset.schema.data.valueColName else lp.column
     val colID = dataset.colIDs(colName).get.head
     val renamedFilters = renameMetricFilter(lp.filters)
     val metaExec = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>
@@ -368,13 +368,13 @@ class QueryEngine(dataset: Dataset,
     * as those are automatically prepended.
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
-    val realCols = if (cols.isEmpty) Seq(dataset.options.valueColumn) else cols
+    val realCols = if (cols.isEmpty) Seq(dataset.schema.data.valueColName) else cols
     val ids = dataset.colIDs(realCols: _*)
       .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
       .get
-    // avoid duplication if first ids are already row keys
-    if (ids.take(dataset.rowKeyIDs.length) == dataset.rowKeyIDs) { ids }
-    else { dataset.rowKeyIDs ++ ids }
+    // avoid duplication if first id is a timestamp, otherwise add it
+    if (ids.take(1) == Dataset.rowKeyIDs) { ids }
+    else { Dataset.rowKeyIDs ++ ids }
   }
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {

@@ -199,13 +199,13 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     // avg
     val expectedAvgs2 = expectedSums2.zip(expectedCounts2).map { case (sum,count) => sum/count }
     downsampledData2.map(_._6) shouldEqual expectedAvgs2
-
   }
 
+  import com.softwaremill.quicklens._
+
   val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
-  val histDSDataset = MMD.histDataset.copy(schema = MMD.histDataset.schema.copy(
-                        data = MMD.histDataset.schema.data.copy(
-                          downsamplers = Dataset.validateDownsamplers(histDSDownsamplers).get)))
+  val histDSDataset = modify(MMD.histDataset)(_.schema.data.downsamplers)
+                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers).get)
 
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
   val downsampleOpsH = new ShardDownsampler(histDSDataset, 0, true, Seq(60000), NoOpDownsamplePublisher,

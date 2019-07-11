@@ -24,17 +24,23 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
   val ourConf = s"""
   filodb {
     memstore.groups-per-shard = 4
+    partition-schema {
+      columns = ["Actor2Code:string", "Actor2Name:string"]
+      predefined-keys = []
+      ${GdeltTestData.datasetOptionConfig}
+    }
+    schemas {
+      gdelt {
+        columns = ["GLOBALEVENTID:long", "SQLDATE:long", "MonthYear:int",
+                        "Year:int", "NumArticles:int", "AvgTone:double"]
+        value-column = "AvgTone"
+        downsamplers = []
+      }
+    }
     inline-dataset-configs = [
       {
         dataset = "gdelt"
-        definition {
-          partition-columns = ["Actor2Code:string", "Actor2Name:string"]
-          data-columns = ["GLOBALEVENTID:long", "SQLDATE:long", "MonthYear:int",
-                          "Year:int", "NumArticles:int", "AvgTone:double"]
-          row-key-columns = [ "GLOBALEVENTID" ]
-          downsamplers = []
-        }
-        ${GdeltTestData.datasetOptionConfig}
+        schema = "gdelt"
         num-shards = 2
         min-num-nodes = 2
         sourcefactory = "${classOf[sources.CsvStreamFactory].getName}"

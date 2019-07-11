@@ -25,7 +25,8 @@ import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCU
  *   partition columns:  metricName:string, tags:map
  *   data columns:       timestamp:long, value:double
  *
- * NOTE: this data structure will be deprecated slowly in favor of PartitionSchema/DataSchema
+ * NOTE: this data structure will be deprecated slowly in favor of PartitionSchema/DataSchema.
+ * NOTE2: name is used for ingestion stream name, which is separate from the name of the schema.
  *
  * The Column IDs (used for querying) for data columns are numbered starting with 0, and for partition
  * columns are numbered starting with PartColStartIndex.  This means position is the same or easily derived
@@ -33,8 +34,7 @@ import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCU
  * The rowKeyIDs are the dataColumns IDs/positions for the "row key", typically a timestamp column but
  * something which makes a value unique within a partition and describes a range of data in a chunk.
  */
-final case class Dataset(schema: Schema) {
-  def name: String = schema.data.name
+final case class Dataset(name: String, schema: Schema) {
   def options: DatasetOptions = schema.partition.options
   def dataColumns: Seq[Column] = schema.data.columns
   def partitionColumns: Seq[Column] = schema.partition.columns
@@ -191,6 +191,8 @@ object DatasetOptions {
  * Contains many helper functions especially pertaining to Dataset creation and validation.
  */
 object Dataset {
+  val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
+
   /**
    * Creates a new Dataset with various options
    *
@@ -308,6 +310,6 @@ object Dataset {
     val valueCol = valueColumn.getOrElse(dataColNameTypes.last.split(":").head)
     for { partSchema <- PartitionSchema.make(partitionColNameTypes, options)
           dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol) }
-    yield { Dataset(Schema(partSchema, dataSchema)) }
+    yield { Dataset(name, Schema(partSchema, dataSchema)) }
   }
 }

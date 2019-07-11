@@ -226,7 +226,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
     settings.streamConfigs.foreach { config =>
-      val dataset = Dataset.fromConfig(config)
+      val dataset = settings.datasetFromStream(config)
       val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       initializeDataset(dataset, ingestion, None)
     }

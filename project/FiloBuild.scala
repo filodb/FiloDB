@@ -194,6 +194,7 @@ object FiloBuild extends Build {
     "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     logbackDep % Test,
     scalaTest  % Test,
+    "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
     scalaCheck % "test"
   )
 

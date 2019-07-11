@@ -8,7 +8,6 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
-import filodb.core.DatasetRef
 import filodb.core.Types._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.BinaryVector
@@ -35,6 +34,8 @@ final case class DataSchema private(name: String,
   // The number of bytes of chunkset metadata including vector pointers in memory
   val chunkSetInfoSize = ChunkSetInfo.chunkSetInfoSize(columns.length)
   val blockMetaSize    = chunkSetInfoSize + 4
+
+  def valueColName: String = columns(valueColumn).name
 }
 
 /**
@@ -175,8 +176,8 @@ final case class Schema(partition: PartitionSchema, data: DataSchema) {
 }
 
 final case class Schemas(part: PartitionSchema,
-                         data: Map[DatasetRef, DataSchema],
-                         schemas: Map[DatasetRef, Schema])
+                         data: Map[String, DataSchema],
+                         schemas: Map[String, Schema])
 
 /**
  * Singleton with code to load all schemas from config, verify no conflicts, and ensure there is only
@@ -224,12 +225,11 @@ object Schemas {
                                    .badMap(e => Seq(("<partition>", e)))
       dataSchemas <- validateDataSchemas(config.as[Map[String, Config]]("schemas"))
     } yield {
-      val data = new collection.mutable.HashMap[DatasetRef, DataSchema]
-      val schemas = new collection.mutable.HashMap[DatasetRef, Schema]
+      val data = new collection.mutable.HashMap[String, DataSchema]
+      val schemas = new collection.mutable.HashMap[String, Schema]
       dataSchemas.foreach { schema =>
-        val ref = DatasetRef(schema.name)
-        data(ref) = schema
-        schemas(ref) = Schema(partSchema, schema)
+        data(schema.name) = schema
+        schemas(schema.name) = Schema(partSchema, schema)
       }
       Schemas(partSchema, data.toMap, schemas.toMap)
     }
