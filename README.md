@@ -335,6 +335,8 @@ A single partition key schema is used for a running FiloDB cluster, though multi
 
 THIS IS IMPORTANT TO READ AND UNDERSTAND.
 
+Each "dataset" ingests one stream or Kafka topic of raw time series data, and is also the unit of isolation.  Each dataset contains its own offheap memory, and can have independent data retention and ingestion properties.
+
 Datasets are setup and loaded into the server via configuration files referred to by application.conf loaded by the server.
 See `conf/timeseries-dev-source.conf` for an example. It is important to note that some aspects of the dataset,
 like its column definition are immutable. This is primarily because the data columns are used to populate persistent
