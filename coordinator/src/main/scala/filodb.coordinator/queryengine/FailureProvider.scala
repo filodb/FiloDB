@@ -29,7 +29,7 @@ case class TimeRange(startInMillis: Long, endInMillis: Long)
   * @param dispatcher dispatcher implementation for given cluster.
   */
 case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange,
-                            dispatcher: PlanDispatcher)
+                            dispatcher: Option[PlanDispatcher])
 
 /**
   * For rerouting queries for failure ranges, Route trait will offer more context in the form of corrective
