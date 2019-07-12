@@ -1,31 +1,35 @@
 package filodb.coordinator.queryengine
 
+import filodb.core.DatasetRef
 import filodb.query.LogicalPlan
 import filodb.query.exec.PlanDispatcher
 
 /**
   * A provider to get failure ranges. Query engine can use failure ranges while preparing physical
   * plan to reroute or skip failure ranges. Ranges are based on dataset and over all clusters.
+  * Provider will filter failure ranges by current cluster and its replicas. Failures which do not
+  * belong to current cluster or its replica, will be skipped.
   */
 trait FailureProvider {
-  def getFailures(dataset: String, queryTimeRange: TimeRange): Seq[FailureTimeRange]
+  def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange]
 }
 
 /**
   * Time range.
-  * @param start epoch time in seconds.
-  * @param end epoch time in seconds.
+  * @param startInMillis epoch time in millis.
+  * @param endInMillis epoch time in millis.
   */
-case class TimeRange(start: Long, end: Long)
+case class TimeRange(startInMillis: Long, endInMillis: Long)
 
 /**
   * Failure details.
-  * @param pod cluster name.
-  * @param dataset dataset name
+  * @param clusterName cluster name.
+  * @param datasetRef Dataset reference for database and dataset.
   * @param timeRange time range.
-  * @param dispatcher dispatcher implementation for given pod.
+  * @param dispatcher dispatcher implementation for given cluster.
   */
-case class FailureTimeRange(pod: String, dataset: String, timeRange: TimeRange, dispatcher: PlanDispatcher)
+case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange,
+                            dispatcher: PlanDispatcher)
 
 /**
   * For rerouting queries for failure ranges, Route trait will offer more context in the form of corrective

@@ -1,8 +1,10 @@
 sequenceDiagram
     participant C as Client
-    participant QE as QueryEngine[pod1]
-    participant FD1 as FiloDB[pod1]
-    participant QE2 as QueryEngine[pod2]
+    participant QE as QueryEngine[cluster1]
+    participant FD1 as FiloDB[cluster1]
+    participant IPD as class InProcessPlanDispatcher
+    participant RPD as class RemotePlanDispatcher
+    participant QE2 as QueryEngine[cluster2]
     participant MP as def materializePlan
     participant FP as trait FailureProvider
     participant RP as trait RoutingPlanner
@@ -28,13 +30,18 @@ sequenceDiagram
     MP -->> MP: createStitchExecPlan(InProcessDispatcher)
     MP -->> QE: StitchExecPlan
     QE -->> C: StitchExecPlan
-    C -->> C: execute stitch plan in process
+    C ->> QE: StitchExecPlan.dispatch
+    QE ->> IPD: dispatch
+    IPD -->> IPD: ExecPlan.execute(DummyChunkSource)
     alt is Local ExecPlan
-       C ->> FD1: execute ExecPlan
-       FD1 -->> C: QueryResponse
+       IPD ->> FD1: dispatch and execute ExecPlan
+       FD1 -->> IPD: QueryResponse
     else is Remote ExecPlan
-       C ->> QE2: execute ExecPlan
-       QE2 -->> C: QueryResponse
+       IPD ->> RPD: dispatch
+       RPD ->> QE2: materialize and execute LogicalPlan
+       QE2 -->> RPD: QueryResponse
+       RPD -->> IPD: QueryResponse
     end
-    C -->> C:  stitch QueryResponse
-
+    IPD -->> IPD:  Stitch QueryResponse
+    IPD -->> QE: QueryResponse
+    QE -->> C: QueryResponse
