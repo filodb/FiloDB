@@ -10,6 +10,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
@@ -108,6 +109,7 @@ trait ExecPlan extends QueryCommand {
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
     Task {
+      require(Thread.currentThread().getName.startsWith(QuerySchedName))
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)

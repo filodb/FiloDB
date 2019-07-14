@@ -11,6 +11,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
+import filodb.core.memstore.FiloSchedulers.IngestSchedName
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -23,6 +24,7 @@ class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: 
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
+  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -124,7 +126,8 @@ extends MemStore with StrictLogging {
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
-                    case FlushCommand(group) => shard.switchGroupBuffers(group)
+                    case FlushCommand(group) => assertThreadName(IngestSchedName)
+                                                shard.switchGroupBuffers(group)
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
