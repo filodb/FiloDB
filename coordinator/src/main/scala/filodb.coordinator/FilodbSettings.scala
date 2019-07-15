@@ -7,6 +7,8 @@ import akka.actor.{ActorPath, Address, RootActorPath}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.GlobalConfig
+
 /** Settings for the FiloCluster Akka Extension which gets
   * config from `GlobalConfig`. Uses Ficus.
   */
@@ -35,8 +37,6 @@ final class FilodbSettings(val conf: Config) {
   val InitializationTimeout = config.as[FiniteDuration]("tasks.timeouts.initialization")
 
   val ShardMapPublishFrequency = config.as[FiniteDuration]("tasks.shardmap-publish-frequency")
-
-  val IOPoolName = "filodb.io"
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])

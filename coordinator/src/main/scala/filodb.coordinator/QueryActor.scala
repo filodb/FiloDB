@@ -13,7 +13,7 @@ import scala.util.control.NonFatal
 
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
-import filodb.core.memstore.{MemStore, TermInfo}
+import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.query._
@@ -54,6 +54,7 @@ final class QueryActor(memStore: MemStore,
                        shardMapFunc: => ShardMapper) extends BaseActor {
   import QueryActor._
   import client.QueryCommands._
+  import filodb.core.memstore.FiloSchedulers._
 
   val config = context.system.settings.config
 
@@ -79,7 +80,7 @@ final class QueryActor(memStore: MemStore,
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
-  implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads.toInt)
+  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)
 
   private val tags = Map("dataset" -> dataset.ref.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
@@ -93,9 +94,9 @@ final class QueryActor(memStore: MemStore,
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
       .withTag("query-id", q.id)
       .start()
-    implicit val _ = queryConfig.askTimeout
-    q.execute(memStore, dataset, queryConfig)
+    q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
+       FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
@@ -104,12 +105,12 @@ final class QueryActor(memStore: MemStore,
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
        }
        span.finish()
-     }.recover { case ex =>
+     }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
        logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
        replyTo ! QueryError(q.id, ex)
        span.finish()
-     }
+     }(queryScheduler)
   }
 
   private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {

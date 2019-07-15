@@ -20,9 +20,10 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
-                        (implicit val ec: ExecutionContext)
+                        (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
+  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -124,7 +125,8 @@ extends MemStore with StrictLogging {
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
-                    case FlushCommand(group) => shard.switchGroupBuffers(group)
+                    case FlushCommand(group) => assertThreadName(IngestSchedName)
+                                                shard.switchGroupBuffers(group)
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
