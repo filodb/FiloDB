@@ -13,7 +13,7 @@ import scala.util.control.NonFatal
 
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
-import filodb.core.memstore.{MemStore, TermInfo}
+import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.query._
@@ -96,7 +96,7 @@ final class QueryActor(memStore: MemStore,
       .start()
     q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
-       require(Thread.currentThread().getName.startsWith(QuerySchedName))
+       FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)

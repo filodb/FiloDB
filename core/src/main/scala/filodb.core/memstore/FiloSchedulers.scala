@@ -9,9 +9,10 @@ object FiloSchedulers {
   val QuerySchedName = "query-sched"
   val PopulateChunksSched = "populate-odp-chunks"
 
-  def assertThreadName(name: String): Unit = {
+  val assertEnabled = GlobalConfig.systemConfig.getBoolean("filodb.scheduler.enable-assertions")
 
-    if (GlobalConfig.systemConfig.getBoolean("filodb.scheduler.enable-assertions")) {
+  def assertThreadName(name: String): Unit = {
+    if (assertEnabled) {
       require(Thread.currentThread().getName.startsWith(name),
         s"Current thread expected to startWith $name but was ${Thread.currentThread().getName}")
     }
