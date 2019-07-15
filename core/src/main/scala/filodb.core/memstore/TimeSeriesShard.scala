@@ -974,7 +974,11 @@ class TimeSeriesShard(val dataset: Dataset,
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
-    assertThreadName(IngestSchedName)
+    // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
+    // causing the iterator to be consumed synchronously in some cases. It doesnt
+    // seem to be consistent environment to environment.
+    //assertThreadName(IOSchedName)
+
     // Below is coded to work concurrently with logic in getOrAddPartitionAndIngest
     // where we try to activate an inactive time series
     activelyIngesting.synchronized {
