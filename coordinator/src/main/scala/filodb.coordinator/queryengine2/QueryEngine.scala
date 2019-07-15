@@ -28,6 +28,7 @@ import filodb.query.exec._
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
 class QueryEngine(dataset: Dataset,
+                  isDownsampledDataset: Boolean,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
 
@@ -131,7 +132,8 @@ class QueryEngine(dataset: Dataset,
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   queryId: String,
                                   submitTime: Long,
-                                  options: QueryOptions, spreadProvider: SpreadProvider): PlanResult = {
+                                  options: QueryOptions,
+                                  spreadProvider: SpreadProvider): PlanResult = {
 
     logicalPlan match {
       case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
@@ -252,7 +254,9 @@ class QueryEngine(dataset: Dataset,
                                         options: QueryOptions,
                                         lp: PeriodicSeries,
                                         spreadProvider : SpreadProvider): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
+    val rawSeries = materializeRawSeries(queryId, submitTime, options,
+                                         lp.rawSeries.asInstanceOf[RawSeries],
+                                         None, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
     rawSeries
@@ -262,6 +266,7 @@ class QueryEngine(dataset: Dataset,
                                    submitTime: Long,
                                    options: QueryOptions,
                                    lp: RawSeries,
+                                   rangeFunction: Option[RangeFunctionId],
                                    spreadProvider: SpreadProvider): PlanResult = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
@@ -273,7 +278,7 @@ class QueryEngine(dataset: Dataset,
     val execPlans = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), colIDs)
+        renamedFilters, toChunkScanMethod(lp.rangeSelector), isDownsampledDataset, colIDs)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -329,7 +334,8 @@ class QueryEngine(dataset: Dataset,
   private def materializeRawChunkMeta(queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
-                                      lp: RawChunkMeta, spreadProvider : SpreadProvider): PlanResult = {
+                                      lp: RawChunkMeta,
+                                      spreadProvider : SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
     val colID = dataset.colIDs(colName).get.head
