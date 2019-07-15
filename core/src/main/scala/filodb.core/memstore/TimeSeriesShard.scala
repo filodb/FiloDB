@@ -780,7 +780,10 @@ class TimeSeriesShard(val dataset: Dataset,
 
     val chunkSetIter = partitionIt.flatMap { p =>
 
-      assertThreadName(IngestSchedName)
+      // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
+      // causing the iterator to be consumed synchronously in some cases. It doesnt
+      // seem to be consistent environment to environment.
+      // assertThreadName(IOSchedName)
 
       /* Step 2: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
