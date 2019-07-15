@@ -7,6 +7,8 @@ import akka.actor.{ActorPath, Address, RootActorPath}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.GlobalConfig
+
 /** Settings for the FiloCluster Akka Extension which gets
   * config from `GlobalConfig`. Uses Ficus.
   */

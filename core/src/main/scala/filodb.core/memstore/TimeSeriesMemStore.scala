@@ -11,7 +11,6 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.memstore.FiloSchedulers.IngestSchedName
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -21,7 +20,7 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
-                        (implicit val ec: ExecutionContext)
+                        (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
   import FiloSchedulers._

@@ -12,7 +12,6 @@ import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.Types
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.memstore.FiloSchedulers.IngestSchedName
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge

@@ -186,7 +186,7 @@ class TimeSeriesShard(val dataset: Dataset,
                       evictionPolicy: PartitionEvictionPolicy,
                       downsampleConfig: DownsampleConfig,
                       downsamplePublisher: DownsamplePublisher)
-                     (implicit val ec: ExecutionContext) extends StrictLogging {
+                     (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
   import TimeSeriesShard._

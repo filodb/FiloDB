@@ -1,4 +1,4 @@
-package filodb.coordinator
+package filodb.core
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -29,13 +29,3 @@ object GlobalConfig extends StrictLogging {
                  .resolve()
   }
 }
-
-/** Mixin used for nodes and tests. */
-trait NodeConfiguration {
-
-  /** The global Filo configuration. */
-  val systemConfig: Config = GlobalConfig.systemConfig
-
-}
-
-
