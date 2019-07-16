@@ -37,6 +37,7 @@ final case class Dataset(name: String,
                          dataColumns: Seq[Column],
                          rowKeyIDs: Seq[Int],
                          downsamplers: Seq[ChunkDownsampler],
+                         hasDownsampledData: Boolean = false,
                          database: Option[String] = None,
                          options: DatasetOptions = DatasetOptions.DefaultOptions) {
   require(rowKeyIDs.nonEmpty)
@@ -221,8 +222,10 @@ object Dataset {
     val dataCols = defn.as[Seq[String]]("data-columns")
     val downsamplers = defn.as[Seq[String]]("downsamplers")
     val rowKeyColumns = defn.as[Seq[String]]("row-key-columns")
+    val hasDownsampledData = config.as[Option[Boolean]]("has-downsampled-data").getOrElse(false)
 
-    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers, DatasetOptions.fromConfig(options)).get
+    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers,
+                 hasDownsampledData, DatasetOptions.fromConfig(options)).get
   }
 
   /**
@@ -245,7 +248,8 @@ object Dataset {
             dataColumns: Seq[String],
             keyColumns: Seq[String],
             downsamplers: Seq[String], options : DatasetOptions): Dataset =
-    make(name, partitionColumns, dataColumns, keyColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
+    make(name, partitionColumns, dataColumns, keyColumns,
+      downsamplers, false, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
@@ -346,6 +350,7 @@ object Dataset {
            dataColNameTypes: Seq[String],
            keyColumnNames: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
+           hasDownsampledData: Boolean = false,
            options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema = {
 
     for {partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
@@ -355,7 +360,7 @@ object Dataset {
          downsamplers <- validateDownsamplers(downsamplerNames)
          _ <- validateTimeSeries(dataColumns, rowKeyIDs)}
       yield {
-        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, None, options)
+        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, hasDownsampledData, None, options)
       }
   }
 

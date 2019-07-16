@@ -407,7 +407,7 @@ object CustomMetricsData {
                         columns,
                         Seq("timestamp"),
                         Seq.empty,
-                        DatasetOptions(Seq("metric", "_ns"), "metric", "count")).get
+                        options = DatasetOptions(Seq("metric", "_ns"), "metric", "count")).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
   val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
 
@@ -418,7 +418,7 @@ object CustomMetricsData {
                         columns,
                         Seq("timestamp"),
                         Seq.empty,
-                        DatasetOptions(Seq("__name__"), "__name__", "count")).get
+                        options = DatasetOptions(Seq("__name__"), "__name__", "count")).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
   val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
 
@@ -430,7 +430,7 @@ object MetricsTestData {
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq("timestamp"),
                                   Seq.empty,
-                                  DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+                                  options = DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 

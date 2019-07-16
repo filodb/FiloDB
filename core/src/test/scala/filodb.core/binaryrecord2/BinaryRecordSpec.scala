@@ -606,7 +606,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       Seq("timestamp:ts", "value:double"),
       Seq("timestamp"),
       Seq.empty,
-      DatasetOptions(Seq("__name__", "job"), "__name__", "value", Map("dummy" -> Seq("_bucket")))).get
+      options = DatasetOptions(Seq("__name__", "job"), "__name__", "value", Map("dummy" -> Seq("_bucket")))).get
     val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset, "__name__", "heap_usage_bucket")
     metricName4 shouldEqual "heap_usage_bucket"
 

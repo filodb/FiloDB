@@ -28,7 +28,6 @@ import filodb.query.exec._
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
 class QueryEngine(dataset: Dataset,
-                  isDownsampledDataset: Boolean,
                   shardMapperFunc: => ShardMapper)
                    extends StrictLogging {
 
@@ -251,12 +250,9 @@ class QueryEngine(dataset: Dataset,
 
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
-                                        options: QueryOptions,
-                                        lp: PeriodicSeries,
-                                        spreadProvider : SpreadProvider): PlanResult = {
-    val rawSeries = materializeRawSeries(queryId, submitTime, options,
-                                         lp.rawSeries.asInstanceOf[RawSeries],
-                                         None, spreadProvider)
+                                       options: QueryOptions,
+                                       lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
     rawSeries
@@ -265,9 +261,7 @@ class QueryEngine(dataset: Dataset,
   private def materializeRawSeries(queryId: String,
                                    submitTime: Long,
                                    options: QueryOptions,
-                                   lp: RawSeries,
-                                   rangeFunction: Option[RangeFunctionId],
-                                   spreadProvider: SpreadProvider): PlanResult = {
+                                   lp: RawSeries, spreadProvider : SpreadProvider): PlanResult = {
     val colIDs = getColumnIDs(dataset, lp.columns)
     val renamedFilters = renameMetricFilter(lp.filters)
     val spreadChanges = spreadProvider.spreadFunc(renamedFilters)
@@ -278,7 +272,7 @@ class QueryEngine(dataset: Dataset,
     val execPlans = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), isDownsampledDataset, colIDs)
+        renamedFilters, toChunkScanMethod(lp.rangeSelector), colIDs)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -377,12 +371,9 @@ class QueryEngine(dataset: Dataset,
     * as those are automatically prepended.
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
-    val ids = dataset.colIDs(cols: _*)
+    dataset.colIDs(cols: _*)
       .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
       .get
-    // avoid duplication if first ids are already row keys
-    if (ids.take(dataset.rowKeyIDs.length) == dataset.rowKeyIDs) { ids }
-    else { dataset.rowKeyIDs ++ ids }
   }
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {

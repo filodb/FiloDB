@@ -9,7 +9,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.QueryConfig
+import filodb.query.{Query, QueryConfig}
 
 object SelectRawPartitionsExec {
   import Column.ColumnType._
@@ -35,7 +35,6 @@ final case class SelectRawPartitionsExec(id: String,
                                          shard: Int,
                                          filters: Seq[ColumnFilter],
                                          chunkMethod: ChunkScanMethod,
-                                         downsample: Boolean,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
@@ -59,20 +58,28 @@ final case class SelectRawPartitionsExec(id: String,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
-    require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
+    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
-    val selectColIds = if (colIds.size > dataset.rowKeyIDs.size) {
-      colIds // query is selecting specific columns
-    } else if (!downsample) {
-      colIds ++ dataset.colIDs(dataset.options.valueColumn).get
-    } else {
-      rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
-        PeriodicSamplesMapper.downsampleColFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
-      }.getOrElse("avg")
+    val selectColIds = dataset.rowKeyIDs ++ {
+      if (colIds.nonEmpty) {
+        // query is selecting specific columns
+        colIds
+      } else if (!dataset.hasDownsampledData) {
+        // needs to select raw data
+        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
+      } else {
+        // need to select column based on range function
+        val colName = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
+          PeriodicSamplesMapper.downsampleColFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
+        }.getOrElse("avg")
+        Query.qLogger.debug(s"queryId=$id is configured to use column=$colName")
+        colIds ++ dataset.colIDs(colName).get
+      }
     }
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
+    source.rangeVectors(dataset, selectColIds, partMethod, chunkMethod)
   }
 
   protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"

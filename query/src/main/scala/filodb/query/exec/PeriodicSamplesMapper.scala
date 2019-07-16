@@ -20,12 +20,12 @@ final case object PeriodicSamplesMapper {
   def downsampleColFromRangeFunction(f: Option[RangeFunctionId]): String = {
     f match {
       case None                   => "avg"
-      case Some(Rate)             => "counter"
-      case Some(Delta)            => "counter"
-      case Some(Irate)            => "counter"
-      case Some(Increase)         => "counter"
-      case Some(Resets)           => "counter"
+      case Some(Rate)             => "value"
+      case Some(Irate)            => "value"
+      case Some(Increase)         => "value"
+      case Some(Resets)           => "value"
       case Some(CountOverTime)    => "count"
+      case Some(Changes)          => "avg"
       case Some(Delta)            => "avg"
       case Some(Idelta)           => "avg"
       case Some(Deriv)            => "avg"
