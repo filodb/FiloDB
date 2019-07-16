@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -102,9 +103,10 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int = 259200,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)
+    doIngestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -113,11 +115,19 @@ extends MemStore with StrictLogging {
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
-  def ingestStream(dataset: DatasetRef,
-                   shardNum: Int,
-                   combinedStream: Observable[DataOrCommand],
-                   flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int): CancelableFuture[Unit] = {
+  def doIngestStream(dataset: DatasetRef,
+                     shardNum: Int,
+                     combinedStream: Observable[DataOrCommand],
+                     flushSched: Scheduler,
+                     diskTimeToLiveSeconds: Int): CancelableFuture[Unit] =
+    doIngestStream(dataset, shardNum, combinedStream, flushSched, diskTimeToLiveSeconds, Task(() => {}))
+
+  def doIngestStream(dataset: DatasetRef,
+                     shardNum: Int,
+                     combinedStream: Observable[DataOrCommand],
+                     flushSched: Scheduler,
+                     diskTimeToLiveSeconds: Int,
+                     cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -135,7 +145,9 @@ extends MemStore with StrictLogging {
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
                            // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-                  .foreach({ x => })(shard.ingestSched)
+                  .completedL
+                  .doOnCancel(cancelTask)
+                  .runAsync(shard.ingestSched)
   }
 
   // a more optimized ingest stream handler specifically for recovery

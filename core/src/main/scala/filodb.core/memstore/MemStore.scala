@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -99,8 +100,8 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit]
-
+                   diskTimeToLiveSeconds: Int = 259200,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
 

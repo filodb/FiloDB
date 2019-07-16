@@ -11,6 +11,7 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
 import kamon.Kamon
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -98,6 +99,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     case GetStatus               => status(sender())
     case e: IngestRows           => ingest(e)
     case e: ShardIngestionState  => resync(e, sender())
+    case e: IngestionStopped     => ingestionStopped(e.ref, e.shard)
   }
 
   /**
@@ -226,12 +228,20 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       logger.info(s"Starting normal/active ingestion for dataset=${dataset.ref} shard=$shard at offset $offset")
       statusActor ! IngestionStarted(dataset.ref, shard, nodeCoord)
 
+      // Define a cancel task to run when ingestion is stopped.
+      val onCancel = Task {
+        val stopped = IngestionStopped(dataset.ref, shard)
+        self ! stopped
+        statusActor ! stopped
+      }
+
       val shardIngestionEnd = memStore.ingestStream(dataset.ref,
         shard,
         stream,
         flushSched,
         flushStream(startingGroupNo),
-        diskTimeToLiveSeconds)
+        diskTimeToLiveSeconds,
+        onCancel)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
@@ -339,21 +349,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
   private def stopIngestion(shard: Int): Unit = {
+    // When the future is canceled, the onCancel task installed earlier should run.
     logger.info(s"stopIngestion called for dataset=${dataset.ref} shard=$shard")
-    val shardIngestion = streamSubscriptions.get(shard)
-    shardIngestion.foreach { s =>
-      s.onComplete {
-        case Success(_) =>
-          // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
-          removeAndReleaseResources(dataset.ref, shard)
-          logger.info(s"stopIngestion handler done. Ingestion success for dataset=${dataset.ref} shard=$shard")
-          // ingestion stopped event is already handled in the normalIngestion method
-        case Failure(f) =>
-          logger.error(s"stopIngestion handler done. Ingestion failure for dataset=${dataset.ref} shard=$shard", f)
-          // release of resources on failure is already handled in the normalIngestion method
-      }(actorDispatcher)
-    }
-    shardIngestion.foreach(_.cancel())
+    streamSubscriptions.get(shard).foreach(_.cancel())
+  }
+
+  private def ingestionStopped(ref: DatasetRef, shard: Int): Unit = {
+    removeAndReleaseResources(ref, shard)
+    logger.info(s"stopIngestion handler done. Ingestion success for dataset=${ref} shard=$shard")
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
