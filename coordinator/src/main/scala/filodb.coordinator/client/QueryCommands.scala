@@ -65,7 +65,8 @@ object QueryCommands {
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 sampleLimit: Int = 1000000,
-                                shardOverrides: Option[Seq[Int]] = None)
+                                shardOverrides: Option[Seq[Int]] = None,
+  processFailures: Boolean = true )
 
   object QueryOptions {
     def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryOptions =

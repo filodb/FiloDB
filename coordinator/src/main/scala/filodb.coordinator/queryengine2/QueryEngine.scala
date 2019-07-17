@@ -5,37 +5,35 @@ import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorRef
-import akka.japi
-import com.sun.tools.javadoc.Start
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
+import filodb.coordinator.queryengine._
+
 import filodb.core.Types
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
-import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query.{BinaryJoin, exec, _}
+import filodb.query.{exec, _}
 import filodb.query.exec._
 
-case class TimeRange (start: Long, end: Long)
-case class FailureTimeRange(pod: String, dataset: String , timeRange: TimeRange, dispatcher: Option[PlanDispatcher])
-trait FailureProvider {
-def getFailures(dataset: String, queryTimeRange: TimeRange): List[FailureTimeRange]
-}
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
 class QueryEngine(dataset: Dataset,
-                  shardMapperFunc: => ShardMapper, failureProvider: FailureProvider,
-                  LocalDispatcher: PlanDispatcher)
+                  shardMapperFunc: => ShardMapper,
+                  failureProvider: FailureProvider,
+                  LocalDispatcher: PlanDispatcher,
+                  spreadProvider: SpreadProvider = StaticSpreadProvider())
                    extends StrictLogging {
 
   /**
@@ -45,26 +43,6 @@ class QueryEngine(dataset: Dataset,
     * Not for runtime use.
     */
   private case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
-
-  trait FailureProvider {
-    def getFailures(dataset: String, queryTimeRange: TimeRange): List[FailureTimeRange]
-  }
-
-  trait Route
-    case class LocalRoute( tr: Option[TimeRange]) extends Route
-    case class RemoteRoute(tr: Option[TimeRange], dispatcher: PlanDispatcher) extends Route
-
-  trait RoutingPlanner {
-    def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange]): Seq[Route]
-  }
-  class QueryRoutingPlanner extends  RoutingPlanner{
-    def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange]): Seq[Route] = {
-
-      if (isPeriodicSeriesPlan (lp))
-        new LocalRoute()
-      return Nil
-    }
-  }
 
   private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
 
@@ -82,72 +60,74 @@ class QueryEngine(dataset: Dataset,
   }
 
 
-  def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan])
-     return  false;
-   true
-  }
+  def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
+                          options: QueryOptions, spreadProvider: SpreadProvider): ExecPlan = {
+    // to do check whether need to create another exec plan for local which will have LocalPlanDIspatcher
+    val execPlans : Seq[ExecPlan]= routes.map { route =>
+      route match {
+        case route: LocalRoute => if (!route.asInstanceOf[LocalRoute].tr.isDefined)
+          genExecPlan(rootLogicalPlan, queryId, submitTime, options, spreadProvider)
+        else
+          genExecPlan(QueryRoutingPlanner.updateTimeLogicalPlan(rootLogicalPlan,
+            route.asInstanceOf[LocalRoute].tr.get),
+            queryId, submitTime, options, spreadProvider)
 
-  def getRoute(logicalPlan: LogicalPlan) : Route = {
+        case route: RemoteRoute =>
+          val remoteLogicalPlan = route.asInstanceOf[RemoteRoute].tr.map(_ =>QueryRoutingPlanner.
+            updateTimeLogicalPlan(rootLogicalPlan,
+            route.asInstanceOf[RemoteRoute].tr.get)).getOrElse(rootLogicalPlan)
 
 
-  }
-  case class FailureTimeRange(pod: String, dataset: String , timeRange: TimeRange, dispatcher: Option[PlanDispatcher])
-  private  def splitQuery( failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long) : Seq[Route] = {
-    // sort failure
-    // traverse query range time from left to right , break at failure start
-    var i = index
-    failure(index + 1).timeRange
-    // current failure is in Remote
-      if (failure(index).dispatcher.isDefined) {
-        do {
-          i = index + 1
-        } while ((failure(index).dispatcher.isDefined))
-        splitQuery(failure, i + 1, failure(i + 1).timeRange.start, end) :+
-          RemoteRoute( Some(TimeRange(start, failure(i + 1).timeRange.start)), failure(i).dispatcher.get)
+
+          
+
+          //TO DO Serialize remoteLogicalPlan and put in RemoteExec
+          RemoteExec(queryId, route.dispatcher, Nil, remoteLogicalPlan)
       }
+    }
+
+    if (execPlans.size == 1)
+      return execPlans(1)
     else
-        {
-
-          do {
-            i = index + 1
-          } while ((!failure(index).dispatcher.isDefined)) // till we get a remote failure
-          splitQuery(failure, i + 1, failure(i + 1).timeRange.start, end) :+
-          new LocalRoute(Some(TimeRange(start, failure(i + 1).timeRange.start)))
-        }
-
+      StitchRvsExec(queryId, LocalDispatcher, execPlans)
   }
+
+
   /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions, spreadProvider: SpreadProvider = StaticSpreadProvider()): ExecPlan = {
+                  options: QueryOptions): ExecPlan = {
 
-val failures = failureProvider.getFailures()
 
-RoutingPl
     val queryId = UUID.randomUUID().toString
+    val submitTime = System.currentTimeMillis()
+    val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
-    /*1 Get startTime endtime from logicalplan using periodicseriesplan
-    2. Break down into remote an local query plans based on failover times
-    3. Timerange => seq[pod, timerange1] -  timerange1 is failur times in pod
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures)
+      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
- if (requested Time Range has a gap in current DC) {
-    val parent = createStitchExecPlan()
-    val leftChild = walkTree (modified logical plan 1)
-    val rightChild = createExecPlanToRunLogicalPlanRemotely( modified logical plan 2)
-        // link children
-    return parent;
-  } else {
-       // current logic
+      val failures: Seq[FailureTimeRange] = failureProvider.getFailures(dataset.ref,
+        QueryRoutingPlanner.getTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)).
+        sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
+
+    if(failures.isEmpty)
+      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures ||
+      failures.isEmpty)
+      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+
+    val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures)
+
+    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
   }
 
-    */
-//    val instance = "PeriodicSeriesPlan"
-//    rootLogicalPlan.asInstanceOf[instance]
-//rootLogicalPlan.cl
-
-    val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(),
+  private def genExecPlan(logicalPlan: LogicalPlan,
+                          queryId: String,
+                          submitTime: Long,
+                          options: QueryOptions, spreadProvider: SpreadProvider) = {
+    val materialized = walkLogicalPlanTree(logicalPlan, queryId, System.currentTimeMillis(),
       options, spreadProvider)
     match {
       case PlanResult(Seq(justOne), stitch) =>
@@ -165,62 +145,15 @@ RoutingPl
         }
     }
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
-      s" $rootLogicalPlan to \n${materialized.printTree()}")
+      s" $logicalPlan to \n${materialized.printTree()}")
     materialized
+
   }
 
   //to do make class for TimeF
-  private def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
 
-    logicalPlan match {
-      case lp: PeriodicSeries              => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
-                                              TimeRange(periodicSeries.start, periodicSeries.end)
-      case lp: PeriodicSeriesWithWindowing => val periodicSeriesWithWindowing = lp.
-                                              asInstanceOf[PeriodicSeriesWithWindowing]
-                                              TimeRange(periodicSeriesWithWindowing.start,
-                                                periodicSeriesWithWindowing.end)
-      case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.asInstanceOf[ApplyInstantFunction].vectors)
-      case lp: Aggregate                   => getTimeFromLogicalPlan(lp.asInstanceOf[Aggregate].vectors)
-      case lp: BinaryJoin                  => // can assume lhs & rhs have same timr
-                                              getTimeFromLogicalPlan(lp.asInstanceOf[BinaryJoin].lhs)
-      //To do take care of oteger logical plans
-//      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
-//        spreadProvider)
-//      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-//      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
-//        spreadProvider)
-//      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
-//        spreadProvider)
-    }
-  }
 
-  private def updateTimeLogicalPlan(logicalPlan: LogicalPlan, timeRange: TimeRange): PeriodicSeriesPlan = {
 
-    logicalPlan match {
-      case lp: PeriodicSeries              => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
-                                              periodicSeries.copy(start = timeRange.start, end = timeRange.end )
-      case lp: PeriodicSeriesWithWindowing => lp.asInstanceOf[PeriodicSeriesWithWindowing].
-                                              copy(start = timeRange.start, end = timeRange.end)
-      case lp: ApplyInstantFunction        => val applyInstantFunction = lp.asInstanceOf[ApplyInstantFunction]
-                                              applyInstantFunction.copy(vectors = updateTimeLogicalPlan
-                                              (applyInstantFunction.vectors, timeRange))
-      case lp: Aggregate                   => val aggregate = lp.asInstanceOf[Aggregate]
-                                              aggregate.copy(vectors = updateTimeLogicalPlan
-                                              (aggregate.vectors, timeRange))
-      case lp: BinaryJoin                  => val binaryJoin = lp.asInstanceOf[BinaryJoin]
-                                              binaryJoin.copy(lhs = updateTimeLogicalPlan(binaryJoin.lhs,
-                                                timeRange), rhs =
-                                                updateTimeLogicalPlan(binaryJoin.rhs, timeRange))
-        //To do take care of oteger logical plans
-//      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
-//        spreadProvider)
-//      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-//      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
-//        spreadProvider)
-//      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
-     //   spreadProvider)
-    }
-  }
 
   val shardColumns = dataset.options.shardKeyColumns.sorted
 
