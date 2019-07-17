@@ -116,15 +116,15 @@ trait ExecPlan extends QueryCommand {
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
+        (transf.apply(dataset, acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators if necessary")
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>
+            qLogger.debug(s"queryId: ${id} SRVs already materialized from iterators")
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
@@ -133,6 +133,7 @@ trait ExecPlan extends QueryCommand {
             srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
+            qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators")
             val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results

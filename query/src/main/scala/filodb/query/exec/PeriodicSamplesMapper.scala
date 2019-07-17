@@ -17,27 +17,27 @@ import filodb.query.util.IndexedArrayQueue
 
 
 final case object PeriodicSamplesMapper {
-  def downsampleColFromRangeFunction(f: Option[RangeFunctionId]): String = {
+  def downsampleColsFromRangeFunction(f: Option[RangeFunctionId]): Seq[String] = {
     f match {
-      case None                   => "avg"
-      case Some(Rate)             => "value"
-      case Some(Irate)            => "value"
-      case Some(Increase)         => "value"
-      case Some(Resets)           => "value"
-      case Some(CountOverTime)    => "count"
-      case Some(Changes)          => "avg"
-      case Some(Delta)            => "avg"
-      case Some(Idelta)           => "avg"
-      case Some(Deriv)            => "avg"
-      case Some(HoltWinters)      => "avg"
-      case Some(PredictLinear)    => "avg"
-      case Some(SumOverTime)      => "sum"
-      case Some(AvgOverTime)      => "avg"
-      case Some(StdDevOverTime)   => "avg"
-      case Some(StdVarOverTime)   => "avg"
-      case Some(QuantileOverTime) => "avg"
-      case Some(MinOverTime)      => "min"
-      case Some(MaxOverTime)      => "max"
+      case None                   => Seq("sum", "count") // to calculate last average
+      case Some(Rate)             => Seq("value")
+      case Some(Irate)            => Seq("value")
+      case Some(Increase)         => Seq("value")
+      case Some(Resets)           => Seq("value")
+      case Some(CountOverTime)    => Seq("count")
+      case Some(Changes)          => Seq("avg")
+      case Some(Delta)            => Seq("avg")
+      case Some(Idelta)           => Seq("avg")
+      case Some(Deriv)            => Seq("avg")
+      case Some(HoltWinters)      => Seq("avg")
+      case Some(PredictLinear)    => Seq("avg")
+      case Some(SumOverTime)      => Seq("sum")
+      case Some(AvgOverTime)      => Seq("sum", "count")
+      case Some(StdDevOverTime)   => Seq("avg")
+      case Some(StdVarOverTime)   => Seq("avg")
+      case Some(QuantileOverTime) => Seq("avg")
+      case Some(MinOverTime)      => Seq("min")
+      case Some(MaxOverTime)      => Seq("max")
     }
   }
 }
@@ -58,24 +58,27 @@ final case class PeriodicSamplesMapper(start: Long,
   require(step > 0, "step should be > 0")
 
   if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
-                                  "Need positive window lengths to apply range function")
+    "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
 
-  def apply(source: Observable[RangeVector],
+  //noinspection ScalaStyle method.length
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (step < queryConfig.minStepMs)
-      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
+      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs / 1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
-                   sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
-    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, queryConfig, funcParams, maxCol)
+      sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
+    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, queryConfig,
+      dataset.hasDownsampledData, funcParams, maxCol)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
@@ -90,14 +93,14 @@ final case class PeriodicSamplesMapper(start: Long,
           val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                       windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
+              windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-                                       windowLength, rangeFuncGen().asChunkedD, queryConfig))
+              windowLength, rangeFuncGen().asChunkedD, queryConfig))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -117,15 +120,23 @@ final case class PeriodicSamplesMapper(start: Long,
   }
 
   // Transform source double or long to double schema
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema =
-    source.copy(columns = source.columns.zipWithIndex.map {
-                  // Transform if its not a row key column
-                  case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
-                    ColumnInfo(name, ColumnType.DoubleColumn)
-                  case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
-                    ColumnInfo(name, ColumnType.DoubleColumn)
-                  case (c: ColumnInfo, _) => c
-                }, fixedVectorLen = Some(((end - start)/step).toInt + 1))
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+
+    if (dataset.hasDownsampledData) {
+      source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)))
+      // TODO need to alter for histograms and other schema types
+    } else {
+      source.copy(columns = source.columns.zipWithIndex.map {
+        // Transform if its not a row key column
+        case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
+          ColumnInfo(name, ColumnType.DoubleColumn)
+        case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
+          ColumnInfo(name, ColumnType.DoubleColumn)
+        case (c: ColumnInfo, _) => c
+      }, fixedVectorLen = Some(((end - start) / step).toInt + 1))
+    }
+  }
 }
 
 /**

@@ -222,7 +222,7 @@ object Dataset {
     val dataCols = defn.as[Seq[String]]("data-columns")
     val downsamplers = defn.as[Seq[String]]("downsamplers")
     val rowKeyColumns = defn.as[Seq[String]]("row-key-columns")
-    val hasDownsampledData = config.as[Option[Boolean]]("has-downsampled-data").getOrElse(false)
+    val hasDownsampledData = defn.as[Option[Boolean]]("has-downsampled-data").getOrElse(false)
 
     Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers,
                  hasDownsampledData, DatasetOptions.fromConfig(options)).get

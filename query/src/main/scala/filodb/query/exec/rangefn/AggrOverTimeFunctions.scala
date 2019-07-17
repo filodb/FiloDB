@@ -222,6 +222,80 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
   }
 }
 
+/**
+  * Sums Histograms over time and also computes Max over time of a Max field.
+  */
+class AvgWithSumAndCountOverTimeFuncD extends ChunkedRangeFunction[TransientRow] {
+  private val sumFunc = new SumOverTimeChunkedFunctionD
+  private val countFunc = new SumOverTimeChunkedFunctionD
+  private val countColId: Int = 1 // FIXME hard coded for now
+
+  override final def reset(): Unit = {
+    sumFunc.reset()
+    countFunc.reset()
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, sumFunc.sum / countFunc.sum)
+  }
+
+  import BinaryVector.BinaryVectorPtr
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for both columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      sumFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+
+      // Get valueVector/reader for count column
+      val countVectPtr = info.vectorPtr(countColId)
+      countFunc.addTimeChunks(countVectPtr, bv.DoubleVector(countVectPtr), startRowNum, endRowNum)
+    }
+  }
+}
+
+/**
+  * Sums Histograms over time and also computes Max over time of a Max field.
+  */
+class AvgWithSumAndCountOverTimeFuncL extends ChunkedRangeFunction[TransientRow] {
+  private val sumFunc = new SumOverTimeChunkedFunctionL
+  private val countFunc = new CountOverTimeChunkedFunction
+  private val countColId: Int = 1 // FIXME hard coded for now
+
+  override final def reset(): Unit = {
+    sumFunc.reset()
+    countFunc.reset()
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, sumFunc.sum / countFunc.count)
+  }
+
+  import BinaryVector.BinaryVectorPtr
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for both columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      sumFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+
+      // Get valueVector/reader for count column
+      val cntVectPtr = info.vectorPtr(countColId)
+      countFunc.addTimeChunks(cntVectPtr, bv.DoubleVector(cntVectPtr), startRowNum, endRowNum)
+    }
+  }
+}
+
 class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     if (!JLDouble.isNaN(row.value)) {

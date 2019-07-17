@@ -5,8 +5,8 @@ import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.exec._
 import filodb.query.RangeFunctionId._
+import filodb.query.exec._
 
 /**
   * Container for samples within a window of samples
@@ -232,9 +232,10 @@ object RangeFunction {
             columnType: ColumnType,
             config: QueryConfig,
             funcParams: Seq[Any] = Nil,
+            useDownsampledColumns: Boolean = false,
             maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(func, columnType, config, funcParams, maxCol, useChunked)()
+    generatorFor(func, columnType, config, useDownsampledColumns, funcParams, maxCol, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
@@ -242,13 +243,14 @@ object RangeFunction {
   def generatorFor(func: Option[RangeFunctionId],
                    columnType: ColumnType,
                    config: QueryConfig,
+                   useDownsampledColumns: Boolean,
                    funcParams: Seq[Any] = Nil,
                    maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator =
     if (useChunked) columnType match {
-      case ColumnType.DoubleColumn => doubleChunkedFunction(func, config, funcParams)
-      case ColumnType.LongColumn   => longChunkedFunction(func, funcParams)
-      case ColumnType.TimestampColumn => longChunkedFunction(func, funcParams)
+      case ColumnType.DoubleColumn => doubleChunkedFunction(func, useDownsampledColumns, config, funcParams)
+      case ColumnType.LongColumn   => longChunkedFunction(func, useDownsampledColumns, funcParams)
+      case ColumnType.TimestampColumn => longChunkedFunction(func, useDownsampledColumns, funcParams)
       case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
       case other: ColumnType       => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
@@ -259,11 +261,14 @@ object RangeFunction {
    * Returns a function to generate a ChunkedRangeFunction for Long columns
    */
   def longChunkedFunction(func: Option[RangeFunctionId],
+                          useDownsampledColumns: Boolean,
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionL
-    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
+    case Some(CountOverTime)  => () => if (useDownsampledColumns) new SumOverTimeChunkedFunctionL
+                                       else new CountOverTimeChunkedFunction()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
-    case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionL
+    case Some(AvgOverTime)    => () => if (useDownsampledColumns) new AvgWithSumAndCountOverTimeFuncL
+                                       else new AvgOverTimeChunkedFunctionL
     case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionL
     case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
@@ -275,15 +280,18 @@ object RangeFunction {
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
   def doubleChunkedFunction(func: Option[RangeFunctionId],
+                            useDownsampledColumns: Boolean,
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionD
     case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
     case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
     case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
-    case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
+    case Some(CountOverTime)  => () => if (useDownsampledColumns) new SumOverTimeChunkedFunctionD
+                                       else new CountOverTimeChunkedFunctionD()
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
-    case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
+    case Some(AvgOverTime)    => () => if (useDownsampledColumns) new AvgWithSumAndCountOverTimeFuncD
+                                       else new AvgOverTimeChunkedFunctionD
     case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionD
     case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
     case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD

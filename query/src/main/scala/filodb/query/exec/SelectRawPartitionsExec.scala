@@ -38,18 +38,36 @@ final case class SelectRawPartitionsExec(id: String,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
-  require(colIds.nonEmpty)
-
   protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    val numRowKeyCols = colIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
+    val selectedColIds = selectColIds(dataset)
+    val numRowKeyCols = selectedColIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
 
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
     // But make sure the max column isn't already included
-    histMaxColumn(dataset, colIds).filter { mId => !(colIds contains mId) }
+    histMaxColumn(dataset, selectedColIds).filter { mId => !(colIds contains mId) }
                                   .map { maxColId =>
-      ResultSchema(dataset.infosFromIDs(colIds :+ maxColId), numRowKeyCols, colIDs = (colIds :+ maxColId))
+      ResultSchema(dataset.infosFromIDs(selectedColIds :+ maxColId),
+        numRowKeyCols, colIDs = (selectedColIds :+ maxColId))
     }.getOrElse {
-      ResultSchema(dataset.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
+      ResultSchema(dataset.infosFromIDs(selectedColIds), numRowKeyCols, colIDs = selectedColIds)
+    }
+  }
+
+  private def selectColIds(dataset: Dataset) = {
+    dataset.rowKeyIDs ++ {
+      if (colIds.nonEmpty) {
+        // query is selecting specific columns
+        colIds
+      } else if (!dataset.hasDownsampledData) {
+        // needs to select raw data
+        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
+      } else {
+        // need to select column based on range function
+        val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
+          PeriodicSamplesMapper.downsampleColsFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
+        }.getOrElse(Seq("avg"))
+        colIds ++ dataset.colIDs(colNames: _*).get
+      }
     }
   }
 
@@ -61,25 +79,11 @@ final case class SelectRawPartitionsExec(id: String,
     require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
-    val selectColIds = dataset.rowKeyIDs ++ {
-      if (colIds.nonEmpty) {
-        // query is selecting specific columns
-        colIds
-      } else if (!dataset.hasDownsampledData) {
-        // needs to select raw data
-        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
-      } else {
-        // need to select column based on range function
-        val colName = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
-          PeriodicSamplesMapper.downsampleColFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
-        }.getOrElse("avg")
-        Query.qLogger.debug(s"queryId=$id is configured to use column=$colName")
-        colIds ++ dataset.colIDs(colName).get
-      }
-    }
-
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    source.rangeVectors(dataset, selectColIds, partMethod, chunkMethod)
+    val selectCols = selectColIds(dataset)
+    Query.qLogger.debug(s"queryId=$id on dataset=${dataset.ref} shard=$shard" +
+      s" is configured to use column=$selectCols to serve downsampled results")
+    source.rangeVectors(dataset, selectCols, partMethod, chunkMethod)
   }
 
   protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"
