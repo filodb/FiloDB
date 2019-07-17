@@ -124,7 +124,6 @@ trait ExecPlan extends QueryCommand {
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>
-            qLogger.debug(s"queryId: ${id} SRVs already materialized from iterators")
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
@@ -133,7 +132,6 @@ trait ExecPlan extends QueryCommand {
             srv
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators")
             val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
