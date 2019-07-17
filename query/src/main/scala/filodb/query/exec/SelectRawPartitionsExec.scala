@@ -10,6 +10,7 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
+import filodb.query.exec.rangefn.RangeFunction
 
 object SelectRawPartitionsExec {
   import Column.ColumnType._
@@ -64,7 +65,7 @@ final case class SelectRawPartitionsExec(id: String,
       } else {
         // need to select column based on range function
         val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
-          PeriodicSamplesMapper.downsampleColsFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
+          RangeFunction.downsampleColsFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
         }.getOrElse(Seq("avg"))
         colIds ++ dataset.colIDs(colNames: _*).get
       }

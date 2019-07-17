@@ -225,6 +225,30 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
+
+  def downsampleColsFromRangeFunction(f: Option[RangeFunctionId]): Seq[String] = {
+    f match {
+      case None                   => Seq("sum", "count") // to calculate last average
+      case Some(Rate)             => Seq("value")
+      case Some(Irate)            => Seq("value")
+      case Some(Increase)         => Seq("value")
+      case Some(Resets)           => Seq("value")
+      case Some(CountOverTime)    => Seq("count")
+      case Some(Changes)          => Seq("avg")
+      case Some(Delta)            => Seq("avg")
+      case Some(Idelta)           => Seq("avg")
+      case Some(Deriv)            => Seq("avg")
+      case Some(HoltWinters)      => Seq("avg")
+      case Some(PredictLinear)    => Seq("avg")
+      case Some(SumOverTime)      => Seq("sum")
+      case Some(AvgOverTime)      => Seq("sum", "count")
+      case Some(StdDevOverTime)   => Seq("avg")
+      case Some(StdVarOverTime)   => Seq("avg")
+      case Some(QuantileOverTime) => Seq("avg")
+      case Some(MinOverTime)      => Seq("min")
+      case Some(MaxOverTime)      => Seq("max")
+    }
+  }
   /**
    * Returns a (probably new) instance of RangeFunction given the func ID and column type
    */
