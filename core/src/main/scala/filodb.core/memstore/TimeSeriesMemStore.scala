@@ -119,13 +119,6 @@ extends MemStore with StrictLogging {
                      shardNum: Int,
                      combinedStream: Observable[DataOrCommand],
                      flushSched: Scheduler,
-                     diskTimeToLiveSeconds: Int): CancelableFuture[Unit] =
-    doIngestStream(dataset, shardNum, combinedStream, flushSched, diskTimeToLiveSeconds, Task(() => {}))
-
-  def doIngestStream(dataset: DatasetRef,
-                     shardNum: Int,
-                     combinedStream: Observable[DataOrCommand],
-                     flushSched: Scheduler,
                      diskTimeToLiveSeconds: Int,
                      cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
