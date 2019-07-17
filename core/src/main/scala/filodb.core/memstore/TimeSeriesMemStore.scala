@@ -106,7 +106,7 @@ extends MemStore with StrictLogging {
                    diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    doIngestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -115,12 +115,12 @@ extends MemStore with StrictLogging {
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
-  def doIngestStream(dataset: DatasetRef,
-                     shardNum: Int,
-                     combinedStream: Observable[DataOrCommand],
-                     flushSched: Scheduler,
-                     diskTimeToLiveSeconds: Int,
-                     cancelTask: Task[Unit]): CancelableFuture[Unit] = {
+  def ingestStream(dataset: DatasetRef,
+                   shardNum: Int,
+                   combinedStream: Observable[DataOrCommand],
+                   flushSched: Scheduler,
+                   diskTimeToLiveSeconds: Int,
+                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
