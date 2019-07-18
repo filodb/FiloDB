@@ -225,10 +225,9 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
 /**
   * Sums Histograms over time and also computes Max over time of a Max field.
   */
-class AvgWithSumAndCountOverTimeFuncD extends ChunkedRangeFunction[TransientRow] {
+class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunction[TransientRow] {
   private val sumFunc = new SumOverTimeChunkedFunctionD
   private val countFunc = new SumOverTimeChunkedFunctionD
-  private val countColId: Int = 4 // FIXME hard coded for now
 
   override final def reset(): Unit = {
     sumFunc.reset()
@@ -262,10 +261,9 @@ class AvgWithSumAndCountOverTimeFuncD extends ChunkedRangeFunction[TransientRow]
 /**
   * Sums Histograms over time and also computes Max over time of a Max field.
   */
-class AvgWithSumAndCountOverTimeFuncL extends ChunkedRangeFunction[TransientRow] {
+class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunction[TransientRow] {
   private val sumFunc = new SumOverTimeChunkedFunctionL
   private val countFunc = new CountOverTimeChunkedFunction
-  private val countColId: Int = 4 // FIXME hard coded for now
 
   override final def reset(): Unit = {
     sumFunc.reset()

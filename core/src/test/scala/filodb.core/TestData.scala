@@ -439,7 +439,13 @@ object MetricsTestData {
     Seq("timestamp"),
     Seq.empty,
     true,
-    options = DatasetOptions(Seq("__name__"), "__name__", "average")).get
+    options = DatasetOptions(Seq("__name__"), "__name__", "average",
+                            maxColumn = Some("max"),
+                            minColumn = Some("min"),
+                            sumColumn = Some("sum"),
+                            countColumn = Some("count"),
+                            avgColumn = Some("avg"))
+  ).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 

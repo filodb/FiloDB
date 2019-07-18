@@ -159,13 +159,18 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Map[String, String] = Map.empty) {
+                          copyTags: Map[String, String] = Map.empty,
+                          minColumn: Option[String] = None,
+                          maxColumn: Option[String] = None,
+                          sumColumn: Option[String] = None,
+                          countColumn: Option[String] = None,
+                          avgColumn: Option[String] = None) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
 
   def toConfig: Config = {
-    val map: Map[String, Any] = Map(
+    val map: scala.collection.mutable.Map[String, Any] = scala.collection.mutable.Map(
       "shardKeyColumns" -> shardKeyColumns.asJava,
       "metricColumn" -> metricColumn,
       "valueColumn" -> valueColumn,
@@ -173,6 +178,13 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
       "copyTags" -> copyTags.asJava)
+
+    minColumn.foreach(map += "min-column" -> _)
+    maxColumn.foreach(map += "max-column" -> _)
+    sumColumn.foreach(map += "sum-column" -> _)
+    countColumn.foreach(map += "count-column" -> _)
+    avgColumn.foreach(map += "avg-column" -> _)
+
     ConfigFactory.parseMap(map.asJava)
   }
 
@@ -206,7 +218,12 @@ object DatasetOptions {
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = config.as[Map[String, String]]("copyTags"))
+                   copyTags = config.as[Map[String, String]]("copyTags"),
+                   minColumn = config.as[Option[String]]("min-column"),
+                   maxColumn = config.as[Option[String]]("max-column"),
+                   sumColumn = config.as[Option[String]]("sum-column"),
+                   countColumn = config.as[Option[String]]("count-column"),
+                   avgColumn = config.as[Option[String]]("avg-column"))
 }
 
 /**
