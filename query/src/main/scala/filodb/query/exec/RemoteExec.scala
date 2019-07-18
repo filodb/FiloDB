@@ -1,6 +1,4 @@
-package filodb.query.exec
-
-;
+package filodb.query.exec;
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
@@ -11,13 +9,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import scala.concurrent.duration.FiniteDuration
-
-//final case class QueryOptions(spreadProvider: Option[SpreadProvider] = None,
-//                              parallelism: Int = 16,
-//                              queryTimeoutSecs: Int = 30,
-//                              sampleLimit: Int = 1000000,
-//                              shardOverrides: Option[Seq[Int]] = None,
-//                              processFailures: Boolean = true )
 
 final case class RemoteExecParams(logicalPlan: LogicalPlan,
                                   queryOptions: QueryOptions)
