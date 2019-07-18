@@ -7,17 +7,16 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
+import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
-import filodb.core.Types.{PartitionKey, UTF8Map}
-import filodb.memory.format._
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.{vectors => bv}
 import filodb.memory._
+import filodb.memory.format.{vectors => bv, _}
+import filodb.memory.format.ZeroCopyUTF8String._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -433,6 +432,14 @@ object MetricsTestData {
                                   Seq("timestamp"),
                                   Seq.empty,
                                   options = DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+
+  val downsampleDataset = Dataset.make("tsdbdata",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double"),
+    Seq("timestamp"),
+    Seq.empty,
+    true,
+    options = DatasetOptions(Seq("__name__"), "__name__", "average")).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 

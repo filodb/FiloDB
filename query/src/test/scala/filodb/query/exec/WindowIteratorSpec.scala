@@ -405,6 +405,51 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
+
+  it("should calculate query results from downsampled data") {
+    // min, max, sum, count, avg
+    val samples = Seq(
+      (100000L, 2d, 5d, 20d, 5d, 2.8d),
+      (153000L, 1d, 6d, 18d, 3d, 1.4d),
+      (250000L, 3d, 7d, 21d, 5d, 5d),
+      (270000L, 2d, 10d, 22d, 4d, 6d),
+      (280000L, 1.5d, 2d, 10d, 6d, 1.75d),
+      (360000L, 0.6d, 7d, 23d, 7d, 2d),
+      (430000L, 7d, 10d, 60d, 5d, 8d),
+      (690000L, 1.8d, 5d, 25d, 7d, 3d),
+      (700000L, 4.9d, 12d, 80d, 10d, 10d),
+      (710000L, 0.1d, 3d, 10d, 10d, 1d)
+    )
+    val rvAvg = timeValueRvDownsample(samples, Array(0, 3, 4))
+
+    val avgWindowResults = Seq(
+      150000 -> 4.0,
+      250000 -> 4.875,
+      350000 -> 3.2,
+      450000 -> 6.916666666666667,
+      750000 -> 4.2592592592592595
+    )
+    val chunkedItAvg = new ChunkedWindowIteratorD(rvAvg, 50000L, 100000, 750000L, 100000,
+      RangeFunction(Some(RangeFunctionId.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
+        useDownsampledColumns = true, useChunked = true).asChunkedD, queryConfig)
+    chunkedItAvg.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual avgWindowResults
+
+    val rvCnt = timeValueRvDownsample(samples, Array(0, 4))
+
+    val countWindowResults = Seq(
+      150000 -> 5.0,
+      250000 -> 8.0,
+      350000 -> 10.0,
+      450000 -> 12.0,
+      750000 -> 27.0
+    )
+    val chunkedItCnt = new ChunkedWindowIteratorD(rvCnt, 50000L, 100000, 750000L, 100000,
+      RangeFunction(Some(RangeFunctionId.CountOverTime), ColumnType.DoubleColumn, queryConfig,
+        useDownsampledColumns = true, useChunked = true).asChunkedD, queryConfig)
+    chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual countWindowResults
+
+  }
+
   it("should calculate MinOverTime correctly even for windows with no values") {
     val samples = Seq(
       100000L -> 1d,

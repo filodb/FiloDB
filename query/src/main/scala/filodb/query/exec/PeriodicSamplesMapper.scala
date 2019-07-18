@@ -11,7 +11,6 @@ import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
 import filodb.memory.format.{vectors => bv, _}
 import filodb.query._
 import filodb.query.Query.qLogger
-import filodb.query.RangeFunctionId._
 import filodb.query.exec.rangefn._
 import filodb.query.util.IndexedArrayQueue
 
