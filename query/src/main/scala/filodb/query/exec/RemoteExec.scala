@@ -1,27 +1,50 @@
-package filodb.query.exec;
-import monix.reactive.Observable
+package filodb.query.exec
 
+;
+
+import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.query._
-import filodb.query.Query.qLogger
+import monix.execution.Scheduler
+import monix.reactive.Observable
 
-final case class RemoteExec (id: String,
-        dispatcher: PlanDispatcher,
-        children: Seq[ExecPlan], serializedLogicalPlan: LogicalPlan) extends NonLeafExecPlan {
-    require(children.nonEmpty)
+import scala.concurrent.duration.FiniteDuration
 
-    protected def args: String = ""
+//final case class QueryOptions(spreadProvider: Option[SpreadProvider] = None,
+//                              parallelism: Int = 16,
+//                              queryTimeoutSecs: Int = 30,
+//                              sampleLimit: Int = 1000000,
+//                              shardOverrides: Option[Seq[Int]] = None,
+//                              processFailures: Boolean = true )
 
-    protected def schemaOfCompose(dataset: Dataset): ResultSchema = ResultSchema(Nil, 0, Map.empty) //dummy resultSchema
+final case class RemoteExecParams(logicalPlan: LogicalPlan,
+                                  queryOptions: QueryOptions)
 
-    protected def compose(dataset: Dataset,
-                          childResponses: Observable[(QueryResponse, Int)],
-    queryConfig: QueryConfig): Observable[RangeVector] = {
-        qLogger.debug(s"RemoteExec: Concatenating results")
-        childResponses.flatMap {
-            case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
-            case (QueryError(_, ex), _)         => throw ex
-        }
-    }
+final case class RemoteExec(id: String,
+                            dispatcher: PlanDispatcher, serializedLogicalPlan: LogicalPlan,
+                            dataset: DatasetRef, params: RemoteExecParams, submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+  protected def args: String = ""
+
+  /**
+    * Limit on number of samples returned by this ExecPlan
+    */
+  override def limit: Int = ???
+
+  // override def dataset: DatasetRef = ???
+
+  /**
+    * Sub classes should override this method to provide a concrete
+    * implementation of the operation represented by this exec plan
+    * node
+    */
+  override protected def doExecute(source: ChunkSource, dataset: Dataset, queryConfig: QueryConfig)
+                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
+
+  /**
+    * Sub classes should implement this with schema of RangeVectors returned
+    * from doExecute() abstract method.
+    */
+  override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ???
 }
