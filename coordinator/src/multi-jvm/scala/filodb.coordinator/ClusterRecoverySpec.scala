@@ -12,15 +12,46 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, ResultSchema}
+import filodb.core.query.ColumnInfo
 
 object ClusterRecoverySpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
   val first = role("first")
   val second = role("second")
 
+  // Combined dataset/stream definition, store config
+  // 2 shards, 2 nodes == 1 shard per node
+  val ourConf = s"""
+  filodb {
+    memstore.groups-per-shard = 4
+    inline-dataset-configs = [
+      {
+        dataset = "gdelt"
+        definition {
+          partition-columns = ["Actor2Code:string", "Actor2Name:string"]
+          data-columns = ["GLOBALEVENTID:long", "SQLDATE:long", "MonthYear:int",
+                          "Year:int", "NumArticles:int", "AvgTone:double"]
+          row-key-columns = [ "GLOBALEVENTID" ]
+          downsamplers = []
+        }
+        ${GdeltTestData.datasetOptionConfig}
+        num-shards = 2
+        min-num-nodes = 2
+        sourcefactory = "${classOf[sources.CsvStreamFactory].getName}"
+        sourceconfig {
+          header = true
+          batch-size = 10
+          noflush = true
+          resource = "/GDELT-sample-test.csv"
+          shutdown-ingest-after-stopped = false
+          ${TestData.sourceConfStr}
+        }
+      }
+    ]
+  }"""
+
   // this configuration will be used for all nodes
-  val globalConfig = ConfigFactory.parseString("""filodb.memstore.groups-per-shard = 4""".stripMargin)
+  val globalConfig = ConfigFactory.parseString(ourConf)
                        .withFallback(ConfigFactory.parseResources("application_test.conf"))
                        .withFallback(ConfigFactory.load("filodb-defaults.conf"))
   commonConfig(globalConfig)
@@ -28,6 +59,8 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
 
 /**
  * A cluster recovery (auto restart of previous ingestion streams, checkpoints) test.
+ * Also a good integration test for cluster and coordinator startup, etc.
+ * NOTE: since we moved to static configs every startup is a "recovery".
  */
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
   import akka.testkit._
@@ -36,7 +69,6 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   import filodb.query._
   import GdeltTestData._
   import NodeClusterActor._
-  import sources.CsvStreamFactory
 
   override def initialParticipants: Int = roles.size
 
@@ -50,24 +82,8 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   private lazy val coordinatorActor = cluster.coordinatorActor
   private lazy val metaStore = cluster.metaStore
 
-  // 2 shards, 2 nodes == 1 shard per node
-  val sourceConfig = ConfigFactory.parseString(s"""header = true
-                                                   batch-size = 10
-                                                   noflush = true
-                                                   resource = "/GDELT-sample-test.csv"
-                                                   """).withFallback(TestData.sourceConf)
-  val shards = 2
-  private val setup = SetupDataset(dataset6,
-                                   DatasetResourceSpec(shards, shards),
-                                   IngestionSource(classOf[CsvStreamFactory].getName, sourceConfig),
-                                   TestData.storeConf)
-
   implicit val patience =   // make sure futureValue has long enough time
     PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
-
-  // FIXME need to fix this test
-//  metaStore.newDataset(dataset6).futureValue shouldEqual Success
-//  metaStore.writeIngestionConfig(setup.config).futureValue shouldEqual Success
 
   var clusterActor: ActorRef = _
   var mapper: ShardMapper = _
@@ -81,7 +97,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
 
   // Temporarily ignore this test, it always seems to fail in Travis.  Seems like in Travis the shards are
   // never assigned.
-  ignore("should start actors, join cluster, automatically start prev ingestion") {
+  it("should start actors, join cluster, automatically start prev ingestion") {
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     coordinatorActor
     cluster join address1
@@ -118,6 +134,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
         case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
       }
     }
+    cluster.memStore.commitIndexForTesting(dataset6.ref)
     enterBarrier("ingestion-stopped")
 
     // val query = LogicalPlanQuery(dataset6.ref,
@@ -131,8 +148,8 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     coordinatorActor ! q2
     expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, schema, vectors) =>
-        schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn),
-                                            ColumnInfo("AvgTone", ColumnType.DoubleColumn)), 1)
+        schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn),
+                                       ColumnInfo("AvgTone", ColumnType.DoubleColumn))
         // query is counting each partition....
         vectors should have length (59 * 2)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)

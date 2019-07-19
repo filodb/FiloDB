@@ -10,7 +10,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.Success
+import filodb.core.{GlobalConfig, Success}
 import filodb.timeseries.TestTimeseriesProducer
 
 object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {

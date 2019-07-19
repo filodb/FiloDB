@@ -13,6 +13,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
+import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig

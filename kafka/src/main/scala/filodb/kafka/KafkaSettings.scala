@@ -15,7 +15,7 @@ import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.config.SslConfigs
 import org.apache.kafka.common.serialization.LongDeserializer
 
-import filodb.coordinator.GlobalConfig
+import filodb.core.GlobalConfig
 
 class SourceConfig(conf: Config, shard: Int)
   extends KafkaSettings(conf, ConsumerConfig.configNames.asScala.toSet) {

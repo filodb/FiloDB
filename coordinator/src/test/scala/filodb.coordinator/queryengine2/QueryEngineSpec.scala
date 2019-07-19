@@ -205,4 +205,23 @@ class QueryEngineSpec extends FunSpec with Matchers {
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
   }
 
+  it ("should generate SetOperatorExec for LogicalPlan with Set operator") {
+    // final logical plan
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan, QueryOptions())
+
+    execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
+    execPlan.children.foreach { l1 =>
+      // Now there should be single level of reduce because we have 2 shards
+      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.children.foreach { l2 =>
+        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l2.rangeVectorTransformers.size shouldEqual 2
+        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+      }
+    }
+  }
 }

@@ -19,7 +19,6 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * dictated by `on` or `ignoring` fields passed as params.
   *
   * Joins can be one-to-one or one-to-many. One-to-One is currently supported using a hash based join.
-  * One-to-Many is yet to be implemented. Many-to-Many is not supported for math based joins.
   *
   * The performance is going to be not-so-optimal since it will involve moving possibly lots of matching range vector
   * data across machines. Histogram based joins can and will be optimized by co-location of bucket, count and sum
@@ -42,8 +41,9 @@ final case class BinaryJoinExec(id: String,
                                 on: Seq[String],
                                 ignoring: Seq[String],
                                 include: Seq[String]) extends NonLeafExecPlan {
-  require(cardinality != Cardinality.ManyToMany || binaryOp.isInstanceOf[ComparisonOperator],
-    "Many To Many cardinality is supported only for comparison binary operators")
+
+  require(cardinality != Cardinality.ManyToMany,
+    "Many To Many cardinality is not supported for BinaryJoinExec")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains("__name__"), "On cannot contain metric name")
 
@@ -81,7 +81,7 @@ final case class BinaryJoinExec(id: String,
         val jk = joinKeys(rv.key)
         if (oneSideMap.contains(jk))
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
-        oneSideMap.put(joinKeys(rv.key), rv)
+        oneSideMap.put(jk, rv)
       }
 
       // keep a hashset of result range vector keys to help ensure uniqueness of result range vectors
