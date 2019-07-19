@@ -36,8 +36,8 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnSupportedChunkSource()
     // translate implicit ExecutionContext to monix.Scheduler
-    val scheduler = Scheduler(sched)
-    plan.execute(source, dataset, queryConfig)(scheduler, timeout)
+    implicit val scheduler:Scheduler = Scheduler(sched)
+    plan.execute(source, dataset, queryConfig)
   }
 
 }
