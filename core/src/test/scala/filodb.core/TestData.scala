@@ -343,8 +343,10 @@ object MachineMetricsData {
     }
   }
 
-  val histMaxDS = Dataset("histmax", Seq("tags:map"),
-                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+  val histMaxDS = Dataset.make("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"),
+                          Seq("timestamp"),
+                          options = DatasetOptions.DefaultOptions.copy(maxColumn = Some("max"))).get
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max column before h/hist

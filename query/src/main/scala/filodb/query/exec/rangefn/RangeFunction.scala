@@ -227,27 +227,27 @@ object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
 
-  def downsampleColsFromRangeFunction(f: Option[RangeFunctionId]): Seq[String] = {
+  def downsampleColsFromRangeFunction(dataset: Dataset, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
-      case None                   => Seq("sum", "count") // to calculate last average
-      case Some(Rate)             => Seq("value")
-      case Some(Irate)            => Seq("value")
-      case Some(Increase)         => Seq("value")
-      case Some(Resets)           => Seq("value")
-      case Some(CountOverTime)    => Seq("count")
-      case Some(Changes)          => Seq("avg")
-      case Some(Delta)            => Seq("avg")
-      case Some(Idelta)           => Seq("avg")
-      case Some(Deriv)            => Seq("avg")
-      case Some(HoltWinters)      => Seq("avg")
-      case Some(PredictLinear)    => Seq("avg")
-      case Some(SumOverTime)      => Seq("sum")
-      case Some(AvgOverTime)      => Seq("sum", "count")
-      case Some(StdDevOverTime)   => Seq("avg")
-      case Some(StdVarOverTime)   => Seq("avg")
-      case Some(QuantileOverTime) => Seq("avg")
-      case Some(MinOverTime)      => Seq("min")
-      case Some(MaxOverTime)      => Seq("max")
+      case None                   => Seq(dataset.options.avgColumn.get)
+      case Some(Rate)             => Seq(dataset.options.valueColumn)
+      case Some(Irate)            => Seq(dataset.options.valueColumn)
+      case Some(Increase)         => Seq(dataset.options.valueColumn)
+      case Some(Resets)           => Seq(dataset.options.valueColumn)
+      case Some(CountOverTime)    => Seq(dataset.options.countColumn.get)
+      case Some(Changes)          => Seq(dataset.options.avgColumn.get)
+      case Some(Delta)            => Seq(dataset.options.avgColumn.get)
+      case Some(Idelta)           => Seq(dataset.options.avgColumn.get)
+      case Some(Deriv)            => Seq(dataset.options.avgColumn.get)
+      case Some(HoltWinters)      => Seq(dataset.options.avgColumn.get)
+      case Some(PredictLinear)    => Seq(dataset.options.avgColumn.get)
+      case Some(SumOverTime)      => Seq(dataset.options.sumColumn.get)
+      case Some(AvgOverTime)      => Seq(dataset.options.sumColumn.get, dataset.options.countColumn.get)
+      case Some(StdDevOverTime)   => Seq(dataset.options.avgColumn.get)
+      case Some(StdVarOverTime)   => Seq(dataset.options.avgColumn.get)
+      case Some(QuantileOverTime) => Seq(dataset.options.avgColumn.get)
+      case Some(MinOverTime)      => Seq(dataset.options.minColumn.get)
+      case Some(MaxOverTime)      => Seq(dataset.options.maxColumn.get)
     }
   }
   /**
@@ -295,7 +295,7 @@ object RangeFunction {
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
       case Some(AvgOverTime)    => () => if (dataset.hasDownsampledData) {
-                                           val cntCol = dataset.options.countColumn.map(dataset.colIDs(_).get.head).get
+                                           val cntCol = dataset.options.countColumn.map(dataset.dataColId(_)).get
                                            new AvgWithSumAndCountOverTimeFuncL(cntCol)
                                          }
                                          else new AvgOverTimeChunkedFunctionL
@@ -323,7 +323,7 @@ object RangeFunction {
                                          else new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
       case Some(AvgOverTime)    => () => if (dataset.hasDownsampledData) {
-                                            val cntCol = dataset.options.countColumn.map(dataset.colIDs(_).get.head).get
+                                            val cntCol = dataset.options.countColumn.map(dataset.dataColId(_)).get
                                             new AvgWithSumAndCountOverTimeFuncD(cntCol)
                                          }
                                          else new AvgOverTimeChunkedFunctionD
@@ -338,7 +338,7 @@ object RangeFunction {
   def histChunkedFunction(dataset: Dataset,
                           func: Option[RangeFunctionId],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
-    val maxCol = dataset.options.maxColumn.map(dataset.colIDs(_).get.head)
+    val maxCol = dataset.options.maxColumn.map(dataset.dataColId(_))
     func match {
       case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
       case None                 => () => new LastSampleChunkedFunctionH

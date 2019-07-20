@@ -19,8 +19,8 @@ object SelectRawPartitionsExec {
   def histMaxColumn(dataset: Dataset, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => dataset.dataColumns(id).columnType == HistogramColumn }
           .flatMap { histColID =>
-            dataset.dataColumns.find { c => c.name == "max" && c.columnType == DoubleColumn }
-          }.map(_.id)
+            dataset.options.maxColumn.map(dataset.dataColId(_))
+          }
   }
 }
 
@@ -40,6 +40,9 @@ final case class SelectRawPartitionsExec(id: String,
   import SelectRawPartitionsExec._
 
   protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
+    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
+
     val selectedColIds = selectColIds(dataset)
     val numRowKeyCols = selectedColIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
 
@@ -65,7 +68,7 @@ final case class SelectRawPartitionsExec(id: String,
       } else {
         // need to select column based on range function
         val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
-          RangeFunction.downsampleColsFromRangeFunction(p.asInstanceOf[PeriodicSamplesMapper].functionId)
+          RangeFunction.downsampleColsFromRangeFunction(dataset, p.asInstanceOf[PeriodicSamplesMapper].functionId)
         }.getOrElse(Seq("avg"))
         colIds ++ dataset.colIDs(colNames: _*).get
       }

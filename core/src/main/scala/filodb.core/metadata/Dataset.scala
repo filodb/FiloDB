@@ -108,6 +108,13 @@ final case class Dataset(name: String,
             .combined.badMap(_.toSeq)
 
   /**
+    * Throws exception on invalid column name
+    */
+  def dataColId(colName: String): Int = {
+    dataColumns.find(_.name == colName).map(_.id).get
+  }
+
+  /**
    * Given a list of column names representing say CSV columns, returns a routing from each data column
    * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
    * over the input RowReader to return data columns corresponding to dataset definition.
