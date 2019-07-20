@@ -1,18 +1,19 @@
 package filodb.query.exec
 
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.ConfigFactory
-import filodb.core.DatasetRef
-import filodb.core.Types.ColumnId
-import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats, PartitionScanMethod, RawPartData, ReadablePartition, ScanSplit}
-import filodb.query.exec.{ExecPlan, NonLeafExecPlan, PlanDispatcher}
-import filodb.query.{QueryConfig, QueryResponse}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
+import filodb.core.DatasetRef
+import filodb.core.Types.ColumnId
+import filodb.core.metadata.Dataset
+import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats, PartitionScanMethod, RawPartData,
+  ReadablePartition, ScanSplit}
+import filodb.query.{QueryConfig, QueryResponse}
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
@@ -47,19 +48,22 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
   */
 case class UnSupportedChunkSource() extends ChunkSource {
 
-  val excp = throw new UnsupportedOperationException("This operation is not supported")
-
   override def scanPartitions(dataset: Dataset, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
-                              chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = excp
+                              chunkMethod: ChunkScanMethod): Observable[ReadablePartition] =
+    throw new UnsupportedOperationException("This operation is not supported")
 
-  override def groupsInDataset(dataset: Dataset): Int = excp
+  override def groupsInDataset(dataset: Dataset): Int =
+    throw new UnsupportedOperationException("This operation is not supported")
 
-  override def stats: ChunkSourceStats = excp
+  override def stats: ChunkSourceStats =
+    throw new UnsupportedOperationException("This operation is not supported")
 
-  override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = excp
+  override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] =
+    throw new UnsupportedOperationException("This operation is not supported")
 
   override def readRawPartitions(dataset: Dataset, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
-                                 chunkMethod: ChunkScanMethod): Observable[RawPartData] = excp
+                                 chunkMethod: ChunkScanMethod): Observable[RawPartData] =
+    throw new UnsupportedOperationException("This operation is not supported")
 }
 
 
