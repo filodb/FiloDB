@@ -51,7 +51,7 @@ object TestData {
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
-  val nativeMem = new NativeMemoryManager(20 * 1024 * 1024)
+  val nativeMem = new NativeMemoryManager(40 * 1024 * 1024)
 
   val optionsString = """
   options {
