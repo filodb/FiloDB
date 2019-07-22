@@ -101,20 +101,15 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   store.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
-  val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
-                                          timeout: FiniteDuration): Task[query.QueryResponse] = ???
-  }
-
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset, shardMapper, dummyFailureProvider, dummyDispatcher)
+  val engine = new QueryEngine(dataset, shardMapper, emptyFailureProvider)
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop

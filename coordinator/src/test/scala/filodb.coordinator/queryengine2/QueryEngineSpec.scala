@@ -30,18 +30,18 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
   val dataset = MetricsTestData.timeseriesDataset
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
-  val dummyDispatcher = new PlanDispatcher {
+  val emptyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
+  val engine = new QueryEngine(dataset, mapperRef, emptyFailureProvider)
 
   /*
   This is the PromQL
@@ -146,7 +146,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     // Custom QueryEngine with different dataset with different metric name
     val dataset2 = dataset.copy(options = dataset.options.copy(
       metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
-    val engine2 = new QueryEngine(dataset2, mapperRef, dummyFailureProvider)
+    val engine2 = new QueryEngine(dataset2, mapperRef, emptyFailureProvider)
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryOptions())
@@ -254,7 +254,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
         Seq(FailureTimeRange("local", datasetRef,
           TimeRange(1500, 5000), None), FailureTimeRange("remote", datasetRef,
           TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
-          TimeRange(1000, 2000), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
+          TimeRange(1000, 2000), Some(emptyDispatcher)), FailureTimeRange("remote", datasetRef,
           TimeRange(100, 700), None))
       }
     }

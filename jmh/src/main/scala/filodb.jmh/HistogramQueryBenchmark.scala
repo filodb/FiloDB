@@ -76,15 +76,15 @@ class HistogramQueryBenchmark {
   private val shardMapper = new ShardMapper(1)
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
   // Query configuration
-  val hEngine = new QueryEngine(histDataset, shardMapper, dummyFailureProvider)
-  val pEngine = new QueryEngine(promDataset, shardMapper, dummyFailureProvider)
+  val hEngine = new QueryEngine(histDataset, shardMapper, emptyFailureProvider)
+  val pEngine = new QueryEngine(promDataset, shardMapper, emptyFailureProvider)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total{job="prometheus",__col__="h"}[30s]))"""

@@ -41,7 +41,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     serializer.fromBinary(serializer.toBinary(thing))
   }
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
@@ -175,7 +175,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, emptyFailureProvider)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")))
@@ -209,7 +209,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, emptyFailureProvider)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\"}[20s])) by (handler)",
@@ -239,7 +239,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, emptyFailureProvider)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(

@@ -104,13 +104,13 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
-  val engine = new QueryEngine(dataset, shardMapper, dummyFailureProvider)
+  val engine = new QueryEngine(dataset, shardMapper, emptyFailureProvider)
 
   /**
    * ## ========  Queries ===========

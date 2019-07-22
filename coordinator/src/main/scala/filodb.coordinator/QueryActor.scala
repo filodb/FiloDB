@@ -78,14 +78,14 @@ final class QueryActor(memStore: MemStore,
                    }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
-  val dummyFailureProvider = new FailureProvider {
+  val emptyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
-    dummyFailureProvider, functionalSpreadProvider)
+    emptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)
