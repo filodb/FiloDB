@@ -140,11 +140,6 @@ class QueryEngine(dataset: Dataset,
 
   }
 
-  //to do make class for TimeF
-
-
-
-
   val shardColumns = dataset.options.shardKeyColumns.sorted
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],

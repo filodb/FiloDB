@@ -116,7 +116,6 @@ object QueryRoutingPlanner extends RoutingPlanner {
         Seq(RemoteRoute(Some(TimeRange(start, end)), x))
 
     }.getOrElse {
-
       // Iterate till we get a local failure
       while ((i < failure.length) && (!failure(i).dispatcher.isDefined))
         i = i + 1
@@ -137,7 +136,6 @@ object QueryRoutingPlanner extends RoutingPlanner {
   def hasSingleTimeRange(logicalPlan: LogicalPlan): Boolean = {
     if (logicalPlan.isInstanceOf[BinaryJoin]) {
       val binaryJoin = logicalPlan.asInstanceOf[BinaryJoin]
-      //TO DO see if you can implements equals, hashcode in case class
       val lhsTime = getTimeFromLogicalPlan(binaryJoin.lhs)
       val rhsTime = getTimeFromLogicalPlan(binaryJoin.rhs)
       return (lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis)

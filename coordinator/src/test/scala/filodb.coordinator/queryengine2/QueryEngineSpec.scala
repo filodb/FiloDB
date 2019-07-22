@@ -24,7 +24,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val node = TestProbe().ref
 
   val mapper = new ShardMapper(32)
-  for {i <- 0 until 32} mapper.registerNode(Seq(i), node)
+  for { i <- 0 until 32 } mapper.registerNode(Seq(i), node)
 
   private def mapperRef = mapper
 
@@ -60,17 +60,17 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
   val intervalSelector = IntervalSelector(from, to)
 
-  val raw1 = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+  val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
   val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
 
   val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
     ColumnFilter("job", Filter.Equals("myService")))
-  val raw2 = RawSeries(rangeSelector = intervalSelector, filters = f2, columns = Seq("value"))
+  val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
 
-  it("should generate ExecPlan for LogicalPlan") {
+  it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
@@ -112,7 +112,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should parallelize aggregation") {
+  it ("should parallelize aggregation") {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
@@ -175,41 +175,34 @@ class QueryEngineSpec extends FunSpec with Matchers {
     execPlan.children should have length (2)
     execPlan.children.foreach { reduceAggPlan =>
       reduceAggPlan.isInstanceOf[ReduceAggregateExec] shouldEqual true
-      reduceAggPlan.children should have length (4) // spread=2 means 4 shards
+      reduceAggPlan.children should have length (4)   // spread=2 means 4 shards
     }
   }
 
   it("should stitch results when spread changes during query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
-
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-
     val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
   it("should not stitch results when spread has not changed in query range") {
     val lp = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""", TimeStepParams(20000, 100, 30000))
-
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-
     val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
     execPlan.rangeVectorTransformers.isEmpty shouldEqual true
   }
 
   it("should stitch results before binary join when spread changed in query range") {
-    val lp = Parser.queryRangeToLogicalPlan(
-      """count(foo{job="bar"} + baz{job="bar"})""",
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
-
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
     }
-
     val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
@@ -218,18 +211,35 @@ class QueryEngineSpec extends FunSpec with Matchers {
   }
 
   it("should not stitch results before binary join when spread has not changed in query range") {
-    val lp = Parser.queryRangeToLogicalPlan(
-      """count(foo{job="bar"} + baz{job="bar"})""",
+    val lp = Parser.queryRangeToLogicalPlan("""count(foo{job="bar"} + baz{job="bar"})""",
       TimeStepParams(20000, 100, 30000))
-
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-
     val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
+  }
+
+  it ("should generate SetOperatorExec for LogicalPlan with Set operator") {
+    // final logical plan
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan, QueryOptions())
+
+    execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
+    execPlan.children.foreach { l1 =>
+      // Now there should be single level of reduce because we have 2 shards
+      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      l1.children.foreach { l2 =>
+        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l2.rangeVectorTransformers.size shouldEqual 2
+        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+      }
+    }
   }
 
   it("should generate RemoteExec when failures are present in local") {
@@ -314,26 +324,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (100)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (10000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    }
-  }
-
-  it("should generate SetOperatorExec for LogicalPlan with Set operator") {
-    // final logical plan
-    val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
-
-    // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions())
-
-    execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
-    execPlan.children.foreach { l1 =>
-      // Now there should be single level of reduce because we have 2 shards
-      l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
-      l1.children.foreach { l2 =>
-        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-        l2.rangeVectorTransformers.size shouldEqual 2
-        l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-      }
     }
   }
 }
