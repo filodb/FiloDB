@@ -15,11 +15,11 @@ import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.Sampl
-import filodb.query.{LogicalPlan, QueryError, QueryResult}
+import filodb.query.{LogicalPlan, QueryError, QueryOptions, QueryResult}
 import filodb.query.exec.ExecPlan
 
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)

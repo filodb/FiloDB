@@ -12,10 +12,9 @@ import kamon.Kamon
 import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryengine._
-
-import filodb.core.Types
+import filodb.core.{SpreadProvider, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
@@ -32,7 +31,6 @@ import filodb.query.exec._
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper,
                   failureProvider: FailureProvider,
-                  LocalDispatcher: PlanDispatcher,
                   spreadProvider: SpreadProvider = StaticSpreadProvider())
                    extends StrictLogging {
 
@@ -62,7 +60,6 @@ class QueryEngine(dataset: Dataset,
 
   def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
                           options: QueryOptions, spreadProvider: SpreadProvider): ExecPlan = {
-    // to do check whether need to create another exec plan for local which will have LocalPlanDIspatcher
     val execPlans : Seq[ExecPlan]= routes.map { route =>
       route match {
         case route: LocalRoute => if (!route.asInstanceOf[LocalRoute].tr.isDefined)
@@ -77,29 +74,22 @@ class QueryEngine(dataset: Dataset,
             updateTimeLogicalPlan(rootLogicalPlan,
             route.asInstanceOf[RemoteRoute].tr.get)).getOrElse(rootLogicalPlan)
 
-
-
-          
-
-          //TO DO Serialize remoteLogicalPlan and put in RemoteExec
-          RemoteExec(queryId, route.dispatcher, Nil, remoteLogicalPlan)
+          RemoteExec(queryId, route.dispatcher, dataset.ref, exec.RemoteExecParams(remoteLogicalPlan,
+            options.copy(processFailures = true)), submitTime)
       }
     }
 
     if (execPlans.size == 1)
-      return execPlans(1)
+      return execPlans(0)
     else
-      StitchRvsExec(queryId, LocalDispatcher, execPlans)
+      StitchRvsExec(queryId, InProcessPlanDispatcher(dataset), execPlans)
   }
-
 
   /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
                   options: QueryOptions): ExecPlan = {
-
-
     val queryId = UUID.randomUUID().toString
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)

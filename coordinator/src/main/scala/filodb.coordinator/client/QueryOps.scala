@@ -5,8 +5,7 @@ import scala.concurrent.duration._
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core._
-import filodb.query.{LogicalPlan => LogicalPlan2}
-import filodb.query.{QueryResponse => QueryResponse2}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryOptions, QueryResponse => QueryResponse2}
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._

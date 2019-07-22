@@ -14,12 +14,13 @@ import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 
 import filodb.coordinator.ShardMapper
+import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryOptions, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex

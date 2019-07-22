@@ -1,9 +1,10 @@
 package filodb.coordinator.queryengine
 
-import filodb.core.DatasetRef
-import filodb.query.exec.PlanDispatcher
-import filodb.query.{LogicalPlan, _}
+import com.typesafe.scalalogging.StrictLogging
 
+import filodb.core.DatasetRef
+import filodb.query.{LogicalPlan, _}
+import filodb.query.exec.PlanDispatcher
 
 /**
   * A provider to get failure ranges. Query engine can use failure ranges while preparing physical
@@ -29,7 +30,7 @@ case class TimeRange(startInMillis: Long, endInMillis: Long)
   * @param clusterName cluster name.
   * @param datasetRef  Dataset reference for database and dataset.
   * @param timeRange   time range.
-  * @param dispatcher  dispatcher implementation for given cluster.
+  * @param dispatcher  dispatcher implementation for given cluster. It is present if failure is in local.
   */
 case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange,
                             dispatcher: Option[PlanDispatcher])
@@ -49,7 +50,7 @@ case class RemoteRoute(tr: Option[TimeRange], dispatcher: PlanDispatcher) extend
 /**
   * Planner for routing based on failure ranges for a given LogicalPlan.
   */
-trait RoutingPlanner {
+trait RoutingPlanner extends StrictLogging {
   def plan(lp: LogicalPlan, failure: Seq[FailureTimeRange]): Seq[Route]
 }
 
@@ -86,6 +87,10 @@ object QueryRoutingPlanner extends RoutingPlanner {
 
     val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
     val time = getTimeFromLogicalPlan(lp)
+    if(nonOverlappingFailures.last.timeRange.startInMillis < time.startInMillis )
+      return Seq(LocalRoute(None))  // No failure in this time range
+    logger.info("Logical plan time:" + time)
+
     splitQueryTime(nonOverlappingFailures, 0, time.startInMillis, time.endInMillis)
 
   }
@@ -95,30 +100,29 @@ object QueryRoutingPlanner extends RoutingPlanner {
     if (index >= failure.length)
       return Nil
     // traverse query range time from left to right , break at failure start
-    var i = index
-
+    var i = index + 1
 
     failure(index).dispatcher.map { x =>
       // Handle local failure
       // Traverse till we get a remote failure
-      while ((i + 1 < failure.length) && (failure(i + 1).dispatcher.isDefined))
+      while ((i < failure.length) && (failure(i).dispatcher.isDefined))
         i = i + 1
 
-      if (i + 1 < failure.length)
-        RemoteRoute(Some(TimeRange(start, failure(i + 1).timeRange.startInMillis)),
-          x) +: splitQueryTime(failure, i + 1, failure(i + 1).timeRange.startInMillis, end)
+      if (i < failure.length)
+        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis)),
+          x) +: splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end)
       else
-        // Last failure so no further splitting required
+      // Last failure so no further splitting required
         Seq(RemoteRoute(Some(TimeRange(start, end)), x))
 
     }.getOrElse {
 
-      // till we get a remote failure
-      while ((i + 1 < failure.length) && (!failure(i + 1).dispatcher.isDefined))
+      // Iterate till we get a local failure
+      while ((i < failure.length) && (!failure(i).dispatcher.isDefined))
         i = i + 1
-      if (i + 1 < failure.length) //need further splitting
-        LocalRoute(Some(TimeRange(start, failure(i + 1).timeRange.startInMillis))) +:
-          splitQueryTime(failure, i + 1, failure(i + 1).timeRange.startInMillis, end)
+      if (i < failure.length) //need further splitting
+        LocalRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis))) +:
+          splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end)
       else
         Seq(LocalRoute(Some(TimeRange(start, end))))
     }
@@ -142,8 +146,6 @@ object QueryRoutingPlanner extends RoutingPlanner {
   }
 
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
-
-
     logicalPlan match {
       case lp: PeriodicSeries => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
         TimeRange(periodicSeries.start, periodicSeries.end)

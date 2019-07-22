@@ -2,7 +2,7 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
@@ -13,13 +13,16 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
+import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
+import filodb.core.{DatasetRef, SpreadChange}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.QueryConfig
-import filodb.query.exec.ExecPlan
+import filodb.query
+import filodb.query.{QueryConfig, QueryOptions}
+import filodb.query.exec.{ExecPlan, PlanDispatcher}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -98,9 +101,20 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   store.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
+  val dummyFailureProvider = new FailureProvider {
+    override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+      Seq[FailureTimeRange]()
+    }
+  }
+
+  val dummyDispatcher = new PlanDispatcher {
+    override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
+                                          timeout: FiniteDuration): Task[query.QueryResponse] = ???
+  }
+
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset, shardMapper)
+  val engine = new QueryEngine(dataset, shardMapper, dummyFailureProvider, dummyDispatcher)
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop

@@ -5,23 +5,19 @@ import java.util.concurrent.atomic.AtomicLong
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
-import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
 import kamon.Kamon
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-
 import scala.util.control.NonFatal
+
+import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.query._
-import filodb.query.exec.{ExecPlan, PlanDispatcher}
-import monix.eval.Task
-
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
+import filodb.query.exec.ExecPlan
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -77,20 +73,15 @@ final class QueryActor(memStore: MemStore,
 
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
-  
+
   val dummyFailureProvider = new FailureProvider {
     override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
       Seq[FailureTimeRange]()
     }
   }
 
-  val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
-  }
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
-    dummyFailureProvider, dummyDispatcher, functionalSpreadProvider)
+    dummyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads.toInt)
@@ -134,7 +125,6 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      //q.queryOptions.spreadProvider = getSpreadProvider(q.queryOptions)
       val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
       self forward execPlan
     } catch {

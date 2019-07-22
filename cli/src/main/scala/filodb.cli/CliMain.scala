@@ -12,7 +12,7 @@ import monix.reactive.Observable
 
 import filodb.coordinator._
 import filodb.coordinator.client._
-import filodb.coordinator.client.QueryCommands.{SpreadChange, SpreadProvider, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core._
 import filodb.core.metadata.Column
 import filodb.memory.format.RowReader
@@ -231,7 +231,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
-    val qOpts = QueryCommands.QueryOptions(spreadProvider, options.sampleLimit)
+    val qOpts = QueryOptions(spreadProvider, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")

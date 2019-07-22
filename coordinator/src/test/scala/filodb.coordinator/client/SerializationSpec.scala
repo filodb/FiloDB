@@ -4,10 +4,10 @@ import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryengine2.QueryEngine
-import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData}
+import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
+import filodb.core.{DatasetRef, MachineMetricsData, MetricsTestData, NamesTestData, SpreadChange}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.IngestionConfig
@@ -41,7 +41,13 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     serializer.fromBinary(serializer.toBinary(thing))
   }
 
-  it("should be able to serialize IngestionConfig, SetupDataset, DatasetResourceSpec, IngestionSource") {
+  val dummyFailureProvider = new FailureProvider {
+    override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+      Seq[FailureTimeRange]()
+    }
+  }
+
+  it("should be able to serialize IngestionConfig,a SetupDataset, DatasetResourceSpec, IngestionSource") {
     val source1 = s"""
                        |dataset = ${dataset.name}
                        |num-shards = 128
@@ -169,7 +175,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef)
+    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")))
@@ -190,7 +196,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
     val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 0))),
-      100), new StaticSpreadProvider(SpreadChange(0, 0)))
+      100))
     roundTrip(execPlan) shouldEqual execPlan
   }
 
@@ -203,13 +209,13 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef)
+    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\"}[20s])) by (handler)",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
-      100), new StaticSpreadProvider(SpreadChange(0, 0)))
+      100))
     roundTrip(execPlan1) shouldEqual execPlan1
 
     // scalastyle:off
@@ -217,7 +223,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       "sum(rate(http_request_duration_microseconds_sum{job=\"prometheus\"}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job=\"prometheus\"}[5m])) by (handler)",
       qParams)
     // scalastyle:on
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100), new StaticSpreadProvider(SpreadChange(0, 0)))
+    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     roundTrip(execPlan2) shouldEqual execPlan2
 
   }
@@ -233,14 +239,14 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
-    val engine = new QueryEngine(dataset, mapperRef)
+    val engine = new QueryEngine(dataset, mapperRef, dummyFailureProvider)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
       "http_request_duration_seconds_bucket{job=\"prometheus\"}",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(
-      new StaticSpreadProvider(SpreadChange(0, 0))), 100), new StaticSpreadProvider(SpreadChange(0, 0)))
+      new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     val partKeysExec = execPlan1.asInstanceOf[PartKeysExec] // will be dispatched to single shard
     roundTrip(partKeysExec) shouldEqual partKeysExec
 
