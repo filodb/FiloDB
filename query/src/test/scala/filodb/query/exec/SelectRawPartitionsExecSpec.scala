@@ -230,7 +230,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   // A lower-level (below coordinator) end to end histogram with max ingestion and querying test
-  it("should aggregate Histogram records with max correctly") {
+  it("should sum Histogram records with max correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
       filters, AllChunkScan, Seq(0, 4))
@@ -270,6 +270,34 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     resultIt2.foreach { case (t, v) =>
       v.isNaN shouldEqual false
     }
+  }
+
+  it("should extract Histogram with max using Last/None function correctly") {
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
+      filters, AllChunkScan, Seq(0, 4))
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+
+    val resp = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1), r.getDouble(2)))
+
+    // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
+    // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
+    val orig = histMaxData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+                       .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+      res._3.isNaN shouldEqual false
+      res._3 should be >= origData._3.asInstanceOf[Double]
+    }
+
   }
 
   it ("should return correct result schema") {

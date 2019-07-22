@@ -141,7 +141,6 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
-    )
     routes(1).equals(expectedResult(1)) shouldEqual true
     routes.sameElements(expectedResult) shouldEqual (true)
 

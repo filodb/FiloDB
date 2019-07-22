@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -20,9 +21,10 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
-                        (implicit val ec: ExecutionContext)
+                        (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
+  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -101,9 +103,10 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int = 259200,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -116,7 +119,8 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int,
+                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -124,7 +128,8 @@ extends MemStore with StrictLogging {
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
-                    case FlushCommand(group) => shard.switchGroupBuffers(group)
+                    case FlushCommand(group) => assertThreadName(IngestSchedName)
+                                                shard.switchGroupBuffers(group)
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
@@ -133,7 +138,9 @@ extends MemStore with StrictLogging {
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
                            // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-                  .foreach({ x => })(shard.ingestSched)
+                  .completedL
+                  .doOnCancel(cancelTask)
+                  .runAsync(shard.ingestSched)
   }
 
   // a more optimized ingest stream handler specifically for recovery

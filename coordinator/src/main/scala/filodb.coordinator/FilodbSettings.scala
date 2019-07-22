@@ -7,6 +7,8 @@ import akka.actor.{ActorPath, Address, RootActorPath}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.GlobalConfig
+
 /** Settings for the FiloCluster Akka Extension which gets
   * config from `GlobalConfig`. Uses Ficus.
   */
@@ -36,8 +38,6 @@ final class FilodbSettings(val conf: Config) {
 
   val ShardMapPublishFrequency = config.as[FiniteDuration]("tasks.shardmap-publish-frequency")
 
-  val IOPoolName = "filodb.io"
-
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])
 
@@ -46,6 +46,16 @@ final class FilodbSettings(val conf: Config) {
 
   val datasets = config.as[Seq[String]]("dataset-configs")
 
+  /**
+   * Returns IngestionConfig/dataset configuration from parsing dataset-configs file paths.
+   * If those are empty, then parse the "streams" config key for inline configs.
+   */
+  val streamConfigs: Seq[Config] =
+    if (datasets.nonEmpty) {
+      datasets.map { d => ConfigFactory.parseFile(new java.io.File(d)) }
+    } else {
+      config.as[Seq[Config]]("inline-dataset-configs")
+    }
 }
 
 /** Consistent naming: allows other actors to accurately filter

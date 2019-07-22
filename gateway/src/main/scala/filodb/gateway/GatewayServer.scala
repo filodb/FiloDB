@@ -25,7 +25,8 @@ import org.jboss.netty.handler.ssl.util.SelfSignedCertificate
 import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
 
-import filodb.coordinator.{FilodbSettings, GlobalConfig, ShardMapper, StoreFactory}
+import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
+import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.gateway.conversion._

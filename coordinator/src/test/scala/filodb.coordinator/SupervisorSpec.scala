@@ -12,7 +12,6 @@ class SupervisorSpec extends AkkaSpec {
 
   private val filoCluster = FilodbCluster(system)
   private val settings = new FilodbSettings(system.settings.config)
-  import settings._
 
   /* Set all as lazy to test same startup as users. */
   // private lazy val threadPool = FutureUtils.getBoundedTPE(QueueLength, PoolName, PoolSize, MaxPoolSize)
@@ -23,7 +22,7 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val metaStore: MetaStore = factory.metaStore
   private lazy val memStore = factory.memStore
   private lazy val assignmentStrategy = DefaultShardAssignmentStrategy
-  private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, config)
+  private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, settings)
   private lazy val guardianProps = NodeGuardian.props(settings, metaStore, memStore, assignmentStrategy)
   private lazy val cluster = Cluster(system)
 
