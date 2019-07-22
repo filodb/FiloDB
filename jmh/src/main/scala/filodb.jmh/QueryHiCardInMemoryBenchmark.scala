@@ -2,7 +2,7 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
@@ -20,9 +20,8 @@ import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query
 import filodb.query.{QueryConfig, QueryOptions}
-import filodb.query.exec.{ExecPlan, PlanDispatcher}
+import filodb.query.exec.ExecPlan
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex

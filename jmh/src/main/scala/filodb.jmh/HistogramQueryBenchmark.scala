@@ -2,7 +2,7 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
@@ -20,8 +20,8 @@ import filodb.core.{DatasetRef, MachineMetricsData, MetricsTestData, SpreadChang
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.memory.format.SeqRowReader
 import filodb.memory.MemFactory
+import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryConfig, QueryOptions}
 
