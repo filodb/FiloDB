@@ -56,6 +56,9 @@ trait RoutingPlanner extends StrictLogging {
 
 object QueryRoutingPlanner extends RoutingPlanner {
 
+  /**
+    * Remove larger FailureTimeRange when more than one FailureTimeRanges have overlapping times
+    */
   def removeLargerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
 
     failures.sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis).
@@ -91,10 +94,19 @@ object QueryRoutingPlanner extends RoutingPlanner {
       return Seq(LocalRoute(None))  // No failure in this time range
     logger.info("Logical plan time:" + time)
 
+   // Recursively split query into local and remote routes starting from first FailureTimeRange
     splitQueryTime(nonOverlappingFailures, 0, time.startInMillis, time.endInMillis)
 
   }
 
+  /**
+    * Recursively generate Local and Remote Routes by splitting query time based on failures
+    * @param failure seq of FailureTimeRanges
+    * @param index index of FailureTimeRange which has to be processed
+    * @param start start time for route
+    * @param end end time for route
+    * @return seq of Routes
+    */
   def splitQueryTime(failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long): Seq[Route] = {
 
     if (index >= failure.length)
@@ -102,15 +114,17 @@ object QueryRoutingPlanner extends RoutingPlanner {
     // traverse query range time from left to right , break at failure start
     var i = index + 1
 
+    // Dispatcher is present only when failure is local
     failure(index).dispatcher.map { x =>
       // Handle local failure
-      // Traverse till we get a remote failure
+      // Traverse till we get a remote failure to minimize number of queries
       while ((i < failure.length) && (failure(i).dispatcher.isDefined))
         i = i + 1
 
-      if (i < failure.length)
-        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis)),
-          x) +: splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end)
+      if (i < failure.length) // need further splitting
+        // Query from current start time till next remote failure starts should be executed remotely
+        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis)), x) +:
+          splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end) // Process remaining query
       else
       // Last failure so no further splitting required
         Seq(RemoteRoute(Some(TimeRange(start, end)), x))
@@ -119,7 +133,8 @@ object QueryRoutingPlanner extends RoutingPlanner {
       // Iterate till we get a local failure
       while ((i < failure.length) && (!failure(i).dispatcher.isDefined))
         i = i + 1
-      if (i < failure.length) //need further splitting
+      if (i < failure.length)
+      // Query from current start time till next local failure starts should be executed locally
         LocalRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis))) +:
           splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end)
       else
@@ -127,12 +142,18 @@ object QueryRoutingPlanner extends RoutingPlanner {
     }
   }
 
+  /**
+    * Check whether logical plan has a PeriodicSeriesPlan
+    */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
     if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan])
       return false;
     true
   }
 
+  /**
+    * Check whether all child logical plans have same start and end time
+    */
   def hasSingleTimeRange(logicalPlan: LogicalPlan): Boolean = {
     if (logicalPlan.isInstanceOf[BinaryJoin]) {
       val binaryJoin = logicalPlan.asInstanceOf[BinaryJoin]
@@ -143,6 +164,10 @@ object QueryRoutingPlanner extends RoutingPlanner {
     return true
   }
 
+  /**
+    * Retrieve start and end time from LogicalPlan
+    * NOTE: Plan should be PeriodicSeriesPlan
+    */
   def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
@@ -153,7 +178,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
           periodicSeriesWithWindowing.end)
       case lp: ApplyInstantFunction => getTimeFromLogicalPlan(lp.asInstanceOf[ApplyInstantFunction].vectors)
       case lp: Aggregate => getTimeFromLogicalPlan(lp.asInstanceOf[Aggregate].vectors)
-      case lp: BinaryJoin => // can assume lhs & rhs have same timr
+      case lp: BinaryJoin => // can assume lhs & rhs have same time
         getTimeFromLogicalPlan(lp.asInstanceOf[BinaryJoin].lhs)
 
       case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.asInstanceOf[ScalarVectorBinaryOperation]
@@ -164,8 +189,11 @@ object QueryRoutingPlanner extends RoutingPlanner {
     }
   }
 
+  /**
+    * Used to change start and end time(TimeRange) of LogicalPlan
+    * NOTE: Plan should be PeriodicSeriesPlan
+    */
   def updateTimeLogicalPlan(logicalPlan: LogicalPlan, timeRange: TimeRange): PeriodicSeriesPlan = {
-
     logicalPlan match {
       case lp: PeriodicSeries => val periodicSeries = lp.asInstanceOf[PeriodicSeries]
         periodicSeries.copy(start = timeRange.startInMillis,

@@ -57,7 +57,9 @@ class QueryEngine(dataset: Dataset,
     }
   }
 
-
+  /**
+    * Converts Routes to ExecPlan
+    */
   def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
                           options: QueryOptions, spreadProvider: SpreadProvider): ExecPlan = {
     val execPlans : Seq[ExecPlan]= routes.map { route =>
@@ -82,6 +84,7 @@ class QueryEngine(dataset: Dataset,
     if (execPlans.size == 1)
       return execPlans(0)
     else
+      // Stitch RemoteExec plan results with local using InProcessorDispatcher
       StitchRvsExec(queryId, InProcessPlanDispatcher(dataset), execPlans)
   }
 
@@ -102,10 +105,6 @@ class QueryEngine(dataset: Dataset,
         sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
 
     if(failures.isEmpty)
-      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
-
-    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures ||
-      failures.isEmpty)
       return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
     val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures)

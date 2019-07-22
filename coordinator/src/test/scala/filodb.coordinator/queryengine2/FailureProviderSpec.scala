@@ -92,8 +92,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
       TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
       TimeRange(1000, 2000), Some(dummyDispatcher)))
 
-    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 1000))), RemoteRoute(Some(TimeRange(1000, 3000)), dummyDispatcher))
-    println("failureTimeRangeNonOverlapping:" + failureTimeRangeNonOverlapping)
+    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 1000))),
+      RemoteRoute(Some(TimeRange(1000, 3000)), dummyDispatcher))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 3000)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
@@ -110,7 +110,6 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 1000)), dummyDispatcher),
       LocalRoute(Some(TimeRange(1000, 5000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
-    println("routes:" + routes)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
