@@ -306,11 +306,11 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
       readPartKey.bytes.slice(readPartKey.offset, readPartKey.offset + readPartKey.length) shouldEqual expectedPartKey
       if (i%2 == 0) {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset).get.partID shouldEqual i
         tsShard.partitions.containsKey(i) shouldEqual true // since partition is ingesting
       }
       else {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off) shouldEqual None
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset) shouldEqual None
         tsShard.partitions.containsKey(i) shouldEqual false // since partition is not ingesting
       }
     }
