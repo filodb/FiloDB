@@ -51,9 +51,8 @@ trait Histogram extends Ordered[Histogram] {
 
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
-   * TODO: monotonicity check, which will be in a separate function.
    */
-  final def quantile(q: Double): Double = {
+  def quantile(q: Double): Double = {
     val result = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else if (numBuckets < 2) Double.NaN
@@ -63,8 +62,8 @@ trait Histogram extends Ordered[Histogram] {
       // using rank, find the le bucket which would have the identified rank
       val b = firstBucketGTE(rank)
 
-      // now calculate quantile
-      // If the rank is at the top return the last bucket (though shouldn't we interpolate here too?)
+      // now calculate quantile.  If bucket is last one then return second-to-last bucket top
+      // as we cannot interpolate to +Inf.
       if (b == numBuckets-1) return bucketTop(numBuckets-2)
       else if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
       else {
@@ -166,6 +165,21 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def copy: MutableHistogram = MutableHistogram(buckets, values.clone)
 
   /**
+   * Copies the values of this histogram from another histogram.  Other histogram must have same bucket scheme.
+   */
+  final def populateFrom(other: HistogramWithBuckets): Unit = {
+    require(other.buckets == buckets)
+    other match {
+      case m: MutableHistogram =>
+        System.arraycopy(m.values, 0, values, 0, values.size)
+      case l: LongHistogram    =>
+        for { n <- 0 until values.size optimized } {
+          values(n) = l.values(n).toDouble
+        }
+    }
+  }
+
+  /**
    * Adds the values from another Histogram.
    * If the other histogram has the same bucket scheme, then the values are just added per bucket.
    * If the scheme is different, then an approximation is used so that the resulting histogram has
@@ -225,6 +239,47 @@ object MutableHistogram {
   def apply(h: Histogram): MutableHistogram = h match {
     case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)
     case other: Histogram         => ???
+  }
+}
+
+/**
+ * MaxHistogram improves quantile calculation accuracy with a known max value recorded from the client.
+ * Whereas normally Prom histograms have +Inf as the highest bucket, and we cannot interpolate above the last
+ * non-Inf bucket, having a max allows us to interpolate from the rank up to the max.
+ * When the max value is lower, we interpolate between the bottom of the bucket and the max value.
+ * Both changes mean that the 0.90+ quantiles return much closer to the max value, instead of interpolating or clipping.
+ * The quantile result can never be above max, regardless of the bucket scheme.
+ */
+final case class MaxHistogram(innerHist: MutableHistogram, max: Double) extends HistogramWithBuckets {
+  final def buckets: HistogramBuckets = innerHist.buckets
+  final def bucketValue(no: Int): Double = innerHist.bucketValue(no)
+
+  def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = ???
+
+  override def quantile(q: Double): Double = {
+    val result = if (q < 0) Double.NegativeInfinity
+    else if (q > 1) Double.PositiveInfinity
+    else if (numBuckets < 2) Double.NaN
+    else {
+      // find rank for the quantile using total number of occurrences (which is the last bucket value)
+      var rank = q * topBucketValue
+      // using rank, find the le bucket which would have the identified rank
+      val b = firstBucketGTE(rank)
+
+      // now calculate quantile.  No need to special case top bucket since we will always cap top at max
+      if (b == 0 && bucketTop(0) <= 0) return bucketTop(0)
+      else {
+        // interpolate quantile within le bucket
+        var (bucketStart, bucketEnd, count) = (0d, Math.min(bucketTop(b), max), bucketValue(b))
+        if (b > 0) {
+          bucketStart = bucketTop(b-1)
+          count -= bucketValue(b-1)
+          rank -= bucketValue(b-1)
+        }
+        bucketStart + (bucketEnd-bucketStart)*(rank/count)
+      }
+    }
+    result
   }
 }
 

@@ -1,6 +1,6 @@
 package filodb.prometheus.ast
 
-import filodb.query.{BinaryJoin, Cardinality, PeriodicSeriesPlan, ScalarVectorBinaryOperation}
+import filodb.query._
 
 
 trait Expressions extends Aggregates with Functions {
@@ -46,15 +46,18 @@ trait Expressions extends Aggregates with Functions {
         case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>
           val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-          val cardinality = vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
+          val cardinality = if (operator.getPlanOperator.isInstanceOf[SetOperator])
+            Cardinality.ManyToMany
+          else
+            vectorMatch.map(_.cardinality.cardinality).getOrElse(Cardinality.OneToOne)
 
           val matcher = vectorMatch.flatMap(_.matching)
           val onLabels = matcher.filter(_.isInstanceOf[On]).map(_.labels)
           val ignoringLabels = matcher.filter(_.isInstanceOf[Ignoring]).map(_.labels)
 
           BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
-            onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil))
-
+            onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
+            vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
       }
     }
   }

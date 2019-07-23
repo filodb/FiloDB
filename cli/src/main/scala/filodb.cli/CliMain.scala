@@ -4,19 +4,17 @@ import java.io.OutputStream
 import java.sql.Timestamp
 
 import scala.concurrent.duration._
-import scala.util.{Failure, Success => SSuccess, Try}
+import scala.util.Try
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
-import com.typesafe.config.{Config, ConfigFactory}
 import monix.reactive.Observable
 
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.{SpreadChange, SpreadProvider, StaticSpreadProvider}
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.store._
+import filodb.core.metadata.Column
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
@@ -29,13 +27,7 @@ class Arguments extends FieldArgs {
   var command: Option[String] = None
   var filename: Option[String] = None
   var configPath: Option[String] = None
-  var dataColumns: Seq[String] = Nil
-  var partitionColumns: Seq[String] = Nil
-  var downsamplers: Seq[String] = Nil
-  var rowKeys: Seq[String] = Seq("timestamp")
-  var partitionKeys: Seq[String] = Nil
-  var select: Option[Seq[String]] = None
-  // max # of RangeVectors returned. Don't make it too high.
+  // max # of results returned. Don't make it too high.
   var limit: Int = 200
   var sampleLimit: Int = 1000000
   var timeoutSeconds: Int = 60
@@ -53,18 +45,13 @@ class Arguments extends FieldArgs {
   var minutes: Option[String] = None
   var step: Long = 10 // in seconds
   var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
-  var metricColumn: String = "__name__"
-  var shardKeyColumns: Seq[String] = Nil
-  // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
-  var ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty
-  // Ignores the given Tags while calculating partitionKeyHash
-  var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
   var shards: Option[Seq[String]] = None
   var spread: Option[Integer] = None
 }
 
-object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
+object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
+  var exitCode = 0
 
   override val role = ClusterRole.Cli
 
@@ -136,33 +123,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case Some("list") =>
           args.host.map { server =>
             listRegisteredDatasets(Client.standaloneClient(system, server, args.port))
-          }.getOrElse {
-            args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
           }
-
-        case Some("create") =>
-          require(args.dataset.isDefined &&
-                  args.dataColumns.nonEmpty &&
-                  args.partitionColumns.nonEmpty, "Need to specify dataset and partition/dataColumns")
-          createDataset(getRef(args),
-                        args.dataColumns,
-                        args.partitionColumns,
-                        args.rowKeys,
-                        args.downsamplers,
-                        args.metricColumn,
-                        args.shardKeyColumns,
-                        args.ignoreShardKeyColumnSuffixes,
-                        args.ignoreTagsOnPartitionKeyHash,
-                        timeout)
-
-        case Some("importcsv") =>
-          import org.apache.commons.lang3.StringEscapeUtils._
-          val delimiter = unescapeJava(args.delimiter)(0)
-          ingestCSV(getRef(args),
-                    args.filename.get,
-                    delimiter,
-                    99.minutes)
-
         case Some("truncate") =>
           client.truncateDataset(getRef(args), timeout)
           println(s"Truncated data for ${getRef(args)} with no errors")
@@ -183,18 +144,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           val (remote, ref) = getClientAndRef(args)
           dumpShardStatus(remote, ref)
 
-        case Some("setup") =>
-          require(args.host.nonEmpty, "--host must be defined")
-          val remote = Client.standaloneClient(system, args.host.get, args.port)
-          (args.filename, args.configPath) match {
-            case (Some(configFile), _) =>
-              setupDataset(remote, ConfigFactory.parseFile(new java.io.File(configFile)), timeout)
-            case (None, Some(configPath)) =>
-              setupDataset(remote, systemConfig.getConfig(configPath), timeout)
-            case (None, None) =>
-              println("Either --filename or --configPath must be specified for setup")
-              exitCode = 1
-          }
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
@@ -219,14 +168,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), args.spread)
             parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
-          }.orElse {
-            args.select.map { selectCols =>
-              exportCSV(getRef(args),
-                        selectCols,
-                        args.limit,
-                        args.outfile)
-            }
-          }.getOrElse(printHelp)
+          }
+            .getOrElse(printHelp)
       }
     } catch {
       case e: Throwable =>
@@ -237,84 +180,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       // No need to shutdown, just exit.  This ensures things like C* client are not started by accident and
       // ensures a much quicker exit, which is important for CLI.
       sys.exit(exitCode)
-    }
-  }
-
-  def dumpDataset(dataset: String, database: Option[String]): Unit = {
-    val ref = DatasetRef(dataset, database)
-    parse(metaStore.getDataset(ref)) { datasetObj =>
-      println(s"Dataset name: ${datasetObj.ref}")
-      println(s"Partition columns:\n  ${datasetObj.partitionColumns.mkString("\n  ")}")
-      println(s"Data columns:\n  ${datasetObj.dataColumns.mkString("\n  ")}")
-      println(s"Row keys:\n  ${datasetObj.rowKeyColumns.mkString("\n  ")}")
-      println(s"Options: ${datasetObj.options}\n")
-    }
-  }
-
-  def dumpAllDatasets(database: Option[String]): Unit = {
-    parse(metaStore.getAllDatasets(database)) { refs =>
-      refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
-    }
-  }
-
-  def createDataset(dataset: DatasetRef,
-                    dataColumns: Seq[String],
-                    partitionColumns: Seq[String],
-                    rowKeys: Seq[String],
-                    downsamplers: Seq[String],
-                    metricColumn: String,
-                    shardKeyColumns: Seq[String],
-                    ignoreShardKeyColumnSuffixes: Map[String, Seq[String]],
-                    ignoreTagsOnPartitionKeyHash: Seq[String],
-                    timeout: FiniteDuration): Unit = {
-    try {
-      val options = DatasetOptions.DefaultOptions.copy(metricColumn = metricColumn,
-                                                       shardKeyColumns = shardKeyColumns,
-                                                       ignoreShardKeyColumnSuffixes = ignoreShardKeyColumnSuffixes,
-                                                       ignoreTagsOnPartitionKeyHash = ignoreTagsOnPartitionKeyHash)
-      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys, downsamplers, options)
-      println(s"Creating dataset $dataset with options $options...")
-      client.createNewDataset(datasetObj, dataset.database)
-      exitCode = 0
-    } catch {
-      case b: Dataset.BadSchemaError =>
-        println(b)
-        println(b.getMessage)
-        exitCode = 2
-      case r: RuntimeException =>
-        println(r.getMessage)
-        exitCode = 2
-    }
-  }
-
-  import NodeClusterActor._
-
-  /**
-   * setup command configuration example:
-   * {{{
-   *   dataset = "gdelt"
-   *   num-shards = 32   # for Kafka this should match the number of partitions
-   *   min-num-nodes = 10     # This many nodes needed to ingest all shards
-   *   sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"
-   *   sourceconfig {
-   *     bootstrap.servers = ["10.11.12.13", "10.11.12.14"]
-   *     filo-topic-name = "gdelt-events.production"
-   *   }
-   * }}}
-   * sourcefactory and sourceconfig are optional.  If omitted, a NoOpFactory will be used, which means
-   * no automatic pull ingestion will be started.  New data can always be pushed into any Filo node.
-   */
-  def setupDataset(client: LocalClient, config: Config, timeout: FiniteDuration): Unit = {
-    IngestionConfig(config, noOpSource.streamFactoryClass) match {
-      case SSuccess(ingestConfig) =>
-        client.setupDataset(ingestConfig, timeout).foreach {
-          case e: ErrorResponse =>
-            println(s"Errors setting up dataset ${ingestConfig.ref}: $e")
-            exitCode = 2
-        }
-      case Failure(e) =>
-        println(s"Configuration error: unable to parse config for IngestionConfig: ${e.getClass.getName}: ${e.getMessage}")
-        exitCode = 2
     }
   }
 
@@ -447,18 +312,4 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  def exportCSV(dataset: DatasetRef,
-                columnNames: Seq[String],
-                limit: Int,
-                outFile: Option[String]): Unit = {
-    val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
-    val colIDs = datasetObj.colIDs(columnNames: _*).get
-    val columns = colIDs.map(id => datasetObj.dataColumns(id))
-
-    // NOTE: we will only return data from the first split!
-    val splits = cluster.memStore.getScanSplits(dataset)
-    val requiredRows = cluster.memStore.scanRows(datasetObj, colIDs, FilteredPartitionScan(splits.head))
-                                  .take(limit)
-    writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
-  }
 }

@@ -21,11 +21,11 @@ class HistogramVectorTest extends NativeVectorTest {
 
   val buffer = new UnsafeBuffer(new Array[Byte](4096))
 
-  def verifyHistogram(h: Histogram, itemNo: Int): Unit = {
+  def verifyHistogram(h: Histogram, itemNo: Int, rawBuckets: Seq[Array[Double]] = rawHistBuckets): Unit = {
     h.numBuckets shouldEqual bucketScheme.numBuckets
     for { i <- 0 until bucketScheme.numBuckets } {
       h.bucketTop(i) shouldEqual bucketScheme.bucketTop(i)
-      h.bucketValue(i) shouldEqual rawHistBuckets(itemNo)(i)
+      h.bucketValue(i) shouldEqual rawBuckets(itemNo)(i)
     }
   }
 
@@ -98,6 +98,55 @@ class HistogramVectorTest extends NativeVectorTest {
 
     appender.reset()
     appender.length shouldEqual 0
+  }
+
+  it("should append, optimize, and query SectDelta histograms") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual incrHistBuckets.length
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    reader.length shouldEqual rawHistBuckets.length
+    println(reader.dumpAllSections)  //  XXX
+
+    (0 until incrHistBuckets.length).foreach { i =>
+      verifyHistogram(reader(i), i, incrHistBuckets)
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+    optReader.length(optimized) shouldEqual incrHistBuckets.length
+    (0 until incrHistBuckets.length).foreach { i =>
+      val h = optReader(i)
+      verifyHistogram(h, i, incrHistBuckets)
+    }
+  }
+
+  it("SectDelta vectors should detect and handle drops correctly") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual incrHistBuckets.length*2
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    // One normal section, one dropped section
+    reader.iterateSections.toSeq.map(_.sectionType) shouldEqual Seq(SectionType(0), SectionType(1))
+
+    (0 until incrHistBuckets.length).foreach { i =>
+      verifyHistogram(reader(i), i, incrHistBuckets)
+      verifyHistogram(reader(4 + i), i, incrHistBuckets)
+    }
   }
 
   it("should reject BinaryHistograms of schema different from first schema ingested") {

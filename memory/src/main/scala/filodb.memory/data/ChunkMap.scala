@@ -123,12 +123,12 @@ object ChunkMap extends StrictLogging {
   def validateNoSharedLocks(execPlan: String): Unit = {
     val t = Thread.currentThread()
     if (execPlanTracker.containsKey(t)) {
-      logger.debug(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
+      logger.error(s"Current thread ${t.getName} did not release lock for execPlan: ${execPlanTracker.get(t)}")
     }
 
     val numLocksReleased = ChunkMap.releaseAllSharedLocks()
     if (numLocksReleased > 0) {
-      logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
+      logger.error(s"Number of locks was non-zero: $numLocksReleased. " +
         s"This is indicative of a possible lock acquisition/release bug.")
     }
     execPlanTracker.put(t, execPlan)
@@ -139,7 +139,7 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogging {
+class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
   require(capacity > 0)
 
   private var lockState: Int = 0
@@ -259,6 +259,10 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
     var locks1: ConcurrentHashMap[Thread, String] = null
     while (true) {
       if (tryAcquireExclusive(timeoutNanos)) {
+        if (arrayPtr == 0) {
+          chunkmapReleaseExclusive()
+          throw new IllegalStateException("ChunkMap is freed");
+        }
         return
       }
 
@@ -279,9 +283,9 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
         val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         locks2.entrySet().retainAll(locks1.entrySet())
         val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-        logger.error(s"Following execPlan locks have not been released for a while: " +
+        _logger.error(s"Following execPlan locks have not been released for a while: " +
           s"$locks2 $locks1 $execPlanTracker $lockState")
-        logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
+        _logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
         Runtime.getRuntime.halt(1)
       }
     }
@@ -563,7 +567,14 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
   }
 
   final def chunkmapFree(): Unit = {
-    chunkmapWithExclusive({
+    try {
+      chunkmapAcquireExclusive()
+    } catch {
+      // Already freed.
+      case e: IllegalStateException => return
+    }
+
+    try {
       if (arrayPtr != 0) {
         memFactory.freeMemory(arrayPtr)
         capacity = 0
@@ -571,14 +582,21 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
         first = 0
         arrayPtr = 0
       }
-    })
+    } finally {
+      chunkmapReleaseExclusive()
+    }
   }
 
   /**
    * Method which retrieves a pointer to the key/ID within the element. It just reads the first
    * eight bytes from the element as the ID. Please override to implement custom functionality.
    */
-  private def chunkmapKeyRetrieve(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
+  private def chunkmapKeyRetrieve(elementPtr: NativePointer): Long = {
+    if (elementPtr == 0) {
+      throw new NullPointerException()
+    }
+    UnsafeUtils.getLong(elementPtr)
+  }
 
   /**
    * Does a binary search for the element with the given key. Caller must hold any lock.

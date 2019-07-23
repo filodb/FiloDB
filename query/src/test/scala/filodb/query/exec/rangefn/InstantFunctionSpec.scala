@@ -8,7 +8,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.{MachineMetricsData => MMD, MetricsTestData}
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String, vectors => bv}
 import filodb.query._
 import filodb.query.exec.TransientRow
 
@@ -16,6 +16,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
   val histSchema = ResultSchema(MMD.histDataset.infosFromIDs(Seq(0, 3)), 1)
+  val histMaxSchema = ResultSchema(MMD.histMaxDS.infosFromIDs(Seq(0, 4, 3)), 1, colIDs=Seq(0, 4, 3))
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
   val sampleBase: Array[RangeVector] = Array(
@@ -244,6 +245,35 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     val expected = Seq(0.8, 1.6, 2.4, 3.2, 4.0, 5.6, 7.2, 9.6)
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
                                  InstantFunctionId.HistogramQuantile, Seq(0.4), histSchema)
+
+    // check output schema
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile,
+                                                                 Seq(0.99))
+    val outSchema = instantVectorFnMapper.schema(MMD.histDataset, histSchema)
+    outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
+  }
+
+  it("should compute histogram_max_quantile on Histogram RV") {
+    val (data, histRV) = MMD.histMaxRV(100000L, numSamples = 7)
+    val expected = data.zipWithIndex.map { case (row, i) =>
+      // Calculating the quantile is quite complex... sigh
+      val _max = row(3).asInstanceOf[Double]
+      if ((i % 8) == 0) (_max * 0.9) else {
+        val _hist = row(4).asInstanceOf[bv.MutableHistogram]
+        val rank = 0.9 * _hist.bucketValue(_hist.numBuckets - 1)
+        val ratio = (rank - _hist.bucketValue((i-1) % 8)) / (_hist.bucketValue(i%8) - _hist.bucketValue((i-1) % 8))
+        _hist.bucketTop((i-1) % 8) + ratio * (_max -  _hist.bucketTop((i-1) % 8))
+      }
+    }
+    applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
+                                 InstantFunctionId.HistogramMaxQuantile, Seq(0.9), histMaxSchema)
+  }
+
+  it("should return proper schema after applying histogram_max_quantile") {
+    val instantVectorFnMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile,
+                                                                 Seq(0.99))
+    val outSchema = instantVectorFnMapper.schema(MMD.histMaxDS, histMaxSchema)
+    outSchema.columns.map(_.colType) shouldEqual resultSchema.columns.map(_.colType)
   }
 
   it("should compute histogram_bucket on Histogram RV") {

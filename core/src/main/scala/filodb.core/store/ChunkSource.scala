@@ -5,10 +5,10 @@ import java.nio.ByteBuffer
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core._
-import filodb.core.memstore.TimeSeriesShard
+import filodb.core.memstore.{FiloSchedulers, TimeSeriesShard}
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 
@@ -135,7 +135,9 @@ trait DefaultChunkSource extends ChunkSource {
    */
   def partMaker(dataset: Dataset, shard: Int): RawToPartitionMaker
 
-  val singleThreadPool = Scheduler.singleThread("make-partition")
+  val singleThreadPool = Scheduler.singleThread(FiloSchedulers.PopulateChunksSched)
+  // TODO: make this configurable
+  private val strategy = OverflowStrategy.BackPressure(1000)
 
   // Default implementation takes every RawPartData and turns it into a regular TSPartition
   def scanPartitions(dataset: Dataset,
@@ -145,8 +147,10 @@ trait DefaultChunkSource extends ChunkSource {
     readRawPartitions(dataset, columnIDs, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
-      .mapAsync { rawPart => partMaker(dataset, partMethod.shard).populateRawChunks(rawPart)
-                               .executeOn(singleThreadPool) }
+      .mapAsync { rawPart =>
+          partMaker(dataset, partMethod.shard).populateRawChunks(rawPart).executeOn(singleThreadPool)
+       }
+      .asyncBoundary(strategy)
   }
 }
 

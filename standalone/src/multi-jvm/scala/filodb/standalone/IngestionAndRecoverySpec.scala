@@ -9,9 +9,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
-import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
 import filodb.coordinator.client.Client
-import filodb.core.Success
+import filodb.core.{GlobalConfig, Success}
 import filodb.timeseries.TestTimeseriesProducer
 
 object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
@@ -53,7 +52,6 @@ class IngestionAndRecoverySpecMultiJvmNode2 extends IngestionAndRecoverySpec
   * NOTE: this test will run as part of the standard test directive when MAYBE_MULTI_JVM is set in the environment
   */
 abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(IngestionAndRecoveryMultiNodeConfig) {
-  import akka.testkit._
   import IngestionAndRecoveryMultiNodeConfig._
 
   // Used when servers are started first time
@@ -72,7 +70,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   // Test fields
   var query1Response: Double = 0
-  val chunkDurationTimeout = FiniteDuration(chunkDuration.toMillis + 20000, TimeUnit.MILLISECONDS)
+  val chunkDurationTimeout = FiniteDuration(chunkDuration.toMillis + 60000, TimeUnit.MILLISECONDS)
   implicit val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
 
   "IngestionAndRecoverySpec Multi-JVM Test" should "clear data on node 1" in {
@@ -87,8 +85,6 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      val datasetObj = TestTimeseriesProducer.dataset
-      metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       info("Dataset created")
     }
@@ -109,28 +105,10 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     enterBarrier("second-node-started")
   }
 
-  it should "be able to set up dataset successfully on node 1" in {
-    runOn(first) {
-      setupDataset(client1)
-      server1.cluster.clusterActor.get ! SubscribeShardUpdates(dataset)
-      expectMsgPF(6.seconds.dilated) {
-        case CurrentShardSnapshot(ref, newMap) => info(s"Got initial ShardMap for $ref: $newMap")
-      }
-      waitAllShardsIngestionActive()
-    }
-    enterBarrier("dataset-set-up")
-  }
-
-  it should "be able to validate the cluster status as normal via CLI" in {
-    runOn(first) {
-      validateShardStatus(client1)(_ == ShardStatusActive)
-    }
-    enterBarrier("shard-status-validated")
-  }
-
   it should "be able to ingest data into FiloDB via Kafka" in {
     within(chunkDurationTimeout) {
       runOn(first) {
+        Thread.sleep(15000) // needed since awaitNodeUp doesnt wait for shard consumption to begin
         TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400).futureValue(producePatience)
         info("Waiting for chunk-duration to pass so checkpoints for all groups are created")
         Thread.sleep(chunkDuration.toMillis + 7000)
@@ -195,14 +173,18 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     enterBarrier("query1-answered")
   }
 
-  it should "be able to shutdown nodes prior to chunks being written to persistent store" in {
+  it should "be able to shutdown node1 prior to chunks being written to persistent store" in {
     runOn(first) {
       awaitNodeDown(server1)
     }
+    enterBarrier("node1-shutdown")
+  }
+
+  it should "be able to shutdown node2 prior to chunks being written to persistent store" in {
     runOn(second) {
       awaitNodeDown(server1)
     }
-    enterBarrier("both-nodes-shutdown")
+    enterBarrier("node2-shutdown")
   }
 
   it should "be able to restart node 1" in {
@@ -215,7 +197,6 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to restart node 2" in {
     runOn(second) {
       awaitNodeUp(server2)
-      Thread.sleep(5000) // wait for coordinator and query actors to be initialized
     }
     enterBarrier("second-node-restarted")
   }

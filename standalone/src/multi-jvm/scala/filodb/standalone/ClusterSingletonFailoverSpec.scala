@@ -10,7 +10,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.Success
+import filodb.core.{GlobalConfig, Success}
 import filodb.timeseries.TestTimeseriesProducer
 
 object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {
@@ -59,9 +59,7 @@ class ClusterSingletonFailoverSpecMultiJvmNode3 extends ClusterSingletonFailover
 abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(ClusterSingletonFailoverMultiNodeConfig)
   with ScalaFutures {
 
-  import akka.testkit._
   import ClusterSingletonFailoverMultiNodeConfig._
-  import NodeClusterActor.SubscribeShardUpdates
 
   // Used for first start of servers on each node, stopped in test
   lazy val server = new FiloServer(watcher.ref)
@@ -93,7 +91,6 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       colStore.truncate(dataset).futureValue shouldBe Success
 
       val datasetObj = TestTimeseriesProducer.dataset
-      metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       logger.info("Dataset created")
     }
@@ -143,19 +140,6 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       info(s"  ${myself.name}: ${server.cluster.selfAddress}")
     }
     enterBarrier(s"${roles.size}-roles-initialized")
-  }
-
-  it should "be able to set up dataset successfully on first joined node" in {
-    // NOTE: for some reason this does not work when run from a node other than the singleton node
-    runOn(second) {
-      setupDataset(client1)
-      server.cluster.clusterActor.foreach(_ ! SubscribeShardUpdates(dataset))
-      expectMsgPF(6.seconds.dilated) {
-        case CurrentShardSnapshot(ref, newMap) => info(s"Received initial ShardMap for $ref: $newMap")
-      }
-      waitAllShardsIngestionActive()
-    }
-    enterBarrier("dataset-set-up-ingestion-started")
   }
 
   it should "be able to validate the cluster status as normal via CLI" in {

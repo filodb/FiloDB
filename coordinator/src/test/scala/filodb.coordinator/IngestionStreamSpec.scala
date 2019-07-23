@@ -4,11 +4,12 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import org.scalatest.{BeforeAndAfterEach, Ignore}
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
 object IngestionStreamSpec extends ActorSpecConfig
@@ -17,7 +18,6 @@ object IngestionStreamSpec extends ActorSpecConfig
 // Most of the tests use the automated DatasetSetup where the coordinators set up the IngestionStream, but
 // some set them up manually by invoking the factories directly.
 // TODO disabled since this test is flaky in Travis.
-@Ignore
 class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) with StrictLogging
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -56,8 +56,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     memStore.reset()
     // Make sure checkpoints are reset
     metaStore.clearAllData().futureValue
-    metaStore.newDataset(dataset6).futureValue shouldEqual Success
-    metaStore.newDataset(dataset33).futureValue shouldEqual Success
     coordinatorActor ! NodeProtocol.ResetState
     expectMsg(NodeProtocol.StateReset)
     clusterActor ! NodeProtocol.ResetState
@@ -65,7 +63,21 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     Thread sleep 2000
   }
 
-  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
+  def waitForStatus(ref: DatasetRef, waitFor: ShardStatus): Unit = {
+    var latestStatus: ShardStatus = ShardStatusAssigned
+    // sometimes we receive multiple status snapshots
+    while (latestStatus != waitFor) {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(ref, mapper) =>
+          latestStatus = mapper.statuses.head
+          if (latestStatus != ShardStatusError)
+            mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+      }
+      info(s"Latest status = $latestStatus")
+    }
+  }
+
+  def setup(dataset: Dataset, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
@@ -79,11 +91,13 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     val storeConf = StoreConfig(config.getConfig("store"))
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
-    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
+    val command = SetupDataset(dataset, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
+    coordinatorActor ! command  // have to send command to coordinator to help initialize it
+    Thread sleep 2000
     clusterActor ! command
     expectMsg(within, DatasetVerified)
 
-    clusterActor ! SubscribeShardUpdates(command.ref)
+    clusterActor ! SubscribeShardUpdates(command.dataset.ref)
     expectMsgPF(within) {
       case CurrentShardSnapshot(ds, mapper) =>
         shardMap = mapper
@@ -96,19 +110,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // happens until the IngestionActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
   it("should fail if cannot parse input record during coordinator ingestion") {
-    setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-
-    var latestStatus: ShardStatus = ShardStatusAssigned
-    // sometimes we receive multiple status snapshots
-    while (latestStatus != ShardStatusError) {
-      expectMsgPF(within) {
-        case CurrentShardSnapshot(dataset33.ref, mapper) =>
-          latestStatus = mapper.statuses.head
-          if (latestStatus != ShardStatusError)
-            mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-      }
-      info(s"Latest status = $latestStatus")
-    }
+    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+    waitForStatus(dataset33.ref, ShardStatusError)
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -116,42 +119,25 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
   it("should not start ingestion, raise a IngestionError vs IngestionStopped, " +
     "if incorrect shard is sent for the creation of the stream") {
-    setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    waitForStatus(dataset6.ref, ShardStatusActive)
 
     // then it becomes stopped
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
-
+    waitForStatus(dataset6.ref, ShardStatusStopped)
   }
 
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
     // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
-    setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // first it becomes active
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    waitForStatus(dataset33.ref, ShardStatusActive)
 
     // Wait for all messages to be ingested
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
+    waitForStatus(dataset33.ref, ShardStatusStopped)
 
     coordinatorActor ! GetIngestionStats(dataset33.ref)
     expectMsg(IngestionActor.IngestionStatus(99))
@@ -177,7 +163,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.writeCheckpoint(dataset33.ref, 0, 2, 3L).futureValue shouldEqual Success
     metaStore.writeCheckpoint(dataset33.ref, 0, 3, 4L).futureValue shouldEqual Success
 
-    setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 0))
 
@@ -200,17 +186,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     }
     */
 
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
+    // first it becomes active
+    waitForStatus(dataset33.ref, ShardStatusActive)
 
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
-    }
+    // Wait for all messages to be ingested
+    waitForStatus(dataset33.ref, ShardStatusStopped)
 
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)

@@ -5,9 +5,8 @@ import java.util
 
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
-import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
-import filodb.query.exec.{TransientHistRow, TransientRow}
+import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -167,23 +166,58 @@ class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with Chun
 }
 
 class SumOverTimeChunkedFunctionH(var h: bv.MutableHistogram = bv.Histogram.empty)
-extends ChunkedRangeFunction[TransientHistRow] {
+extends TimeRangeFunction[TransientHistRow] {
   override final def reset(): Unit = { h = bv.Histogram.empty }
   final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
     sampleToEmit.setValues(endTimestamp, h)
   }
 
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
-
-    val sum = valueReader.asHistReader.sum(startRowNum, endRowNum)
+  final def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+                          reader: VectorDataReader,
+                          startRowNum: Int,
+                          endRowNum: Int): Unit = {
+    val sum = reader.asHistReader.sum(startRowNum, endRowNum)
     h match {
       // sum is mutable histogram, copy to be sure it's our own copy
       case hist if hist.numBuckets == 0 => h = sum.copy
       case hist: bv.MutableHistogram    => hist.add(sum)
+    }
+  }
+}
+
+/**
+ * Sums Histograms over time and also computes Max over time of a Max field.
+ * @param maxColID the data column ID containing the max column
+ */
+class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[TransientHistMaxRow] {
+  private val hFunc = new SumOverTimeChunkedFunctionH
+  private val maxFunc = new MaxOverTimeChunkedFunctionD
+
+  override final def reset(): Unit = {
+    hFunc.reset()
+    maxFunc.reset()
+  }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, hFunc.h)
+    sampleToEmit.setDouble(2, maxFunc.max)
+  }
+
+  import BinaryVector.BinaryVectorPtr
+
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Do BinarySearch for start/end pos only once for both columns == WIN!
+    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // At least one sample is present
+    if (startRowNum <= endRowNum) {
+      hFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+
+      // Get valueVector/reader for max column
+      val maxVectPtr = info.vectorPtr(maxColID)
+      maxFunc.addTimeChunks(maxVectPtr, bv.DoubleVector(maxVectPtr), startRowNum, endRowNum)
     }
   }
 }
@@ -217,18 +251,17 @@ class CountOverTimeFunction(var count: Double = Double.NaN) extends RangeFunctio
   }
 }
 
-class CountOverTimeChunkedFunction(var count: Int = 0) extends ChunkedRangeFunction[TransientRow] {
+class CountOverTimeChunkedFunction(var count: Int = 0) extends TimeRangeFunction[TransientRow] {
   override final def reset(): Unit = { count = 0 }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
-    // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = tsReader.ceilingIndex(tsVector, endTime)
-    val numRows = Math.min(endRowNum, info.numRows - 1) - startRowNum + 1
+
+  def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+                    reader: VectorDataReader,
+                    startRowNum: Int,
+                    endRowNum: Int): Unit = {
+    val numRows = endRowNum - startRowNum + 1
     count += numRows
   }
 }

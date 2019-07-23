@@ -1,5 +1,6 @@
 package filodb.standalone
 
+import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
 import akka.actor.ActorRef
@@ -43,6 +44,8 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
   lazy val config = cluster.settings.config
 
+  var filoHttpServer: FiloHttpServer = _
+
   // Now, initialize any datasets using in memory MetaStore.
   // This is a hack until we are able to use CassandraMetaStore for standalone.  It is also a
   // convenience for users to get up and running quickly without setting up cassandra.
@@ -50,7 +53,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
   def bootstrap(akkaCluster: Cluster): AkkaBootstrapper = {
     val bootstrapper = AkkaBootstrapper(akkaCluster)
-    val seeds = bootstrapper.bootstrap()
+    bootstrapper.bootstrap()
     bootstrapper
   }
 
@@ -60,7 +63,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
       scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
       val bootstrapper = bootstrap(cluster.cluster)
       val singleton = cluster.clusterSingleton(role, watcher)
-      val filoHttpServer = new FiloHttpServer(cluster.system)
+      filoHttpServer = new FiloHttpServer(cluster.system)
       filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
       // Launch the profiler after startup, if configured.
       SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
@@ -70,6 +73,11 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
         logger.error("Could not initialize server", e)
         shutdown()
     }
+  }
+
+  override def shutdown(): Unit = {
+    filoHttpServer.shutdown(5.seconds) // TODO configure
+    super.shutdown()
   }
 
   def shutdownAndExit(code: Int): Unit = {

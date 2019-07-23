@@ -82,7 +82,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan),
+                settings.queryAskTimeout)
             }
             Future.sequence(asks)
           }
@@ -115,7 +116,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     else {
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryOptions(spreadProvider))
     }
-    onSuccess(asyncAsk(nodeCoord, command)) {
+    onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
       case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))

@@ -10,12 +10,12 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.MetricsTestData._
 import filodb.core.{TestData, Types}
+import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -65,6 +65,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData = MMD.linearHistSeries().take(100)
+  val histMaxData = MMD.histMax(histData)
 
   implicit val execTimeout = 5.seconds
 
@@ -75,9 +76,12 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
     memStore.setup(MMD.histDataset, 0, TestData.storeConf)
     memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
+    memStore.setup(MMD.histMaxDS, 0, TestData.storeConf)
+    memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
     memStore.commitIndexForTesting(timeseriesDataset.ref)
     memStore.commitIndexForTesting(MMD.dataset1.ref)
     memStore.commitIndexForTesting(MMD.histDataset.ref)
+    memStore.commitIndexForTesting(MMD.histMaxDS.ref)
   }
 
   override def afterAll(): Unit = {
@@ -225,6 +229,77 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
+  // A lower-level (below coordinator) end to end histogram with max ingestion and querying test
+  it("should sum Histogram records with max correctly") {
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
+      filters, AllChunkScan, Seq(0, 4))
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
+                                         Some(RangeFunctionId.SumOverTime), Nil))
+    execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
+
+    val resp = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1), r.getDouble(2)))
+
+    // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
+    // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
+    val orig = histMaxData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+                       .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+      res._3.isNaN shouldEqual false
+      res._3 should be >= origData._3.asInstanceOf[Double]
+    }
+
+    // Add the histogram_max_quantile function to ExecPlan and make sure results are OK
+    execPlan.addRangeVectorTransformer(
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(0.99)))
+    val resp2 = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
+    val result2 = resp2.asInstanceOf[QueryResult]
+    result2.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    result2.result.size shouldEqual 1
+    val resultIt2 = result2.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toBuffer
+
+    resultIt2.foreach { case (t, v) =>
+      v.isNaN shouldEqual false
+    }
+  }
+
+  it("should extract Histogram with max using Last/None function correctly") {
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
+    val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
+      filters, AllChunkScan, Seq(0, 4))
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+
+    val resp = execPlan.execute(memStore, MMD.histMaxDS, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1), r.getDouble(2)))
+
+    // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
+    // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
+    val orig = histMaxData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+                       .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
+                       .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
+    resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
+      res._3.isNaN shouldEqual false
+      res._3 should be >= origData._3.asInstanceOf[Double]
+    }
+
+  }
+
   it ("should return correct result schema") {
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
@@ -237,6 +312,23 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     resultSchema.length shouldEqual 2
     resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
+  }
+
+  it("should produce correct schema for histogram RVs with and without max column") {
+    // Histogram dataset, no max column
+    val noMaxPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
+                      MMD.histDataset.ref, 0, Nil, AllChunkScan, Seq(0, 3))
+    val expected1 = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn),
+                                     ColumnInfo("h", HistogramColumn)), 1, colIDs = Seq(0, 3))
+    noMaxPlan.schemaOfDoExecute(MMD.histDataset) shouldEqual expected1
+
+    // Histogram dataset with max column - should add max to schema automatically
+    val maxPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
+                      MMD.histMaxDS.ref, 0, Nil, AllChunkScan, Seq(0, 4))
+    val expected2 = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn),
+                                     ColumnInfo("h", HistogramColumn),
+                                     ColumnInfo("max", DoubleColumn)), 1, colIDs = Seq(0, 4, 3))
+    maxPlan.schemaOfDoExecute(MMD.histMaxDS) shouldEqual expected2
   }
 
   it("should return chunk metadata from MemStore") {
@@ -263,5 +355,21 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val startTimes = tuples.grouped(TestData.storeConf.maxChunksSize).map(_.head._1).toBuffer
     infosRead.map(_._2) shouldEqual startTimes
   }
+
+  it ("should fail with exception BadQueryException") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
+    // with ResponseTooLargeException
+    val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples - 1, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
+
+    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryError]
+    result.t.getClass shouldEqual classOf[BadQueryException]
+  }
+
 }
 

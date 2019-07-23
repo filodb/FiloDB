@@ -10,6 +10,8 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
@@ -49,6 +51,12 @@ trait ExecPlan extends QueryCommand {
     * Limit on number of samples returned by this ExecPlan
     */
   def limit: Int
+
+  /**
+    * Throw error if the size of the resultset is greater than Limit
+    * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
+    */
+  def enforceLimit: Boolean = true
 
   def dataset: DatasetRef
 
@@ -102,6 +110,7 @@ trait ExecPlan extends QueryCommand {
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
     Task {
+      FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
@@ -118,7 +127,7 @@ trait ExecPlan extends QueryCommand {
           case srv: SerializableRangeVector =>
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (numResultSamples > limit)
+            if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
@@ -127,11 +136,12 @@ trait ExecPlan extends QueryCommand {
             val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRows
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (numResultSamples > limit)
+            if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
         }
+        .take(limit)
         .toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
@@ -149,12 +159,14 @@ trait ExecPlan extends QueryCommand {
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
           QueryError(id, ex)
         }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
+      if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+        qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       QueryError(id, ex)
     }
   }
