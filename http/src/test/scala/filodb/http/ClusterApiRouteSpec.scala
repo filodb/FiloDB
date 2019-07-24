@@ -1,15 +1,15 @@
 package filodb.http
 
 import akka.actor.ActorSystem
+import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
 import akka.http.scaladsl.model.headers.RawHeader
-import akka.http.scaladsl.model.{StatusCodes, ContentTypes}
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.testkit.TestProbe
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.scalatest.FunSpec
 
 import filodb.coordinator._
-import filodb.core.{AsyncTest, GdeltTestData, TestData, Success}
+import filodb.core.{AsyncTest, GdeltTestData, TestData}
 import filodb.core.store.{AssignShardConfig, UnassignShardConfig}
 
 object ClusterApiRouteSpec extends ActorSpecConfig
@@ -17,8 +17,9 @@ object ClusterApiRouteSpec extends ActorSpecConfig
 class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest {
   import FailFastCirceSupport._
   import io.circe.generic.auto._
-  import NodeClusterActor._
+
   import GdeltTestData.dataset6
+  import NodeClusterActor._
   import filodb.http.apiv1._
 
   // Use our own ActorSystem with our test config so we can init cluster properly
@@ -34,17 +35,17 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
   Thread sleep 2000
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(dataset6.ref, DatasetResourceSpec(4, 2), noOpSource, TestData.storeConf)
+    val command = SetupDataset(dataset6, DatasetResourceSpec(4, 2), noOpSource, TestData.storeConf)
     probe.send(clusterProxy, command)
     probe.expectMsg(DatasetVerified)
+    probe.send(cluster.coordinatorActor, command)
+    Thread.sleep(2500)
   }
 
   before {
     probe.send(cluster.coordinatorActor, NodeProtocol.ResetState)
     probe.expectMsg(NodeProtocol.StateReset)
     // Note: at this point all ingestor actors are shut down
-    cluster.metaStore.clearAllData().futureValue
-    cluster.metaStore.newDataset(dataset6).futureValue shouldEqual Success
     probe.send(clusterProxy, NodeProtocol.ResetState)
     probe.expectMsg(NodeProtocol.StateReset)
   }
@@ -60,7 +61,6 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
 
     it("should return list of registered datasets") {
       setupDataset()
-      Thread sleep 500
       Get("/api/v1/cluster") ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK
@@ -83,9 +83,6 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
     it("should return shard status after dataset is setup") {
       setupDataset()
 
-      // Give the coordinator nodes some time to get started
-      Thread sleep 1000
-
       Get(s"/api/v1/cluster/${dataset6.ref}/status") ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK
@@ -100,8 +97,6 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
 
     it("should return shard status groupByAddress after dataset is setup") {
       setupDataset()
-      // Give the coordinator nodes some time to get started
-      Thread sleep 1000
       Get(s"/api/v1/cluster/${dataset6.ref}/statusByAddress") ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK
@@ -138,85 +133,4 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
     }
   }
 
-  describe("POST /api/v1/cluster/<dataset>") {
-    it("should return 400 if config is not HOCON or JSON") {
-      // Try sending YAML or something
-      Post("/api/v1/cluster/timeseries",
-           """datasettimeseries
-             |  - numshards: 4
-             |     - min-num-nodes: 2""".stripMargin) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.BadRequest
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpError].status shouldEqual "error"
-        responseAs[HttpError].errorType should include ("ConfigException$Parse")
-      }
-    }
-
-    it("should return 400 if config is HOCON/JSON but does not have needed members") {
-      Post("/api/v1/cluster/timeseries",
-           """dataset = "timeseries"
-             |num-shards = 4""".stripMargin) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.BadRequest
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpError].status shouldEqual "error"
-        responseAs[HttpError].errorType should include ("ConfigException$Missing")
-      }
-    }
-
-    it("should return 200 if valid HOCON config, 409 if dataset already exists") {
-      // Send the initial config, validate get back 200 and success
-      val goodSourceConf = """dataset = "gdelt"
-                             |num-shards = 4
-                             |min-num-nodes = 2
-                             |sourceconfig.store {
-                             |  max-chunks-size = 100
-                             |  demand-paged-chunk-retention-period = 10 hours
-                             |  shard-mem-size = 256MB
-                             |  groups-per-shard = 4
-                             |  ingestion-buffer-mem-size = 50MB
-                             |  flush-interval = 10 minutes
-                             |} """.stripMargin
-      Post("/api/v1/cluster/gdelt", goodSourceConf) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.OK
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpList[String]].status shouldEqual "success"
-      }
-
-      // POST original config again.  Should now get 409, "error" and DatasetExists
-      Post("/api/v1/cluster/gdelt", goodSourceConf) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.getForKey(409).get
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpError].errorType should startWith ("DatasetExists")
-      }
-    }
-
-    it("should return 200 if valid JSON config") {
-      // Send the initial config, validate get back 200 and success
-      val sourceJson = """{"dataset": "gdelt",
-                             |"num-shards": 4,
-                             |"min-num-nodes": 2,
-                             |"sourceconfig": { "store": {
-                             |  "flush-interval": "1h",
-                             |  "shard-mem-size": "100MB"
-                             |}}}""".stripMargin
-      Post("/api/v1/cluster/gdelt", sourceJson) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.OK
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpList[String]].status shouldEqual "success"
-      }
-
-      // POST original config again.  Should now get 409, "error" and DatasetExists
-      Post("/api/v1/cluster/gdelt", sourceJson) ~> clusterRoute ~> check {
-        handled shouldBe true
-        status shouldEqual StatusCodes.getForKey(409).get
-        contentType shouldEqual ContentTypes.`application/json`
-        responseAs[HttpError].errorType should startWith ("DatasetExists")
-      }
-    }
-  }
 }

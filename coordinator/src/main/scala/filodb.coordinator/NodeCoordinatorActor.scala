@@ -8,7 +8,6 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
-import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
@@ -16,7 +15,7 @@ import filodb.core._
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
-import filodb.core.store.{MetaStore, StoreConfig}
+import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
 import filodb.query.QueryCommand
 
 /**
@@ -41,13 +40,13 @@ object NodeCoordinatorActor {
 
   def props(metaStore: MetaStore,
             memStore: MemStore,
-            config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, config)
+            settings: FilodbSettings): Props =
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, settings)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
-                                                 config: Config) extends NamingAwareBaseActor {
+                                                 settings: FilodbSettings) extends NamingAwareBaseActor {
   import context.dispatcher
 
   import NodeClusterActor._
@@ -55,14 +54,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   import client.DatasetCommands._
   import client.IngestionCommands._
 
-  val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
   val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
   val shardMaps = new ConcurrentHashMap[DatasetRef, ShardMapper]
   var statusActor: Option[ActorRef] = None
+  var datasetsInitialized = false
 
-  private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
+  private val statusAckTimeout = settings.config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
@@ -80,25 +79,31 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     ingesters.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
   }
 
-  // NOTE: if no QueryActor is set up, forward to NodeGuardian who will then pass it on to a random shard
+  // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
+  // TODO: if we ever support query API against cold (not in memory) datasets, change this
   private def withQueryActor(originator: ActorRef, dataset: DatasetRef)(func: ActorRef => Unit): Unit =
-    queryActors.get(dataset).map(func).getOrElse {
-      context.parent forward NodeProtocol.ForwardMsg(dataset, func)
-    }
+    queryActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
 
+  // Used only for testing
   private def createDataset(originator: ActorRef,
                             datasetObj: Dataset): Unit = {
     (for {
-      resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
       resp2 <- memStore.store.initialize(datasetObj.ref) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
     }).recover {
-      case e: NoSuchElementException => originator ! DatasetAlreadyExists
-      case e: StorageEngineException => originator ! e
       case e: Exception => originator ! DatasetError(e.toString)
     }
+  }
+
+  private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
+    logger.info(s"Initializing dataset ${dataset.ref}")
+    memStore.store.initialize(dataset.ref)
+    setupDataset( dataset,
+                  ingestConfig.storeConfig,
+                  IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
+                  ingestConfig.downsampleConfig)
   }
 
   // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
@@ -124,8 +129,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def setupDataset(dataset: Dataset,
                            storeConf: StoreConfig,
                            source: IngestionSource,
-                           downsample: DownsampleConfig,
-                           origin: ActorRef): Unit = {
+                           downsample: DownsampleConfig): Unit = {
     import ActorName.{Ingestion, Query}
 
     logger.debug(s"Recreated dataset $dataset from string")
@@ -140,7 +144,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
-        nca.tell(SubscribeShardUpdates(ref), self)
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
@@ -153,6 +156,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, db) =>
+      // used only for unit testing now
       createDataset(sender(), datasetObj.copy(database = db))
 
     case TruncateDataset(ref) =>
@@ -160,9 +164,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def ingestHandlers: Receive = LoggingReceive {
-    case DatasetSetup(compactDSString, storeConf, source, downsample) =>
-      val dataset = Dataset.fromCompactString(compactDSString)
-      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample, sender()) }
+    case SetupDataset(dataset, resources, source, storeConf, downsample) =>
+      // used only in unit tests
+      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample) }
 
     case IngestRows(dataset, shard, rows) =>
       withIngester(sender(), dataset) { _ ! IngestionActor.IngestRows(sender(), shard, rows) }
@@ -183,28 +187,37 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case e: ShardIngestionState       => forward(e, e.ref, sender())
+    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+                                         shardMaps.put(s.ref, s.map)
+                                         forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
     case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
     case ClearState(ref)              => clearState(ref)
     case NodeProtocol.ResetState      => reset(sender())
-    case CurrentShardSnapshot(ds, mapper) =>
-      logger.debug(s"Received ShardSnapshot $mapper")
-      shardMaps.put(ds, mapper)
-      // NOTE: QueryActor has AtomicRef so no need to forward message to it
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
 
   private def registered(e: CoordinatorRegistered): Unit = {
-    logger.info(s"${e.clusterActor} said hello!")
+    logger.info(s"Registering new ClusterActor ${e.clusterActor}")
     clusterActor = Some(e.clusterActor)
     if (!statusActor.isDefined) {
       statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
     } else {
       statusActor.get ! e.clusterActor    // update proxy.  NOTE: this is temporary fix
     }
+
+    if (!datasetsInitialized) {
+      logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
+      settings.streamConfigs.foreach { config =>
+        val dataset = Dataset.fromConfig(config)
+        val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
+        initializeDataset(dataset, ingestion)
+      }
+      datasetsInitialized = true
+    }
+
   }
 
   /** Forwards shard actions to the ingester for the given dataset.

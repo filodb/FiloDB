@@ -32,7 +32,9 @@ object WireFormat {
   val SUBTYPE_INT = 0x07             // Int gets special type because Longs and Doubles may be encoded as Int
   val SUBTYPE_INT_NOMASK = 0x08
 
-  val SUBTYPE_H_SIMPLE = 0x10         // Histograms, stored as is
+  val SUBTYPE_H_SIMPLE = 0x10         // Histograms, stored as is (Long/u64 values)
+  val SUBTYPE_H_2DDELTA = 0x11        // Histograms, 2D-Delta encoded
+  val SUBTYPE_H_SECTDELTA = 0x12      // Histograms, Section-Delta encoded
 
   def vectorSubType(headerBytes: Int): Int = (headerBytes & 0x00ff00) >> 8
 

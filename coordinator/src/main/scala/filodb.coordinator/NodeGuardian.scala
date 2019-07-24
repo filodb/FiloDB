@@ -18,7 +18,6 @@ final class NodeGuardian(val settings: FilodbSettings,
 
   import ActorName._
   import NodeProtocol._
-  import client.IngestionCommands.UnknownDataset
 
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
 
@@ -43,7 +42,6 @@ final class NodeGuardian(val settings: FilodbSettings,
     case s: CurrentShardSnapshot   => shardSnapshot(s)
     case e: ShardSubscriptions     => subscriptions = e
     case GetClusterState           => state(sender())
-    case f: ForwardMsg             => forward(f)
     case e: ListenerRef            => failureAware ! e
   }
 
@@ -54,14 +52,6 @@ final class NodeGuardian(val settings: FilodbSettings,
     */
   private def state(requestor: ActorRef): Unit =
     requestor ! ClusterState(shardMappers, subscriptions)
-
-  // Workaround: pass random shard's ActorRef to given function for dataset
-  // Designed to work around bug where spare nodes cannot process query
-  private def forward(f: ForwardMsg): Unit =
-    shardMappers.get(f.dataset).map { mapper =>
-      val shard = util.Random.nextInt(mapper.numShards)
-      f.func(mapper.coordForShard(shard))
-    }.getOrElse(sender() ! UnknownDataset)
 
   private def shardSnapshot(s: CurrentShardSnapshot): Unit = {
     logger.debug(s"Updating shardMappers for ref ${s.ref}")
@@ -85,7 +75,7 @@ final class NodeGuardian(val settings: FilodbSettings,
     */
   private def createCoordinator(requester: ActorRef): Unit = {
     val actor = context.child(CoordinatorName) getOrElse {
-      val props = NodeCoordinatorActor.props(metaStore, memStore, settings.config)
+      val props = NodeCoordinatorActor.props(metaStore, memStore, settings)
       context.actorOf(props, CoordinatorName) }
 
     requester ! CoordinatorIdentity(actor)
@@ -193,8 +183,6 @@ object NodeProtocol {
   private[coordinator] case object GetClusterState extends StateCommand
 
   private[filodb] case object StateReset extends StateTaskAck
-
-  private[coordinator] final case class ForwardMsg(dataset: DatasetRef, func: ActorRef => Unit)
 
   private[coordinator] final case class ClusterState(shardMaps: MMap[DatasetRef, ShardMapper],
                                                      subscriptions: ShardSubscriptions) extends StateTaskAck

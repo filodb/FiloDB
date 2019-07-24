@@ -53,8 +53,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
   case class VectorMatch(matching: Option[JoinMatching],
                          grouping: Option[JoinGrouping]) {
     lazy val cardinality: Cardinal = grouping match {
-      case Some(GroupLeft(_)) => OneToMany
-      case Some(GroupRight(_)) => ManyToOne
+      case Some(GroupLeft(_)) => ManyToOne
+      case Some(GroupRight(_)) => OneToMany
       case None => OneToOne
     }
 

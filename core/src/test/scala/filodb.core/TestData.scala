@@ -36,7 +36,7 @@ object TestData {
                   }.toListL.map { rawChunkSets => RawPartData(partKeyBytes, rawChunkSets) }
   }
 
-  val sourceConf = ConfigFactory.parseString("""
+  val sourceConfStr = """
     store {
       max-chunks-size = 100
       demand-paged-chunk-retention-period = 10 hours
@@ -48,10 +48,22 @@ object TestData {
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
     }
-  """)
+  """
+  val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
   val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
+
+  val optionsString = """
+  options {
+    copyTags = {}
+    ignoreShardKeyColumnSuffixes = {}
+    ignoreTagsOnPartitionKeyHash = ["le"]
+    metricColumn = "__name__"
+    valueColumn = "value"
+    shardKeyColumns = ["__name__", "_ns"]
+  }
+  """
 }
 
 object NamesTestData {
@@ -188,6 +200,17 @@ object GdeltTestData {
   val datasetOptions = DatasetOptions.DefaultOptions.copy(
     shardKeyColumns = Seq( "__name__","_ns"))
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID", datasetOptions)
+
+  val datasetOptionConfig = """
+    options {
+      shardKeyColumns = ["__name__","_ns"]
+      ignoreShardKeyColumnSuffixes = {}
+      valueColumn = "AvgTone"
+      metricColumn = "__name__"
+      ignoreTagsOnPartitionKeyHash = []
+      copyTags = {}
+    }
+  """
 }
 
 // A simulation of machine metrics data
@@ -321,6 +344,22 @@ object MachineMetricsData {
     }
   }
 
+  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+
+  // Pass in the output of linearHistSeries here.
+  // Adds in the max column before h/hist
+  def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
+    histStream.map { row =>
+      val hist = row(3).asInstanceOf[bv.MutableHistogram]
+      // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
+      val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
+      val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }
+                            .lastOption.getOrElse(hist.numBuckets - 1)
+      val max = hist.bucketTop(lastBucketNum) * 0.8
+      ((row take 3) :+ max) ++ (row drop 3)
+    }
+
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
   val histPartKey = histKeyBuilder.addFromObjects(extraTags)
 
@@ -338,6 +377,21 @@ object MachineMetricsData {
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
+  }
+
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS, TestData.storeConf)
+
+  // Designed explicitly to work with histMax(linearHistSeries) records
+  def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  (Stream[Seq[Any]], RawDataRangeVector) = {
+    val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
+    val container = records(histMaxDS, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(histIngestBH, encode = true)
+    // Select timestamp, hist, max
+    (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
   }
 }
 
@@ -373,7 +427,7 @@ object CustomMetricsData {
 object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
-                                  Seq("timestamp:ts", "value:double"),
+                                  Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq("timestamp"),
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get

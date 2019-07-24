@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.Types._
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
 import filodb.memory.data.ChunkMap
@@ -203,6 +203,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
       shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
+      if (dataset.dataColumns(i).columnType == Column.ColumnType.HistogramColumn)
+        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
       optimized
     }
     shardStats.numSamplesEncoded.increment(info.numRows)
@@ -397,6 +399,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   // Free memory (esp offheap) attached to this TSPartition and return buffers to common pool
   def shutdown(): Unit = {
     chunkmapFree()
+  }
+
+  override protected def finalize(): Unit = {
+    memFactory.freeMemory(partKeyOffset)
     if (currentInfo != nullInfo) bufferPool.release(currentInfo.infoAddr, currentChunks)
   }
 }
@@ -425,13 +431,13 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = dataset.timestamp(row)
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - ingesting ts=$ts " +
+    _log.debug(s"Ingesting dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition ts=$ts " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - switchBuffers, encode=$encode" +
+    _log.debug(s"SwitchBuffers dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - encode=$encode" +
                s" for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
   }

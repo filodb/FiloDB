@@ -71,6 +71,10 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           source.map { rv =>
             IteratorBackedRangeVector(rv.key, new H2DoubleInstantFuncIterator(rv.rows, instantFunction.asHToDouble))
           }
+        } else if (instantFunction.isHistDoubleToDoubleFunc && sourceSchema.isHistDouble) {
+          source.map { rv =>
+            IteratorBackedRangeVector(rv.key, new HD2DoubleInstantFuncIterator(rv.rows, instantFunction.asHDToDouble))
+          }
         } else {
           throw new UnsupportedOperationException(s"Sorry, function $function is not supported right now")
         }
@@ -96,10 +100,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     RangeVectorTransformer.valueColumnType(source) match {
       case ColumnType.HistogramColumn =>
         val instantFunction = InstantFunction.histogram(function, funcParams)
-        if (instantFunction.isHToDoubleFunc) {
+        if (instantFunction.isHToDoubleFunc || instantFunction.isHistDoubleToDoubleFunc) {
           // Hist to Double function, so output schema is double
-          source.copy(columns = Seq(source.columns.head,
-                                    source.columns(1).copy(colType = ColumnType.DoubleColumn)))
+          source.copy(columns = Seq(source.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)))
         } else { source }
       case cType: ColumnType          =>
         source
@@ -126,6 +129,18 @@ private class H2DoubleInstantFuncIterator(rows: Iterator[RowReader],
   final def next(): RowReader = {
     val next = rows.next()
     val newValue = instantFunction(next.getHistogram(1))
+    result.setValues(next.getLong(0), newValue)
+    result
+  }
+}
+
+private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
+                                           instantFunction: HDToDoubleIFunction,
+                                           result: TransientRow = new TransientRow()) extends Iterator[RowReader] {
+  final def hasNext: Boolean = rows.hasNext
+  final def next(): RowReader = {
+    val next = rows.next()
+    val newValue = instantFunction(next.getHistogram(1), next.getDouble(2))
     result.setValues(next.getLong(0), newValue)
     result
   }

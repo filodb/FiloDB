@@ -7,8 +7,7 @@ import com.typesafe.config.Config
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._
-import filodb.core.metadata.Dataset
-import filodb.core.store.{IngestionConfig, MetaStore}
+import filodb.core.store.MetaStore
 
 /**
  * A class for Cassandra implementation of the MetaStore.
@@ -20,39 +19,20 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
                         (implicit val ec: ExecutionContext) extends MetaStore {
   private val ingestionConsistencyLevel = ConsistencyLevel.valueOf(config.getString("ingestion-consistency-level"))
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
-  val datasetTable = new DatasetTable(config, sessionProvider)
   val checkpointTable = new CheckpointTable(config, sessionProvider, ingestionConsistencyLevel)
-  val sourcesTable = new IngestionConfigTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
-    datasetTable.createKeyspace(datasetTable.keyspace)
-    datasetTable.initialize()
+    checkpointTable.createKeyspace(checkpointTable.keyspace)
     checkpointTable.initialize()
-    sourcesTable.initialize()
   }
 
   def clearAllData(): Future[Response] = {
-    datasetTable.clearAll()
     checkpointTable.clearAll()
-    sourcesTable.clearAll()
   }
 
-  def newDataset(dataset: Dataset): Future[Response] =
-    datasetTable.createNewDataset(dataset)
-
-  def getDataset(ref: DatasetRef): Future[Dataset] =
-    datasetTable.getDataset(ref)
-
-  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]] =
-    datasetTable.getAllDatasets(database)
-
-  def deleteDataset(ref: DatasetRef): Future[Response] =
-    datasetTable.deleteDataset(ref)
-
   def shutdown(): Unit = {
-    datasetTable.shutdown()
   }
 
   def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
@@ -68,15 +48,6 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
       if (m.values.isEmpty) Long.MinValue else m.values.min
     }
   }
-
-  def writeIngestionConfig(source: IngestionConfig): Future[Response] =
-    sourcesTable.insertIngestionConfig(source)
-
-  def readIngestionConfigs(): Future[Seq[IngestionConfig]] =
-    sourcesTable.readAllConfigs()
-
-  def deleteIngestionConfig(ref: DatasetRef): Future[Response] =
-    sourcesTable.deleteIngestionConfig(ref)
 
   /**
     * Record highest time bucket for part key indexable data in meta store

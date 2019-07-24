@@ -23,7 +23,6 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 // TODO disabled since several tests in this class are flaky in Travis.
-@org.scalatest.Ignore
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -58,7 +57,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   val strategy = DefaultShardAssignmentStrategy
   protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
-
   val clusterActor = system.actorOf(Props(new Actor {
     import StatusActor._
     def receive: Receive = {
@@ -71,7 +69,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
-  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, config)
+  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, cluster.settings)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -98,8 +96,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
     val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName, TestData.sourceConf)
-    val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
-    shardManager.addDataset(sd, dataset, self)
+    val sd = SetupDataset(dataset, resources, noOpSource, TestData.storeConf)
+    coordinatorActor ! sd
+    shardManager.addDataset(dataset, sd.config, sd.source, Some(self))
     shardManager.subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => } // for subscription
     for { i <- 0 until numShards } { // for each shard assignment
@@ -113,17 +112,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     keyValue.toSeq.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }
 
   describe("NodeCoordinatorActor DatasetOps commands") {
-    it("should be able to create new dataset") {
+    it("should be able to create new dataset (really for unit testing only)") {
       probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
-    }
-
-    it("should return DatasetAlreadyExists creating dataset that already exists") {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetCreated)
-
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetAlreadyExists)
     }
   }
 
@@ -139,18 +130,14 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
-      Thread.sleep(1000) // wait for Lucene index flush to happen correctly.  Wish there was a listener for this
       dataset1.ref
     }
 
-    ignore("should reach out to NodeGuardian if attempting to query before ingestion set up") {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
-      probe.expectMsg(DatasetCreated)
-
+    it("should return UnknownDataset if attempting to query before ingestion set up") {
       val ref = MachineMetricsData.dataset1.ref
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")))
       probe.send(coordinatorActor, q1)
-      probe.expectMsgClass(classOf[NodeProtocol.ForwardMsg])
+      probe.expectMsg(UnknownDataset)
     }
 
     it("should return chunks when querying all samples after ingesting rows") {
@@ -162,10 +149,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // Query existing partition: Series 1
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")), qOpt)
+
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (1)
           srvs(0).rows.toSeq should have length (2)   // 2 samples per series
       }
@@ -175,12 +163,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, Nil) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
       }
     }
 
-    // This actually returns a QueryError, but it should be validation done instead
-    ignore("should return BadArgument if arguments could not be parsed successfully") {
+    it("should return QueryError if bad arguments or could not execute") {
       val ref = setupTimeSeries()
       val to = System.currentTimeMillis() / 1000
       val from = to - 50
@@ -188,7 +175,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, series_1)", qParams)
       val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
       probe.send(coordinatorActor, q1)
-      probe.expectMsgClass(classOf[BadArgument])
+      probe.expectMsgClass(classOf[QueryError])
     }
 
     it("should return results in QueryResult if valid LogicalPlanQuery") {
@@ -208,7 +195,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
@@ -221,7 +208,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual countSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual countSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
@@ -235,7 +222,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (0)
       }
     }
@@ -260,15 +247,16 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
           case QueryResult(_, schema, vectors) =>
-            schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+            schema.columns shouldEqual timeMinSchema.columns
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
       }
     }
 
-    ignore("should aggregate from multiple shards") {
+    it("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
@@ -288,9 +276,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 4.0)
+          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
       }
     }
 
@@ -312,7 +300,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
           groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
@@ -323,8 +311,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     }
 
     implicit val askTimeout = Timeout(5.seconds)
-
-    it("should return QueryError if physical plan execution errors out") (pending)
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
@@ -386,8 +372,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>
-        schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                            ColumnInfo("AvgTone", DoubleColumn)), 1, fixedVectorLen = Some(10))
+        schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
+                                       ColumnInfo("AvgTone", DoubleColumn))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
@@ -416,8 +402,5 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1)))
     probe.expectMsg(UnknownDataset)
   }
-
-
-
 }
 

@@ -1,6 +1,9 @@
 package filodb.coordinator
 
-import scala.collection.mutable.{HashMap, HashSet}
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable.HashSet
 import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
@@ -8,11 +11,12 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
 import kamon.Kamon
-import monix.execution.CancelableFuture
+import monix.eval.Task
+import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.{DatasetRef, GlobalScheduler, Iterators}
+import filodb.core.{DatasetRef, Iterators}
 import filodb.core.downsample.DownsampleConfig
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
@@ -58,22 +62,24 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   import IngestionActor._
 
-  final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
-  final val streams = new HashMap[Int, IngestionStream]
+  final val streamSubscriptions = (new ConcurrentHashMap[Int, CancelableFuture[Unit]]).asScala
+  final val streams = (new ConcurrentHashMap[Int, IngestionStream]).asScala
   final val nodeCoord = context.parent
   var shardStateVersion: Long = 0
 
   // Params for creating the default memStore flush scheduler
   private final val numGroups = storeConfig.groupsPerShard
 
+  val actorDispatcher = context.dispatcher
+
   // The flush task has very little work -- pretty much none. Looking at doFlushSteps, you can see that
   // all of the heavy lifting -- including chunk encoding, forming the (potentially big) index timebucket blobs --
   // is all done in the ingestion thread. Even the futures used to do I/O will not be done in this flush thread...
   // they are allocated by the implicit ExecutionScheduler that Futures use and/or what C* etc uses.
-  // The only thing that flushSched really does is tie up all these Futures together.  Thus we use the global one.
-  // TODO: re-examine doFlushSteps and thread usage in flush tasks.
-  import context.dispatcher
-  val flushSched = GlobalScheduler.globalImplicitScheduler
+  // The only thing that flushSched really does is tie up all these Futures together.
+  val flushSched = Scheduler.computation(
+    name = FiloSchedulers.FlushSchedName,
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Flush Scheduler", _)))
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -81,9 +87,11 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
   logger.info(s"Using stream factory $streamFactory with config ${source.config}, storeConfig $storeConfig")
 
+  val shutdownAfterStop = source.config.as[Option[Boolean]]("shutdown-ingest-after-stopped").getOrElse(true)
+
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
-    logger.info("Cancelling all streams and calling teardown")
+    logger.info(s"Cancelling all streams and calling teardown for dataset=${dataset.ref}")
     streamSubscriptions.keys.foreach(stopIngestion(_))
   }
 
@@ -91,6 +99,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     case GetStatus               => status(sender())
     case e: IngestRows           => ingest(e)
     case e: ShardIngestionState  => resync(e, sender())
+    case e: IngestionStopped     => ingestionStopped(e.ref, e.shard)
   }
 
   /**
@@ -105,7 +114,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     }
 
     if (state.version != 0 && state.version <= shardStateVersion) {
-      logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion")
+      logger.info(s"Ignoring old ShardIngestionState version: ${state.version} <= $shardStateVersion " +
+        s"for dataset=${dataset.ref}")
       return
     }
 
@@ -115,7 +125,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
-        if (state.map.isAnIngestionState(shard)) {
+        if (state.map.isAnIngestionState(shard) || !shutdownAfterStop) {
           if (shardsToStop.contains(shard)) {
             // Is aready ingesting, and it must not be stopped.
             shardsToStop.remove(shard)
@@ -132,7 +142,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           }
         } else {
           val status = state.map.statuses(shard)
-          logger.info(s"Will stop ingestion of shard $shard due to status ${status}")
+          logger.info(s"Will stop ingestion of for dataset=${dataset.ref} shard=$shard due to status ${status}")
         }
       }
     }
@@ -155,6 +165,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     }
 
     logger.info(s"Initiating ingestion for dataset=${dataset.ref} shard=${shard}")
+    logger.info(s"Metastore is ${memStore.metastore}")
+    implicit val futureMapDispatcher = actorDispatcher
     val ingestion = for {
       _ <- memStore.recoverIndex(dataset.ref, shard)
       checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, shard) }
@@ -216,25 +228,36 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       logger.info(s"Starting normal/active ingestion for dataset=${dataset.ref} shard=$shard at offset $offset")
       statusActor ! IngestionStarted(dataset.ref, shard, nodeCoord)
 
-      streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
+      // Define a cancel task to run when ingestion is stopped.
+      val onCancel = Task {
+        logger.info(s"Ingstion cancel task invoked for dataset=${dataset.ref} shard=$shard")
+        val stopped = IngestionStopped(dataset.ref, shard)
+        self ! stopped
+        statusActor ! stopped
+      }
+
+      val shardIngestionEnd = memStore.ingestStream(dataset.ref,
         shard,
         stream,
         flushSched,
         flushStream(startingGroupNo),
-        diskTimeToLiveSeconds)
+        diskTimeToLiveSeconds,
+        onCancel)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
-      streamSubscriptions(shard).onComplete {
+      shardIngestionEnd.onComplete {
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
         case Success(_) =>
+          logger.info(s"IngestStream onComplete.Success invoked for dataset=${dataset.ref} shard=$shard")
           // We dont release resources when finite ingestion ends normally.
           // Kafka ingestion is usually infinite and does not end unless canceled.
           // Cancel operation is already releasing after cancel is done.
           // We also have some tests that validate after finite ingestion is complete
           if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
-      }
+      }(actorDispatcher)
+      streamSubscriptions(shard) = shardIngestionEnd
     } recover { case t: Throwable =>
       logger.error(s"Error occurred when setting up ingestion pipeline for dataset=${dataset.ref} shard=$shard ", t)
       handleError(dataset.ref, shard, t)
@@ -284,7 +307,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           logger.error(s"Recovery failed for dataset=${dataset.ref} shard=$shard", ex)
           handleError(dataset.ref, shard, ex)
           recoveryTrace.finish()
-      }
+      }(actorDispatcher)
       fut
     }
     futTry.recover { case NonFatal(t) =>
@@ -327,18 +350,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
   private def stopIngestion(shard: Int): Unit = {
-    streamSubscriptions.get(shard).foreach { s =>
-      s.onComplete {
-        case Success(_) =>
-          // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
-          removeAndReleaseResources(dataset.ref, shard)
-          // ingestion stopped event is already handled in the normalIngestion method
-          logger.info(s"Stopped streaming ingestion for dataset=${dataset.ref} shard=$shard and released resources")
-        case Failure(_) =>
-          // release of resources on failure is already handled in the normalIngestion method
-      }
-    }
+    // When the future is canceled, the onCancel task installed earlier should run.
+    logger.info(s"stopIngestion called for dataset=${dataset.ref} shard=$shard")
     streamSubscriptions.get(shard).foreach(_.cancel())
+  }
+
+  private def ingestionStopped(ref: DatasetRef, shard: Int): Unit = {
+    removeAndReleaseResources(ref, shard)
+    logger.info(s"stopIngestion handler done. Ingestion success for dataset=${ref} shard=$shard")
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
@@ -351,16 +370,16 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     logger.error(s"Stopped dataset=${dataset.ref} shard=$shard after error was thrown")
   }
 
-  private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {
-    if (streamSubscriptions.contains(shard)) {
-      // TODO: Wait for all the queries to stop
-      streamSubscriptions.remove(shard).foreach(_.cancel)
-      streams.remove(shard).foreach(_.teardown())
-      // Release memory for shard in MemStore
-      memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
-        .foreach { shard =>
-          shard.shutdown()
-        }
-    }
+  private def removeAndReleaseResources(ref: DatasetRef, shardNum: Int): Unit = {
+    // TODO: Wait for all the queries to stop
+    streamSubscriptions.remove(shardNum).foreach(_.cancel)
+    streams.remove(shardNum).foreach(_.teardown())
+    // Release memory for shard in MemStore
+    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shardNum)
+      .foreach { shard =>
+        shard.shutdown()
+        memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum, shard)
+      }
+    logger.info(s"Released resources for dataset=${dataset.ref} shard=$shardNum")
   }
 }

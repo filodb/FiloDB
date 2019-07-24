@@ -57,8 +57,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     metaStore.clearAllData().futureValue
     multiNodeSpecBeforeAll()
 
-    // Initialize dataset
-    metaStore.newDataset(dataset6).futureValue shouldEqual Success
+    // TODO Initialize dataset
+//    metaStore.newDataset(dataset6).futureValue shouldEqual Success
   }
 
   override def afterAll(): Unit = multiNodeSpecAfterAll()
@@ -103,7 +103,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       clusterActor ! GetShardMap(ref)
       expectMsg(DatasetUnknown(ref))
 
-      clusterActor ! SetupDataset(DatasetRef("noColumns"), spec, noOpSource, TestData.storeConf)
+      // MachineMetricsData.dataset1 is not setup
+      clusterActor ! SetupDataset(MachineMetricsData.dataset1, spec, noOpSource, TestData.storeConf)
       expectMsg(DatasetUnknown(DatasetRef("noColumns")))
     }
   }
@@ -114,7 +115,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   it("should setup dataset on all nodes for valid dataset and get ShardMap updates") {
     runOn(first) {
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val command = SetupDataset(dataset6.ref, spec, noOpSource, TestData.storeConf)
+      val command = SetupDataset(dataset6, spec, noOpSource, TestData.storeConf)
 
       clusterActor ! command
       expectMsg(DatasetVerified)

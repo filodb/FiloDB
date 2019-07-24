@@ -44,11 +44,13 @@ object NodeClusterActor {
   final case class StartShards(assignmentConfig: AssignShardConfig, datasetRef: DatasetRef)
 
   /**
-   * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
+   * Sets up a dataset for streaming ingestion and querying, with specs for sharding
+   * IN UNIT TESTS ONLY. In real runtime scenarios, setup the dataset using server config.
+   *
    * Results in a state change and shard assignment to existing and new nodes.
    * Initiates ingestion on each node.
    *
-   * @param ref the DatasetRef for the dataset defined in MetaStore to start ingesting
+   * @param dataset the dataset to start ingesting
    * @param resources the sharding and number of nodes for ingestion and querying
    * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
    *               manually push records into NodeCoordinator.
@@ -56,7 +58,7 @@ object NodeClusterActor {
    * @return DatasetVerified - meaning the dataset and columns are valid.  Does not mean ingestion is
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
-  final case class SetupDataset(ref: DatasetRef,
+  final case class SetupDataset(dataset: Dataset,
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource,
                                 storeConfig: StoreConfig,
@@ -64,7 +66,7 @@ object NodeClusterActor {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
-    val config = IngestionConfig(ref, resourceConfig,
+    val config = IngestionConfig(dataset.ref, resourceConfig,
                                  source.streamFactoryClass,
                                  source.config,
                                  storeConfig,
@@ -72,8 +74,8 @@ object NodeClusterActor {
   }
 
   object SetupDataset {
-    def apply(source: IngestionConfig): SetupDataset =
-      SetupDataset(source.ref,
+    def apply(dataset: Dataset, source: IngestionConfig): SetupDataset =
+      SetupDataset(dataset,
                    DatasetResourceSpec(source.numShards, source.minNumNodes),
                    IngestionSource(source.streamFactoryClass, source.sourceConfig),
                    source.storeConfig,
@@ -219,24 +221,21 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     super.preStart()
     watcher ! NodeProtocol.PreStart(singletonProxy, cluster.selfAddress)
 
+    logger.info(s"NodeClusterActor starting. Attempting to restore previous ingestion state...")
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
-    logger.info(s"NodeClusterActor starting. Attempting to restore previous ingestion state...")
-    metaStore.readIngestionConfigs()
-             .map { configs =>
-               initDatasets ++= configs.map(_.ref)
-               configs.foreach { config => self ! SetupDataset(config) }
-               if (configs.isEmpty) initiateShardStateRecovery()
-             }.recover {
-               case e: Exception =>
-                 logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
-                 // Continue the protocol, so that the singleton can come up
-                 initiateShardStateRecovery()
-             }
+    settings.streamConfigs.foreach { config =>
+      val dataset = Dataset.fromConfig(config)
+      val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
+      initializeDataset(dataset, ingestion, None)
+    }
+    initiateShardStateRecovery()
+
   }
 
   override def postStop(): Unit = {
+    shardManager.logAllMappers("PostStop of NodeClusterActor")
     super.postStop()
     cluster.unsubscribe(self)
     pubTask foreach (_.cancel)
@@ -315,14 +314,10 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case GetShardMap(ref)       => shardManager.sendSnapshot(ref, sender())
   }
 
-  // The initial recovery handler: recover dataset setup/ingestion config first
   def datasetHandler: Receive = LoggingReceive {
     case e: SetupDataset =>
-      setupDataset(e, sender()) map { _ => self ! SetupDatasetFinished(e.ref) }
-    case e: SetupDatasetFinished => {
-      initDatasets -= e.ref
-      if (initDatasets.isEmpty) initiateShardStateRecovery()
-    }
+      // used by unit testing only
+      initializeDataset(e.dataset, e.config, Some(sender()))
     case GetDatasetFromRef(r) => sender() ! datasets(r)
   }
 
@@ -357,7 +352,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
     case RemoveStaleCoordinators  => shardManager.removeStaleCoordinators()
-    case e: SetupDataset          => setupDataset(e, sender())
+    case e: SetupDataset          => // used in unit tests only
+                                     initializeDataset(e.dataset, e.config, Some(sender()))
     case e: StartShards           => shardManager.startShards(e, sender())
     case e: StopShards            => shardManager.stopShards(e, sender())
   }
@@ -418,21 +414,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     }
   }
 
-  /** Initiated by Client and Spark FiloDriver setup. */
-  private def setupDataset(setup: SetupDataset, origin: ActorRef): Future[Unit] = {
-    logger.info(s"Registering dataset ${setup.ref} with ingestion source ${setup.source}")
-    (for { datasetObj    <- metaStore.getDataset(setup.ref)
-           resp1         <- metaStore.writeIngestionConfig(setup.config) }
-      yield {
-        // Add the dataset first so once DatasetVerified is sent back any queries will actually list the dataset
-        datasets(setup.ref) = datasetObj
-        shardManager.addDataset(setup, datasetObj, origin)
-        sources(setup.ref) = setup.source
-      }).recover {
-      case err: Dataset.BadSchema           => origin ! BadSchema(err.toString)
-      case NotFoundError(what)              => origin ! DatasetUnknown(setup.ref)
-      case t: Throwable                     => origin ! MetadataException(t)
-    }
+  private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig, replyTo: Option[ActorRef]): Unit = {
+    datasets(dataset.ref) = dataset
+    val source = IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig)
+    shardManager.addDataset(dataset, ingestConfig, source, replyTo)
+    sources(dataset.ref) = source
   }
 
   def routerEvents: Receive = LoggingReceive {

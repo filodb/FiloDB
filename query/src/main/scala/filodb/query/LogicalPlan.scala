@@ -107,13 +107,14 @@ case class Aggregate(operator: AggregationOperator,
   *
   * @param on columns to join on
   * @param ignoring columns to ignore while joining
+  * @param include labels specified in group_left/group_right to be included from one side
   */
 case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       operator: BinaryOperator,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
-                      ignoring: Seq[String] = Nil) extends PeriodicSeriesPlan
+                      ignoring: Seq[String] = Nil, include: Seq[String] = Nil) extends PeriodicSeriesPlan
 
 /**
   * Apply Scalar Binary operation to a collection of RangeVectors
