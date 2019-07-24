@@ -10,6 +10,8 @@ import monix.reactive.Observable
 import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -660,6 +662,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
+      FiloSchedulers.assertThreadName(QuerySchedName)
       ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>

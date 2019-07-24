@@ -35,8 +35,10 @@ class OnDemandPagingShard(dataset: Dataset,
 TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
+  import FiloSchedulers._
 
-  private val singleThreadPool = Scheduler.singleThread(s"make-partition-${dataset.ref}-$shardNum")
+  private val singleThreadPool =
+    Scheduler.singleThread(s"${FiloSchedulers.PopulateChunksSched}-${dataset.ref}-$shardNum")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
@@ -160,6 +162,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
                                                                   Task[Seq[TimeSeriesPartition]] = Task {
+    assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
     partIDs.map { id =>
       // for each partID: look up in partitions

@@ -235,6 +235,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   override def postStop(): Unit = {
+    shardManager.logAllMappers("PostStop of NodeClusterActor")
     super.postStop()
     cluster.unsubscribe(self)
     pubTask foreach (_.cancel)

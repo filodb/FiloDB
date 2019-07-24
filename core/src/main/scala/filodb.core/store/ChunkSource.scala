@@ -8,7 +8,7 @@ import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core._
-import filodb.core.memstore.TimeSeriesShard
+import filodb.core.memstore.{FiloSchedulers, TimeSeriesShard}
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 
@@ -135,7 +135,7 @@ trait DefaultChunkSource extends ChunkSource {
    */
   def partMaker(dataset: Dataset, shard: Int): RawToPartitionMaker
 
-  val singleThreadPool = Scheduler.singleThread("make-partition")
+  val singleThreadPool = Scheduler.singleThread(FiloSchedulers.PopulateChunksSched)
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
