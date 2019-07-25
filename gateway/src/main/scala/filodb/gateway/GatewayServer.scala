@@ -26,7 +26,6 @@ import org.jctools.queues.MpscGrowableArrayQueue
 import org.rogach.scallop._
 
 import filodb.coordinator.{FilodbSettings, ShardMapper, StoreFactory}
-import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.gateway.conversion._
@@ -58,8 +57,9 @@ import filodb.timeseries.TestTimeseriesProducer
  */
 object GatewayServer extends StrictLogging {
   // Get global configuration using universal FiloDB/Akka-based config
-  val config = GlobalConfig.systemConfig
-  val storeFactory = StoreFactory(new FilodbSettings(config), Scheduler.io())
+  val settings = new FilodbSettings()
+  val config = settings.allConfig
+  val storeFactory = StoreFactory(settings, Scheduler.io())
 
   // ==== Metrics ====
   val numInfluxMessages = Kamon.counter("num-influx-messages")
@@ -89,7 +89,7 @@ object GatewayServer extends StrictLogging {
     val sourceConfig = ConfigFactory.parseFile(new java.io.File(userOpts.sourceConfigPath()))
     val numShards = sourceConfig.getInt("num-shards")
 
-    val dataset = Dataset.fromConfig(sourceConfig)
+    val dataset = settings.datasetFromStream(sourceConfig)
 
     // NOTE: the spread MUST match the default spread used in the HTTP module for consistency between querying
     //       and ingestion sharding

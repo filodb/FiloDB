@@ -9,12 +9,13 @@ import scala.util.Try
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import monix.reactive.Observable
+import org.scalactic._
 
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.{SpreadChange, SpreadProvider, StaticSpreadProvider}
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Schemas}
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
@@ -144,6 +145,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           val (remote, ref) = getClientAndRef(args)
           dumpShardStatus(remote, ref)
 
+        case Some("validateSchemas") => validateSchemas()
+
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
@@ -199,6 +202,22 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         }
       case _ =>
         println(s"Unable to obtain status for dataset $ref, has it been setup yet?")
+    }
+  }
+
+  def validateSchemas(): Unit = {
+    Schemas.fromConfig(config) match {
+      case Good(Schemas(partSchema, data, _)) =>
+        println("Schema validated.\nPartition schema:")
+        partSchema.columns.foreach(c => println(s"\t$c"))
+        data.foreach { case (schemaName, sch) =>
+          println(s"Schema $schemaName:")
+          sch.columns.foreach(c => println(s"\t$c"))
+        }
+      case Bad(errors) =>
+        println(s"Schema validation errors:")
+        errors.foreach { case (name, err) => println(s"$name\t$err")}
+        exitCode = 1
     }
   }
 

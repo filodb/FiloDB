@@ -19,13 +19,7 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
     inline-dataset-configs = [
       {
         dataset = "prometheus"
-        definition {
-          partition-columns = ["tags:map"]
-          data-columns = ["timestamp:ts", "value:double"]
-          row-key-columns = [ "timestamp" ]
-          downsamplers = []
-        }
-        ${TestData.optionsString}
+        schema = "prometheus"
         num-shards = 4
         min-num-nodes = 1
         sourcefactory = "${classOf[NoOpStreamFactory].getName}"
