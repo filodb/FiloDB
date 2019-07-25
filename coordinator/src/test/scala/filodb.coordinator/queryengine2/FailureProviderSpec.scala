@@ -1,6 +1,5 @@
 package filodb.coordinator.queryengine2
 
-import filodb.coordinator.queryengine._
 import filodb.core.DatasetRef
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
@@ -44,7 +43,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
     QueryRoutingPlanner.hasSingleTimeRange(summed1) shouldEqual (true)
     QueryRoutingPlanner.hasSingleTimeRange(binaryJoinLogicalPlan) shouldEqual (false)
 
-    val timeRange = QueryRoutingPlanner.getTimeFromLogicalPlan(summed1)
+    val timeRange = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(summed1)
 
     timeRange.startInMillis shouldEqual (100000)
     timeRange.endInMillis shouldEqual (150000)
@@ -53,14 +52,17 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should update time in logical plan") {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
-    val updatedTimeLogicalPlan = QueryRoutingPlanner.updateTimeLogicalPlan(summed1, TimeRange(20000, 30000))
+    val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"))
+    val updatedTimeLogicalPlan = QueryRoutingPlanner.copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 0)
 
-    QueryRoutingPlanner.getTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
-    QueryRoutingPlanner.getTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
+    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
+    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
+
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
-    updatedTimeLogicalPlan.asInstanceOf[Aggregate].vectors.isInstanceOf[PeriodicSeriesWithWindowing] shouldEqual (true)
-    updatedTimeLogicalPlan.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].
-      rawSeries shouldEqual (raw1)
+    val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
+    aggregate.vectors.isInstanceOf[PeriodicSeriesWithWindowing] shouldEqual (true)
+    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].rawSeries.toString shouldEqual
+      (expectedRaw.toString)
 
   }
 
@@ -82,17 +84,12 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
   it("should split failures to local and remote correctly") {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
-    val failureTimeRanges = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(1500, 5000), None), FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("local", datasetRef,
-      TimeRange(1000, 2000), None), FailureTimeRange("local", datasetRef,
-      TimeRange(100, 700), Some(dummyDispatcher)))
 
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("remote", datasetRef,
       TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
       TimeRange(1000, 2000), Some(dummyDispatcher)))
 
-    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 1000))),
+    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
       RemoteRoute(Some(TimeRange(1000, 3000)), dummyDispatcher))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 3000)
 
@@ -107,7 +104,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
       TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
       TimeRange(1000, 3000), None))
 
-    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 1000)), dummyDispatcher),
+    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999)), dummyDispatcher),
       LocalRoute(Some(TimeRange(1000, 5000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
@@ -135,8 +132,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
       TimeRange(1000, 3000), None), FailureTimeRange("local", datasetRef,
       TimeRange(4000, 4500), Some(dummyDispatcher)))
 
-    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 1000)), dummyDispatcher),
-      LocalRoute(Some(TimeRange(1000, 4000))), RemoteRoute(Some(TimeRange(4000, 5000)), dummyDispatcher))
+    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999)), dummyDispatcher),
+      LocalRoute(Some(TimeRange(1000, 3999))), RemoteRoute(Some(TimeRange(4000, 5000)), dummyDispatcher))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
@@ -153,8 +150,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
       TimeRange(1000, 3000), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
       TimeRange(4000, 4500), None))
 
-    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 1000))),
-      RemoteRoute(Some(TimeRange(1000, 4000)), dummyDispatcher), LocalRoute(Some(TimeRange(4000, 5000))))
+    val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
+      RemoteRoute(Some(TimeRange(1000, 3999)), dummyDispatcher), LocalRoute(Some(TimeRange(4000, 5000))))
 
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
@@ -162,4 +159,22 @@ class FailureProviderSpec extends FunSpec with Matchers {
     routes(1).equals(expectedResult(1)) shouldEqual true
     routes.sameElements(expectedResult) shouldEqual (true)
   }
+
+  it("should update time in logical plan when lookBack is present") {
+    val datasetRef = DatasetRef("dataset", Some("cassandra"))
+
+    val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"))
+    val updatedTimeLogicalPlan = QueryRoutingPlanner.copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 100)
+
+    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20100)
+    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
+
+    updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
+    val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
+    aggregate.vectors.isInstanceOf[PeriodicSeriesWithWindowing] shouldEqual (true)
+    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].rawSeries.toString shouldEqual
+      (expectedRaw.toString)
+
+  }
+
 }

@@ -9,9 +9,9 @@ import scala.concurrent.duration.FiniteDuration
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
-import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, QueryRoutingPlanner, TimeRange}
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query
@@ -30,18 +30,12 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
   val dataset = MetricsTestData.timeseriesDataset
 
-  val emptyFailureProvider = new FailureProvider {
-    override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-      Seq[FailureTimeRange]()
-    }
-  }
-
   val emptyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dataset, mapperRef, emptyFailureProvider)
+  val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
 
   /*
   This is the PromQL
@@ -146,7 +140,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     // Custom QueryEngine with different dataset with different metric name
     val dataset2 = dataset.copy(options = dataset.options.copy(
       metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
-    val engine2 = new QueryEngine(dataset2, mapperRef, emptyFailureProvider)
+    val engine2 = new QueryEngine(dataset2, mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryOptions())
@@ -245,17 +239,17 @@ class QueryEngineSpec extends FunSpec with Matchers {
   it("should generate RemoteExec when failures are present in local") {
     val to = 10000
     val from = 100
+    val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(1500, 5000), None), FailureTimeRange("remote", datasetRef,
-          TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
-          TimeRange(1000, 2000), Some(emptyDispatcher)), FailureTimeRange("remote", datasetRef,
-          TimeRange(100, 700), None))
+        Seq(FailureTimeRange("local", datasetRef, TimeRange(1500, 5000), Some(emptyDispatcher)), // Should be removed
+          FailureTimeRange("remote", datasetRef, TimeRange(100, 200), None),
+          FailureTimeRange("local", datasetRef, TimeRange(1000, 2000), Some(emptyDispatcher)),
+          FailureTimeRange("remote", datasetRef, TimeRange(100, 700), None)) // Should be removed
       }
     }
 
@@ -264,7 +258,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
-    //Should be broken into local exec plan from 100 to 1000 and remote exec from 1000 to 10000
+    //Should be broken into local exec plan from 100 to 999 and remote exec from 1000 to 10000
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
@@ -280,12 +274,12 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (100)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (1000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (999)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
     // RemoteExec should have same logical plan with updated time based on failures
-    QueryRoutingPlanner.updateTimeLogicalPlan(summed, TimeRange(1000, 10000)).
+    QueryRoutingPlanner.copyWithUpdatedTimeRange(summed, TimeRange(1000, 10000), 0).
       toString() shouldEqual (child2.params.logicalPlan.toString)
     child2.params.queryOptions.spreadProvider.isDefined shouldEqual (false) // QueryOptions should be false
 
@@ -294,6 +288,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   it("should not generate RemoteExec plan when local overlapping failure is bigger") {
     val to = 10000
     val from = 100
+    val intervalSelector = IntervalSelector(from, to)
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
@@ -325,5 +320,79 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (10000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
+  }
+
+  it("should generate only RemoteExec when failure is present only in local") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(1000, 6000), Some(emptyDispatcher)))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions())
+
+    execPlan.isInstanceOf[RemoteExec] shouldEqual (true)
+    execPlan.getPlan().foreach(print(_))
+    execPlan.asInstanceOf[RemoteExec].params.logicalPlan.toString shouldEqual(summed.toString)
+
+  }
+
+  it("should generate RemotExecPlan with RawSeries time according to lookBack") {
+    val to = 2000
+    val from = 1000
+    val intervalSelector = IntervalSelector(from - 50 , to) // Lookback of 50
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(980, 1030), Some(emptyDispatcher)), FailureTimeRange("remote", datasetRef,
+          TimeRange(1060, 1090), None))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions())
+
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+
+    //Should be broken into local exec plan from 100 to 1000 and remote exec from 1000 to 1059
+    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+    stitchRvsExec.children.size shouldEqual (2)
+    stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[RemoteExec] shouldEqual (true)
+
+    val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[RemoteExec]
+
+    child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
+
+    child1.children.foreach { l1 =>
+      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual 1060
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000
+      l1.rangeVectorTransformers.size shouldEqual 2
+      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1110)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000)
+      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+
+    // RemoteExec should have same logical plan with updated time based on failures
+    QueryRoutingPlanner.copyWithUpdatedTimeRange(summed, TimeRange(950, 1059), 50).
+      toString() shouldEqual (child2.params.logicalPlan.toString)
+    child2.params.queryOptions.spreadProvider.isDefined shouldEqual (false) // QueryOptions should be false
+
   }
 }

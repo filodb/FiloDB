@@ -13,7 +13,6 @@ import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryengine._
 import filodb.core.{SpreadProvider, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
@@ -58,34 +57,33 @@ class QueryEngine(dataset: Dataset,
   }
 
   /**
-    * Converts Routes to ExecPlan
+    * Converif(failures.isEmpty)ts Routes to ExecPlan
     */
-  def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
-                          options: QueryOptions, spreadProvider: SpreadProvider): ExecPlan = {
+  private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
+                          options: QueryOptions, spreadProvider: SpreadProvider, lookBackTime: Long): ExecPlan = {
     val execPlans : Seq[ExecPlan]= routes.map { route =>
       route match {
-        case route: LocalRoute => if (!route.asInstanceOf[LocalRoute].tr.isDefined)
-          genExecPlan(rootLogicalPlan, queryId, submitTime, options, spreadProvider)
+        case route: LocalRoute => if (!route.timeRange.isDefined)
+          generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, spreadProvider)
         else
-          genExecPlan(QueryRoutingPlanner.updateTimeLogicalPlan(rootLogicalPlan,
-            route.asInstanceOf[LocalRoute].tr.get),
-            queryId, submitTime, options, spreadProvider)
-
+          generateLocalExecPlan(QueryRoutingPlanner.copyWithUpdatedTimeRange(rootLogicalPlan,
+            route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime), queryId, submitTime, options, spreadProvider)
         case route: RemoteRoute =>
-          val remoteLogicalPlan = route.asInstanceOf[RemoteRoute].tr.map(_ =>QueryRoutingPlanner.
-            updateTimeLogicalPlan(rootLogicalPlan,
-            route.asInstanceOf[RemoteRoute].tr.get)).getOrElse(rootLogicalPlan)
+          val remoteLogicalPlan = route.timeRange.map(_ => QueryRoutingPlanner.
+            copyWithUpdatedTimeRange(rootLogicalPlan, route.timeRange.get, lookBackTime)).getOrElse(rootLogicalPlan)
 
           RemoteExec(queryId, route.dispatcher, dataset.ref, exec.RemoteExecParams(remoteLogicalPlan,
-            options.copy(processFailures = true)), submitTime)
+            options.copy(processFailures = false)), submitTime)
       }
     }
 
     if (execPlans.size == 1)
-      return execPlans(0)
+      return execPlans.head
     else
-      // Stitch RemoteExec plan results with local using InProcessorDispatcher
-      StitchRvsExec(queryId, InProcessPlanDispatcher(dataset), execPlans)
+      /* Stitch RemoteExec plan results with local using InProcessorDispatcher
+        RemoteExec should be in end as it does not have schema */
+       StitchRvsExec(queryId, InProcessPlanDispatcher(dataset),
+        execPlans.sortWith((x, y) => !x.isInstanceOf[RemoteExec] ))
   }
 
   /**
@@ -97,22 +95,28 @@ class QueryEngine(dataset: Dataset,
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
-    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures)
-      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures ||
+      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan))
+      return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
-      val failures: Seq[FailureTimeRange] = failureProvider.getFailures(dataset.ref,
-        QueryRoutingPlanner.getTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)).
-        sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
+    val periodicSeriesTime = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)
+    val lookBackTime: Long = QueryRoutingPlanner.getRawSeriesStartTime(rootLogicalPlan).
+      map(periodicSeriesTime.startInMillis - _ ).getOrElse(return  generateLocalExecPlan
+    (rootLogicalPlan, queryId, submitTime, options, querySpreadProvider))
+
+    val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
+    val failures: Seq[FailureTimeRange] = failureProvider.getFailures(dataset.ref, routingTime).
+      sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
 
     if(failures.isEmpty)
-      return genExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+       return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
-    val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures)
+    val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures, routingTime)
 
-    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime)
   }
 
-  private def genExecPlan(logicalPlan: LogicalPlan,
+  private def generateLocalExecPlan(logicalPlan: LogicalPlan,
                           queryId: String,
                           submitTime: Long,
                           options: QueryOptions, spreadProvider: SpreadProvider) = {

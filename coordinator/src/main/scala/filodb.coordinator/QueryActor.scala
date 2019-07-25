@@ -11,8 +11,7 @@ import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 import scala.util.control.NonFatal
 
-import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
-import filodb.coordinator.queryengine2.QueryEngine
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
@@ -78,14 +77,8 @@ final class QueryActor(memStore: MemStore,
                    }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
-  val emptyFailureProvider = new FailureProvider {
-    override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-      Seq[FailureTimeRange]()
-    }
-  }
-
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
-    emptyFailureProvider, functionalSpreadProvider)
+    EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)

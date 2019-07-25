@@ -13,8 +13,8 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.queryengine.{FailureProvider, FailureTimeRange, TimeRange}
-import filodb.core.{DatasetRef, SpreadChange}
+import filodb.coordinator.queryengine2.EmptyFailureProvider
+import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
@@ -100,15 +100,9 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   store.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
-  val emptyFailureProvider = new FailureProvider {
-    override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-      Seq[FailureTimeRange]()
-    }
-  }
-
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset, shardMapper, emptyFailureProvider)
+  val engine = new QueryEngine(dataset, shardMapper, EmptyFailureProvider)
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
