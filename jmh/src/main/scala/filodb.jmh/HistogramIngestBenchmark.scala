@@ -1,7 +1,5 @@
 package filodb.jmh
 
-import scala.language.postfixOps
-
 import java.util.concurrent.TimeUnit
 
 import scala.language.postfixOps
