@@ -294,6 +294,7 @@ object RangeFunction {
   def histChunkedFunction(func: Option[RangeFunctionId],
                           funcParams: Seq[Any] = Nil,
                           maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
+    case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
     case None                 => () => new LastSampleChunkedFunctionH
     case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
@@ -393,6 +394,39 @@ extends LastSampleChunkedFunction[TransientHistRow] {
   final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
     timestamp = ts
     value = valReader.asHistReader(endRowNum)
+  }
+}
+
+class LastSampleChunkedFunctionHMax(maxColID: Int,
+                                    var timestamp: Long = -1L,
+                                    var value: bv.HistogramWithBuckets = bv.Histogram.empty,
+                                    var max: Double = Double.NaN) extends ChunkedRangeFunction[TransientHistMaxRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty; max = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+    sampleToEmit.setDouble(2, max)
+  }
+
+  // Add each chunk and update timestamp and value such that latest sample wins
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Just in case timestamp vectors are a bit longer than others.
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // update timestamp only if
+    //   1) endRowNum >= 0 (timestamp within chunk)
+    //   2) timestamp is within stale window; AND
+    //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
+    if (endRowNum >= 0) {
+      val ts = tsReader(tsVector, endRowNum)
+      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
+        val maxVect = info.vectorPtr(maxColID)
+        timestamp = ts
+        value = valueReader.asHistReader(endRowNum)
+        max = bv.DoubleVector(maxVect)(maxVect, endRowNum)
+      }
+    }
   }
 }
 

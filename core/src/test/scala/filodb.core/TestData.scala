@@ -36,7 +36,7 @@ object TestData {
                   }.toListL.map { rawChunkSets => RawPartData(partKeyBytes, rawChunkSets) }
   }
 
-  val sourceConf = ConfigFactory.parseString("""
+  val sourceConfStr = """
     store {
       max-chunks-size = 100
       demand-paged-chunk-retention-period = 10 hours
@@ -48,10 +48,22 @@ object TestData {
       part-index-flush-max-delay = 10 seconds
       part-index-flush-min-delay = 2 seconds
     }
-  """)
+  """
+  val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
   val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
+
+  val optionsString = """
+  options {
+    copyTags = {}
+    ignoreShardKeyColumnSuffixes = {}
+    ignoreTagsOnPartitionKeyHash = ["le"]
+    metricColumn = "__name__"
+    valueColumn = "value"
+    shardKeyColumns = ["__name__", "_ns"]
+  }
+  """
 }
 
 object NamesTestData {
@@ -188,6 +200,17 @@ object GdeltTestData {
   val datasetOptions = DatasetOptions.DefaultOptions.copy(
     shardKeyColumns = Seq( "__name__","_ns"))
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID", datasetOptions)
+
+  val datasetOptionConfig = """
+    options {
+      shardKeyColumns = ["__name__","_ns"]
+      ignoreShardKeyColumnSuffixes = {}
+      valueColumn = "AvgTone"
+      metricColumn = "__name__"
+      ignoreTagsOnPartitionKeyHash = []
+      copyTags = {}
+    }
+  """
 }
 
 // A simulation of machine metrics data

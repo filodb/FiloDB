@@ -31,15 +31,15 @@ object StoreFactory extends Instance with StrictLogging {
   /**
    * Initializes the StoreFactory with configuration and a scheduler
    * @param settings a FilodbSettings
-   * @param sched a Monix Scheduler for scheduling async I/O operations, probably the default I/O pool
+   * @param ioPool a Monix Scheduler for scheduling async I/O operations, probably the default I/O pool
    */
-  def apply(settings: FilodbSettings, sched: Scheduler): StoreFactory =
+  def apply(settings: FilodbSettings, ioPool: Scheduler): StoreFactory =
     settings.StorageStrategy match {
       case StoreStrategy.Configured(fqcn) =>
         val clazz = createClass(fqcn).get
         val args = Seq(
           (classOf[Config] -> settings.config),
-          (classOf[Scheduler] -> sched))
+          (classOf[Scheduler] -> ioPool))
 
         createInstance[StoreFactory](clazz, args).get
     }
@@ -49,8 +49,8 @@ object StoreFactory extends Instance with StrictLogging {
  * TimeSeriesMemstore with a NullChunkSink (no chunks persisted), and in-memory MetaStore.
  * Not what you want for production, but good for getting started and running tests.
  */
-class TimeSeriesNullStoreFactory(config: Config, scheduler: Scheduler) extends StoreFactory {
-  implicit val sched = scheduler
+class TimeSeriesNullStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
+  implicit val ioSched = ioPool
   val metaStore = SingleJvmInMemoryStore.metaStore
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, metaStore)
 }

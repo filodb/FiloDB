@@ -6,11 +6,11 @@ import scala.collection.immutable
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
+import akka.Done
 import akka.actor._
 import akka.cluster._
 import akka.cluster.ClusterEvent._
 import akka.util.Timeout
-import akka.Done
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -18,6 +18,7 @@ import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.misc.NonFatal
 
 import filodb.core.GlobalScheduler
+import filodb.core.memstore.FiloSchedulers
 import filodb.core.store.MetaStore
 
 /** The base Coordinator Extension implementation providing standard ActorSystem startup.
@@ -62,7 +63,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
 
   implicit lazy val ec = GlobalScheduler.globalImplicitScheduler
 
-  lazy val ioPool = Scheduler.io(name = IOPoolName,
+  lazy val ioPool = Scheduler.io(name = FiloSchedulers.IOSchedName,
                                  reporter = UncaughtExceptionReporter(
                                    logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
 

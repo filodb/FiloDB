@@ -14,12 +14,12 @@ import filodb.core.store.NullColumnStore
  * and a Cassandra MetaStore
  *
  * @param config a Typesafe Config, not at the root but at the "filodb." level
- * @param sched a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
+ * @param ioPool a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
  */
-class CassandraTSStoreFactory(config: Config, sched: Scheduler) extends StoreFactory {
-  val colStore = new CassandraColumnStore(config, sched)(sched)
-  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(sched)
-  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(sched)
+class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
+  val colStore = new CassandraColumnStore(config, ioPool)(ioPool)
+  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)
+  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
 }
 
 /**
@@ -29,10 +29,10 @@ class CassandraTSStoreFactory(config: Config, sched: Scheduler) extends StoreFac
   * on-demand-paging.
   *
   * @param config a Typesafe Config, not at the root but at the "filodb." level
-  * @param sched a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
+  * @param ioPool a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
   */
-class NonPersistentTSStoreFactory(config: Config, sched: Scheduler) extends StoreFactory {
-  val colStore = new NullColumnStore()(sched)
-  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(sched)
-  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(sched)
+class NonPersistentTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
+  val colStore = new NullColumnStore()(ioPool)
+  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)
+  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
 }
