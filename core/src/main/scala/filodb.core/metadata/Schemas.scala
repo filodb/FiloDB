@@ -66,6 +66,7 @@ final case class PartitionSchema(columns: Seq[Column],
 
 object DataSchema {
   import Dataset._
+  import java.nio.charset.StandardCharsets.UTF_8
 
   def validateValueColumn(dataColumns: Seq[Column], valueColName: String): ColumnId Or BadSchema = {
     val index = dataColumns.indexWhere(_.name == valueColName)
@@ -80,7 +81,7 @@ object DataSchema {
     var hash = 7
     for { col <- columns } {
       // Use XXHash to get high quality hash for column name.  String.hashCode is _horrible_
-      hash = 31 * hash + (BinaryRegion.hash32(col.name.getBytes) * col.columnType.hashCode)
+      hash = 31 * hash + (BinaryRegion.hash32(col.name.getBytes(UTF_8)) * col.columnType.hashCode)
     }
     hash & 0x0ffff
   }
