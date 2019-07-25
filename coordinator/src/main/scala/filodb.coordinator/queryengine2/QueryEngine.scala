@@ -80,10 +80,10 @@ class QueryEngine(dataset: Dataset,
     if (execPlans.size == 1)
       return execPlans.head
     else
-      /* Stitch RemoteExec plan results with local using InProcessorDispatcher
-        RemoteExec should be in end as it does not have schema */
+      // Stitch RemoteExec plan results with local using InProcessorDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
        StitchRvsExec(queryId, InProcessPlanDispatcher(dataset),
-        execPlans.sortWith((x, y) => !x.isInstanceOf[RemoteExec] ))
+        execPlans.sortWith((x, y) => !x.isInstanceOf[RemoteExec]))
   }
 
   /**

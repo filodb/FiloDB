@@ -27,11 +27,10 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
                                         timeout: FiniteDuration): Task[QueryResponse] = {
     // Since we will be testing with StitchRvsExec only,
     // any other plan will need more testing before this dispatcher can be used.
-    plan match {
-      case _: NonLeafExecPlan =>
-      case default => throw new IllegalStateException(
-        s"Only non leaf exec plan are supported by inprocess dispatcher $default")
-    }
+    if (!plan.isInstanceOf[NonLeafExecPlan])
+      throw new IllegalStateException(
+        s"Only non leaf exec plan are supported by inprocess dispatcher $plan")
+
     // Empty query config, since its does not apply in case of non-leaf plans
     val queryConfig: QueryConfig = new QueryConfig(ConfigFactory.empty())
     // unsupported source since its does not apply in case of non-leaf plans
