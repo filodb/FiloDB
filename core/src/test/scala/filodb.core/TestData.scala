@@ -51,7 +51,7 @@ object TestData {
   """)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
-  val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
+  val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
 }
 
 object NamesTestData {
