@@ -47,9 +47,11 @@ final case class DataSchema private(name: String,
 final case class PartitionSchema(columns: Seq[Column],
                                  predefinedKeys: Seq[String],
                                  options: DatasetOptions) {
+  import PartitionSchema._
+
   val binSchema = new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)), Some(0), predefinedKeys)
 
-  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, binSchema, 10240)
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, binSchema, DefaultContainerSize)
 
   /**
    * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
@@ -127,6 +129,8 @@ object DataSchema {
 
 object PartitionSchema {
   import Dataset._
+
+  val DefaultContainerSize = 10240
 
   /**
    * Creates and validates a new PartitionSchema

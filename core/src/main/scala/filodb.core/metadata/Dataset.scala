@@ -35,9 +35,9 @@ import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCU
  * something which makes a value unique within a partition and describes a range of data in a chunk.
  */
 final case class Dataset(name: String, schema: Schema) {
-  def options: DatasetOptions = schema.partition.options
-  def dataColumns: Seq[Column] = schema.data.columns
-  def partitionColumns: Seq[Column] = schema.partition.columns
+  val options         = schema.partition.options
+  val dataColumns     = schema.data.columns
+  val partitionColumns = schema.partition.columns
 
   val ref = DatasetRef(name, None)
   val rowKeyColumns   = schema.data.columns take 1
