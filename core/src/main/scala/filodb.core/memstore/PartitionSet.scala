@@ -23,7 +23,7 @@ import scala.{specialized => sp}
 
 import spire.syntax.all._
 
-import filodb.core.binaryrecord2.{RecordComparator, RecordSchema}
+import filodb.core.metadata.Dataset
 import filodb.core.store.FiloPartition
 import filodb.memory.BinaryRegionLarge
 
@@ -37,8 +37,7 @@ import filodb.memory.BinaryRegionLarge
  * When the type A is known (or the caller is specialized on A),
  * Set[A] will store the values in an unboxed array.
  */
-final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: Int,
-                         ingestSchema: RecordSchema, comp: RecordComparator) extends Serializable { lhs =>
+final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: Int) extends Serializable { lhs =>
   // set machinery
   var items: Array[FiloPartition] = as      // slots for items
   var buckets: Array[Byte] = bs // buckets track defined/used slots
@@ -163,9 +162,9 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * @param ingestOffset the offset/address of the ingestion BinaryRecord
    * @param addFunc a no-arg function to create the FiloPartition if it cannot be found
    */
-  final def getOrAddWithIngestBR(ingestBase: Any, ingestOffset: Long,
+  final def getOrAddWithIngestBR(ingestBase: Any, ingestOffset: Long, ds: Dataset,
                                  addFunc: => FiloPartition): FiloPartition = {
-    getWithIngestBR(ingestBase, ingestOffset) match {
+    getWithIngestBR(ingestBase, ingestOffset, ds) match {
       case null =>
         val newItem = addFunc
         if (newItem != null) add(newItem)
@@ -177,19 +176,20 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   /**
    * Returns the partition that matches the partition key in an ingest record, or NULL if it doesn't exist
    */
-  final def getWithIngestBR(ingestBase: Any, ingestOffset: Long): FiloPartition = {
+  final def getWithIngestBR(ingestBase: Any, ingestOffset: Long, ds: Dataset): FiloPartition = {
     @inline @tailrec def loop(i: Int, perturbation: Int): FiloPartition = {
       val j = i & mask
       val status = buckets(j)
       if (status == 0) {
         null
-      } else if (status == 3 && comp.partitionMatch(ingestBase, ingestOffset, null, items(j).partKeyOffset)) {
+      } else if (status == 3 &&
+                 ds.comparator.partitionMatch(ingestBase, ingestOffset, null, items(j).partKeyOffset)) {
         items(j)
       } else {
         loop((i << 2) + i + perturbation + 1, perturbation >> 5)
       }
     }
-    val i = ingestSchema.partitionHash(ingestBase, ingestOffset) & 0x7fffffff
+    val i = ds.ingestionSchema.partitionHash(ingestBase, ingestOffset) & 0x7fffffff
     loop(i, i)
   }
 
@@ -197,7 +197,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * Searches for and returns Some(tsPartition) if a partition exists with a key matching the passed in
    * partition key BinaryRecord.  Otherwise, None is returned.
    */
-  final def getWithPartKeyBR(partBase: Any, partOffset: Long): Option[FiloPartition] = {
+  final def getWithPartKeyBR(partBase: Any, partOffset: Long, ds: Dataset): Option[FiloPartition] = {
     @inline @tailrec def loop(i: Int, perturbation: Int): Option[FiloPartition] = {
       val j = i & mask
       val status = buckets(j)
@@ -210,7 +210,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
         loop((i << 2) + i + perturbation + 1, perturbation >> 5)
       }
     }
-    val i = comp.partitionKeySchema.partitionHash(partBase, partOffset) & 0x7fffffff
+    val i = ds.comparator.partitionKeySchema.partitionHash(partBase, partOffset) & 0x7fffffff
     loop(i, i)
   }
 
@@ -222,7 +222,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    *
    * This is an O(n) operation.
    */
-  final def copy(): PartitionSet = new PartitionSet(items.clone, buckets.clone, len, used, ingestSchema, comp)
+  final def copy(): PartitionSet = new PartitionSet(items.clone, buckets.clone, len, used)
 
   /**
    * Clears the set's internal state.
@@ -238,7 +238,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * This is an O(1) operation, but may generate a lot of garbage if
    * the set was previously large.
    */
-  final def clear(): Unit = { absorb(PartitionSet.empty(ingestSchema, comp)) }
+  final def clear(): Unit = { absorb(PartitionSet.empty()) }
 
   /**
    * Aborb the given set's contents into this set.
@@ -422,7 +422,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    */
   final def grow(): Unit = {
     val next = buckets.length * (if (buckets.length < 10000) 4 else 2)
-    val set = PartitionSet.ofAllocatedSize(next, ingestSchema, comp)
+    val set = PartitionSet.ofAllocatedSize(next)
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3) set += items(i)
     }
@@ -443,7 +443,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * This is an O(n) operation, where n it the set's size.
    */
   final def compact(): Unit = {
-    val set = PartitionSet.ofSize(len, ingestSchema, comp)
+    val set = PartitionSet.ofSize(len)
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3) set += items(i)
     }
@@ -651,7 +651,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * This is an O(n) operation, where n is the size of the set.
    */
   def findAll(p: FiloPartition => Boolean): PartitionSet = {
-    val out = PartitionSet.empty(lhs.ingestSchema, lhs.comp)
+    val out = PartitionSet.empty()
     cfor(0)(_ < buckets.length, _ + 1) { i =>
       if (buckets(i) == 3 && p(items(i))) out += items(i)
     }
@@ -744,8 +744,8 @@ object PartitionSet {
   /**
    * Allocate an empty Set.
    */
-  def empty(ingestSchema: RecordSchema, comp: RecordComparator): PartitionSet =
-    new PartitionSet(new Array[FiloPartition](8), new Array[Byte](8), 0, 0, ingestSchema, comp)
+  def empty(): PartitionSet =
+    new PartitionSet(new Array[FiloPartition](8), new Array[Byte](8), 0, 0)
 
   /**
    * Allocate an empty Set, capable of holding n items without
@@ -754,8 +754,8 @@ object PartitionSet {
    * This method is useful if you know you'll be adding a large number
    * of elements in advance and you want to save a few resizes.
    */
-  def ofSize(n: Int, ingestSchema: RecordSchema, comp: RecordComparator): PartitionSet =
-    ofAllocatedSize(n / 2 * 3, ingestSchema, comp)
+  def ofSize(n: Int): PartitionSet =
+    ofAllocatedSize(n / 2 * 3)
 
   /**
    * Allocate an empty Set, with underlying storage of size n.
@@ -764,12 +764,12 @@ object PartitionSet {
    * underlying array to be. In most cases ofSize() is probably what
    * you want instead.
    */
-  private def ofAllocatedSize(n: Int, ingestSchema: RecordSchema, comp: RecordComparator): PartitionSet = {
+  private def ofAllocatedSize(n: Int): PartitionSet = {
     val sz = debox.Util.nextPowerOfTwo(n) match {
       case n if n < 0 => throw debox.DeboxOverflowError(n)
       case 0 => 8
       case n => n
     }
-    new PartitionSet(new Array[FiloPartition](sz), new Array[Byte](sz), 0, 0, ingestSchema, comp)
+    new PartitionSet(new Array[FiloPartition](sz), new Array[Byte](sz), 0, 0)
   }
 }
