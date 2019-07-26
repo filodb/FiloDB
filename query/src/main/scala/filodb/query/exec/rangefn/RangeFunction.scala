@@ -146,7 +146,7 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
     }
 
     // Add any corrections from this chunk, pass on lastValue also to next chunk computation
-    correctionMeta = ccReader.updateCorrection(valueVector, startRowNum, correctionMeta)
+    correctionMeta = ccReader.updateCorrection(valueVector, correctionMeta)
   }
 
   /**
@@ -298,6 +298,8 @@ object RangeFunction {
     case None                 => () => new LastSampleChunkedFunctionH
     case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
+    case Some(Rate)           => () => new HistRateFunction
+    case Some(Increase)       => () => new HistIncreaseFunction
     case _                    => ???
   }
 

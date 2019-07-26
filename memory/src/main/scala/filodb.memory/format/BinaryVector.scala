@@ -132,16 +132,9 @@ trait VectorDataReader extends AvailableReader {
  * CorrectionMeta stores the type-specific correction amount for counter vectors.
  * It is also used to propagate and accumulate corrections as one iterates through vectors.
  */
-trait CorrectionMeta {
-  def correction: Double
-}
+trait CorrectionMeta
 
-object NoCorrection extends CorrectionMeta {
-  def correction: Double = 0.0
-}
-
-// TODO: move to DoubleVector
-final case class DoubleCorrection(lastValue: Double, correction: Double = 0.0) extends CorrectionMeta
+object NoCorrection extends CorrectionMeta
 
 /**
  * Trait that extends VectorDataReaders with methods assisting counter-like vectors that may reset or need correction
@@ -158,15 +151,14 @@ trait CounterVectorReader extends VectorDataReader {
   def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 
   /**
-   * Updates the CorrectionMeta from this vector from startElement to the end,
+   * Updates the CorrectionMeta from this vector,
    * namely the total correction over that period plus the last value of the vector.
    * Returns a new CorrectionMeta which has lastValue plus the total running correction including prev correction.
    * IE this method should upward adjust the correction in meta based on any new corrections detected in this chunk.
    * @param vector the BinaryVectorPtr native address of the BinaryVector
-   * @param startElement the starting element # to seek out correction metadata
    * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
    */
-  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta
+  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
