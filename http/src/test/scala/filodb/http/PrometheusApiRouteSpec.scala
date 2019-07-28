@@ -6,11 +6,12 @@ import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
 import akka.testkit.TestProbe
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.scalatest.FunSpec
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import filodb.coordinator._
 import filodb.core.{AsyncTest, DatasetRef, TestData}
-import filodb.prometheus.query.PrometheusModel.ExplainPlanResponse
+import filodb.query.ExplainPlanResponse
+
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
   override lazy val configString = s"""

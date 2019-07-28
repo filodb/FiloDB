@@ -1,7 +1,6 @@
 package filodb.coordinator.queryengine2
 
 import filodb.core.DatasetRef
-import filodb.query.exec.PlanDispatcher
 
 /**
   * A provider to get failure ranges. Query engine can use failure ranges while preparing physical
@@ -13,7 +12,7 @@ trait FailureProvider {
   def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange]
 }
 
-object EmptyFailureProvider extends  FailureProvider{
+object EmptyFailureProvider extends FailureProvider {
   override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
     Seq[FailureTimeRange]()
   }
@@ -33,10 +32,9 @@ case class TimeRange(startInMillis: Long, endInMillis: Long)
   * @param clusterName cluster name.
   * @param datasetRef  Dataset reference for database and dataset.
   * @param timeRange   time range.
-  * @param dispatcher  dispatcher implementation for given cluster. It is present if failure is in local.
   */
 case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange,
-                            dispatcher: Option[PlanDispatcher])
+                            isRemote: Boolean)
 
 /**
   * For rerouting queries for failure ranges, Route trait will offer more context in the form of corrective
@@ -48,4 +46,4 @@ trait Route
 
 case class LocalRoute(timeRange: Option[TimeRange]) extends Route
 
-case class RemoteRoute(timeRange: Option[TimeRange], dispatcher: PlanDispatcher) extends Route
+case class RemoteRoute(timeRange: Option[TimeRange]) extends Route

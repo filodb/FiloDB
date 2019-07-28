@@ -57,10 +57,12 @@ class QueryEngine(dataset: Dataset,
   }
 
   /**
-    * Converif(failures.isEmpty)ts Routes to ExecPlan
+    * Converts Routes to ExecPlan
     */
   private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
-                          options: QueryOptions, spreadProvider: SpreadProvider, lookBackTime: Long): ExecPlan = {
+                                  options: QueryOptions, spreadProvider: SpreadProvider, lookBackTime: Long,
+                                  tsdbQueryParams: TsdbQueryParams): ExecPlan = {
+
     val execPlans : Seq[ExecPlan]= routes.map { route =>
       route match {
         case route: LocalRoute => if (!route.timeRange.isDefined)
@@ -69,11 +71,10 @@ class QueryEngine(dataset: Dataset,
           generateLocalExecPlan(QueryRoutingPlanner.copyWithUpdatedTimeRange(rootLogicalPlan,
             route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime), queryId, submitTime, options, spreadProvider)
         case route: RemoteRoute =>
-          val remoteLogicalPlan = route.timeRange.map(_ => QueryRoutingPlanner.
-            copyWithUpdatedTimeRange(rootLogicalPlan, route.timeRange.get, lookBackTime)).getOrElse(rootLogicalPlan)
-
-          RemoteExec(queryId, route.dispatcher, dataset.ref, exec.RemoteExecParams(remoteLogicalPlan,
-            options.copy(processFailures = false)), submitTime)
+          val timeRange = route.timeRange.get
+          PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref,
+            tsdbQueryParams.asInstanceOf[PromQlQueryParams].copy(start = timeRange.startInMillis + lookBackTime, end =
+              timeRange.endInMillis), submitTime)
       }
     }
 
@@ -83,14 +84,14 @@ class QueryEngine(dataset: Dataset,
       // Stitch RemoteExec plan results with local using InProcessorDispatcher
       // Sort to move RemoteExec in end as it does not have schema
        StitchRvsExec(queryId, InProcessPlanDispatcher(dataset),
-        execPlans.sortWith((x, y) => !x.isInstanceOf[RemoteExec]))
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
   }
 
   /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions): ExecPlan = {
+                  options: QueryOptions, tsdbQueryParams: TsdbQueryParams): ExecPlan = {
     val queryId = UUID.randomUUID().toString
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
@@ -113,7 +114,8 @@ class QueryEngine(dataset: Dataset,
 
     val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures, routingTime)
 
-    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime)
+    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
+      tsdbQueryParams)
   }
 
   private def generateLocalExecPlan(logicalPlan: LogicalPlan,

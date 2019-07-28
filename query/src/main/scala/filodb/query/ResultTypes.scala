@@ -2,7 +2,7 @@ package filodb.query
 
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.{DatasetRef, ErrorResponse, NodeCommand, NodeResponse}
+import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
 import filodb.core.query.{ResultSchema, SerializableRangeVector}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
@@ -14,7 +14,7 @@ trait QueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
 }
 
-final case class QueryError(id: String, t: Throwable) extends QueryResponse with ErrorResponse {
+final case class QueryError(id: String, t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
   override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }

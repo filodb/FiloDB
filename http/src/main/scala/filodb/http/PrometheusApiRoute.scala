@@ -9,7 +9,6 @@ import akka.stream.ActorMaterializer
 import akka.util.ByteString
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-import io.circe.{Decoder, Encoder, HCursor, Json}
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
@@ -18,8 +17,7 @@ import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.prometheus.query.PrometheusModel.Sampl
-import filodb.query.{LogicalPlan, QueryError, QueryOptions, QueryResult}
+import filodb.query._
 import filodb.query.exec.ExecPlan
 
 class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
@@ -122,24 +120,6 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
         ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
-    }
-  }
-}
-
-// TODO extend and make more generic
-object PromCirceSupport {
-  // necessary to encode sample in promql response as an array with long and double value as string
-  implicit val encodeSampl: Encoder[Sampl] = new Encoder[Sampl] {
-    final def apply(a: Sampl): Json = Json.arr(Json.fromLong(a.timestamp), Json.fromString(a.value.toString))
-  }
-
-  implicit val decodeFoo: Decoder[Sampl] = new Decoder[Sampl] {
-    final def apply(c: HCursor): Decoder.Result[Sampl] = {
-      for {timestamp <- c.downArray.as[Long].right
-           value <- c.downArray.right.as[String].right
-      } yield {
-        Sampl(timestamp, value.toDouble)
-      }
     }
   }
 }

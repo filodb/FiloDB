@@ -122,7 +122,7 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, DummyPromQlQueryParams)
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -134,7 +134,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, DummyPromQlQueryParams)
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>

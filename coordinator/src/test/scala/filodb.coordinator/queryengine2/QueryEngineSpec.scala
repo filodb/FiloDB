@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import monix.eval.Task
 import org.scalatest.{FunSpec, Matchers}
+
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
@@ -15,7 +16,7 @@ import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query
-import filodb.query._
+import filodb.query.{PromQlQueryParams, _}
 import filodb.query.exec._
 
 class QueryEngineSpec extends FunSpec with Matchers {
@@ -63,13 +64,14 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+  val promQlQueryParams = PromQlQueryParams("", "sum(heap_usage)", 0, 0, 0)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions())
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(), DummyPromQlQueryParams)
 
     /*
     Following ExecPlan should be generated:
@@ -111,7 +113,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     // materialized exec plan
     val execPlan = engine.materialize(logicalPlan,
-      QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000))
+      QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000), DummyPromQlQueryParams)
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
 
     // Now there should be multiple levels of reduce because we have 16 shards
@@ -132,7 +134,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   it("should throw BadQuery if illegal column name in LogicalPlan") {
     val raw3 = raw2.copy(columns = Seq("foo"))
     intercept[BadQueryException] {
-      engine.materialize(raw3, QueryOptions())
+      engine.materialize(raw3, QueryOptions(), DummyPromQlQueryParams)
     }
   }
 
@@ -143,7 +145,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val engine2 = new QueryEngine(dataset2, mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
-    val execPlan = engine2.materialize(raw2, QueryOptions())
+    val execPlan = engine2.materialize(raw2, QueryOptions(), DummyPromQlQueryParams)
     execPlan.isInstanceOf[DistConcatExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
@@ -162,7 +164,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(FunctionalSpreadProvider(spreadFunc)), 1000000))
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(FunctionalSpreadProvider(spreadFunc)), 1000000), DummyPromQlQueryParams)
     execPlan.printTree()
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
@@ -178,7 +180,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
+    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
+      DummyPromQlQueryParams)
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
@@ -187,7 +190,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
+    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
+      DummyPromQlQueryParams)
     execPlan.rangeVectorTransformers.isEmpty shouldEqual true
   }
 
@@ -197,7 +201,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
+    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
+      DummyPromQlQueryParams)
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.size shouldEqual 2
@@ -210,7 +215,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000))
+    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
+      DummyPromQlQueryParams)
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
@@ -221,7 +227,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions())
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(), DummyPromQlQueryParams)
 
     execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
     execPlan.children.foreach { l1 =>
@@ -246,15 +252,15 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        Seq(FailureTimeRange("local", datasetRef, TimeRange(1500, 5000), Some(emptyDispatcher)), // Should be removed
-          FailureTimeRange("remote", datasetRef, TimeRange(100, 200), None),
-          FailureTimeRange("local", datasetRef, TimeRange(1000, 2000), Some(emptyDispatcher)),
-          FailureTimeRange("remote", datasetRef, TimeRange(100, 700), None)) // Should be removed
+        Seq(FailureTimeRange("local", datasetRef, TimeRange(1500, 5000), false), // Should be removed
+          FailureTimeRange("remote", datasetRef, TimeRange(100, 200), true),
+          FailureTimeRange("local", datasetRef, TimeRange(1000, 2000), false),
+          FailureTimeRange("remote", datasetRef, TimeRange(100, 700), true)) // Should be removed
       }
     }
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions())
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
@@ -262,10 +268,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[RemoteExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[RemoteExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
 
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -278,14 +284,14 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    // RemoteExec should have same logical plan with updated time based on failures
-    QueryRoutingPlanner.copyWithUpdatedTimeRange(summed, TimeRange(1000, 10000), 0).
-      toString() shouldEqual (child2.params.logicalPlan.toString)
-    child2.params.queryOptions.spreadProvider.isDefined shouldEqual (false) // QueryOptions should be false
+    // Time should be updated
+    child2.params.start shouldEqual (1000)
+    child2.params.end shouldEqual (10000)
+    child2.params.promQl shouldEqual(promQlQueryParams.promQl) // Query should not change
 
   }
 
-  it("should not generate RemoteExec plan when local overlapping failure is bigger") {
+  it("should not generate PromQlExec plan when local overlapping failure is bigger") {
     val to = 10000
     val from = 100
     val intervalSelector = IntervalSelector(from, to)
@@ -296,14 +302,14 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
         Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(1500, 4000), None), FailureTimeRange("remote", datasetRef,
-          TimeRange(2000, 3000), None), FailureTimeRange("remote", datasetRef,
-          TimeRange(5000, 6000), None))
+          TimeRange(1500, 4000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(2000, 3000), true), FailureTimeRange("remote", datasetRef,
+          TimeRange(5000, 6000), true))
       }
     }
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions())
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
 
@@ -322,7 +328,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should generate only RemoteExec when failure is present only in local") {
+  it("should generate only PromQlExec when failure is present only in local") {
     val to = 10000
     val from = 100
     val intervalSelector = IntervalSelector(from, to)
@@ -333,17 +339,16 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
         Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(1000, 6000), Some(emptyDispatcher)))
+          TimeRange(1000, 6000), false))
       }
     }
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions())
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
-    execPlan.isInstanceOf[RemoteExec] shouldEqual (true)
-    execPlan.getPlan().foreach(print(_))
-    execPlan.asInstanceOf[RemoteExec].params.logicalPlan.toString shouldEqual(summed.toString)
-
+    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
   }
 
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
@@ -357,13 +362,13 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
         Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(980, 1030), Some(emptyDispatcher)), FailureTimeRange("remote", datasetRef,
-          TimeRange(1060, 1090), None))
+          TimeRange(980, 1030), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(1060, 1090), true))
       }
     }
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions())
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
@@ -371,10 +376,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[RemoteExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[RemoteExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
 
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -389,10 +394,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    // RemoteExec should have same logical plan with updated time based on failures
-    QueryRoutingPlanner.copyWithUpdatedTimeRange(summed, TimeRange(950, 1059), 50).
-      toString() shouldEqual (child2.params.logicalPlan.toString)
-    child2.params.queryOptions.spreadProvider.isDefined shouldEqual (false) // QueryOptions should be false
-
+    child2.params.start shouldEqual 1000
+    child2.params.end shouldEqual 1059
   }
 }

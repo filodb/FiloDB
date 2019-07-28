@@ -101,7 +101,7 @@ trait ExecPlan extends QueryCommand {
     *
     */
   // scalastyle:off method.length
-  final def execute(source: ChunkSource,
+  def execute(source: ChunkSource,
                     dataset: Dataset,
                     queryConfig: QueryConfig)
                    (implicit sched: Scheduler,

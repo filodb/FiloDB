@@ -2,7 +2,6 @@ package filodb.standalone
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
@@ -23,11 +22,11 @@ import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource
 import filodb.coordinator.client.LocalClient
 import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
-import filodb.http.PromCirceSupport
 import filodb.prometheus.ast.TimeStepParams
+import filodb.query.PromCirceSupport
 import filodb.prometheus.parse.Parser
-import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
+import filodb.query.SuccessResponse
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config

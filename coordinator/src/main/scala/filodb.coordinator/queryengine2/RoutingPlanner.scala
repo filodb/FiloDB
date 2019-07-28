@@ -68,24 +68,23 @@ object QueryRoutingPlanner extends RoutingPlanner {
     // traverse query range time from left to right , break at failure start
     var i = index + 1
 
-    // Dispatcher is present only when failure is local
-    failure(index).dispatcher.map { x =>
+    if (!failure(index).isRemote) {
       // Handle local failure
       // Traverse till we get a remote failure to minimize number of queries
-      while ((i < failure.length) && (failure(i).dispatcher.isDefined))
+      while ((i < failure.length) && (!failure(i).isRemote))
         i = i + 1
 
       if (i < failure.length) // need further splitting
       // Query from current start time till next remote failure starts should be executed remotely
-        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis - 1)), x) +:
+        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis - 1))) +:
           splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end) // Process remaining query
       else
       // Last failure so no further splitting required
-        Seq(RemoteRoute(Some(TimeRange(start, end)), x))
+        Seq(RemoteRoute(Some(TimeRange(start, end))))
 
-    }.getOrElse {
+    } else {
       // Iterate till we get a local failure
-      while ((i < failure.length) && (!failure(i).dispatcher.isDefined))
+      while ((i < failure.length) && (failure(i).isRemote))
         i = i + 1
       if (i < failure.length)
       // Query from current start time till next local failure starts should be executed locally

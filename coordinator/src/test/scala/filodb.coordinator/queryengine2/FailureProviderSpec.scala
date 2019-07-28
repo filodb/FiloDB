@@ -69,14 +69,14 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should sort and remove larger overlapping failures") {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
     val failureTimeRanges = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(1500, 5000), None), FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("local", datasetRef,
-      TimeRange(1000, 2000), None), FailureTimeRange("local", datasetRef,
-      TimeRange(100, 700), Some(dummyDispatcher)))
+      TimeRange(1500, 5000), false), FailureTimeRange("local", datasetRef,
+      TimeRange(100, 200), false), FailureTimeRange("local", datasetRef,
+      TimeRange(1000, 2000), false), FailureTimeRange("local", datasetRef,
+      TimeRange(100, 700), false))
 
     val expectedResult = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("local", datasetRef,
-      TimeRange(1000, 2000), None))
+      TimeRange(100, 200), false), FailureTimeRange("local", datasetRef,
+      TimeRange(1000, 2000), false))
 
     val failureTimeRangeNonOverlapping = QueryRoutingPlanner.removeLargerOverlappingFailures(failureTimeRanges)
     failureTimeRangeNonOverlapping.sameElements(expectedResult) shouldEqual true
@@ -86,11 +86,11 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("remote", datasetRef,
-      TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
-      TimeRange(1000, 2000), Some(dummyDispatcher)))
+      TimeRange(100, 200), true), FailureTimeRange("local", datasetRef,
+      TimeRange(1000, 2000), false))
 
     val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
-      RemoteRoute(Some(TimeRange(1000, 3000)), dummyDispatcher))
+      RemoteRoute(Some(TimeRange(1000, 3000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 3000)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
@@ -101,10 +101,10 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should split failures to remote followed by local") {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
-      TimeRange(1000, 3000), None))
+      TimeRange(100, 200), false), FailureTimeRange("remote", datasetRef,
+      TimeRange(1000, 3000), true))
 
-    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999)), dummyDispatcher),
+    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999))),
       LocalRoute(Some(TimeRange(1000, 5000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
@@ -116,9 +116,9 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should generate remote route when there is only one failure which is in local") {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)))
+      TimeRange(100, 200), false))
 
-    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 5000)), dummyDispatcher))
+    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 5000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
     routes.sameElements(expectedResult) shouldEqual (true)
@@ -128,12 +128,12 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("local", datasetRef,
-      TimeRange(100, 200), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
-      TimeRange(1000, 3000), None), FailureTimeRange("local", datasetRef,
-      TimeRange(4000, 4500), Some(dummyDispatcher)))
+      TimeRange(100, 200), false), FailureTimeRange("remote", datasetRef,
+      TimeRange(1000, 3000), true), FailureTimeRange("local", datasetRef,
+      TimeRange(4000, 4500), false))
 
-    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999)), dummyDispatcher),
-      LocalRoute(Some(TimeRange(1000, 3999))), RemoteRoute(Some(TimeRange(4000, 5000)), dummyDispatcher))
+    val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999))),
+      LocalRoute(Some(TimeRange(1000, 3999))), RemoteRoute(Some(TimeRange(4000, 5000))))
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
@@ -146,12 +146,12 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
     val failureTimeRangeNonOverlapping = Seq(FailureTimeRange("remote", datasetRef,
-      TimeRange(100, 200), None), FailureTimeRange("local", datasetRef,
-      TimeRange(1000, 3000), Some(dummyDispatcher)), FailureTimeRange("remote", datasetRef,
-      TimeRange(4000, 4500), None))
+      TimeRange(100, 200), true), FailureTimeRange("local", datasetRef,
+      TimeRange(1000, 3000), false), FailureTimeRange("remote", datasetRef,
+      TimeRange(4000, 4500), true))
 
     val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
-      RemoteRoute(Some(TimeRange(1000, 3999)), dummyDispatcher), LocalRoute(Some(TimeRange(4000, 5000))))
+      RemoteRoute(Some(TimeRange(1000, 3999))), LocalRoute(Some(TimeRange(4000, 5000))))
 
     val routes = QueryRoutingPlanner.splitQueryTime(failureTimeRangeNonOverlapping, 0, 50, 5000)
 

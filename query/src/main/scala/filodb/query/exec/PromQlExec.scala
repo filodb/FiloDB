@@ -1,25 +1,21 @@
 package filodb.query.exec
 
-
 import com.softwaremill.sttp.akkahttp.AkkaHttpBackend
 import com.softwaremill.sttp.circe._
-import io.circe.{Decoder, Encoder, HCursor, Json}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 
-
 import filodb.core.DatasetRef
-import filodb.core.store.ChunkSource
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
-import filodb.query._
 import filodb.memory.format.ZeroCopyUTF8String._
-
+import filodb.query._
 
 case class PromQlExec(id: String,
                       dispatcher: PlanDispatcher,
@@ -47,74 +43,18 @@ case class PromQlExec(id: String,
     */
   override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ???
 
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
+  val recSchema = SerializableRangeVector.toSchema(columns)
+  val builder = SerializableRangeVector.toBuilder(recSchema)
+
   override def execute(source: ChunkSource,
                        dataset: Dataset,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
 
-    Task.fromFuture(PromQlExec.httpClient(params, id))
-
-  }
-
-}
-
-object PromCirceSupport {
-  // necessary to encode sample in promql response as an array with long and double value as string
-  implicit val encodeSampl: Encoder[Sampl] = new Encoder[Sampl] {
-    final def apply(a: Sampl): Json = Json.arr(Json.fromLong(a.timestamp), Json.fromString(a.value.toString))
-  }
-
-  implicit val decodeFoo: Decoder[Sampl] = new Decoder[Sampl] {
-    final def apply(c: HCursor): Decoder.Result[Sampl] = {
-      for {timestamp <- c.downArray.as[Long].right
-           value <- c.downArray.right.as[String].right
-      } yield {
-        Sampl(timestamp, value.toDouble)
-      }
-    }
-  }
-}
-
-object PromQlExec {
-  import com.softwaremill.sttp._
-  implicit val sttpBackend = AkkaHttpBackend()
-
-  def toQueryResponse(data: Data, id: String): QueryResponse = {
-
-    val schema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-      ColumnInfo("value", ColumnType.DoubleColumn)), 1)
-    val rangeVectors : Seq[RangeVector]= data.result.map {
-      r => {
-
-       new RangeVector {
-          override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map {
-            m => {
-              m._1.utf8 -> m._2.utf8
-            }
-          })
-
-         override def rows: Iterator[RowReader] = r.values.map { v => {
-           new TransientRow(v.timestamp, v.value)
-         }
-         }.iterator
-
-         override def numRows: Option[StatusCode] = Some(rows.size)
-        }
-
-
-      }
-    }
-    QueryResult(id, schema, rangeVectors)
-
-  }
-
-  def httpClient(params: PromQlQueryParams, id: String)(implicit scheduler: Scheduler): Future[QueryResponse] = {
-
-    val urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step)
-    val url = uri"$params.promEndPoint?$urlParams"
-    val queryResponse = sttp.get(url).response(asJson[SuccessResponse]).send()
-    queryResponse.map(response => {
+    val queryResponse = PromQlExec.httpClient(params).map(response => {
 
       response.unsafeBody match {
         case Left(error) => QueryError(id, new IllegalStateException(error.message))
@@ -122,6 +62,49 @@ object PromQlExec {
       }
 
     })
+    Task.fromFuture(queryResponse)
+  }
 
+  def toQueryResponse(data: Data, id: String): QueryResponse = {
+
+    val schema = ResultSchema(columns, 1)
+    val rangeVectors = data.result.map {
+      r => {
+        val rv = new RangeVector {
+          override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map {
+            m => {
+              m._1.utf8 -> m._2.utf8
+            }
+          })
+
+          override def rows: Iterator[RowReader] = r.values.map { v => {
+            new TransientRow(v.timestamp, v.value)
+          }
+          }.iterator
+        }
+        SerializableRangeVector(rv, builder, recSchema, printTree(false))
+      }
+    }
+    QueryResult(id, schema, rangeVectors)
   }
 }
+
+object PromQlExec {
+
+  import com.softwaremill.sttp._
+  import io.circe.generic.auto._
+
+  import scala.concurrent.ExecutionContext.Implicits.global
+  // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
+  // Needed to override Sampl case class Encoder.
+  import PromCirceSupport._
+  implicit val backend = AkkaHttpBackend()
+
+  def httpClient(params: PromQlQueryParams):
+  Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
+    val urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step)
+    val url = uri"$params.promEndPoint?$urlParams"
+    sttp.get(url).response(asJson[SuccessResponse]).send()
+  }
+}
+
