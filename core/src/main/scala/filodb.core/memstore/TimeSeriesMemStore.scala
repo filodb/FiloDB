@@ -1,7 +1,6 @@
 package filodb.core.memstore
 
 import scala.collection.mutable.HashMap
-//import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.{Future}
 
 import com.typesafe.config.Config
