@@ -43,7 +43,8 @@ object QueryRoutingPlanner extends RoutingPlanner {
   def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange], time: TimeRange): Seq[Route] = {
 
     val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
-    if (nonOverlappingFailures.last.timeRange.startInMillis < time.startInMillis)
+    if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
+      (nonOverlappingFailures.head.timeRange.startInMillis > time.endInMillis))
       return Seq(LocalRoute(None)) // No failure in this time range
     logger.info("Logical plan time:" + time)
 
