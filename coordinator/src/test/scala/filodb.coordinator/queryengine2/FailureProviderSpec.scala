@@ -5,9 +5,9 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
 import filodb.query.exec.{ExecPlan, PlanDispatcher}
 import monix.eval.Task
+import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 class FailureProviderSpec extends FunSpec with Matchers {
@@ -33,7 +33,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val binaryJoinLogicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
+                         (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 

@@ -1,15 +1,12 @@
 package filodb.query.exec
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.{TestData, Types}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.RecordBuilder
@@ -20,11 +17,12 @@ import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, Time
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import monix.execution.Scheduler
 
 object SelectRawPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
+                         (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 

@@ -5,9 +5,7 @@ import akka.testkit.TestProbe
 import monix.eval.Task
 import org.scalatest.{FunSpec, Matchers}
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}
@@ -18,6 +16,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query
 import filodb.query.{PromQlQueryParams, _}
 import filodb.query.exec._
+import monix.execution.Scheduler
 
 class QueryEngineSpec extends FunSpec with Matchers {
 
@@ -32,7 +31,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val dataset = MetricsTestData.timeseriesDataset
 
   val emptyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
+    override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 

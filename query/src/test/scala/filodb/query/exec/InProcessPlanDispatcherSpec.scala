@@ -2,7 +2,17 @@ package filodb.query.exec
 
 import java.util.concurrent.{Executors, TimeUnit}
 
+import scala.collection.immutable
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
+import monix.eval.Task
+import monix.execution.Scheduler
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData.{builder, timeseriesDataset}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
@@ -13,15 +23,6 @@ import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
-import monix.eval.Task
-import monix.execution.Scheduler
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-
-import scala.collection.immutable
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
 
 class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
@@ -92,15 +93,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dispatcher: PlanDispatcher = InProcessPlanDispatcher(dataset)
 
-    // run locally withing any check.
-    val dummyDispatcher: PlanDispatcher = new PlanDispatcher {
-      override def dispatch(plan: ExecPlan)
-                           (implicit sched: ExecutionContext,
-                            timeout: FiniteDuration): Task[QueryResponse] = {
-        implicit val scheduler: Scheduler = Scheduler(sched)
-        plan.execute(memStore, timeseriesDataset, queryConfig)
-      }
-    }
+    val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
     val execPlan1 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
@@ -119,4 +112,13 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
   }
 
+}
+
+case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfig) extends PlanDispatcher {
+  // run locally withing any check.
+  override def dispatch(plan: ExecPlan)
+                       (implicit sched: Scheduler,
+                        timeout: FiniteDuration): Task[QueryResponse] = {
+    plan.execute(memStore, timeseriesDataset, queryConfig)
+  }
 }

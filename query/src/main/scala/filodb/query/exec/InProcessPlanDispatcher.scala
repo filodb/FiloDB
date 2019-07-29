@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.ConfigFactory
@@ -23,7 +22,7 @@ import filodb.query.{QueryConfig, QueryResponse}
   */
 case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
 
-  override def dispatch(plan: ExecPlan)(implicit sched: ExecutionContext,
+  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                         timeout: FiniteDuration): Task[QueryResponse] = {
     // Since we will be testing with StitchRvsExec only,
     // any other plan will need more testing before this dispatcher can be used.
@@ -36,7 +35,6 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnSupportedChunkSource()
     // translate implicit ExecutionContext to monix.Scheduler
-    implicit val scheduler: Scheduler = Scheduler(sched)
     plan.execute(source, dataset, queryConfig)
   }
 

@@ -3,13 +3,13 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
+import monix.execution.Scheduler
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
@@ -21,6 +21,7 @@ import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
+
 
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
@@ -48,7 +49,7 @@ class QueryEngine(dataset: Dataset,
     * It sends the ExecPlan to the destination where it will be executed.
     */
   def dispatchExecPlan(execPlan: ExecPlan)
-                      (implicit sched: ExecutionContext,
+                      (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
     val currentSpan = Kamon.currentSpan()
     Kamon.withSpan(currentSpan) {
