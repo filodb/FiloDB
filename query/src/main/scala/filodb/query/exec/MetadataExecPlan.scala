@@ -6,13 +6,11 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format._
 import filodb.memory.format.UTF8MapIteratorRowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
@@ -83,17 +81,12 @@ final case class LabelValuesDistConcatExec(id: String,
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _) => result
+      case (QueryResult(_, _, result), _) => result.map(_.asInstanceOf[SerializableRangeVector])
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.foreach(rv => {
-        metadataResult ++= rv(0).rows.map(rowReader => {
-          val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-          rv(0).schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
-            .map(pair => pair._1.utf8 -> pair._2.utf8).toMap
-        })
-      })
+      val metadataResult = resp.map { rv =>
+        rv(0).key.labelValues.map(pair => pair._1 -> pair._2)
+      }
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(metadataResult.toIterator))
