@@ -26,7 +26,7 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
                                         timeout: FiniteDuration): Task[QueryResponse] = {
     // Since we will be testing with StitchRvsExec only,
     // any other plan will need more testing before this dispatcher can be used.
-    if (!plan.isInstanceOf[NonLeafExecPlan])
+    if (!plan.isInstanceOf[LeafExecPlan])
       throw new IllegalStateException(
         s"Only non leaf exec plan are supported by inprocess dispatcher $plan")
 
