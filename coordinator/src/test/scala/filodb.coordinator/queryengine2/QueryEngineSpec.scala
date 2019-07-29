@@ -63,7 +63,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-  val promQlQueryParams = PromQlQueryParams("", "sum(heap_usage)", 0, 0, 0)
+  val promQlQueryParams = PromQlQueryParams("", "sum(heap_usage)", 0, 0, 0, 0, 0)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -287,6 +287,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child2.params.start shouldEqual (1000)
     child2.params.end shouldEqual (10000)
     child2.params.promQl shouldEqual(promQlQueryParams.promQl) // Query should not change
+    child2.params.processFailure shouldEqual(false)
 
   }
 
@@ -395,9 +396,33 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     child2.params.start shouldEqual 1000
     child2.params.end shouldEqual 1059
+    child2.params.processFailure shouldEqual(false)
   }
 
   it("should generate only PromQlExec when local failure starts before query time") {
+    val to = 10000
+    val from = 100
+    val intervalSelector = IntervalSelector(from, to)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 10000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(50, 200), false))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+
+    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
+  }
+
+  it("should generate only PromQlExec when local failure timerange coincide with query time range") {
     val to = 10000
     val from = 100
     val intervalSelector = IntervalSelector(from, to)

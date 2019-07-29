@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import com.softwaremill.sttp.akkahttp.AkkaHttpBackend
 import com.softwaremill.sttp.circe._
+import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -89,7 +90,7 @@ case class PromQlExec(id: String,
   }
 }
 
-object PromQlExec {
+object PromQlExec extends  StrictLogging{
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
@@ -102,8 +103,11 @@ object PromQlExec {
 
   def httpClient(params: PromQlQueryParams):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step)
-    val url = uri"$params.promEndPoint?$urlParams"
+    val urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
+      "processFailure:" -> params.processFailure)
+    val endpoint = params.promEndPoint
+    val url = uri"$endpoint?$urlParams"
+    logger.debug("promqlexec url is {}", url)
     sttp.get(url).response(asJson[SuccessResponse]).send()
   }
 }

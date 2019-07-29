@@ -75,7 +75,7 @@ class QueryEngine(dataset: Dataset,
           val timeRange = route.timeRange.get
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref,
             tsdbQueryParams.asInstanceOf[PromQlQueryParams].copy(start = timeRange.startInMillis + lookBackTime, end =
-              timeRange.endInMillis), submitTime)
+              timeRange.endInMillis, processFailure = false), submitTime)
       }
     }
 
@@ -97,7 +97,8 @@ class QueryEngine(dataset: Dataset,
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
-    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || !options.processFailures ||
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) ||
+      !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure ||
       !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan))
       return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 

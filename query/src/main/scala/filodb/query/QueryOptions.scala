@@ -12,8 +12,7 @@ final case class QueryOptions(spreadProvider: Option[SpreadProvider] = None,
                               parallelism: Int = 16,
                               queryTimeoutSecs: Int = 30,
                               sampleLimit: Int = 1000000,
-                              shardOverrides: Option[Seq[Int]] = None,
-                              processFailures: Boolean = true)
+                              shardOverrides: Option[Seq[Int]] = None)
 
 object QueryOptions {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryOptions =
