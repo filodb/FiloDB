@@ -79,7 +79,7 @@ case class PromQlExec(id: String,
           })
 
           override def rows: Iterator[RowReader] = r.values.map { v => {
-            new TransientRow(v.timestamp, v.value)
+            new TransientRow(v.timestamp * 1000, v.value)
           }
           }.iterator
         }
@@ -104,7 +104,7 @@ object PromQlExec extends  StrictLogging{
   def httpClient(params: PromQlQueryParams):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
-      "processFailure:" -> params.processFailure)
+      "processFailure" -> params.processFailure)
     if (params.spread.isDefined)
       urlParams = urlParams + ("spread" -> params.spread.get)
 

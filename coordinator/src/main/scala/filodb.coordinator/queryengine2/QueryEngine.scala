@@ -74,8 +74,8 @@ class QueryEngine(dataset: Dataset,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref,
-            tsdbQueryParams.asInstanceOf[PromQlQueryParams].copy(start = timeRange.startInMillis + lookBackTime, end =
-              timeRange.endInMillis, processFailure = false), submitTime)
+            tsdbQueryParams.asInstanceOf[PromQlQueryParams].copy(start = ((timeRange.startInMillis + lookBackTime)/1000)
+              , end = (timeRange.endInMillis / 1000), processFailure = false), submitTime)
       }
     }
 

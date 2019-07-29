@@ -284,8 +284,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     // Time should be updated
-    child2.params.start shouldEqual (1000)
-    child2.params.end shouldEqual (10000)
+    child2.params.start shouldEqual (1)
+    child2.params.end shouldEqual (10)
     child2.params.promQl shouldEqual(promQlQueryParams.promQl) // Query should not change
     child2.params.processFailure shouldEqual(false)
 
@@ -347,8 +347,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
   }
 
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
@@ -394,8 +394,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    child2.params.start shouldEqual 1000
-    child2.params.end shouldEqual 1059
+    child2.params.start shouldEqual 1
+    child2.params.end shouldEqual 1
     child2.params.processFailure shouldEqual(false)
   }
 
@@ -418,8 +418,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure timerange coincide with query time range") {
@@ -441,8 +441,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure starts before query end time and ends after query end time") {
@@ -464,7 +464,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to)
+    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
   }
 }
