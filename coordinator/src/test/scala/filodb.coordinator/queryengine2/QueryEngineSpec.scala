@@ -63,7 +63,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-  val promQlQueryParams = PromQlQueryParams("", "sum(heap_usage)", 0, 0, 0, 0, 0)
+  val promQlQueryParams = PromQlQueryParams("", "sum(heap_usage)", 0, 0, 0, 0)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan

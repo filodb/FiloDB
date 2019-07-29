@@ -103,8 +103,11 @@ object PromQlExec extends  StrictLogging{
 
   def httpClient(params: PromQlQueryParams):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
+    var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
       "processFailure:" -> params.processFailure)
+    if (params.spread.isDefined)
+      urlParams = urlParams + ("spread" -> params.spread.get)
+
     val endpoint = params.promEndPoint
     val url = uri"$endpoint?$urlParams"
     logger.debug("promqlexec url is {}", url)
