@@ -220,10 +220,8 @@ object SerializableRangeVector extends StrictLogging {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
-    val brSchemas = brColInfos.mapValues(toSchema(_))
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(columns = cols, brSchema = brSchemas) })
-  }
+  def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
   def toBuilder(schema: RecordSchema): RecordBuilder =
     new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)

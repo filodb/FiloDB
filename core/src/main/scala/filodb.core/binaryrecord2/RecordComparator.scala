@@ -80,6 +80,10 @@ final class RecordComparator(ingestSchema: RecordSchema) {
     val ingestNumBytes = UnsafeUtils.getInt(ingestBase, ingestOffset)
     val partKeyNumBytes = UnsafeUtils.getInt(partKeyBase, partKeyOffset)
 
+    // schemaIDs should match
+    if (RecordSchema.schemaID(ingestBase, ingestOffset) !=
+        RecordSchema.schemaID(partKeyBase, partKeyOffset)) return false
+
     // compare lengths of variable areas (map tags & strings)
     val ingestVarAreaOffset = ingestVarOffset(ingestBase, ingestOffset)
     val ingestVarSize = ingestNumBytes + 4 - ingestVarAreaOffset
@@ -94,7 +98,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
     // finally compare primitive fields if needed
     if (anyPrimitiveFieldsToCompare) {
       var ingestPtr = ingestOffset + ingestPartOffset
-      var partKeyPtr = partKeyOffset + 4
+      var partKeyPtr = partKeyOffset + partitionKeySchema.fixedStart
       var bitmap = compareBitmap
       while (bitmap != 0) {
         if (((bitmap & 0x01) == 1) &&
@@ -121,7 +125,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
     // Copy fixed area + hash over, then variable areas
     val ingestNumBytes = UnsafeUtils.getInt(ingestBase, ingestOffset)
     val ingestVarAreaOffset = ingestVarOffset(ingestBase, ingestOffset)
-    builder.copyFixedAreasFrom(ingestBase, ingestOffset + ingestPartOffset, fixedAreaNumBytes + 4)
+    builder.copyFixedAreasFrom(ingestBase, ingestOffset, ingestPartOffset, fixedAreaNumBytes + 4)
     builder.copyVarAreasFrom(ingestBase, ingestOffset + ingestVarAreaOffset, ingestNumBytes + 4 - ingestVarAreaOffset)
 
     // adjust offsets to var fields

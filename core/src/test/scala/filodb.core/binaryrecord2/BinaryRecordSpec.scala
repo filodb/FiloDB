@@ -331,7 +331,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (1)
       // 56 (len + 5 long/double + 2 var + hash) + 10 + 4 + extraTagsLen + 10 * 2)
-      containers.head.numBytes shouldEqual (4 + 3 * align4(70 + extraTagsLen + 2 + 20))
+      containers.head.numBytes shouldEqual (4 + 3 * align4(72 + extraTagsLen + 2 + 20))
 
       containers.head.consumeRecords(consumer)
       records should have length (3)

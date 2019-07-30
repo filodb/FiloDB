@@ -78,6 +78,8 @@ The total length of any field must be less than 64KB.
 
 ### Field Access
 
+NOTE: Please see the actual `RecordSchema` class for the accessor methods.  This is just an example to explain principles in the design.
+
 Data column fields need to be accessed for ingestion for adding to each TSPartition.  In addition when a new TSPartition is created, partition key fields need to be accessed (including map field key/values) for index creation.
 
 Offheap `BinaryRecord` accessors:
@@ -119,14 +121,16 @@ An `IngestionRecordSchema` should be able to do the following to help in identif
 The builder has add methods that should be called in field order.  The methods will throw if called in the wrong order.  For example, a sequence for an ingestion `BinaryRecord` with the following fields:  `timestamp:long`, `value:double`, `tags:map` where the first two are the data columns and last one is the partition column, would mean the following call sequence:
 
 ```scala
-builder.startNewRecord()
+builder.startNewRecord(schema)
 builder.addLong(timestamp)
 builder.addDouble(value)
 builder.addMap(tags)
 val memory = builder.endRecord()
 ```
 
-Note that due to the restrictions for predefined keys the key needs to be less than 60KB in length.
+Records of different schemas may be added using the same builder.
+
+Keys in maps are supposed to be very short (<= 127 bytes).  Use of predefined keys helps save space.
 
 A different builder should be used for each different dataset schema and also per thread or per stream/Observable, but should be protected from multi-thread access.
 
@@ -154,13 +158,17 @@ Returns all the full containers and removes the returned full containers from `R
 
 * +0000  4 bytes   total length of `BinaryRecord` not including this length field
 
+### Optional SchemaID
+
+An optional 2-byte schemaID follows the length prefix.  The schemaID is present for partition keys and ingestion records which contain partition keys - it is used to identify the schema to use for ingestion of the record, and for querying, etc.
+
 ### Fixed length fields
 
 * Int - 4 bytes - little-endian 32-bit int
 * Long - 8 bytes - little-endian Long
 * Double - 8 bytes
 * utf8 - 4 bytes - offset within BR to var-length UTF8 string area
-* map - 4 bytes - offset within BR to map area (with 4-byte length prefix)
+* map - 4 bytes - offset within BR to map area (with 2-byte length prefix)
 * hist - 4 bytes - offset within BR to histogram blob, with 2 byte length prefix
 
 ### Hash
@@ -178,9 +186,9 @@ Note that map fields must be presorted before being added.
 
 Note that this is called a "Map" field but is actually just a list of key-value pairs.  Since none of the operations above involve actual lookup by key, O(1) lookup is not needed, plus the usually small number of keys means it is extremely fast to iterate through everything.
 
-* +0000   4 bytes  total length of map field not including these bytes
-* +0004   2-byte Length of key #1, or 0xFzzz for preset key field where zzz = preset number (up to 4K presets)
-* +0006 to +0006+(keylen1 - 1)   UTF8 bytes for key #1
+* +0000   2 bytes  total length of map field not including these bytes
+* +0002   1-byte Length of key #1, or if MSB is set, then preset key field where zzz = preset number (up to 128 presets)
+* +0003 to +0003+(keylen1 - 1)   UTF8 bytes for key #1, or no bytes if preset key
 * +n      2-byte length of value #1, followed by UTF8 bytes of value string #1
 
 ### Variable length fields - Histograms
@@ -192,6 +200,6 @@ Histograms are stored as blobs with a 2-byte length prefix and includes the hist
 A [RecordContainer](../core/src/main/scala/filodb.core/binaryrecord2/RecordContainer.scala) is a container for multiple `BinaryRecords` for ingesting into Kafka, for example.
 
 * +0000   4 bytes  total length of container following these length bytes
-* +0004   4 bytes  version and flag word, for future expansion.  For now, upper byte == version, which is currently 0.
+* +0004   4 bytes  version and flag word, for future expansion.  For now, upper byte == version, which is currently 1.
 * +0008   BinaryRecord 1  (where first bytes indicates its length)
 * +0008+n  BinaryRecord 2....

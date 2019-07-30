@@ -366,16 +366,18 @@ final class RecordBuilder(memFactory: MemFactory,
 
   /**
    * Used only internally by RecordComparator etc. to shortcut create a new BR by copying bytes from an existing BR.
+   * Namely, from an ingestion record (schema, fixed area) to a partition key only record.
    * You BETTER know what you are doing.
    */
-  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, fixedOffset: Int, numBytes: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
-    requireBytes(numBytes + 4)
+    requireBytes(numBytes + 6)
 
     // write length header, copy bytes, and update RecEndOffset
-    setInt(curBase, curRecordOffset, numBytes)
-    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecordOffset + 4, numBytes)
-    curRecEndOffset = curRecordOffset + numBytes + 4
+    setInt(curBase, curRecordOffset, numBytes + 2)
+    UnsafeUtils.setShort(curBase, curRecordOffset + 4, UnsafeUtils.getShort(base, offset + 4))
+    UnsafeUtils.unsafe.copyMemory(base, offset + fixedOffset, curBase, curRecordOffset + 6, numBytes)
+    curRecEndOffset = curRecordOffset + numBytes + 6
   }
 
   // Extend current variable area with stuff from somewhere else

@@ -31,11 +31,13 @@ import filodb.memory.format.{vectors => bv}
  *   the fact that all variable length fields after the partitionFieldStart are contiguous and can be binary compared
  *
  * @param columns In order, the column of each field in this schema
+ * @param hash the 16-bit Schema Hash (see DataSchema class) for verification purposes
  * @param brSchema schema of any binary record type column
  * @param partitionFieldStart Some(n) from n to the last field are considered the partition key.  A field number.
  * @param predefinedKeys A list of predefined keys to save space for the tags/MapColumn field(s)
  */
 final class RecordSchema(val columns: Seq[ColumnInfo],
+                         // val hash: Int,
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
                          val brSchema: Map[Int, RecordSchema] = Map.empty) {
@@ -51,9 +53,10 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   require(partitionFieldStart.isEmpty ||
           partitionFieldStart.get < columnTypes.length, s"partitionFieldStart $partitionFieldStart is too high")
 
-  // Offset to fixed area for each field.  Extra elemnt at end is end of fixed size area / hash.
+  // Offset to fixed area for each field.  Extra element at end is end of fixed size area / hash.
   // Note: these offsets start at 4, after the length header
-  private val offsets = columnTypes.map(colTypeToFieldSize).scan(4)(_ + _).toArray
+  val fixedStart = partitionFieldStart.map(x => 6).getOrElse(4)
+  private val offsets = columnTypes.map(colTypeToFieldSize).scan(fixedStart)(_ + _).toArray
 
   // Offset from BR start to beginning of variable area.  Also the minimum length of a BR.
   val variableAreaStart = partitionFieldStart.map(x => 4).getOrElse(0) + offsets.last
@@ -210,7 +213,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }
-    s"b2[${result.mkString(",")}]"
+    val schemaStr = partitionFieldStart.map(x => s"schema=${RecordSchema.schemaID(base, offset)} ").getOrElse("")
+    s"b2[$schemaStr ${result.mkString(",")}]"
   }
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
@@ -383,6 +387,15 @@ object RecordSchema {
     val hash = if (keyHash != 7) { keyHash }
                else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
     (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
+  }
+
+  /**
+   * Extracts the schemaID out of a BinaryRecord which contains a partition key.  Do not use this on a BR which
+   * is not ingestion or partition key.
+   */
+  final def schemaID(base: Any, offset: Long): Int = {
+    require(UnsafeUtils.getInt(base, offset) >= 2, "Empty BinaryRecord/not large enough")
+    UnsafeUtils.getShort(base, offset + 4) & 0x0ffff
   }
 
   /**
