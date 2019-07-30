@@ -157,7 +157,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, db) =>
       // used only for unit testing now
-      createDataset(sender(), datasetObj)
+      createDataset(sender(), datasetObj.copy(database = db))
 
     case TruncateDataset(ref) =>
       truncateDataset(sender(), ref)
@@ -211,7 +211,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     if (!datasetsInitialized) {
       logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
       settings.streamConfigs.foreach { config =>
-        val dataset = settings.datasetFromStream(config)
+        val dataset = Dataset.fromConfig(config)
         val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
         initializeDataset(dataset, ingestion)
       }

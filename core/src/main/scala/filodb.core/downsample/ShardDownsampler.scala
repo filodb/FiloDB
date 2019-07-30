@@ -25,11 +25,9 @@ class ShardDownsampler(dataset: Dataset,
                        resolutions: Seq[Int],
                        publisher: DownsamplePublisher,
                        stats: TimeSeriesShardStats) extends StrictLogging {
-  private val downsamplers = dataset.schema.data.downsamplers
-
   if (enabled) {
     logger.info(s"Downsampling enabled for dataset=${dataset.ref} shard=$shardNum with " +
-      s"following downsamplers: ${downsamplers.map(_.encoded)} at resolutions: $resolutions")
+      s"following downsamplers: ${dataset.downsamplers.map(_.encoded)} at resolutions: $resolutions")
   } else {
     logger.info(s"Downsampling disabled for dataset=${dataset.ref} shard=$shardNum")
   }
@@ -60,7 +58,7 @@ class ShardDownsampler(dataset: Dataset,
     */
   private[downsample] def downsampleIngestSchema(): RecordSchema = {
     // The name of the column in downsample record does not matter at the ingestion side. Type does matter.
-    val downsampleCols = downsamplers.map { d => ColumnInfo(s"${d.name.entryName}", d.colType) }
+    val downsampleCols = dataset.downsamplers.map { d => ColumnInfo(s"${d.name.entryName}", d.colType) }
     new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
       Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
   }
@@ -96,7 +94,7 @@ class ShardDownsampler(dataset: Dataset,
             val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
             builder.startNewRecord()
             // for each downsampler, add downsample column value
-            downsamplers.foreach {
+            dataset.downsamplers.foreach {
               case d: TimeChunkDownsampler =>
                 builder.addLong(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
               case d: DoubleChunkDownsampler =>

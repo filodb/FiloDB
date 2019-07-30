@@ -20,14 +20,16 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   val promDataset = Dataset.make("custom1",
     Seq("someStr:string", "tags:map"),
     Seq("timestamp:ts", "value:double"),
+    Seq("timestamp"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
-    DatasetOptions(Seq("__name__", "job"), "__name__")).get
+    DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
 
   val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string", "instance:string"),
     Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
+    Seq("timestamp"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
-    DatasetOptions(Seq("name", "namespace"), "name")).get
+    DatasetOptions(Seq("name", "namespace"), "name", "total")).get
 
   private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.blockMetaSize, true)
@@ -199,13 +201,12 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     // avg
     val expectedAvgs2 = expectedSums2.zip(expectedCounts2).map { case (sum,count) => sum/count }
     downsampledData2.map(_._6) shouldEqual expectedAvgs2
+
   }
 
-  import com.softwaremill.quicklens._
-
   val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
-  val histDSDataset = modify(MMD.histDataset)(_.schema.data.downsamplers)
-                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers).get)
+  val histDSDataset = MMD.histDataset.copy(
+                        downsamplers = Dataset.validateDownsamplers(histDSDownsamplers).get)
 
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
   val downsampleOpsH = new ShardDownsampler(histDSDataset, 0, true, Seq(60000), NoOpDownsamplePublisher,

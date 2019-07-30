@@ -12,7 +12,7 @@ import monix.reactive.Observable
 import org.scalactic._
 
 import filodb.coordinator.ShardMapper
-import filodb.core.ErrorResponse
+import filodb.core.{ErrorResponse, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
@@ -28,6 +28,18 @@ final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) exten
 object Utils extends StrictLogging {
   import filodb.coordinator.client.QueryCommands._
   import TrySugar._
+  import filodb.coordinator.client.QueryCommands._
+
+  /**
+   * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
+   * as those are automatically prepended.
+   */
+  def getColumnIDs(dataset: Dataset, colStrs: Seq[String]): Seq[Types.ColumnId] Or ErrorResponse =
+    dataset.colIDs(colStrs: _*).badMap(missing => UndefinedColumns(missing.toSet))
+           .map { ids =>   // avoid duplication if first ids are already row keys
+             if (ids.take(dataset.rowKeyIDs.length) == dataset.rowKeyIDs) { ids }
+             else { dataset.rowKeyIDs ++ ids }
+           }
 
   /**
    * Validates a PartitionQuery, returning a set of PartitionScanMethods with shard numbers.
