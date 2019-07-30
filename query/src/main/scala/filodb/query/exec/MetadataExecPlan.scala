@@ -5,7 +5,7 @@ import scala.concurrent.duration.FiniteDuration
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.{query, DatasetRef}
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
