@@ -2,7 +2,7 @@ package filodb.prometheus.query
 
 import remote.RemoteStorage._
 
-import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
+import filodb.core.query.{ColumnFilter, Filter, RangeVector}
 import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
 import filodb.query.exec.ExecPlan
 
@@ -67,7 +67,7 @@ object PrometheusModel {
   /**
     * Used to send out raw data
     */
-  def toPromTimeSeries(srv: SerializableRangeVector): TimeSeries = {
+  def toPromTimeSeries(srv: RangeVector): TimeSeries = {
     val b = TimeSeries.newBuilder()
     srv.key.labelValues.foreach {lv =>
       b.addLabels(LabelPair.newBuilder().setName(lv._1.toString).setValue(lv._2.toString))
@@ -99,7 +99,7 @@ object PrometheusModel {
   /**
     * Used to send out HTTP response
     */
-  def toPromResult(srv: SerializableRangeVector, verbose: Boolean): Result = {
+  def toPromResult(srv: RangeVector, verbose: Boolean): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
                                   "_partIds_" -> srv.key.partIds.mkString(","))
