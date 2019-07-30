@@ -5,13 +5,14 @@ import scala.concurrent.duration.FiniteDuration
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.DatasetRef
+import filodb.core.{query, DatasetRef}
+import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format.UTF8MapIteratorRowReader
+import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -81,11 +82,20 @@ final case class LabelValuesDistConcatExec(id: String,
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _) => result.map(_.asInstanceOf[SerializableRangeVector])
+      case (QueryResult(_, _, result), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      val metadataResult = resp.map { rv =>
-        rv(0).key.labelValues.map(pair => pair._1 -> pair._2)
+      var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+      resp.foreach { rv =>
+          metadataResult ++= rv.head.rows.map { rowReader =>
+            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+            rv.head match {
+              case srv: SerializableRangeVector =>
+                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                   .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+            }
+          }
       }
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
