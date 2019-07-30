@@ -28,17 +28,21 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val policy = new FixedMaxPartitionsEvictionPolicy(100)   // Since 99 GDELT rows, this will never evict
   val memStore = new TimeSeriesMemStore(config, colStore, metaStore, Some(policy))
 
+  val datasetDb2 = dataset.copy(database = Some("unittest2"))
+
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
     colStore.initialize(dataset.ref).futureValue
     colStore.initialize(GdeltTestData.dataset2.ref).futureValue
+    colStore.initialize(datasetDb2.ref).futureValue
   }
 
   before {
     colStore.truncate(dataset.ref).futureValue
     colStore.truncate(GdeltTestData.dataset2.ref).futureValue
+    colStore.truncate(datasetDb2.ref).futureValue
     memStore.reset()
     metaStore.clearAllData()
   }
@@ -101,6 +105,21 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     // check that can read from same partition again
     val rowIt2 = memStore.scanRows(dataset, Seq(2), FilteredPartitionScan(paramSet.head))
     rowIt2.map(_.getLong(0)).toSeq should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
+  }
+
+  it should "read back rows written in another database" ignore {
+    whenReady(colStore.write(datasetDb2, chunkSetStream())) { response =>
+      response should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.ref, 1)
+    paramSet should have length (1)
+
+    val rowIt = memStore.scanRows(datasetDb2, Seq(0, 1, 2), FilteredPartitionScan(paramSet.head))
+    rowIt.map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
+
+    // Check that original keyspace/database has no data
+    memStore.scanRows(dataset, Seq(0), partScan).toSeq should have length (0)
   }
 
   it should "read back rows written with multi-column row keys" ignore {

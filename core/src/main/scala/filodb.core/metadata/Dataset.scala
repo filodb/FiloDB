@@ -7,11 +7,12 @@ import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
 import filodb.core._
-import filodb.core.binaryrecord2._
+import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2, _}
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
+import filodb.core.store.ChunkSetInfo
 import filodb.memory.{BinaryRegion, MemFactory}
-import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -25,30 +26,31 @@ import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCU
  *   partition columns:  metricName:string, tags:map
  *   data columns:       timestamp:long, value:double
  *
- * NOTE: this data structure will be deprecated slowly in favor of PartitionSchema/DataSchema.
- * NOTE2: name is used for ingestion stream name, which is separate from the name of the schema.
- *
  * The Column IDs (used for querying) for data columns are numbered starting with 0, and for partition
  * columns are numbered starting with PartColStartIndex.  This means position is the same or easily derived
  *
  * The rowKeyIDs are the dataColumns IDs/positions for the "row key", typically a timestamp column but
  * something which makes a value unique within a partition and describes a range of data in a chunk.
  */
-final case class Dataset(name: String, schema: Schema) {
-  val options         = schema.partition.options
-  val dataColumns     = schema.data.columns
-  val partitionColumns = schema.partition.columns
+final case class Dataset(name: String,
+                         partitionColumns: Seq[Column],
+                         dataColumns: Seq[Column],
+                         rowKeyIDs: Seq[Int],
+                         downsamplers: Seq[ChunkDownsampler],
+                         database: Option[String] = None,
+                         options: DatasetOptions = DatasetOptions.DefaultOptions) {
+  require(rowKeyIDs.nonEmpty)
+  val ref = DatasetRef(name, database)
+  val rowKeyColumns   = rowKeyIDs.map(dataColumns)
+  val rowKeyRouting   = rowKeyIDs.toArray
 
-  val ref = DatasetRef(name, None)
-  val rowKeyColumns   = schema.data.columns take 1
-
-  val ingestionSchema = schema.ingestionSchema
-  val comparator      = schema.comparator
-  val partKeySchema   = schema.partKeySchema
+  val ingestionSchema = RecordSchema2.ingestion(this)  // TODO: add predefined keys yo
+  val comparator      = new RecordComparator(ingestionSchema)
+  val partKeySchema   = comparator.partitionKeySchema
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
-  val dataReaders     = schema.data.readers
-  val numDataColumns  = schema.data.columns.length
+  val dataReaders     = dataColumns.map(col => BinaryVector.defaultPtrToReader(col.columnType.clazz)).toArray
+  val numDataColumns  = dataColumns.length
 
   // Used for ChunkSetReader.binarySearchKeyChunks
   val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
@@ -57,8 +59,8 @@ final case class Dataset(name: String, schema: Schema) {
   val timestampColID  = timestampColumn.id
 
   // The number of bytes of chunkset metadata including vector pointers in memory
-  val chunkSetInfoSize = schema.data.chunkSetInfoSize
-  val blockMetaSize    = schema.data.blockMetaSize
+  val chunkSetInfoSize = ChunkSetInfo.chunkSetInfoSize(dataColumns.length)
+  val blockMetaSize    = chunkSetInfoSize + 4
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
 
@@ -79,8 +81,8 @@ final case class Dataset(name: String, schema: Schema) {
    */
   def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
     val partColPos = columnID - Dataset.PartColStartIndex
-    require(Dataset.isPartitionID(columnID) && partColPos < schema.partition.columns.length)
-    schema.partition.columns(partColPos).columnType match {
+    require(Dataset.isPartitionID(columnID) && partColPos < partitionColumns.length)
+    partitionColumns(partColPos).columnType match {
       case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
       case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
       case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
@@ -91,7 +93,7 @@ final case class Dataset(name: String, schema: Schema) {
   /**
    * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
    */
-  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
+  def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(rowKeyIDs.head)
 
   import Accumulation._
   import OptionSugar._
@@ -99,8 +101,8 @@ final case class Dataset(name: String, schema: Schema) {
    * Returns the column IDs for the named columns or the missing column names
    */
   def colIDs(colNames: String*): Seq[Int] Or Seq[String] =
-    colNames.map { n => schema.data.columns.find(_.name == n).map(_.id)
-                          .orElse { schema.partition.columns.find(_.name == n).map(_.id) }
+    colNames.map { n => dataColumns.find(_.name == n).map(_.id)
+                          .orElse { partitionColumns.find(_.name == n).map(_.id) }
                           .toOr(One(n)) }
             .combined.badMap(_.toSeq)
 
@@ -110,23 +112,38 @@ final case class Dataset(name: String, schema: Schema) {
    * over the input RowReader to return data columns corresponding to dataset definition.
    */
   def dataRouting(colNames: Seq[String]): Array[Int] =
-    schema.data.columns.map { c => colNames.indexOf(c.name) }.toArray
+    dataColumns.map { c => colNames.indexOf(c.name) }.toArray
 
   /**
    * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
    * the input RowReader columns whose names are passed in.
    */
   def ingestRouting(colNames: Seq[String]): Array[Int] =
-    dataRouting(colNames) ++ schema.partition.columns.map { c => colNames.indexOf(c.name) }
+    dataRouting(colNames) ++ partitionColumns.map { c => colNames.indexOf(c.name) }
 
   /** Returns the Column instance given the ID */
   def columnFromID(columnID: Int): Column =
-    if (Dataset.isPartitionID(columnID)) { schema.partition.columns(columnID - Dataset.PartColStartIndex) }
-    else                                 { schema.data.columns(columnID) }
+    if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }
+    else                                 { dataColumns(columnID) }
 
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
     ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
+
+  def toConfig: Config = {
+
+    val c = Map[String, Any] (
+      "dataset" -> name,
+      "definition.partition-columns" -> partitionColumns.map(_.toStringNotation).asJava,
+      "definition.data-columns" -> dataColumns.map(_.toStringNotation).asJava,
+      "definition.row-key-columns" -> rowKeyIDs.map(dataColumns(_).name).asJava,
+      "definition.downsamplers" -> downsamplers.map(_.encoded).asJava
+    ).asJava
+
+    ConfigFactory.parseMap(c).withFallback(ConfigFactory.parseString(
+           s""" options ${options} """))
+
+  }
 }
 
 /**
@@ -135,6 +152,7 @@ final case class Dataset(name: String, schema: Schema) {
  */
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
+                          valueColumn: String,
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
@@ -149,6 +167,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
     val map: Map[String, Any] = Map(
       "shardKeyColumns" -> shardKeyColumns.asJava,
       "metricColumn" -> metricColumn,
+      "valueColumn" -> valueColumn,
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
@@ -169,6 +188,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
 object DatasetOptions {
   val DefaultOptions = DatasetOptions(shardKeyColumns = Nil,
                                       metricColumn = "__name__",
+                                      valueColumn = "value",
                                       // defaults that work well for Prometheus
                                       ignoreShardKeyColumnSuffixes =
                                         Map("__name__" -> Seq("_bucket", "_count", "_sum")),
@@ -181,6 +201,7 @@ object DatasetOptions {
   def fromConfig(config: Config): DatasetOptions =
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
+                   valueColumn = config.getString("valueColumn"),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
@@ -191,7 +212,18 @@ object DatasetOptions {
  * Contains many helper functions especially pertaining to Dataset creation and validation.
  */
 object Dataset {
-  val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
+  def fromConfig(config: Config): Dataset = {
+    val dataset = config.getString("dataset")
+    val defn = config.getConfig("definition")
+    val options = config.getConfig("options")
+
+    val partitionCols = defn.as[Seq[String]]("partition-columns")
+    val dataCols = defn.as[Seq[String]]("data-columns")
+    val downsamplers = defn.as[Seq[String]]("downsamplers")
+    val rowKeyColumns = defn.as[Seq[String]]("row-key-columns")
+
+    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers, DatasetOptions.fromConfig(options)).get
+  }
 
   /**
    * Creates a new Dataset with various options
@@ -199,30 +231,32 @@ object Dataset {
    * @param name The name of the dataset
    * @param partitionColumns list of partition columns in name:type form
    * @param dataColumns list of data columns in name:type form
+   * @param keyColumns  the key column names, no :type
    * @return a Dataset, or throws an exception if a dataset cannot be created
    */
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumns: Seq[String]): Dataset =
-    apply(name, partitionColumns, dataColumns, Nil, DatasetOptions.DefaultOptions)
+    apply(name, partitionColumns, dataColumns, keyColumns, Nil, DatasetOptions.DefaultOptions)
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
+            keyColumns: Seq[String],
             downsamplers: Seq[String], options : DatasetOptions): Dataset =
-    make(name, partitionColumns, dataColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
+    make(name, partitionColumns, dataColumns, keyColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
-            options: DatasetOptions): Dataset =
-    apply(name, partitionColumns, dataColumns, Nil, options)
+            keyColumn: String, options: DatasetOptions): Dataset =
+    apply(name, partitionColumns, dataColumns, Seq(keyColumn), Nil, options)
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String]): Dataset =
-    apply(name, partitionColumns, dataColumns, DatasetOptions.DefaultOptions)
+    apply(name, partitionColumns, dataColumns, "timestamp", DatasetOptions.DefaultOptions)
 
   sealed trait BadSchema
   case class BadDownsampler(msg: String) extends BadSchema
@@ -234,7 +268,6 @@ object Dataset {
   case class UnknownRowKeyColumn(keyColumn: String) extends BadSchema
   case class IllegalMapColumn(reason: String) extends BadSchema
   case class NoTimestampRowKey(colName: String, colType: String) extends BadSchema
-  case class HashConflict(detail: String) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 
@@ -271,6 +304,14 @@ object Dataset {
           nothing2 <- validatePartMapCol() } yield ()
   }
 
+  def getRowKeyIDs(dataColumns: Seq[Column], rowKeyColNames: Seq[String]): Seq[Int] Or BadSchema = {
+    val indices = rowKeyColNames.map { rowKeyCol => dataColumns.indexWhere(_.name == rowKeyCol) }
+    indices.zip(rowKeyColNames).find(_._1 < 0) match {
+      case Some((_, col)) => Bad(UnknownRowKeyColumn(col))
+      case None           => Good(indices)
+    }
+  }
+
   def validateTimeSeries(dataColumns: Seq[Column], rowKeyIDs: Seq[Int]): Unit Or BadSchema =
     dataColumns(rowKeyIDs.head).columnType match {
       case Column.ColumnType.LongColumn      => Good(())
@@ -303,13 +344,20 @@ object Dataset {
   def make(name: String,
            partitionColNameTypes: Seq[String],
            dataColNameTypes: Seq[String],
+           keyColumnNames: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
-           options: DatasetOptions = DatasetOptions.DefaultOptions,
-           valueColumn: Option[String] = None): Dataset Or BadSchema = {
-    // Default value column is the last data column name
-    val valueCol = valueColumn.getOrElse(dataColNameTypes.last.split(":").head)
-    for { partSchema <- PartitionSchema.make(partitionColNameTypes, options)
-          dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol) }
-    yield { Dataset(name, Schema(partSchema, dataSchema)) }
+           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema = {
+
+    for {partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
+         dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
+         _ <- validateMapColumn(partColumns, dataColumns)
+         rowKeyIDs <- getRowKeyIDs(dataColumns, keyColumnNames)
+         downsamplers <- validateDownsamplers(downsamplerNames)
+         _ <- validateTimeSeries(dataColumns, rowKeyIDs)}
+      yield {
+        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, None, options)
+      }
   }
+
+
 }

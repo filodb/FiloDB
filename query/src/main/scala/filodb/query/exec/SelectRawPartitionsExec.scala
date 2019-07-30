@@ -41,13 +41,15 @@ final case class SelectRawPartitionsExec(id: String,
   require(colIds.nonEmpty)
 
   protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
+    val numRowKeyCols = colIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
+
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
     // But make sure the max column isn't already included
     histMaxColumn(dataset, colIds).filter { mId => !(colIds contains mId) }
                                   .map { maxColId =>
-      ResultSchema(dataset.infosFromIDs(colIds :+ maxColId), 1, colIDs = (colIds :+ maxColId))
+      ResultSchema(dataset.infosFromIDs(colIds :+ maxColId), numRowKeyCols, colIDs = (colIds :+ maxColId))
     }.getOrElse {
-      ResultSchema(dataset.infosFromIDs(colIds), 1, colIDs = colIds)
+      ResultSchema(dataset.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
     }
   }
 
@@ -56,6 +58,8 @@ final case class SelectRawPartitionsExec(id: String,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
+    require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
+
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
   }
