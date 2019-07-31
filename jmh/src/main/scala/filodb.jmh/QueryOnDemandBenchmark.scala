@@ -113,7 +113,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                     }.countL.runAsync
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
-  memStore.commitIndexForTesting(dataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended.")
 
   // For each invocation, reclaim all blocks to make sure ODP is really happening

@@ -476,7 +476,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def completeIndexRecovery(): Unit = {
     assertThreadName(IngestSchedName)
-    commitPartKeyIndexBlocking()
+    refreshPartKeyIndexBlocking()
     startFlushingIndex() // start flushing index now that we have recovered
     logger.info(s"Bootstrapped index for dataset=${dataset.ref} shard=$shardNum")
   }
@@ -555,7 +555,7 @@ class TimeSeriesShard(val dataset: Dataset,
       s" numPartsInIndex=${partIdMap.size} numIngestingParts=${partitions.size}")
   }
 
-  def indexNames: Iterator[String] = partKeyIndex.indexNames
+  def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
 
   def labelValues(labelName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(labelName, topK)
 
@@ -650,9 +650,9 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   /**
-    * WARNING: use only for testing. Not performant
+    * WARNING: Not performant. Use only in tests, or during initial bootstrap.
     */
-  def commitPartKeyIndexBlocking(): Unit = partKeyIndex.commitBlocking()
+  def refreshPartKeyIndexBlocking(): Unit = partKeyIndex.refreshReadersBlocking()
 
   def closePartKeyIndex(): Unit = partKeyIndex.closeIndex()
 

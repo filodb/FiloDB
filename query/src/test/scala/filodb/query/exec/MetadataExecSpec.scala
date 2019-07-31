@@ -58,7 +58,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   override def beforeAll(): Unit = {
     memStore.setup(timeseriesDataset, 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
-    memStore.commitIndexForTesting(timeseriesDataset.ref)
+    memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }
 
   override def afterAll(): Unit = {
