@@ -346,7 +346,7 @@ object MachineMetricsData {
   val histMaxDS = Dataset.make("histmax", Seq("tags:map"),
                           Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"),
                           Seq("timestamp"),
-                          options = DatasetOptions.DefaultOptions.copy(maxColumn = Some("max"))).get
+                          options = DatasetOptions.DefaultOptions).get
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max column before h/hist
@@ -441,12 +441,7 @@ object MetricsTestData {
     Seq("timestamp"),
     Seq.empty,
     true,
-    options = DatasetOptions(Seq("__name__"), "__name__", "average",
-                            maxColumn = Some("max"),
-                            minColumn = Some("min"),
-                            sumColumn = Some("sum"),
-                            countColumn = Some("count"),
-                            avgColumn = Some("avg"))
+    options = DatasetOptions(Seq("__name__"), "__name__", "average")
   ).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)

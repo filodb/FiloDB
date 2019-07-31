@@ -19,7 +19,7 @@ object SelectRawPartitionsExec {
   def histMaxColumn(dataset: Dataset, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => dataset.dataColumns(id).columnType == HistogramColumn }
           .flatMap { histColID =>
-            dataset.options.maxColumn.map(dataset.dataColId(_))
+            dataset.dataColumns.find(_.name == "max").map(_.id)
           }
   }
 }

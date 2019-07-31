@@ -56,10 +56,10 @@ final case class PeriodicSamplesMapper(start: Long,
     // so that it returns value present at time - staleSampleAfterMs
     val windowLength = window.getOrElse(if (functionId.isEmpty) queryConfig.staleSampleAfterMs + 1 else 0L)
 
+    val maxCol = dataset.dataColumns.find(_.name == "max").map(_.id)
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val maxCol = dataset.options.maxColumn.map(dataset.dataColId(_))
           val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
