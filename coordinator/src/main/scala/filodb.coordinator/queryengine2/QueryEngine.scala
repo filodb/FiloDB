@@ -6,6 +6,7 @@ import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
@@ -23,6 +24,12 @@ import filodb.query.{exec, _}
 import filodb.query.exec._
 
 
+trait TsdbQueryParams
+case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
+                        spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
+
+object UnavailablePromQlQueryParams extends TsdbQueryParams
+
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
@@ -31,7 +38,8 @@ import filodb.query.exec._
 class QueryEngine(dataset: Dataset,
                   shardMapperFunc: => ShardMapper,
                   failureProvider: FailureProvider,
-                  spreadProvider: SpreadProvider = StaticSpreadProvider())
+                  spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                  queryEngineConfig: Config = ConfigFactory.empty())
                    extends StrictLogging {
 
   /**
@@ -73,9 +81,15 @@ class QueryEngine(dataset: Dataset,
             route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime), queryId, submitTime, options, spreadProvider)
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
-          PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref,
-            tsdbQueryParams.asInstanceOf[PromQlQueryParams].copy(start = ((timeRange.startInMillis + lookBackTime)/1000)
-              , end = (timeRange.endInMillis / 1000), processFailure = false), submitTime)
+          val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
+          val endpoint = queryEngineConfig.isEmpty() match {
+            case false => queryEngineConfig.getString("routing.buddy.http.endpoint")
+            case _     => ""
+          }
+
+          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis +
+            lookBackTime)/1000, queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }
     }
 
@@ -92,13 +106,16 @@ class QueryEngine(dataset: Dataset,
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions, tsdbQueryParams: TsdbQueryParams): ExecPlan = {
+                  options: QueryOptions,
+                  tsdbQueryParams: TsdbQueryParams): ExecPlan = {
     val queryId = UUID.randomUUID().toString
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
     if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) ||
-      !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure ||
+      !tsdbQueryParams.isInstanceOf[PromQlQueryParams] ||
+      (tsdbQueryParams.isInstanceOf[PromQlQueryParams]&&
+      !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) ||
       !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan))
       return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
@@ -114,7 +131,7 @@ class QueryEngine(dataset: Dataset,
     if(failures.isEmpty)
        return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
 
-    val routes: Seq[Route] = QueryRoutingPlanner.plan(rootLogicalPlan, failures, routingTime)
+    val routes: Seq[Route] = QueryRoutingPlanner.plan(failures, routingTime)
 
     routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
       tsdbQueryParams)

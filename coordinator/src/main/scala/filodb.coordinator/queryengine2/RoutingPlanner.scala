@@ -8,7 +8,7 @@ import filodb.query._
   * Planner for routing based on failure ranges for a given LogicalPlan.
   */
 trait RoutingPlanner extends StrictLogging {
-  def plan(lp: LogicalPlan, failure: Seq[FailureTimeRange], time: TimeRange): Seq[Route]
+  def plan(failure: Seq[FailureTimeRange], time: TimeRange): Seq[Route]
 }
 
 object QueryRoutingPlanner extends RoutingPlanner {
@@ -16,7 +16,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
   /**
     * Remove larger FailureTimeRange when more than one FailureTimeRanges have overlapping times
     */
-  def removeLargerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
+  private def removeLargerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
 
     failures.sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis).
       foldLeft(Seq[FailureTimeRange]()) { (buildList, tail) =>
@@ -40,7 +40,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       }
   }
 
-  def plan(lp: LogicalPlan, failures: Seq[FailureTimeRange], time: TimeRange): Seq[Route] = {
+  def plan(failures: Seq[FailureTimeRange], time: TimeRange): Seq[Route] = {
 
     val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
     if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
@@ -62,7 +62,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * @param end     end time for route
     * @return seq of Routes
     */
-  def splitQueryTime(failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long): Seq[Route] = {
+  private def splitQueryTime(failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long): Seq[Route] = {
 
     if (index >= failure.length)
       return Nil

@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -10,9 +9,9 @@ import monix.reactive.Observable
 import filodb.core.DatasetRef
 import filodb.core.Types.ColumnId
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats, PartitionScanMethod, RawPartData,
-  ReadablePartition, ScanSplit}
-import filodb.query.{QueryConfig, QueryResponse}
+import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats,
+  PartitionScanMethod, RawPartData, ReadablePartition, ScanSplit}
+import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
@@ -22,13 +21,13 @@ import filodb.query.{QueryConfig, QueryResponse}
   */
 case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
 
+  // Empty query config, since its does not apply in case of non-leaf plans
+  val queryConfig: QueryConfig = EmptyQueryConfig
+
   override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                         timeout: FiniteDuration): Task[QueryResponse] = {
-
-    // Empty query config, since its does not apply in case of non-leaf plans
-    val queryConfig: QueryConfig = new QueryConfig(ConfigFactory.empty())
     // unsupported source since its does not apply in case of non-leaf plans
-    val source = UnSupportedChunkSource()
+    val source = UnsupportedChunkSource()
     // translate implicit ExecutionContext to monix.Scheduler
     plan.execute(source, dataset, queryConfig)
   }
@@ -38,7 +37,7 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
 /**
   * No-op chunk source which does nothing and throws exception for all functions.
   */
-case class UnSupportedChunkSource() extends ChunkSource {
+case class UnsupportedChunkSource() extends ChunkSource {
 
   override def scanPartitions(dataset: Dataset, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
                               chunkMethod: ChunkScanMethod): Observable[ReadablePartition] =

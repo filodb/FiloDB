@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import scala.collection.mutable.HashMap
-import scala.concurrent.{Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -21,7 +21,7 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
-                        (implicit val ioPool: Scheduler)
+                        (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
   import FiloSchedulers._

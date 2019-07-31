@@ -1,6 +1,7 @@
 package filodb.coordinator.client
 
-import filodb.core.query.{ColumnFilter}
+import filodb.coordinator.queryengine2.TsdbQueryParams
+import filodb.core.query.ColumnFilter
 import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand, QueryOptions}
 
 object QueryCommands {
@@ -65,11 +66,13 @@ object QueryCommands {
    */
   final case class LogicalPlan2Query(dataset: DatasetRef,
                                      logicalPlan: LogicalPlan2,
+                                     tsdbQueryParams: TsdbQueryParams,
                                      queryOptions: QueryOptions = QueryOptions(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class ExplainPlan2Query(dataset: DatasetRef,
                                      logicalPlan: LogicalPlan2,
+                                     tsdbQueryParams: TsdbQueryParams,
                                      queryOptions: QueryOptions = QueryOptions(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query

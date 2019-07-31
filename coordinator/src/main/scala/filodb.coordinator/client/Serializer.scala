@@ -64,8 +64,6 @@ class KryoInit {
     kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey],
                   new PartitionRangeVectorKeySerializer)
     kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
-    kryo.register(classOf[filodb.query.exec.RemoteExec])
-    kryo.register(classOf[filodb.query.exec.RemoteExecParams])
 
     // Needed to serialize/deserialize exceptions multiple times (see unit test for example)
     UnmodifiableCollectionsSerializer.registerSerializers(kryo)

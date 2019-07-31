@@ -13,9 +13,7 @@ trait FailureProvider {
 }
 
 object EmptyFailureProvider extends FailureProvider {
-  override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-    Seq[FailureTimeRange]()
-  }
+  override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = Nil
 }
 
 /**
