@@ -95,7 +95,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   Await.result(producingFut, 200.seconds)
   Thread sleep 2000
   val store = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
-  store.commitIndexForTesting(dataset.ref) // commit lucene index
+  store.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves

@@ -97,7 +97,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     }.countL.runAsync
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
-  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
+  cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves
