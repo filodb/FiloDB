@@ -61,7 +61,7 @@ final case class SetOperatorExec(id: String,
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
-      val results: List[SerializableRangeVector] = binaryOp  match {
+      val results: List[RangeVector] = binaryOp  match {
         case LAND => setOpAnd(lhsRvs, rhsRvs)
         case LOR => setOpOr(lhsRvs, rhsRvs)
         case LUnless => setOpUnless(lhsRvs, rhsRvs)
@@ -78,10 +78,10 @@ final case class SetOperatorExec(id: String,
     else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
   }
 
-  private def setOpAnd(lhsRvs: List[SerializableRangeVector]
-                       , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
+  private def setOpAnd(lhsRvs: List[RangeVector]
+                       , rhsRvs: List[RangeVector]): List[RangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[SerializableRangeVector]()
+    var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       if (!jk.isEmpty)
@@ -99,10 +99,10 @@ final case class SetOperatorExec(id: String,
     result.toList
   }
 
-  private def setOpOr(lhsRvs: List[SerializableRangeVector]
-                      , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
+  private def setOpOr(lhsRvs: List[RangeVector]
+                      , rhsRvs: List[RangeVector]): List[RangeVector] = {
     val lhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[SerializableRangeVector]()
+    var result = new ListBuffer[RangeVector]()
     // Add everything from left hand side range vector
     lhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
@@ -119,10 +119,10 @@ final case class SetOperatorExec(id: String,
     result.toList
   }
 
-  private def setOpUnless(lhsRvs: List[SerializableRangeVector]
-                          , rhsRvs: List[SerializableRangeVector]): List[SerializableRangeVector] = {
+  private def setOpUnless(lhsRvs: List[RangeVector]
+                          , rhsRvs: List[RangeVector]): List[RangeVector] = {
     val rhsKeysSet = new mutable.HashSet[Map[Utf8Str, Utf8Str]]()
-    var result = new ListBuffer[SerializableRangeVector]()
+    var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
       rhsKeysSet += jk

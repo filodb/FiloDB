@@ -474,13 +474,19 @@ class RowHistogramReader(histVect: Ptr.U8) extends HistogramReader with SectionR
   }
 }
 
+final case class HistogramCorrection(lastValue: LongHistogram, correction: LongHistogram) extends CorrectionMeta
+
+trait CounterHistogramReader extends HistogramReader with CounterVectorReader {
+  def correctedValue(n: Int, meta: CorrectionMeta): HistogramWithBuckets
+}
+
 /**
- * A reader for SectDelta encoded histograms
+ * A reader for SectDelta encoded histograms, including correction/drop functionality
  */
-class SectDeltaHistogramReader(histVect: Ptr.U8) extends RowHistogramReader(histVect) {
+class SectDeltaHistogramReader(histVect: Ptr.U8) extends RowHistogramReader(histVect) with CounterHistogramReader {
   // baseHist is section base histogram; summedHist used to compute base + delta or other sums
-  private val summedHist = MutableHistogram.empty(buckets)
-  private val baseHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
+  private val summedHist = LongHistogram.empty(buckets)
+  private val baseHist = summedHist.copy
   private val baseSink = NibblePack.DeltaSink(baseHist.values)
 
   // override setSection: also set the base histogram for getting real value
@@ -514,4 +520,54 @@ class SectDeltaHistogramReader(histVect: Ptr.U8) extends RowHistogramReader(hist
 
   // TODO: optimized summing.  It's wasteful to apply the base + delta math so many times ...
   // instead add delta + base * n if possible.   However, do we care about sum performance on increasing histograms?
+
+  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = meta match {
+    case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
+    case h @ HistogramCorrection(lastValue, correction) =>
+      val firstValue = apply(0)
+      // Last value is the new delta correction.  Also assume the correction is already a cloned independent thing
+      if (firstValue < lastValue) {
+        correction.add(lastValue)
+        h
+      } else { meta }
+  }
+
+  // code to go through and build a list of corrections and corresponding index values.. (dropIndex, correction)
+  lazy val corrections = {
+    var index = 0
+    // Step 1: build an iterator of (starting-index, section) for each section
+    iterateSections.map { case (s) => val o = (index, s); index += s.numElements; o }.collect {
+      case (i, s) if i > 0 && s.sectionType == Section.TypeDrop =>
+        (i, apply(i - 1).asInstanceOf[LongHistogram].copy)
+    }.toBuffer
+  }
+
+  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
+    val correction = meta match {
+      case NoCorrection                 => LongHistogram.empty(buckets)
+      case HistogramCorrection(_, corr) => corr
+    }
+    // Go through and add corrections
+    corrections.foreach { case (_, corr) => correction.add(corr) }
+
+    HistogramCorrection(apply(length - 1).asInstanceOf[LongHistogram].copy, correction)
+  }
+
+  def correctedValue(n: Int, meta: CorrectionMeta): HistogramWithBuckets = {
+    // Get the raw histogram value -- COPY it as we need to modify it, and also
+    // calling corrections below might modify the temporary value
+    val h = apply(n).asInstanceOf[LongHistogram].copy
+
+    // Apply any necessary corrections
+    corrections.foreach { case (ci, corr) =>
+      if (ci <= n) h.add(corr)
+    }
+
+    // Plus any carryover previous corrections
+    meta match {
+      case NoCorrection                 => h
+      case HistogramCorrection(_, corr) => h.add(corr)
+                                           h
+    }
+  }
 }

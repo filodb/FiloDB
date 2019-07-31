@@ -7,7 +7,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryengine2.QueryEngine
-import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData}
+import filodb.core.{query, MachineMetricsData, MetricsTestData, NamesTestData}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.IngestionConfig
@@ -155,7 +155,9 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     result.id shouldEqual roundTripResult.id
     for { i <- 0 until roundTripResult.result.size } {
       // BinaryVector deserializes to different impl, so cannot compare top level object
-      roundTripResult.result(i).schema shouldEqual result.result(i).schema
+      roundTripResult.result(i)
+        .asInstanceOf[query.SerializableRangeVector].schema shouldEqual result.result(i)
+        .asInstanceOf[query.SerializableRangeVector].schema
       roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
         result.result(i).rows.map(_.getDouble(1)).toSeq
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
@@ -299,7 +301,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     srv.rows.size shouldEqual 1
     val actual = srv.rows.map(record => {
       val rowReader = record.asInstanceOf[BinaryRecordRowReader]
-      srv.schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
+      srv.asInstanceOf[query.SerializableRangeVector]
+        .schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
     })
     actual.toList shouldEqual expected
   }
