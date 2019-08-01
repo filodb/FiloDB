@@ -60,13 +60,13 @@ final case class Dataset(name: String, schema: Schema) {
   val chunkSetInfoSize = schema.data.chunkSetInfoSize
   val blockMetaSize    = schema.data.blockMetaSize
 
-  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, Dataset.DefaultContainerSize)
 
   /**
    * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
    */
   def partKey(parts: Any*): Array[Byte] = {
-    val offset = partKeyBuilder.addFromObjects(parts: _*)
+    val offset = partKeyBuilder.addFromObjects(schema, parts: _*)
     val bytes = partKeySchema.asByteArray(partKeyBuilder.allContainers.head.base, offset)
     partKeyBuilder.reset()
     bytes
@@ -193,6 +193,8 @@ object DatasetOptions {
 object Dataset {
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
 
+  val DefaultContainerSize = 10240
+
   /**
    * Creates a new Dataset with various options
    *
@@ -210,7 +212,7 @@ object Dataset {
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
-            downsamplers: Seq[String], options : DatasetOptions): Dataset =
+            downsamplers: Seq[String], options: DatasetOptions): Dataset =
     make(name, partitionColumns, dataColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
@@ -278,9 +280,11 @@ object Dataset {
       case other: Column.ColumnType          => Bad(NoTimestampRowKey(dataColumns(rowKeyIDs.head).name, other.toString))
     }
 
-  def validateDownsamplers(downsamplers: Seq[String]): Seq[ChunkDownsampler] Or BadSchema = {
+  def validateDownsamplers(downsamplers: Seq[String],
+                           downsampleSchema: Option[String]): Seq[ChunkDownsampler] Or BadSchema = {
     try {
-      Good(ChunkDownsampler.downsamplers(downsamplers))
+      if (downsamplers.nonEmpty && downsampleSchema.isEmpty) Bad(BadDownsampler("downsample-schema not defined!"))
+      else Good(ChunkDownsampler.downsamplers(downsamplers))
     } catch {
       case e: IllegalArgumentException => Bad(BadDownsampler(e.getMessage))
     }
@@ -310,6 +314,6 @@ object Dataset {
     val valueCol = valueColumn.getOrElse(dataColNameTypes.last.split(":").head)
     for { partSchema <- PartitionSchema.make(partitionColNameTypes, options)
           dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol) }
-    yield { Dataset(name, Schema(partSchema, dataSchema)) }
+    yield { Dataset(name, Schema(partSchema, dataSchema, None)) }
   }
 }

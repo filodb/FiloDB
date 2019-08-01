@@ -4,12 +4,12 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
+import filodb.core.binaryrecord2.{RecordComparator, RecordSchema}
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.core.Types._
-import filodb.memory.{BinaryRegion, MemFactory}
+import filodb.memory.BinaryRegion
 import filodb.memory.format.BinaryVector
 
 /**
@@ -19,12 +19,14 @@ import filodb.memory.format.BinaryVector
  * One DataSchema should be used for each type of metric or data, such as gauge, histogram, etc.
  * The "timestamp" or rowkey is the first column and must be either a LongColumn or TimestampColumn.
  * DataSchemas are intended to be built from config through Schemas.
+ * If downsamplers are defined, then the downsampleSchema must also be defined.
  */
 final case class DataSchema private(name: String,
                                     columns: Seq[Column],
                                     downsamplers: Seq[ChunkDownsampler],
                                     hash: Int,
-                                    valueColumn: ColumnId) {
+                                    valueColumn: ColumnId,
+                                    downsampleSchema: Option[String] = None) {
   val timestampColumn  = columns.head
   val timestampColID   = 0
 
@@ -47,21 +49,7 @@ final case class DataSchema private(name: String,
 final case class PartitionSchema(columns: Seq[Column],
                                  predefinedKeys: Seq[String],
                                  options: DatasetOptions) {
-  import PartitionSchema._
-
   val binSchema = new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)), Some(0), predefinedKeys)
-
-  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, binSchema, DefaultContainerSize)
-
-  /**
-   * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
-   */
-  def partKey(parts: Any*): Array[Byte] = {
-    val offset = partKeyBuilder.addFromObjects(parts: _*)
-    val bytes = binSchema.asByteArray(partKeyBuilder.allContainers.head.base, offset)
-    partKeyBuilder.reset()
-    bytes
-  }
 }
 
 object DataSchema {
@@ -95,14 +83,15 @@ object DataSchema {
   def make(name: String,
            dataColNameTypes: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
-           valueColumn: String): DataSchema Or BadSchema = {
+           valueColumn: String,
+           downsampleSchema: Option[String] = None): DataSchema Or BadSchema = {
 
     for { dataColumns  <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
-          downsamplers <- validateDownsamplers(downsamplerNames)
+          downsamplers <- validateDownsamplers(downsamplerNames, downsampleSchema)
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, genHash(dataColumns), valueColID)
+      DataSchema(name, dataColumns, downsamplers, genHash(dataColumns), valueColID, downsampleSchema)
     }
   }
 
@@ -114,6 +103,7 @@ object DataSchema {
    *       columns = ["timestamp:ts", "value:double:detectDrops=true"]
    *       value-column = "value"
    *       downsamplers = []
+   *       downsample-schema = "prom-ds-gauge"   # only if downsamplers is not empty
    *     }
    *   }
    * }}}
@@ -125,13 +115,12 @@ object DataSchema {
     make(schemaName,
          conf.as[Seq[String]]("columns"),
          conf.as[Seq[String]]("downsamplers"),
-         conf.getString("value-column"))
+         conf.getString("value-column"),
+         conf.as[Option[String]]("downsample-schema"))
 }
 
 object PartitionSchema {
   import Dataset._
-
-  val DefaultContainerSize = 10240
 
   /**
    * Creates and validates a new PartitionSchema
@@ -170,7 +159,7 @@ object PartitionSchema {
 /**
  * A Schema combines a PartitionSchema with a DataSchema, forming all the columns of a single ingestion record.
  */
-final case class Schema(partition: PartitionSchema, data: DataSchema) {
+final case class Schema(partition: PartitionSchema, data: DataSchema, downsample: Option[Schema]) {
   val allColumns = data.columns ++ partition.columns
   val ingestionSchema = new RecordSchema(allColumns.map(c => ColumnInfo(c.name, c.columnType)),
                                          Some(data.columns.length),
@@ -181,7 +170,6 @@ final case class Schema(partition: PartitionSchema, data: DataSchema) {
 }
 
 final case class Schemas(part: PartitionSchema,
-                         data: Map[String, DataSchema],
                          schemas: Map[String, Schema])
 
 /**
@@ -204,6 +192,7 @@ object Schemas {
   import Accumulation._
 
   // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
+  // and that any downsample-schemas are valid
   def validateDataSchemas(schemas: Map[String, Config]): Seq[DataSchema] Or Seq[(String, BadSchema)] = {
     // get all data schemas parsed, combining errors
     val parsed = schemas.toSeq.map { case (schemaName, schemaConf) =>
@@ -216,6 +205,16 @@ object Schemas {
       val uniqueHashes = schemas.map(_.hash).toSet
       if (uniqueHashes.size == schemas.length) Pass
       else Fail(Seq(("", HashConflict(s"${schemas.length - uniqueHashes.size + 1} schemas have the same hash"))))
+    }.filter { schemas =>
+      // check that downsample-schemas point to valid schemas (and should not point at itself, no loops!)
+      // TODO: also check that the downsample schema matches downsamplers
+      val schemaMap = schemas.map { s => s.name -> s }.toMap
+      val badDsSchemas = schemas.filterNot { s =>
+        s.downsampleSchema.map(ds => ds != s.name && schemaMap.contains(ds)).getOrElse(true)
+      }
+      if (badDsSchemas.isEmpty) Pass
+      else Fail(badDsSchemas.map { s =>
+        (s.name, BadDownsampler(s"Schema ${s.name} has invalid downsample-schema ${s.downsampleSchema}"))})
     }
   }
 
@@ -225,18 +224,22 @@ object Schemas {
    * @param config a Config object at the filodb config level, ie "partition-schema" is an entry
    */
   def fromConfig(config: Config): Schemas Or Seq[(String, BadSchema)] = {
+    val schemas = new collection.mutable.HashMap[String, Schema]
+
+    def addSchema(part: PartitionSchema, schemaName: String, datas: Seq[DataSchema]): Schema = {
+      val data = datas.find(_.name == schemaName).get
+      schemas.getOrElseUpdate(data.name, {
+        Schema(part, data, data.downsampleSchema.map(dsName => addSchema(part, dsName, datas)))
+      })
+    }
+
     for {
       partSchema <- PartitionSchema.fromConfig(config.getConfig("partition-schema"))
                                    .badMap(e => Seq(("<partition>", e)))
       dataSchemas <- validateDataSchemas(config.as[Map[String, Config]]("schemas"))
     } yield {
-      val data = new collection.mutable.HashMap[String, DataSchema]
-      val schemas = new collection.mutable.HashMap[String, Schema]
-      dataSchemas.foreach { schema =>
-        data(schema.name) = schema
-        schemas(schema.name) = Schema(partSchema, schema)
-      }
-      Schemas(partSchema, data.toMap, schemas.toMap)
+      dataSchemas.foreach { schema => addSchema(partSchema, schema.name, dataSchemas) }
+      Schemas(partSchema, schemas.toMap)
     }
   }
 }
