@@ -252,7 +252,7 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
     */
-  private[memstore] final val partSet = PartitionSet.ofSize(InitialNumPartitions, ingestSchema, recordComp)
+  private[memstore] final val partSet = PartitionSet.ofSize(InitialNumPartitions)
   // Use a StampedLock because it supports optimistic read locking. This means that no blocking
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
@@ -1026,7 +1026,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, ingestOffset: Long) = {
     assertThreadName(IngestSchedName)
-    var part = partSet.getWithIngestBR(recordBase, recordOff)
+    var part = partSet.getWithIngestBR(recordBase, recordOff, dataset)
     if (part == null) {
       part = addPartitionForIngestion(recordBase, recordOff, group)
     }
@@ -1353,7 +1353,7 @@ class TimeSeriesShard(val dataset: Dataset,
     // nothing changed in the set, and the partition object is the correct one.
     var stamp = partSetLock.tryOptimisticRead()
     if (stamp != 0) {
-      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
+      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, dataset)
     }
     if (!partSetLock.validate(stamp)) {
       // Because the stamp changed, the write lock was acquired and the set likely changed.
@@ -1362,7 +1362,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // the correct partition is returned.
       stamp = partSetLock.readLock()
       try {
-        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
+        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, dataset)
       } finally {
         partSetLock.unlockRead(stamp)
       }

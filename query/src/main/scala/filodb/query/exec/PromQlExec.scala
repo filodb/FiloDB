@@ -47,8 +47,6 @@ case class PromQlExec(id: String,
     */
   override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ???
 
-
-
   override def execute(source: ChunkSource,
                        dataset: Dataset,
                        queryConfig: QueryConfig)
@@ -68,25 +66,24 @@ case class PromQlExec(id: String,
 
   def toQueryResponse(data: Data, id: String): QueryResponse = {
 
-
     val rangeVectors = data.result.map { r =>
 
-      val rv = new RangeVector {
+       new RangeVector {
           val row = new TransientRow()
 
           override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
           override def rows: Iterator[RowReader] = {
-            r.values.map { v =>
-              // new TransientRow(v.timestamp * 1000, v.value)
-              row.setLong(0, (v.timestamp * 1000))
-              row.setDouble(1, v.value)
-              row
-            }.iterator
-          }
-        }
-        SerializableRangeVector(rv, builder, recSchema, printTree(false))
+           r.values.iterator.map { v =>
+             row.setLong(0, (v.timestamp * 1000))
+             row.setDouble(1, v.value)
+             row
+           }
+         }
 
+         override def numRows: Option[Int] = Some(r.values.size)
+
+        }
     }
     QueryResult(id, resultSchema, rangeVectors)
   }
@@ -99,12 +96,9 @@ object PromQlExec extends  StrictLogging{
   import io.circe.generic.auto._
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-    ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema = SerializableRangeVector.toSchema(columns)
-  val builder = SerializableRangeVector.toBuilder(recSchema)
+   ColumnInfo("value", ColumnType.DoubleColumn))
   val resultSchema = ResultSchema(columns, 1)
 
- // import scala.concurrent.ExecutionContext.Implicits.global
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._

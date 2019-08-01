@@ -125,7 +125,7 @@ trait ExecPlan extends QueryCommand {
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>
-            numResultSamples += srv.numRows
+            numResultSamples += srv.numRowsInt
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
@@ -134,7 +134,7 @@ trait ExecPlan extends QueryCommand {
           case rv: RangeVector =>
             // materialize, and limit rows per RV
             val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
-            numResultSamples += srv.numRows
+            numResultSamples += srv.numRowsInt
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
@@ -222,7 +222,7 @@ trait ExecPlan extends QueryCommand {
     }
   }
 
-  protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
+  protected def rowIterAccumulator(srvsList: List[Seq[RangeVector]]): Iterator[RowReader] = {
 
     new Iterator[RowReader] {
       val listSize = srvsList.size

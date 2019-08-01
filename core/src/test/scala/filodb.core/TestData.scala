@@ -52,7 +52,7 @@ object TestData {
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
-  val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
+  val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
 
   val optionsString = """
   options {
@@ -368,12 +368,13 @@ object MachineMetricsData {
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
+                  ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
   (Stream[Seq[Any]], RawDataRangeVector) = {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
-    val container = records(histDataset, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, histDataset, partKey=histPartKey, bufferPool=histBufferPool)
-    container.iterate(histDataset.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    val container = records(ds, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only

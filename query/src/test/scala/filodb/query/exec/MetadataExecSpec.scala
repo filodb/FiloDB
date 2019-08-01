@@ -2,21 +2,23 @@ package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
+import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
+import filodb.core.{query, TestData}
 import filodb.core.MetricsTestData._
-import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
-import monix.execution.Scheduler
 
 class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
@@ -83,7 +85,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.schema.toStringPairs(record.recordBase, record.recordOffset)
+        rv.asInstanceOf[query.SerializableRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
     result shouldEqual jobQueryResult1
@@ -116,7 +118,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).schema.toStringPairs(row.getBlobBase(0),
+        response(0).rows.map (row => response(0).asInstanceOf[SerializableRangeVector]
+          .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
     }
@@ -135,7 +138,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).schema.toStringPairs(row.getBlobBase(0),
+        response(0).rows.map (row => response(0).asInstanceOf[query.SerializableRangeVector]
+          .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
     }
