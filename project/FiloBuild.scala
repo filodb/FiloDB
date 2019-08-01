@@ -269,7 +269,8 @@ object FiloBuild extends Build {
     logbackDep % "test,it")
 
   lazy val promDeps = Seq(
-    "com.google.protobuf" % "protobuf-java" % "2.5.0"
+    "com.google.protobuf" % "protobuf-java" % "2.5.0",
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
