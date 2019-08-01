@@ -13,7 +13,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.queryengine2.EmptyFailureProvider
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, UnavailablePromQlQueryParams}
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
@@ -113,7 +113,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     val queryStartTime = ingestionStartTime + 7.minutes.toMillis  // 7 minutes from start until 60 minutes from start
     val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
     val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams),
-      QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000))
+      QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000), UnavailablePromQlQueryParams)
     var child = execPlan
     while (child.children.size > 0) child = child.children(0)
     child

@@ -13,7 +13,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
@@ -137,7 +137,8 @@ class QueryOnDemandBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
+    LogicalPlan2Query(dataset.ref, plan, UnavailablePromQlQueryParams, QueryOptions(Some(new StaticSpreadProvider
+    (SpreadChange(0, 1))), 20000))
   }
 
   @TearDown
