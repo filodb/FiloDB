@@ -53,7 +53,7 @@ class HistogramQueryBenchmark {
   memStore.setup(histDataset, 0, ingestConf)
   val hShard = memStore.getShardE(histDataset.ref, 0)
   histSchemaBuilder.allContainers.foreach { c => hShard.ingest(c, 0) }
-  memStore.commitIndexForTesting(histDataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(histDataset.ref) // commit lucene index
 
   // Prometheus hist data: 10 series * 66 = 660 series * 180 samples
   println("Ingesting containers of prometheus schema data....")
@@ -65,7 +65,7 @@ class HistogramQueryBenchmark {
   memStore.setup(promDataset, 0, ingestConf)
   val pShard = memStore.getShardE(promDataset.ref, 0)
   promBuilder.allContainers.foreach { c => pShard.ingest(c, 0) }
-  memStore.commitIndexForTesting(promDataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(promDataset.ref) // commit lucene index
 
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
   private val cluster = FilodbCluster(system)

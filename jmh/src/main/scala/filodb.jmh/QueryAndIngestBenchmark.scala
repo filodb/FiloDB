@@ -115,7 +115,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   // Initial ingest just to populate index
   Await.result(ingestSamples(30), 30.seconds)
   Thread sleep 2000
-  memstore.commitIndexForTesting(dataset.ref) // commit lucene index
+  memstore.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Initial ingestion ended, indexes set up")
 
   /**

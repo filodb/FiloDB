@@ -38,10 +38,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
     memStore.setup(MMD.histMaxDS, 0, TestData.storeConf)
     memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
-    memStore.commitIndexForTesting(timeseriesDataset.ref)
-    memStore.commitIndexForTesting(MMD.dataset1.ref)
-    memStore.commitIndexForTesting(MMD.histDataset.ref)
-    memStore.commitIndexForTesting(MMD.histMaxDS.ref)
+    memStore.refreshIndexForTesting(timeseriesDataset.ref)
+    memStore.refreshIndexForTesting(MMD.dataset1.ref)
+    memStore.refreshIndexForTesting(MMD.histDataset.ref)
+    memStore.refreshIndexForTesting(MMD.histMaxDS.ref)
   }
 
   override def afterAll(): Unit = {
@@ -107,7 +107,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
       case e: QueryError => throw e.t
       case r: QueryResult =>
         r.result.size shouldEqual 1
-        r.result.head.numRows shouldEqual numRawSamples
+        r.result.head.numRows shouldEqual Some(numRawSamples)
     }
 
   }

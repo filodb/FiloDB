@@ -16,6 +16,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.xerial.snappy.Snappy
 import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
+
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.client.LocalClient
@@ -23,8 +24,8 @@ import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
-import filodb.query.PromCirceSupport
 import filodb.prometheus.parse.Parser
+import filodb.query.PromCirceSupport
 import filodb.query.{QueryError, QueryResult => QueryResult2}
 import filodb.query.SuccessResponse
 

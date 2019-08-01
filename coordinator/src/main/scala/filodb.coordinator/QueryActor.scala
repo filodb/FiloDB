@@ -164,7 +164,7 @@ final class QueryActor(memStore: MemStore,
     case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
-      sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
+      sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
     case g: GetIndexValues         => processIndexValues(g, sender())
 
     case ThrowException(dataset) =>

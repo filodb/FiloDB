@@ -133,7 +133,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
         case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
       }
     }
-    cluster.memStore.commitIndexForTesting(dataset6.ref)
+    cluster.memStore.refreshIndexForTesting(dataset6.ref)
     enterBarrier("ingestion-stopped")
 
     // val query = LogicalPlanQuery(dataset6.ref,
