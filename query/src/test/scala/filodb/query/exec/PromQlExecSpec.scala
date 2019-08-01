@@ -12,12 +12,14 @@ import filodb.query
 import filodb.query.{Data, PromQlInvocationParams, QueryResponse, QueryResult, Sampl}
 
 class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
+  
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),
     Seq("timestamp"),
     Seq.empty,
     DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler,

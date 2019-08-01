@@ -46,11 +46,7 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   def getDouble(columnNo: Int): Double = if (columnNo == 1) value else throw new IllegalArgumentException()
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
-  def getAny(columnNo: Int): Any = columnNo match {
-      case 0 => timestamp
-      case 1 => value
-      case _ => throw new IllegalArgumentException()
-    }
+  def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
 
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()

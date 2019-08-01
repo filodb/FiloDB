@@ -68,7 +68,7 @@ case class PromQlExec(id: String,
 
     val rangeVectors = data.result.map { r =>
 
-       new RangeVector {
+       val rv = new RangeVector {
           val row = new TransientRow()
 
           override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
@@ -84,6 +84,7 @@ case class PromQlExec(id: String,
          override def numRows: Option[Int] = Some(r.values.size)
 
         }
+      SerializableRangeVector(rv, builder, recSchema, printTree(false))
     }
     QueryResult(id, resultSchema, rangeVectors)
   }
@@ -97,6 +98,8 @@ object PromQlExec extends  StrictLogging{
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
+  val recSchema = SerializableRangeVector.toSchema(columns)
+  val builder = SerializableRangeVector.toBuilder(recSchema)
   val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
