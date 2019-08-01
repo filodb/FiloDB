@@ -25,8 +25,8 @@ import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.PromCirceSupport
 import filodb.query.{QueryError, QueryResult => QueryResult2}
+import filodb.query.PromCirceSupport
 import filodb.query.SuccessResponse
 
 /**
