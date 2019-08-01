@@ -94,7 +94,7 @@ class QueryEngine(dataset: Dataset,
     }
 
     if (execPlans.size == 1)
-      return execPlans.head
+       execPlans.head
     else
       // Stitch RemoteExec plan results with local using InProcessorDispatcher
       // Sort to move RemoteExec in end as it does not have schema
@@ -112,29 +112,33 @@ class QueryEngine(dataset: Dataset,
     val submitTime = System.currentTimeMillis()
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
-    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) ||
-      !tsdbQueryParams.isInstanceOf[PromQlQueryParams] ||
-      (tsdbQueryParams.isInstanceOf[PromQlQueryParams]&&
-      !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) ||
-      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan))
-      return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || // It is a raw data query
+      !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+      (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
+        !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
+      // failure routing
+      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan)) // Sub queries have different time ranges (unusual)
+      {
+       generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+      } else {
+      val periodicSeriesTime = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)
+      val lookBackTime: Long = QueryRoutingPlanner.getRawSeriesStartTime(rootLogicalPlan).
+        map(periodicSeriesTime.startInMillis - _).get
 
-    val periodicSeriesTime = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)
-    val lookBackTime: Long = QueryRoutingPlanner.getRawSeriesStartTime(rootLogicalPlan).
-      map(periodicSeriesTime.startInMillis - _ ).getOrElse(return  generateLocalExecPlan
-    (rootLogicalPlan, queryId, submitTime, options, querySpreadProvider))
+      val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
+      val failures =
+        failureProvider.getFailures(dataset.ref, routingTime)
+                        .sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
 
-    val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
-    val failures: Seq[FailureTimeRange] = failureProvider.getFailures(dataset.ref, routingTime).
-      sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
+      if (failures.isEmpty) {
+        generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+      } else {
+        val routes: Seq[Route] = QueryRoutingPlanner.plan(failures, routingTime)
 
-    if(failures.isEmpty)
-       return generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
-
-    val routes: Seq[Route] = QueryRoutingPlanner.plan(failures, routingTime)
-
-    routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
-      tsdbQueryParams)
+        routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
+          tsdbQueryParams)
+      }
+    }
   }
 
   private def generateLocalExecPlan(logicalPlan: LogicalPlan,

@@ -44,8 +44,9 @@ object QueryRoutingPlanner extends RoutingPlanner {
 
     val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
     if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
-      (nonOverlappingFailures.head.timeRange.startInMillis > time.endInMillis))
-      return Seq(LocalRoute(None)) // No failure in this time range
+      (nonOverlappingFailures.head.timeRange.startInMillis > time.endInMillis)) {
+       Seq(LocalRoute(None)) // No failure in this time range
+    }
     logger.info("Logical plan time:" + time)
 
     // Recursively split query into local and remote routes starting from first FailureTimeRange
@@ -100,8 +101,9 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * Check whether logical plan has a PeriodicSeriesPlan
     */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan])
-      return false;
+    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan]) {
+      false
+    } else
     true
   }
 
@@ -113,9 +115,9 @@ object QueryRoutingPlanner extends RoutingPlanner {
       val binaryJoin = logicalPlan.asInstanceOf[BinaryJoin]
       val lhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.lhs)
       val rhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.rhs)
-      return (lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis)
-    }
-    return true
+      ((lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis))
+    } else
+    true
   }
 
   /**

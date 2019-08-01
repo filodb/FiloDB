@@ -37,8 +37,12 @@ class FailureProviderSpec extends FunSpec with Matchers {
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
-  it("should extract time from logical plan") {
+  it("should check for PeriodicSeries plan") {
     QueryRoutingPlanner.isPeriodicSeriesPlan(summed1) shouldEqual (true)
+    QueryRoutingPlanner.isPeriodicSeriesPlan(raw2) shouldEqual (false)
+  }
+
+  it("should extract time from logical plan") {
     QueryRoutingPlanner.hasSingleTimeRange(summed1) shouldEqual (true)
     QueryRoutingPlanner.hasSingleTimeRange(binaryJoinLogicalPlan) shouldEqual (false)
 
