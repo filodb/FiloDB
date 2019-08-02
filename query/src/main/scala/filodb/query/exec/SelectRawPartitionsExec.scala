@@ -19,7 +19,7 @@ object SelectRawPartitionsExec {
   def histMaxColumn(dataset: Dataset, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => dataset.dataColumns(id).columnType == HistogramColumn }
           .flatMap { histColID =>
-            dataset.dataColumns.find(_.name == "max").map(_.id)
+            dataset.dataColumns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
           }
   }
 }
@@ -44,7 +44,7 @@ final case class SelectRawPartitionsExec(id: String,
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
     val selectedColIds = selectColIds(dataset)
-    val numRowKeyCols = selectedColIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
+    val numRowKeyCols = 1 // hardcoded since a future PR will indeed fix this to 1 timestamp column
 
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
     // But make sure the max column isn't already included
@@ -62,14 +62,14 @@ final case class SelectRawPartitionsExec(id: String,
       if (colIds.nonEmpty) {
         // query is selecting specific columns
         colIds
-      } else if (!dataset.hasDownsampledData) {
+      } else if (!dataset.options.hasDownsampledData) {
         // needs to select raw data
         colIds ++ dataset.colIDs(dataset.options.valueColumn).get
       } else {
         // need to select column based on range function
         val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
           RangeFunction.downsampleColsFromRangeFunction(dataset, p.asInstanceOf[PeriodicSamplesMapper].functionId)
-        }.getOrElse(Seq("avg"))
+        }.getOrElse(Seq(dataset.options.valueColumn))
         colIds ++ dataset.colIDs(colNames: _*).get
       }
     }

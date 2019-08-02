@@ -30,14 +30,13 @@ final case class PeriodicSamplesMapper(start: Long,
   require(step > 0, "step should be > 0")
 
   if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
-    "Need positive window lengths to apply range function")
+                                  "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
 
-  //noinspection ScalaStyle method.length
   def apply(dataset: Dataset,
             source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -45,8 +44,10 @@ final case class PeriodicSamplesMapper(start: Long,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (step < queryConfig.minStepMs)
-      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs / 1000}s")
+      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
+                   sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
     val rangeFuncGen = RangeFunction.generatorFor(dataset, functionId, valColType, queryConfig, funcParams)
 
     // Generate one range function to check if it is chunked
@@ -56,21 +57,20 @@ final case class PeriodicSamplesMapper(start: Long,
     // so that it returns value present at time - staleSampleAfterMs
     val windowLength = window.getOrElse(if (functionId.isEmpty) queryConfig.staleSampleAfterMs + 1 else 0L)
 
-    val maxCol = dataset.dataColumns.find(_.name == "max").map(_.id)
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-              windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
+                                       windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
-              windowLength, rangeFuncGen().asChunkedD, queryConfig))
+                                       windowLength, rangeFuncGen().asChunkedD, queryConfig))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -92,7 +92,7 @@ final case class PeriodicSamplesMapper(start: Long,
   // Transform source double or long to double schema
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
 
-    if (dataset.hasDownsampledData) {
+    if (dataset.options.hasDownsampledData) {
       source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
         ColumnInfo("value", ColumnType.DoubleColumn)))
       // TODO need to alter for histograms and other schema types

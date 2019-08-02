@@ -223,7 +223,8 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
 }
 
 /**
-  * Sums Histograms over time and also computes Max over time of a Max field.
+  * Computes Average Over Time using sum and count columns.
+  * Used in when calculating avg_over_time using downsampled data
   */
 class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunction[TransientRow] {
   private val sumFunc = new SumOverTimeChunkedFunctionD
@@ -259,7 +260,8 @@ class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunct
 }
 
 /**
-  * Sums Histograms over time and also computes Max over time of a Max field.
+  * Computes Average Over Time using sum and count columns.
+  * Used in when calculating avg_over_time using downsampled data
   */
 class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunction[TransientRow] {
   private val sumFunc = new SumOverTimeChunkedFunctionL

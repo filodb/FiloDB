@@ -37,7 +37,6 @@ final case class Dataset(name: String,
                          dataColumns: Seq[Column],
                          rowKeyIDs: Seq[Int],
                          downsamplers: Seq[ChunkDownsampler],
-                         hasDownsampledData: Boolean = false,
                          database: Option[String] = None,
                          options: DatasetOptions = DatasetOptions.DefaultOptions) {
   require(rowKeyIDs.nonEmpty)
@@ -161,6 +160,7 @@ final case class Dataset(name: String,
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
                           valueColumn: String,
+                          hasDownsampledData: Boolean = false,
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
@@ -176,6 +176,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "shardKeyColumns" -> shardKeyColumns.asJava,
       "metricColumn" -> metricColumn,
       "valueColumn" -> valueColumn,
+      "hasDownsampledData" -> hasDownsampledData,
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
@@ -212,6 +213,7 @@ object DatasetOptions {
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    valueColumn = config.getString("valueColumn"),
+                   hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
@@ -231,10 +233,8 @@ object Dataset {
     val dataCols = defn.as[Seq[String]]("data-columns")
     val downsamplers = defn.as[Seq[String]]("downsamplers")
     val rowKeyColumns = defn.as[Seq[String]]("row-key-columns")
-    val hasDownsampledData = defn.as[Option[Boolean]]("has-downsampled-data").getOrElse(false)
 
-    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers,
-                 hasDownsampledData, DatasetOptions.fromConfig(options)).get
+    Dataset.make(dataset, partitionCols, dataCols, rowKeyColumns, downsamplers, DatasetOptions.fromConfig(options)).get
   }
 
   /**
@@ -258,7 +258,7 @@ object Dataset {
             keyColumns: Seq[String],
             downsamplers: Seq[String], options : DatasetOptions): Dataset =
     make(name, partitionColumns, dataColumns, keyColumns,
-      downsamplers, false, options).badMap(BadSchemaError).toTry.get
+      downsamplers, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
@@ -359,7 +359,6 @@ object Dataset {
            dataColNameTypes: Seq[String],
            keyColumnNames: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
-           hasDownsampledData: Boolean = false,
            options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema = {
 
     for {partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
@@ -369,7 +368,7 @@ object Dataset {
          downsamplers <- validateDownsamplers(downsamplerNames)
          _ <- validateTimeSeries(dataColumns, rowKeyIDs)}
       yield {
-        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, hasDownsampledData, None, options)
+        Dataset(name, partColumns, dataColumns, rowKeyIDs, downsamplers, None, options)
       }
   }
 

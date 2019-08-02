@@ -258,10 +258,9 @@ object RangeFunction {
             columnType: ColumnType,
             config: QueryConfig,
             funcParams: Seq[Any] = Nil,
-            useDownsampledColumns: Boolean = false,
             maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(dataset, func, columnType, config, funcParams, useChunked)()
+    generatorFor(dataset, func, columnType, config, funcParams, maxCol, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
@@ -271,12 +270,13 @@ object RangeFunction {
                    columnType: ColumnType,
                    config: QueryConfig,
                    funcParams: Seq[Any] = Nil,
+                   maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator = {
     if (useChunked) columnType match {
       case ColumnType.DoubleColumn => doubleChunkedFunction(dataset, func, config, funcParams)
       case ColumnType.LongColumn => longChunkedFunction(dataset, func, funcParams)
       case ColumnType.TimestampColumn => longChunkedFunction(dataset, func, funcParams)
-      case ColumnType.HistogramColumn => histChunkedFunction(dataset, func, funcParams)
+      case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
       case other: ColumnType => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
       iteratingFunction(func, funcParams)
@@ -291,10 +291,10 @@ object RangeFunction {
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
-      case Some(CountOverTime)  => () => if (dataset.hasDownsampledData) new SumOverTimeChunkedFunctionL
+      case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionL
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
-      case Some(AvgOverTime)    => () => if (dataset.hasDownsampledData) {
+      case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
                                            val cntCol = dataset.dataColId("count")
                                            new AvgWithSumAndCountOverTimeFuncL(cntCol)
                                          }
@@ -319,10 +319,10 @@ object RangeFunction {
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
-      case Some(CountOverTime)  => () => if (dataset.hasDownsampledData) new SumOverTimeChunkedFunctionD
+      case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionD
                                          else new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
-      case Some(AvgOverTime)    => () => if (dataset.hasDownsampledData) {
+      case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
                                             val cntCol = dataset.dataColId("count")
                                             new AvgWithSumAndCountOverTimeFuncD(cntCol)
                                          }
@@ -335,19 +335,16 @@ object RangeFunction {
     }
   }
 
-  def histChunkedFunction(dataset: Dataset,
-                          func: Option[RangeFunctionId],
-                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
-    val maxCol = dataset.dataColumns.find(_.name == "max").map(_.id)
-    func match {
-      case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
-      case None                 => () => new LastSampleChunkedFunctionH
-      case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
-      case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
-      case Some(Rate)           => () => new HistRateFunction
-      case Some(Increase)       => () => new HistIncreaseFunction
-      case _                    => ???
-    }
+  def histChunkedFunction(func: Option[RangeFunctionId],
+                          funcParams: Seq[Any] = Nil,
+                          maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
+    case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
+    case None                 => () => new LastSampleChunkedFunctionH
+    case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
+    case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
+    case Some(Rate)           => () => new HistRateFunction
+    case Some(Increase)       => () => new HistIncreaseFunction
+    case _                    => ???
   }
 
   /**

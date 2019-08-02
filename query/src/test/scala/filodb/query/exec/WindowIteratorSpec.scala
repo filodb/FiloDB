@@ -459,9 +459,8 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     )
     val chunkedItCnt = new ChunkedWindowIteratorD(rvCnt, 50000L, 100000, 750000L, 100000,
       RangeFunction(MetricsTestData.downsampleDataset, Some(RangeFunctionId.CountOverTime),
-        ColumnType.DoubleColumn, queryConfig, useDownsampledColumns = true, useChunked = true).asChunkedD, queryConfig)
+        ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
     chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual countWindowResults
-
   }
 
   it("should calculate MinOverTime correctly even for windows with no values") {
