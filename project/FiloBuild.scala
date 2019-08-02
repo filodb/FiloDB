@@ -275,6 +275,7 @@ object FiloBuild extends Build {
 
   lazy val gatewayDeps = commonDeps ++ Seq(
     scalaxyDep,
+    logbackDep,
     "io.monix" %% "monix-kafka-1x" % monixKafkaVersion,
     "org.rogach" %% "scallop" % "3.1.1"
   )

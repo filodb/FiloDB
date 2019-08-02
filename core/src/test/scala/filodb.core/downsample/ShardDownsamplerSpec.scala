@@ -22,14 +22,14 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     Seq("timestamp:ts", "value:double"),
     Seq("timestamp"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
-    DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+    DatasetOptions(Seq("__name__", "job"), "__name__", "value", true)).get
 
   val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string", "instance:string"),
     Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
     Seq("timestamp"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
-    DatasetOptions(Seq("name", "namespace"), "name", "total")).get
+    DatasetOptions(Seq("name", "namespace"), "name", "total", true)).get
 
   private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.blockMetaSize, true)
@@ -70,7 +70,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   it ("should formulate downsample ingest schema correctly for custom1 schema") {
     val dsSchema = downsampleOps.downsampleIngestSchema()
     dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "someStr", "tags")
+      Seq("tTime", "dMin", "dMax", "dSum", "dCount", "dAvg", "someStr", "tags")
     dsSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
         StringColumn, MapColumn)

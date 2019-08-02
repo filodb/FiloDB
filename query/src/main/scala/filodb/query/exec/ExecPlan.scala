@@ -116,12 +116,11 @@ trait ExecPlan extends QueryCommand {
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
+        (transf.apply(dataset, acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.toBuilder(recSchema)
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators if necessary")
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>

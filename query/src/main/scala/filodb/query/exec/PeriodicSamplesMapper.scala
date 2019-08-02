@@ -9,9 +9,9 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
 import filodb.memory.format.{vectors => bv, _}
-import filodb.query.{BadQueryException, Query, QueryConfig, RangeFunctionId}
-import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
+import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query.exec.rangefn._
 import filodb.query.util.IndexedArrayQueue
 
 /**
@@ -37,7 +37,8 @@ final case class PeriodicSamplesMapper(start: Long,
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -47,7 +48,7 @@ final case class PeriodicSamplesMapper(start: Long,
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
                    sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
-    val rangeFuncGen = RangeFunction.generatorFor(functionId, valColType, queryConfig, funcParams, maxCol)
+    val rangeFuncGen = RangeFunction.generatorFor(dataset, functionId, valColType, queryConfig, funcParams, maxCol)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
@@ -89,15 +90,23 @@ final case class PeriodicSamplesMapper(start: Long,
   }
 
   // Transform source double or long to double schema
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema =
-    source.copy(columns = source.columns.zipWithIndex.map {
-                  // Transform if its not a row key column
-                  case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
-                    ColumnInfo(name, ColumnType.DoubleColumn)
-                  case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
-                    ColumnInfo(name, ColumnType.DoubleColumn)
-                  case (c: ColumnInfo, _) => c
-                }, fixedVectorLen = Some(((end - start)/step).toInt + 1))
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+
+    if (dataset.options.hasDownsampledData) {
+      source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+        ColumnInfo("value", ColumnType.DoubleColumn)))
+      // TODO need to alter for histograms and other schema types
+    } else {
+      source.copy(columns = source.columns.zipWithIndex.map {
+        // Transform if its not a row key column
+        case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
+          ColumnInfo(name, ColumnType.DoubleColumn)
+        case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
+          ColumnInfo(name, ColumnType.DoubleColumn)
+        case (c: ColumnInfo, _) => c
+      }, fixedVectorLen = Some(((end - start) / step).toInt + 1))
+    }
+  }
 }
 
 /**

@@ -131,7 +131,8 @@ class QueryEngine(dataset: Dataset,
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   queryId: String,
                                   submitTime: Long,
-                                  options: QueryOptions, spreadProvider: SpreadProvider): PlanResult = {
+                                  options: QueryOptions,
+                                  spreadProvider: SpreadProvider): PlanResult = {
 
     logicalPlan match {
       case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp, spreadProvider)
@@ -277,9 +278,10 @@ class QueryEngine(dataset: Dataset,
   }
 
   private def materializeLabelValues(queryId: String,
-                                      submitTime: Long,
-                                      options: QueryOptions,
-                                      lp: LabelValues, spreadProvider : SpreadProvider): PlanResult = {
+                                     submitTime: Long,
+                                     options: QueryOptions,
+                                     lp: LabelValues,
+                                     spreadProvider: SpreadProvider): PlanResult = {
     val filters = lp.labelConstraints.map { case (k, v) =>
       new ColumnFilter(k, Filter.Equals(v))
     }.toSeq
@@ -326,7 +328,8 @@ class QueryEngine(dataset: Dataset,
   private def materializeRawChunkMeta(queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
-                                      lp: RawChunkMeta, spreadProvider : SpreadProvider): PlanResult = {
+                                      lp: RawChunkMeta,
+                                      spreadProvider : SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
     val colID = dataset.colIDs(colName).get.head
@@ -368,13 +371,9 @@ class QueryEngine(dataset: Dataset,
     * as those are automatically prepended.
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
-    val realCols = if (cols.isEmpty) Seq(dataset.options.valueColumn) else cols
-    val ids = dataset.colIDs(realCols: _*)
+    dataset.colIDs(cols: _*)
       .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
       .get
-    // avoid duplication if first ids are already row keys
-    if (ids.take(dataset.rowKeyIDs.length) == dataset.rowKeyIDs) { ids }
-    else { dataset.rowKeyIDs ++ ids }
   }
 
   private def toChunkScanMethod(rangeSelector: RangeSelector): ChunkScanMethod = {

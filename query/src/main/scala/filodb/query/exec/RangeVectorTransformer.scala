@@ -26,7 +26,8 @@ import filodb.query.exec.rangefn._
   * compute intensive and not I/O intensive.
   */
 trait RangeVectorTransformer extends java.io.Serializable {
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector]
@@ -60,7 +61,8 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -82,7 +84,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
           val mapper = HistogramQuantileMapper(funcParams)
-          mapper.apply(source, queryConfig, limit, sourceSchema)
+          mapper.apply(dataset, source, queryConfig, limit, sourceSchema)
         } else {
           val instantFunction = InstantFunction.double(function, funcParams)
           source.map { rv =>
@@ -158,7 +160,8 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -200,7 +203,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
     }
   }
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
