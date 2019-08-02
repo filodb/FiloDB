@@ -184,9 +184,11 @@ object GdeltTestData {
   // NOTE: For all datasets the row key is GLOBALEVENTID
   // Dataset1: Partition keys (Actor2Code, Year)
   val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), DatasetOptions.DefaultOptions)
+  val schema1 = dataset1.schema
 
   // Dataset2: Partition key (MonthYear)
   val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1))
+  val schema2 = dataset2.schema
   val partBuilder2 = new RecordBuilder(TestData.nativeMem, 10240)
 
   // Dataset3: same as Dataset1 for now
@@ -427,6 +429,7 @@ object MetricsTestData {
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
+  val timeseriesSchema = timeseriesDataset.schema
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

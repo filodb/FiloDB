@@ -8,7 +8,7 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.MetricsTestData.{builder, timeseriesDataset}
+import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
@@ -39,7 +39,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
   }
 
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader(_, timeseriesSchema))
   val container = builder.allContainers.head
 
   override def beforeAll(): Unit = {

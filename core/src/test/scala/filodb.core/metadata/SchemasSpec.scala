@@ -285,7 +285,7 @@ class SchemasSpec extends FunSpec with Matchers {
       schemas.schemas("prom").data.timestampColumn.name shouldEqual "timestamp"
       schemas.schemas("hist").data.columns.map(_.columnType) shouldEqual
         Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn)
-      schemas.schemas("prom").downsample shouldEqual schemas.schemas("prom-ds-gauge")
+      schemas.schemas("prom").downsample.get shouldEqual schemas.schemas("prom-ds-gauge")
     }
   }
 }

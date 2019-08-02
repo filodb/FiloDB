@@ -67,6 +67,12 @@ final class RecordBuilder(memFactory: MemFactory,
     curBase = containers.last.base
   }
 
+  private[binaryrecord2] def setSchema(newSchema: RecordSchema): Unit = if (newSchema != schema) {
+    schema = newSchema
+    hashOffset = newSchema.fieldOffset(newSchema.numFields)
+    firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
+  }
+
   /**
    * Start building a new BinaryRecord with a possibly new schema.
    * This must be called after a previous endRecord() or when the builder just started.
@@ -79,11 +85,7 @@ final class RecordBuilder(memFactory: MemFactory,
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
 
     // Set schema, hashoffset, and write schema ID if needed
-    if (schema != recSchema) {
-      schema = recSchema
-      hashOffset = recSchema.fieldOffset(recSchema.numFields)
-      firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
-    }
+    setSchema(recSchema)
     requireBytes(schema.variableAreaStart)
 
     if (recSchema.partitionFieldStart.isDefined) { setShort(curBase, curRecordOffset + 4, schemaID.toShort) }

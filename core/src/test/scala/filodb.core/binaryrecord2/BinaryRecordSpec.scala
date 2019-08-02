@@ -24,7 +24,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   import com.softwaremill.quicklens._
 
   val dataset3 = modify(dataset2)(_.schema.partition.predefinedKeys).setTo(Seq("job", "instance"))
-  val schemaWithPredefKeys = dataset3.schema.partition.binSchema
+  val schemaWithPredefKeys = dataset3.schema.ingestionSchema
   schemaWithPredefKeys shouldEqual RecordSchema.ingestion(dataset2, Seq("job", "instance"))
 
   before {
@@ -302,7 +302,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // schema for part key with only a string
       val stringSchema = new RecordSchema(Seq(ColumnInfo("sc", ColumnType.StringColumn)), Some(0))
       val builder = new RecordBuilder(nativeMem)
-      stringSchema.fixedStart shouldEqual 4
+      stringSchema.fixedStart shouldEqual 6
 
       val str = "Serie zero"
       val strBytes = str.getBytes()
@@ -338,10 +338,10 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrAddSlowly)
 
       // No schemaID should be added
-      RecordSchema.schemaID(addrStringAdd) should not equal (123)
-      RecordSchema.schemaID(addrBlobAdd) should not equal (123)
-      RecordSchema.schemaID(addrAddReader) should not equal (123)
-      RecordSchema.schemaID(addrAddSlowly) should not equal (123)
+      RecordSchema.schemaID(addrStringAdd) shouldEqual (123)
+      RecordSchema.schemaID(addrBlobAdd) shouldEqual (123)
+      RecordSchema.schemaID(addrAddReader) shouldEqual (123)
+      RecordSchema.schemaID(addrAddSlowly) shouldEqual (123)
     }
 
     it("should add and get map fields with no predefined keys") {
@@ -451,7 +451,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   // just to let us test partitionMatch() independently of buildPartKeyFromIngest()
   private def dataset2AddPartKeys(builder: RecordBuilder, data: Stream[Seq[Any]]) = {
     data.foreach { values =>
-      builder.startNewRecord(dataset3.schema)
+      builder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.data.hash)
       builder.addString(values(5).asInstanceOf[String])  // series (partition key)
       if (values.length > 6) {
         builder.startMap()

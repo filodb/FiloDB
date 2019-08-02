@@ -301,7 +301,10 @@ object Dataset {
    * @param name The name of the dataset
    * @param partitionColNameTypes list of partition columns in name:type[:params] form
    * @param dataColNameTypes list of data columns in name:type[:params] form
-   * @param keyColumnNames   the key column names, no :type
+   * @param downsamplerNames a list of downsamplers to use on this schema
+   * @param options DatasetOptions
+   * @param valueColumn the default value column to pick if a column is not supplied
+   * @param dsSchema Option, name of downsample schema, required if downsamplerNames is not empty
    * @return Good(Dataset) or Bad(BadSchema)
    */
   def make(name: String,
@@ -309,11 +312,12 @@ object Dataset {
            dataColNameTypes: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
            options: DatasetOptions = DatasetOptions.DefaultOptions,
-           valueColumn: Option[String] = None): Dataset Or BadSchema = {
+           valueColumn: Option[String] = None,
+           dsSchema: Option[String] = None): Dataset Or BadSchema = {
     // Default value column is the last data column name
     val valueCol = valueColumn.getOrElse(dataColNameTypes.last.split(":").head)
     for { partSchema <- PartitionSchema.make(partitionColNameTypes, options)
-          dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol) }
+          dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol, dsSchema) }
     yield { Dataset(name, Schema(partSchema, dataSchema, None)) }
   }
 }

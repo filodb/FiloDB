@@ -44,7 +44,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
   it("should be able to share containers across multiple SerializableRangeVectors") {
     val rvs = Seq(new TuplesRangeVector(tuples take 400), new TuplesRangeVector(tuples drop 400))
     val schema = SerializableRangeVector.toSchema(cols)
-    val builder = SerializableRangeVector.toBuilder(schema)
+    val builder = SerializableRangeVector.newBuilder()
 
     // Sharing one builder across multiple input RangeVectors
     val srvs = rvs.map(rv => SerializableRangeVector(rv, builder, schema, "Unit-test"))

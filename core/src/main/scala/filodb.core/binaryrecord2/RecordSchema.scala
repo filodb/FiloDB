@@ -304,6 +304,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    * Allows us to compare two RecordSchemas against each other
    */
   override def equals(other: Any): Boolean = other match {
+    case UnsafeUtils.ZeroPointer => false
     case r: RecordSchema => columnTypes == r.columnTypes &&
                             partitionFieldStart == r.partitionFieldStart &&
                             predefinedKeys == r.predefinedKeys

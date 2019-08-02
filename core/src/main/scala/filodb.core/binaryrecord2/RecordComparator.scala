@@ -120,7 +120,7 @@ final class RecordComparator(ingestSchema: RecordSchema) {
    * @return the Long offset or native address of the new partition key BR
    */
   final def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder): Long = {
-    require(builder.schema == partitionKeySchema, s"${builder.schema} is not part key schema $partitionKeySchema")
+    builder.setSchema(partitionKeySchema)
 
     // Copy fixed area + hash over, then variable areas
     val ingestNumBytes = UnsafeUtils.getInt(ingestBase, ingestOffset)

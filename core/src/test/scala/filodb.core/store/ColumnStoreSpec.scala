@@ -105,7 +105,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "read back rows written with multi-column row keys" ignore {
     import GdeltTestData._
-    val stream = toChunkSetStream(dataset2, partBuilder2.addFromObjects(197901), dataRows(dataset2))
+    val stream = toChunkSetStream(dataset2, partBuilder2.partKeyFromObjects(schema2, 197901), dataRows(dataset2))
     colStore.write(dataset2, stream).futureValue should equal (Success)
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
