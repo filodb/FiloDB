@@ -398,6 +398,8 @@ object RecordSchema {
     UnsafeUtils.getShort(base, offset + 4) & 0x0ffff
   }
 
+  final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
+
   /**
    * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
    */

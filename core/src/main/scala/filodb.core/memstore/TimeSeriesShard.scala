@@ -267,8 +267,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
-  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
-    reuseOneContainer = true)
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
   private[memstore] val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
 
@@ -327,7 +326,8 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * Helper for downsampling ingested data for long term retention.
     */
-  private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
+  private final val shardDownsampler = new ShardDownsampler(dataset.name, shardNum,
+    dataset.schema, dataset.schema.downsample.getOrElse(dataset.schema), downsampleConfig.enabled,
     downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
   private[memstore] val evictedPartKeys =
@@ -751,7 +751,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    indexRb.startNewRecord()
+    indexRb.startNewRecord(indexTimeBucketSchema, 0)
     indexRb.addLong(startTime)
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
@@ -896,7 +896,7 @@ class TimeSeriesShard(val dataset: Dataset,
       timeBucketBitmaps.remove(earliestTimeBucket)
 
       /* create time bucket using record builder */
-      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSegmentSize)
       InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
         addPartKeyToTimebucketRb(cmd.timeBucket, timeBucketRb, p)
       }

@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, PartitionSchema, Schema}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -23,14 +23,12 @@ import filodb.memory.format.vectors.Histogram
  * containers can then be 1) sent over the wire, with no further transformations needed, 2) obtained and maybe freed
  *
  * @param memFactory the MemFactory used to allocate containers for building BinaryRecords in
- * @param schema the RecordSchema for the BinaryRecord to build
  * @param containerSize the size of each container
  * @param reuseOneContainer if true, resets the container when we run out of container space.  Designed for scenario
  *                   where one copies the BinaryRecord somewhere else every time, and allocation is minimized by
  *                   reusing the same container over and over.
  */
 final class RecordBuilder(memFactory: MemFactory,
-                          val schema: RecordSchema,
                           containerSize: Int = RecordBuilder.DefaultContainerSize,
                           reuseOneContainer: Boolean = false,
                           // Put fields here so scalac won't generate stupid and slow initialization check logic
@@ -47,8 +45,9 @@ final class RecordBuilder(memFactory: MemFactory,
   require(containerSize >= RecordBuilder.MinContainerSize, s"RecordBuilder.containerSize < minimum")
 
   private val containers = new collection.mutable.ArrayBuffer[RecordContainer]
-  private val firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
-  private val hashOffset = schema.fieldOffset(schema.numFields)
+  var schema: RecordSchema = _
+  var firstPartField = Int.MaxValue
+  private var hashOffset: Int = 0
 
   if (reuseOneContainer) newContainer()
 
@@ -69,12 +68,25 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
-   * Start building a new BinaryRecord.
+   * Start building a new BinaryRecord with a possibly new schema.
    * This must be called after a previous endRecord() or when the builder just started.
+   * NOTE: it's probably better to use an alternative startNewRecord with one of the schema types.
+   * @param recSchema the RecordSchema to use for this record
+   * @param schemaID the schemaID to use.  It may not be the same as the schema of the recSchema - for example
+   *        for partition keys.  However for ingestion records it would be the same.
    */
-  final def startNewRecord(): Unit = {
+  final def startNewRecord(recSchema: RecordSchema, schemaID: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
+
+    // Set schema, hashoffset, and write schema ID if needed
+    if (schema != recSchema) {
+      schema = recSchema
+      hashOffset = recSchema.fieldOffset(recSchema.numFields)
+      firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
+    }
     requireBytes(schema.variableAreaStart)
+
+    if (recSchema.partitionFieldStart.isDefined) { setShort(curBase, curRecordOffset + 4, schemaID.toShort) }
 
     // write length header and update RecEndOffset
     setInt(curBase, curRecordOffset, schema.variableAreaStart - 4)
@@ -83,6 +95,13 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo = 0
     recHash = HASH_INIT
   }
+
+  // startNewRecord for an ingestion schema.  Use this if creating an ingestion record, ensures right ID is used.
+  final def startNewRecord(schema: Schema): Unit =
+    startNewRecord(schema.ingestionSchema, schema.data.hash)
+
+  final def startNewRecord(partSchema: PartitionSchema, schemaID: Int): Unit =
+    startNewRecord(partSchema.binSchema, schemaID)
 
   /**
    * Adds an integer to the record.  This must be called in the right order or the data might be corrupted.
@@ -230,16 +249,20 @@ final class RecordBuilder(memFactory: MemFactory,
    * Adds an entire record from a RowReader, with no boxing, using builderAdders
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
    */
-  final def addFromReader(row: RowReader): Long = {
-    startNewRecord()
+  final def addFromReader(row: RowReader, schema: RecordSchema, schemID: Int): Long = {
+    startNewRecord(schema, schemID)
     for { pos <- 0 until schema.numFields optimized } {
       schema.builderAdders(pos)(row, this)
     }
     endRecord()
   }
 
-  // Really only for testing. Very slow.
-  def addFromObjects(parts: Any*): Long = addFromReader(SeqRowReader(parts.toSeq))
+  final def addFromReader(row: RowReader, schema: Schema): Long =
+    addFromReader(row, schema.ingestionSchema, schema.data.hash)
+
+  // Really only for testing. Very slow.  Only for partition keys
+  def partKeyFromObjects(schema: Schema, parts: Any*): Long =
+    addFromReader(SeqRowReader(parts.toSeq), schema.partKeySchema, schema.data.hash)
 
   /**
    * Sorts and adds keys and values from a map.  The easiest way to add a map to a BinaryRecord.
@@ -532,9 +555,8 @@ object RecordBuilder {
     * Make is a convenience factory method to access from java.
     */
   def make(memFactory: MemFactory,
-           schema: RecordSchema,
            containerSize: Int = RecordBuilder.DefaultContainerSize): RecordBuilder = {
-    new RecordBuilder(memFactory, schema, containerSize)
+    new RecordBuilder(memFactory, containerSize)
   }
 
   /**

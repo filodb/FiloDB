@@ -188,7 +188,7 @@ object SerializableRangeVector extends StrictLogging {
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
-        builder.addFromReader(rows.next)
+        builder.addFromReader(rows.next, schema, 0)
       }
     } finally {
       // clear exec plan
@@ -210,7 +210,7 @@ object SerializableRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, toBuilder(schema), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema, "Test-Only-Plan")
   }
 
   // TODO: make this configurable....
@@ -223,8 +223,8 @@ object SerializableRangeVector extends StrictLogging {
   def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
     schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
-  def toBuilder(schema: RecordSchema): RecordBuilder =
-    new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)
+  def newBuilder(): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, MaxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

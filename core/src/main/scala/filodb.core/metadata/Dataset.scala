@@ -66,7 +66,7 @@ final case class Dataset(name: String, schema: Schema) {
    * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
    */
   def partKey(parts: Any*): Array[Byte] = {
-    val offset = partKeyBuilder.addFromObjects(schema, parts: _*)
+    val offset = partKeyBuilder.partKeyFromObjects(schema, parts: _*)
     val bytes = partKeySchema.asByteArray(partKeyBuilder.allContainers.head.base, offset)
     partKeyBuilder.reset()
     bytes
