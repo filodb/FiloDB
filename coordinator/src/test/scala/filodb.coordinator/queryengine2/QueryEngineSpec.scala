@@ -3,6 +3,7 @@ package filodb.coordinator.queryengine2
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import monix.eval.Task
+import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 
 import scala.concurrent.duration.FiniteDuration
@@ -16,7 +17,6 @@ import filodb.prometheus.parse.Parser
 import filodb.query
 import filodb.query.{_}
 import filodb.query.exec._
-import monix.execution.Scheduler
 
 class QueryEngineSpec extends FunSpec with Matchers {
 
@@ -63,7 +63,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 0, 0, 0, None)
+  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 0, 1, 0, None)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -352,18 +352,19 @@ class QueryEngineSpec extends FunSpec with Matchers {
   }
 
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
-    val to = 2000
-    val from = 1000
-    val intervalSelector = IntervalSelector(from - 50 , to) // Lookback of 50
+    val to = 2000000
+    val from = 1000000
+    val intervalSelector = IntervalSelector(from - 50000 , to) // Lookback of 50000
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", from, 1, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
         Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(980, 1030), false), FailureTimeRange("remote", datasetRef,
-          TimeRange(1060, 1090), true))
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(1060000, 1090000), true))
       }
     }
 
@@ -385,17 +386,18 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     child1.children.foreach { l1 =>
       l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual 1060
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
+        1010000
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1110)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1060000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    child2.params.start shouldEqual 1
-    child2.params.end shouldEqual 1
+    child2.params.start shouldEqual from/1000
+    child2.params.end shouldEqual (1060000-1)/1000
     child2.params.processFailure shouldEqual(false)
   }
 
@@ -466,5 +468,55 @@ class QueryEngineSpec extends FunSpec with Matchers {
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
     execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
+  }
+
+  it("should generate RemotExecPlan with RawSeries time according to lookBack and step") {
+    val to = 2000000
+    val from = 1000000
+    val lookBack = 50000
+    val intervalSelector = IntervalSelector(from - lookBack , to) // Lookback of 50000
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val promQlQueryParams = PromQlQueryParams("", from, 1020, to, None)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(1060000, 1090000), true))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+
+    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
+    
+    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
+    stitchRvsExec.children.size shouldEqual (2)
+    stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
+
+    val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
+
+    child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
+
+    child1.children.foreach { l1 =>
+      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
+        (1060180-lookBack)
+      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
+      l1.rangeVectorTransformers.size shouldEqual 2
+      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1060180)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
+      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+
+    child2.params.start shouldEqual from/1000
+    child2.params.end shouldEqual (1059160)/1000
+    child2.params.processFailure shouldEqual(false)
   }
 }

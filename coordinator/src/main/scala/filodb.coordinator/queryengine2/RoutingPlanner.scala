@@ -8,7 +8,7 @@ import filodb.query._
   * Planner for routing based on failure ranges for a given LogicalPlan.
   */
 trait RoutingPlanner extends StrictLogging {
-  def plan(failure: Seq[FailureTimeRange], time: TimeRange): Seq[Route]
+  def plan(failure: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route]
 }
 
 object QueryRoutingPlanner extends RoutingPlanner {
@@ -40,7 +40,15 @@ object QueryRoutingPlanner extends RoutingPlanner {
       }
   }
 
-  def plan(failures: Seq[FailureTimeRange], time: TimeRange): Seq[Route] = {
+  /**
+    *
+    * @param failures seq of FailureTimeRanges
+    * @param time query start and end time
+    * @param lookbackTime query lookbackTime
+    * @param step query step
+    * @return seq of routes
+    */
+  def plan(failures: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route] = {
 
     val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
     if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
@@ -50,8 +58,8 @@ object QueryRoutingPlanner extends RoutingPlanner {
     logger.info("Logical plan time:" + time)
 
     // Recursively split query into local and remote routes starting from first FailureTimeRange
-    splitQueryTime(nonOverlappingFailures, 0, time.startInMillis, time.endInMillis)
-
+    splitQueryTime(nonOverlappingFailures, 0, time.startInMillis, time.endInMillis, lookbackTime,
+     step)
   }
 
   /**
@@ -63,10 +71,16 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * @param end     end time for route
     * @return seq of Routes
     */
-  private def splitQueryTime(failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long): Seq[Route] = {
+  private def splitQueryTime(failure: Seq[FailureTimeRange], index: Int, start: Long, end: Long,
+                             lookbackTime: Long, step: Long): Seq[Route] = {
 
     if (index >= failure.length)
       return Nil
+
+    val startWithLookBack = if (index == 0)
+        start - lookbackTime
+    else
+        start
     // traverse query range time from left to right , break at failure start
     var i = index + 1
 
@@ -75,26 +89,47 @@ object QueryRoutingPlanner extends RoutingPlanner {
       // Traverse till we get a remote failure to minimize number of queries
       while ((i < failure.length) && (!failure(i).isRemote))
         i = i + 1
-
-      if (i < failure.length) // need further splitting
-      // Query from current start time till next remote failure starts should be executed remotely
-        RemoteRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis - 1))) +:
-          splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end) // Process remaining query
-      else
-      // Last failure so no further splitting required
-        Seq(RemoteRoute(Some(TimeRange(start, end))))
+      // need further splitting
+      if (i < failure.length) {
+        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack + lookbackTime,
+          failure(i).timeRange.startInMillis, step)
+        // Query from current start time till next remote failure starts should be executed remotely
+        // Routes should have Periodic series time so add lookbackTime
+        RemoteRoute(Some(TimeRange(startWithLookBack + lookbackTime, lastSampleTime))) +:
+          splitQueryTime(failure, i, lastSampleTime + step, end,
+            lookbackTime, step) // Process remaining query
+      } else {
+        // Last failure so no further splitting required
+        Seq(RemoteRoute(Some(TimeRange(startWithLookBack + lookbackTime, end))))
+      }
 
     } else {
       // Iterate till we get a local failure
       while ((i < failure.length) && (failure(i).isRemote))
         i = i + 1
-      if (i < failure.length)
-      // Query from current start time till next local failure starts should be executed locally
-        LocalRoute(Some(TimeRange(start, failure(i).timeRange.startInMillis - 1))) +:
-          splitQueryTime(failure, i, failure(i).timeRange.startInMillis, end)
-      else
-        Seq(LocalRoute(Some(TimeRange(start, end))))
+      if (i < failure.length) {
+        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack + lookbackTime,
+          failure(i).timeRange.startInMillis, step )
+        // Query from current start time till next local failure starts should be executed locally
+        LocalRoute(Some(TimeRange(startWithLookBack + lookbackTime, lastSampleTime))) +:
+          splitQueryTime(failure, i, lastSampleTime + step, end, lookbackTime, step)
+      }
+      else {
+        Seq(LocalRoute(Some(TimeRange(startWithLookBack + lookbackTime, end))))
+      }
     }
+  }
+
+  private def getLastSampleTimeWithStep( start: Long, end: Long, step: Long): Long = {
+    var ctr = 0
+    var currentTime = start
+    var nextTime = start
+    while (nextTime < end) {
+      ctr = ctr + 1
+      currentTime = nextTime
+      nextTime = start + (step * ctr)
+    }
+    currentTime
   }
 
   /**
@@ -144,10 +179,10 @@ object QueryRoutingPlanner extends RoutingPlanner {
   def copyWithUpdatedTimeRange(logicalPlan: LogicalPlan, timeRange: TimeRange,
                                lookBackTime: Long): PeriodicSeriesPlan = {
     logicalPlan match {
-      case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis + lookBackTime,
-        end = timeRange.endInMillis, rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange))
-      case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis + lookBackTime, end =
-        timeRange.endInMillis, rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange))
+      case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis, end = timeRange.endInMillis,
+        rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime))
+      case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis, end =
+        timeRange.endInMillis, rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime))
       case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
       case lp: Aggregate => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
       case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange, lookBackTime), rhs =
@@ -163,11 +198,13 @@ object QueryRoutingPlanner extends RoutingPlanner {
   /**
     * Used to change rangeSelector of RawSeriesPlan
     */
-  def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: RawSeriesPlan, timeRange: TimeRange): RawSeries = {
+  def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: RawSeriesPlan, timeRange: TimeRange, lookBackTime: Long):
+  RawSeries = {
 
     rawSeriesPlan match {
       case rs: RawSeries => rs.rangeSelector match {
-        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis, timeRange.endInMillis))
+        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,
+          timeRange.endInMillis))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
       case _ => throw new UnsupportedOperationException("Copy supported only for RawSeries")

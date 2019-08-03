@@ -87,8 +87,9 @@ class QueryEngine(dataset: Dataset,
             case _     => ""
           }
 
-          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis +
-            lookBackTime)/1000, queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis)
+            /1000, queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          logger.debug("PromQlExec params:" + promQlInvocationParams)
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }
     }
@@ -133,8 +134,10 @@ class QueryEngine(dataset: Dataset,
       if (failures.isEmpty) {
         generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
       } else {
-        val routes: Seq[Route] = QueryRoutingPlanner.plan(failures, routingTime)
+        val routes = QueryRoutingPlanner.plan(failures, periodicSeriesTime, lookBackTime,
+          tsdbQueryParams.asInstanceOf[PromQlQueryParams].step)
 
+        logger.debug("Routes:" + routes)
         routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
           tsdbQueryParams)
       }
