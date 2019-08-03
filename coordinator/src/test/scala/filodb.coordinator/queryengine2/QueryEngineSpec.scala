@@ -7,6 +7,7 @@ import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 
 import scala.concurrent.duration.FiniteDuration
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}
@@ -358,7 +359,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", from, 1, to, None)
+    val promQlQueryParams = PromQlQueryParams("", from, 1, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -373,7 +374,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
-    //Should be broken into local exec plan from 100 to 1000 and remote exec from 1000 to 1059
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
@@ -492,7 +492,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
-    
+
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)

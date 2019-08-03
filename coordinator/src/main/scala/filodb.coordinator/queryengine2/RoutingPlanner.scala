@@ -58,7 +58,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
     logger.info("Logical plan time:" + time)
 
     // Recursively split query into local and remote routes starting from first FailureTimeRange
-    splitQueryTime(nonOverlappingFailures, 0, time.startInMillis, time.endInMillis, lookbackTime,
+    splitQueryTime(nonOverlappingFailures, 0, time.startInMillis - lookbackTime, time.endInMillis, lookbackTime,
      step)
   }
 
@@ -78,7 +78,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       return Nil
 
     val startWithLookBack = if (index == 0)
-        start - lookbackTime
+        start + lookbackTime
     else
         start
     // traverse query range time from left to right , break at failure start
@@ -91,16 +91,16 @@ object QueryRoutingPlanner extends RoutingPlanner {
         i = i + 1
       // need further splitting
       if (i < failure.length) {
-        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack + lookbackTime,
+        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack,
           failure(i).timeRange.startInMillis, step)
         // Query from current start time till next remote failure starts should be executed remotely
         // Routes should have Periodic series time so add lookbackTime
-        RemoteRoute(Some(TimeRange(startWithLookBack + lookbackTime, lastSampleTime))) +:
+        RemoteRoute(Some(TimeRange(startWithLookBack, lastSampleTime))) +:
           splitQueryTime(failure, i, lastSampleTime + step, end,
             lookbackTime, step) // Process remaining query
       } else {
         // Last failure so no further splitting required
-        Seq(RemoteRoute(Some(TimeRange(startWithLookBack + lookbackTime, end))))
+        Seq(RemoteRoute(Some(TimeRange(startWithLookBack , end))))
       }
 
     } else {
@@ -108,14 +108,14 @@ object QueryRoutingPlanner extends RoutingPlanner {
       while ((i < failure.length) && (failure(i).isRemote))
         i = i + 1
       if (i < failure.length) {
-        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack + lookbackTime,
+        val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack,
           failure(i).timeRange.startInMillis, step )
         // Query from current start time till next local failure starts should be executed locally
-        LocalRoute(Some(TimeRange(startWithLookBack + lookbackTime, lastSampleTime))) +:
+        LocalRoute(Some(TimeRange(startWithLookBack, lastSampleTime))) +:
           splitQueryTime(failure, i, lastSampleTime + step, end, lookbackTime, step)
       }
       else {
-        Seq(LocalRoute(Some(TimeRange(startWithLookBack + lookbackTime, end))))
+        Seq(LocalRoute(Some(TimeRange(startWithLookBack, end))))
       }
     }
   }
