@@ -54,6 +54,7 @@ final class RecordBuilder(memFactory: MemFactory,
   // Reset last container and all pointers
   def reset(): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
+    containers.last.updateTimestamp()
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -519,6 +520,7 @@ final class RecordBuilder(memFactory: MemFactory,
     curRecEndOffset = curRecordOffset
     container.updateLengthWithOffset(curRecordOffset)
     container.writeVersionWord()
+    container.updateTimestamp()
     maxOffset = newOff + containerSize
   }
 
@@ -546,8 +548,9 @@ object RecordBuilder {
 
   // Please do not change this.  It should only be changed with a change in BinaryRecord and/or RecordContainer
   // format, and only then REALLY carefully.
-  val Version = 0
-  val ContainerHeaderLen = 8
+  val Version = 1
+  val ContainerHeaderLen = 16
+  val EmptyNumBytes = ContainerHeaderLen - 4
 
   val stringPairComparator = new java.util.Comparator[(String, String)] {
     def compare(pair1: (String, String), pair2: (String, String)): Int = pair1._1 compare pair2._1

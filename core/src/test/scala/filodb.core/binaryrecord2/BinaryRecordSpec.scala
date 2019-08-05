@@ -13,6 +13,7 @@ import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZC
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
   import UTF8StringMedium._
+  import RecordBuilder.ContainerHeaderLen
 
   val recSchema1 = schema1.ingestionSchema
   val recSchema2 = schema2.ingestionSchema
@@ -93,8 +94,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     // 62 bytes per record, rounded to 64.  2048 max, what are the number of records we can have?
-    val maxNumRecords = (RecordBuilder.MinContainerSize - 8) / 64
-    val remainingBytes = RecordBuilder.MinContainerSize - 8 - maxNumRecords*64
+    val maxNumRecords = (RecordBuilder.MinContainerSize - ContainerHeaderLen) / 64
+    val remainingBytes = RecordBuilder.MinContainerSize - ContainerHeaderLen - maxNumRecords*64
 
     it("should add multiple records, return offsets, and roll over record to new container if needed") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
@@ -127,12 +128,16 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (2)
       containers.head.numBytes shouldEqual container1Bytes
-      containers.last.numBytes shouldEqual 68
+      containers.last.numBytes shouldEqual 76
 
       containers.last.countRecords shouldEqual 1
 
+      containers.foreach(_.version shouldEqual RecordBuilder.Version)
+      containers.foreach(_.isCurrentVersion shouldEqual true)
+      containers.foreach(_.timestamp should be > 0L)
+
       builder.nonCurrentContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize)
-      builder.optimalContainerBytes(true).map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 72)
+      builder.optimalContainerBytes(true).map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 80)
       builder.nonCurrentContainerBytes().size shouldEqual 0
       builder.optimalContainerBytes().size shouldEqual 0
 
@@ -163,7 +168,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (2)
       containers.head.numBytes shouldEqual container1Bytes
-      containers.last.numBytes shouldEqual 68
+      containers.last.numBytes shouldEqual 76
 
       // Cannot get byte array via optimalContainerBytes for offheap containers
       intercept[UnsupportedOperationException] {
@@ -198,35 +203,39 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       addToBuilder(builder, data drop maxNumRecords)
       val containers = builder.allContainers
       containers should have length (1)
-      containers.head.numBytes shouldEqual 68
+      containers.head.numBytes shouldEqual 76
       containers.last.countRecords shouldEqual 1
     }
 
     it("should add records, reset, and be able to add records again") {
       val builder = new RecordBuilder(nativeMem, RecordBuilder.MinContainerSize)
       addToBuilder(builder, linearMultiSeries() take 10)
+      val curTime = System.currentTimeMillis
 
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.isEmpty shouldEqual false
       builder.currentContainer.get.isEmpty shouldEqual false
       builder.allContainers.head.countRecords shouldEqual 10
+      val origTimestamp = builder.allContainers.head.timestamp
+      origTimestamp shouldEqual curTime +- 20000   // 20 seconds
 
       val byteArrays = builder.optimalContainerBytes(reset = true)
       byteArrays.size shouldEqual 1
 
       // Check that we still have one container but it's empty
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual 4
+      builder.allContainers.head.numBytes shouldEqual 12
       builder.allContainers.head.isEmpty shouldEqual true
+      builder.allContainers.head.timestamp should be > origTimestamp
       builder.currentContainer.get.isEmpty shouldEqual true
 
       // Add some more records
       // CHeck amount of space left, should be same as before
       addToBuilder(builder, linearMultiSeries() take 9)
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*9)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*9)
       builder.allContainers.head.countRecords shouldEqual 9
     }
 
@@ -237,7 +246,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.countRecords shouldEqual 10
 
       val it = builder.allContainers.head.iterate(recSchema1)
@@ -283,7 +292,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // now test everything
       val containers = builder.allContainers
       containers should have length (1)
-      containers.head.numBytes shouldEqual 68   // versionWord + len + long + 4 doubles + stringptr + hash + 2+8 + padding
+      containers.head.numBytes shouldEqual 76   // versionWord + ts + len + long + 4 doubles + stringptr + hash + 2+8 + padding
 
       containers.head.consumeRecords(consumer)
       records should have length (1)
@@ -351,7 +360,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (1)
       // 56 (len + 5 long/double + 2 var + hash) + 10 + 4 + extraTagsLen + 10 * 2)
-      containers.head.numBytes shouldEqual (4 + 3 * align4(72 + extraTagsLen + 2 + 20))
+      containers.head.numBytes shouldEqual (12 + 3 * align4(72 + extraTagsLen + 2 + 20))
 
       containers.head.consumeRecords(consumer)
       records should have length (3)

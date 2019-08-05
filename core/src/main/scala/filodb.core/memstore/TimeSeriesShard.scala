@@ -39,6 +39,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val oldContainers = Kamon.counter("memstore-incompatible-containers").refine(tags)
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").refine(tags)
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
@@ -392,7 +393,6 @@ class TimeSeriesShard(val dataset: Dataset,
   class IngestConsumer(var numActuallyIngested: Int = 0, var ingestOffset: Long = -1L) extends BinaryRegionConsumer {
     // Receives a new ingestion BinaryRecord
     final def onNext(recBase: Any, recOffset: Long): Unit = {
-      assertThreadName(IngestSchedName)
       val group = partKeyGroup(ingestSchema, recBase, recOffset, numGroups)
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
@@ -424,14 +424,20 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   def ingest(container: RecordContainer, offset: Long): Long = {
     assertThreadName(IngestSchedName)
-    ingestConsumer.numActuallyIngested = 0
-    ingestConsumer.ingestOffset = offset
-    binRecordReader.recordBase = container.base
-    container.consumeRecords(ingestConsumer)
-    shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
-    shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
-    ingested += ingestConsumer.numActuallyIngested
-    if (!container.isEmpty) _offset = offset
+    if (container.isCurrentVersion) {
+      if (!container.isEmpty) {
+        ingestConsumer.numActuallyIngested = 0
+        ingestConsumer.ingestOffset = offset
+        binRecordReader.recordBase = container.base
+        container.consumeRecords(ingestConsumer)
+        shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
+        shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
+        ingested += ingestConsumer.numActuallyIngested
+        _offset = offset
+      }
+    } else {
+      shardStats.oldContainers.increment
+    }
     _offset
   }
 
@@ -1025,7 +1031,6 @@ class TimeSeriesShard(val dataset: Dataset,
   // scalastyle:off null
   private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, ingestOffset: Long) = {
-    assertThreadName(IngestSchedName)
     var part = partSet.getWithIngestBR(recordBase, recordOff, dataset)
     if (part == null) {
       part = addPartitionForIngestion(recordBase, recordOff, group)

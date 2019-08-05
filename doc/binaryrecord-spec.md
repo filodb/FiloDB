@@ -201,5 +201,6 @@ A [RecordContainer](../core/src/main/scala/filodb.core/binaryrecord2/RecordConta
 
 * +0000   4 bytes  total length of container following these length bytes
 * +0004   4 bytes  version and flag word, for future expansion.  For now, upper byte == version, which is currently 1.
-* +0008   BinaryRecord 1  (where first bytes indicates its length)
-* +0008+n  BinaryRecord 2....
+* +0008   8 bytes  server timestamp at container creation/reset
+* +0016   BinaryRecord 1  (where first bytes indicates its length)
+* +0016+n  BinaryRecord 2....
