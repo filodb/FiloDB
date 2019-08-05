@@ -473,7 +473,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child2.params.processFailure shouldEqual(false)
   }
 
-  it("should generate only PromQlExecPlan with RawSeries time according to lookBack and step") {
+  it("should generate only PromQlExecPlan when second remote ends after query end time") {
     val to = 2000
     val from = 900
     val lookBack = 300000
@@ -491,7 +491,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
           TimeRange(2000000, 2500000), true))
       }
     }
-    // Routes should be from 900K to 1020K and 1020K + 60K to 2000K
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
