@@ -35,13 +35,13 @@ class IngestionBenchmark {
   val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
                                                     Seq("job", "instance"))
   // sized just big enough for a 1000 entries per container
-  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys, 176064)
+  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, 176064)
   val comparator = new RecordComparator(schemaWithPredefKeys)
   //scalastyle:off
   println("Be patient, generating lots of containers of raw data....")
-  dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data) }
+  dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data, schema2) }
 
-  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, comparator.partitionKeySchema)
+  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
 
   val consumer = new BinaryRegionConsumer {
     def onNext(base: Any, offset: Long): Unit = comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)

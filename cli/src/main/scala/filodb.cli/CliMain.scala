@@ -207,12 +207,13 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
 
   def validateSchemas(): Unit = {
     Schemas.fromConfig(config) match {
-      case Good(Schemas(partSchema, data, _)) =>
+      case Good(Schemas(partSchema, schemas)) =>
         println("Schema validated.\nPartition schema:")
         partSchema.columns.foreach(c => println(s"\t$c"))
-        data.foreach { case (schemaName, sch) =>
+        schemas.foreach { case (schemaName, sch) =>
           println(s"Schema $schemaName:")
-          sch.columns.foreach(c => println(s"\t$c"))
+          sch.data.columns.foreach(c => println(s"\t$c"))
+          println(s"\n\tDownsamplers: ${sch.data.downsamplers}\n\tDownsample schema: ${sch.data.downsampleSchema}")
         }
       case Bad(errors) =>
         println(s"Schema validation errors:")

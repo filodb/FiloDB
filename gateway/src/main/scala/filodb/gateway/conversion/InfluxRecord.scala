@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.DatasetOptions
+import filodb.core.metadata.{DatasetOptions, Schema}
 import filodb.memory.BinaryRegion
 
 /**
@@ -16,7 +16,7 @@ trait InfluxRecord extends InputRecord {
   def tagDelims: Buffer[Int]
   def fieldDelims: Buffer[Int]
   def fieldEnd: Int
-  def dsOptions: DatasetOptions
+  def schema: Schema
   def ts: Long
 
   import InfluxProtocolParser._
@@ -30,8 +30,8 @@ trait InfluxRecord extends InputRecord {
     var nonMetricIndex = 0
     parseKeyValues(bytes, tagDelims, endOfTags, new KVVisitor {
       def apply(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueIndex: Int, valueLen: Int): Unit = {
-        if (nonMetricIndex < dsOptions.nonMetricShardColumns.length) {
-          val keyToCompare = dsOptions.nonMetricShardKeyBytes(nonMetricIndex)
+        if (nonMetricIndex < schema.options.nonMetricShardColumns.length) {
+          val keyToCompare = schema.options.nonMetricShardKeyBytes(nonMetricIndex)
           if (BinaryRegion.equalBytes(bytes, keyIndex, keyLen, keyToCompare)) {
             // key match.  Add value to nonMetricShardValues
             nonMetricShardValues += new String(bytes, valueIndex, valueLen)
@@ -93,6 +93,7 @@ class SimpleDoubleAdder(builder: RecordBuilder) extends InfluxFieldVisitor {
  * @param fieldOffset byte array index of field key=value pair
  * @param fieldEnd the end offset of the fields
  * @param ts the UNIX epoch Long timestamp from the Influx record
+ * @param schema must be the Schema for the Prometheus record type. TOOD: eliminate this, maybe later
  */
 final case class InfluxPromSingleRecord(bytes: Array[Byte],
                                         kpiLen: Int,
@@ -100,17 +101,17 @@ final case class InfluxPromSingleRecord(bytes: Array[Byte],
                                         fieldDelims: Buffer[Int],
                                         fieldEnd: Int,
                                         ts: Long,
-                                        dsOptions: DatasetOptions) extends InfluxRecord {
+                                        schema: Schema) extends InfluxRecord {
   require(fieldDelims.length == 1, s"Cannot use ${getClass.getName} with fieldDelims of length ${fieldDelims.length}")
   final def addToBuilder(builder: RecordBuilder): Unit = {
     // Add the timestamp and value first
-    builder.startNewRecord()
+    builder.startNewRecord(schema)
     builder.addLong(ts)
     InfluxProtocolParser.parseKeyValues(bytes, fieldDelims, fieldEnd, new SimpleDoubleAdder(builder))
 
     // Now start the map and add the metric name / __name__
     builder.startMap()
-    builder.addMapKeyValueHash(dsOptions.metricBytes, dsOptions.metricHash,
+    builder.addMapKeyValueHash(schema.options.metricBytes, schema.options.metricHash,
                                bytes, 0, kpiLen)
 
     // Now add all the tags, and don't forget the hash
@@ -174,13 +175,13 @@ class HistogramPromFieldVisitor(builder: RecordBuilder,
                                 tagDelims: Buffer[Int],
                                 endOfTags: Int,
                                 partKeyHash: Int,
-                                dsOptions: DatasetOptions) extends InfluxFieldVisitor {
+                                schema: Schema) extends InfluxFieldVisitor {
   import InfluxPromHistogramRecord._
 
   val tagsBuilderVisitor = new MapBuilderVisitor(builder)
 
   def doubleValue(bytes: Array[Byte], keyIndex: Int, keyLen: Int, value: Double): Unit = {
-    builder.startNewRecord()
+    builder.startNewRecord(schema)
     builder.addLong(ts)
     builder.addDouble(value)
     builder.startMap()
@@ -191,12 +192,12 @@ class HistogramPromFieldVisitor(builder: RecordBuilder,
 
     // Is the key sum or count?  If so, append that to metric name
     if (BinaryRegion.equalBytes(bytes, keyIndex, keyLen, sumSuffix)) {
-      addSuffixToMetricAndBuild(builder, baseMetricLen, sumSuffix, dsOptions)
+      addSuffixToMetricAndBuild(builder, baseMetricLen, sumSuffix, schema.options)
     } else if (BinaryRegion.equalBytes(bytes, keyIndex, keyLen, countSuffix)) {
-      addSuffixToMetricAndBuild(builder, baseMetricLen, countSuffix, dsOptions)
+      addSuffixToMetricAndBuild(builder, baseMetricLen, countSuffix, schema.options)
     // Otherwise, add _bucket to metric name and add le= with the key
     } else {
-      addSuffixToMetricAndBuild(builder, baseMetricLen, bucketSuffix, dsOptions)
+      addSuffixToMetricAndBuild(builder, baseMetricLen, bucketSuffix, schema.options)
       builder.addMapKeyValueHash(leKey, leHash, bytes, keyIndex, keyLen)
     }
 
@@ -223,13 +224,13 @@ final case class InfluxPromHistogramRecord(bytes: Array[Byte],
                                            fieldDelims: Buffer[Int],
                                            fieldEnd: Int,
                                            ts: Long,
-                                           dsOptions: DatasetOptions) extends InfluxRecord {
+                                           schema: Schema) extends InfluxRecord {
   final def addToBuilder(builder: RecordBuilder): Unit = {
     // do some preprocessing: copy metric name to the thread local buffer
     InfluxPromHistogramRecord.copyMetricToBuffer(bytes, kpiLen)
 
     // For each field, append one BinaryRecord
-    val visitor = new HistogramPromFieldVisitor(builder, ts, kpiLen, tagDelims, endOfTags, partitionKeyHash, dsOptions)
+    val visitor = new HistogramPromFieldVisitor(builder, ts, kpiLen, tagDelims, endOfTags, partitionKeyHash, schema)
     InfluxProtocolParser.parseKeyValues(bytes, fieldDelims, fieldEnd, visitor)
   }
 }

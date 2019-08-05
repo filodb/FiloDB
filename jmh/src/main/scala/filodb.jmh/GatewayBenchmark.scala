@@ -68,8 +68,7 @@ class GatewayBenchmark extends StrictLogging {
   val histInfluxBuf = ChannelBuffers.buffer(1024)
   histInfluxBuf.writeBytes(histInfluxRec.getBytes)
 
-  val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema,
-                                  reuseOneContainer = true)
+  val builder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
@@ -90,7 +89,7 @@ class GatewayBenchmark extends StrictLogging {
   def influxCounterConversion(): Int = {
     // reset the ChannelBuffer so it can be read every timeseries
     singleInfluxBuf.resetReaderIndex()
-    val record = InfluxProtocolParser.parse(singleInfluxBuf, dataset.options).get
+    val record = InfluxProtocolParser.parse(singleInfluxBuf, dataset.schema).get
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric
@@ -122,7 +121,7 @@ class GatewayBenchmark extends StrictLogging {
   def influxHistogramConversion(): Int = {
     // reset the ChannelBuffer so it can be read every timeseries
     histInfluxBuf.resetReaderIndex()
-    val record = InfluxProtocolParser.parse(histInfluxBuf, dataset.options).get
+    val record = InfluxProtocolParser.parse(histInfluxBuf, dataset.schema).get
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric

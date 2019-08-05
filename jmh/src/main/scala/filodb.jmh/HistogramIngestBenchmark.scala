@@ -36,9 +36,9 @@ class HistogramIngestBenchmark {
   println("Be patient, generating lots of containers of histogram schema data....")
   val histSchemaData = linearHistSeries(numBuckets = 64).map(SeqRowReader)
   // sized just big enough for ~300 entries per container 700 * 300
-  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema, 230000)
+  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, 230000)
   histSchemaData.take(300*100).grouped(300).foreach { rows =>
-    rows.foreach(histSchemaBuilder.addFromReader)
+    rows.foreach(histSchemaBuilder.addFromReader(_, histDataset.schema))
     println(s"We have ${histSchemaBuilder.allContainers.length} containers, " +
             s"remaining = ${histSchemaBuilder.containerRemaining}")
     histSchemaBuilder.newContainer()   // Force switching to new container
@@ -49,9 +49,9 @@ class HistogramIngestBenchmark {
   println("Be patient, generating lots of containers of prometheus schema data....")
   val promDataset = MetricsTestData.timeseriesDataset
   val promData = MetricsTestData.promHistSeries(numBuckets = 64).map(SeqRowReader)
-  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, promDataset.ingestionSchema, 4200000)
+  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, 4200000)
   promData.take(300*66*100).grouped(300*66).foreach { rows =>
-    rows.foreach(promBuilder.addFromReader)
+    rows.foreach(promBuilder.addFromReader(_, promDataset.schema))
     println(s"We have ${promBuilder.allContainers.length} containers, " +
             s"remaining = ${promBuilder.containerRemaining}")
     promBuilder.newContainer()   // Force switching to new container
