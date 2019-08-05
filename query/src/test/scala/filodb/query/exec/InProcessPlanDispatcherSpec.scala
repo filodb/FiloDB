@@ -109,9 +109,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
         r.result.size shouldEqual 1
         r.result.head.numRows shouldEqual Some(numRawSamples)
     }
-
   }
-
 }
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfig) extends PlanDispatcher {
