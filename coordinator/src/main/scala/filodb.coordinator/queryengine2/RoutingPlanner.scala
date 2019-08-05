@@ -81,6 +81,9 @@ object QueryRoutingPlanner extends RoutingPlanner {
         start + lookbackTime
     else
         start
+
+    if (startWithLookBack > end)
+       return Nil
     // traverse query range time from left to right , break at failure start
     var i = index + 1
 

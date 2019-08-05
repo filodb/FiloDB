@@ -242,56 +242,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should generate RemoteExec when failures are present in local") {
-    val to = 10000
-    val from = 100
-    val intervalSelector = IntervalSelector(from, to)
-    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
-    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
-    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-
-    val failureProvider = new FailureProvider {
-      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        Seq(FailureTimeRange("local", datasetRef, TimeRange(1500, 5000), false), // Should be removed
-          FailureTimeRange("remote", datasetRef, TimeRange(100, 200), true),
-          FailureTimeRange("local", datasetRef, TimeRange(1000, 2000), false),
-          FailureTimeRange("remote", datasetRef, TimeRange(100, 700), true)) // Should be removed
-      }
-    }
-
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
-
-    execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
-
-    //Should be broken into local exec plan from 100 to 999 and remote exec from 1000 to 10000
-    val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
-    stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
-
-    val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
-
-    child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
-
-    child1.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-      l1.rangeVectorTransformers.size shouldEqual 2
-      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (100)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (999)
-      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
-    }
-
-    // Time should be updated
-    child2.params.start shouldEqual (1)
-    child2.params.end shouldEqual (10)
-    child2.params.promQl shouldEqual(promQlQueryParams.promQl) // Query should not change
-    child2.params.processFailure shouldEqual(false)
-
-  }
-
   it("should not generate PromQlExec plan when local overlapping failure is bigger") {
     val to = 10000
     val from = 100
@@ -359,7 +309,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("", from, 1, to, None)
+    val promQlQueryParams = PromQlQueryParams("", from/1000, 1, to/1000, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -470,15 +420,16 @@ class QueryEngineSpec extends FunSpec with Matchers {
     execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
   }
 
-  it("should generate RemotExecPlan with RawSeries time according to lookBack and step") {
-    val to = 2000000
-    val from = 1000000
-    val lookBack = 50000
-    val intervalSelector = IntervalSelector(from - lookBack , to) // Lookback of 50000
+  it("should generate PromQlExecPlan and LocalPlan with RawSeries time according to lookBack and step") {
+    val to = 2000
+    val from = 900
+    val lookBack = 300000
+    val step = 60
+    val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
-    val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
+    val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("", from, 1020, to, None)
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -487,6 +438,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
           TimeRange(1060000, 1090000), true))
       }
     }
+    //900K to 1020K and 1020+60 k to 2000K
 
     val engine = new QueryEngine(dataset, mapperRef, failureProvider)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
@@ -506,17 +458,51 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child1.children.foreach { l1 =>
       l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
       l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
-        (1060180-lookBack)
+        (1080000-lookBack)
       l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1060180)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1080000)
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    child2.params.start shouldEqual from/1000
-    child2.params.end shouldEqual (1059160)/1000
+    child2.params.start shouldEqual 900
+    child2.params.end shouldEqual 1020
+    child2.params.step shouldEqual 60
     child2.params.processFailure shouldEqual(false)
+  }
+
+  it("should generate only PromQlExecPlan with RawSeries time according to lookBack and step") {
+    val to = 2000
+    val from = 900
+    val lookBack = 300000
+    val step = 60
+    val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(2000000, 2500000), true))
+      }
+    }
+    // Routes should be from 900K to 1020K and 1020K + 60K to 2000K
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+
+    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+
+    val child = execPlan.asInstanceOf[PromQlExec]
+
+    child.params.start shouldEqual 900
+    child.params.end shouldEqual 1980
+    child.params.step shouldEqual 60
+    child.params.processFailure shouldEqual(false)
   }
 }
