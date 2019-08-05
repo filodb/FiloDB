@@ -7,7 +7,7 @@ import com.typesafe.config.ConfigFactory
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, TestData}
-import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator}
 import filodb.core.memstore._
 import filodb.core.store._
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
@@ -32,8 +32,9 @@ class IngestionBenchmark {
   // # of records in a container to test ingestion speed
   val dataStream = withMap(linearMultiSeries(), extraTags = extraTags)
 
-  val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
-                                                    Seq("job", "instance"))
+  val predefKeySchema = dataset2.schema.copy(partition = dataset2.schema.partition.copy(
+                          predefinedKeys = Seq("job", "instance")))
+  val schemaWithPredefKeys = predefKeySchema.ingestionSchema
   // sized just big enough for a 1000 entries per container
   val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, 176064)
   val comparator = new RecordComparator(schemaWithPredefKeys)

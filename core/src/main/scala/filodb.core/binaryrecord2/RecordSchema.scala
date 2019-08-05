@@ -5,7 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
@@ -400,16 +400,6 @@ object RecordSchema {
   }
 
   final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
-
-  /**
-   * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
-   */
-  def ingestion(dataset: Dataset, predefinedKeys: Seq[String] = Nil): RecordSchema = {
-    val columns = dataset.dataColumns ++ dataset.partitionColumns
-    new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)),
-                     Some(dataset.dataColumns.length),
-                     predefinedKeys)
-  }
 
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =

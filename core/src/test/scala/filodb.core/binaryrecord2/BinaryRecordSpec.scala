@@ -25,7 +25,6 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   val dataset3 = modify(dataset2)(_.schema.partition.predefinedKeys).setTo(Seq("job", "instance"))
   val schemaWithPredefKeys = dataset3.schema.ingestionSchema
-  schemaWithPredefKeys shouldEqual RecordSchema.ingestion(dataset2, Seq("job", "instance"))
 
   before {
     records.clear()
