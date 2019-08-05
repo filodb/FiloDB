@@ -89,7 +89,8 @@ final case class StitchRvsExec(id: String,
   */
 final case class StitchRvsMapper() extends RangeVectorTransformer {
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {

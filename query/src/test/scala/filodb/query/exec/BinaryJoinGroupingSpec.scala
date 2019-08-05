@@ -10,6 +10,7 @@ import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
+import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -182,7 +183,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
+    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
+                      queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
@@ -261,7 +263,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
+    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
+                 queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue

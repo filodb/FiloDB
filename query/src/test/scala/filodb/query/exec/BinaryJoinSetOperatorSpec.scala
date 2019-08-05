@@ -215,7 +215,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LAND,
       Nil, Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -252,7 +253,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LAND,
       Seq("instance", "job"), Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -289,7 +291,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LAND,
       Seq("instance"), Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -325,7 +328,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LAND,
       Nil, Seq("group"))
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -360,7 +364,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LAND,
       Nil, Seq("group", "job"))
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -467,7 +472,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LOR,
       Nil, Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
@@ -527,7 +533,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LOR,
       Nil, Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
@@ -598,7 +605,8 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
       BinaryOperator.LOR,
       Nil, Nil)
 
-    val canaryPlusOne = scalarOpMapper(Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
+    val canaryPlusOne = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleCanary), queryConfig, 1000, resultSchema).
       toListL.runAsync.futureValue
     // scalastyle:off
     val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))

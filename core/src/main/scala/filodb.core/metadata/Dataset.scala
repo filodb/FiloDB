@@ -107,6 +107,13 @@ final case class Dataset(name: String,
             .combined.badMap(_.toSeq)
 
   /**
+    * Throws exception on invalid column name
+    */
+  def dataColId(colName: String): Int = {
+    dataColumns.find(_.name == colName).map(_.id).get
+  }
+
+  /**
    * Given a list of column names representing say CSV columns, returns a routing from each data column
    * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
    * over the input RowReader to return data columns corresponding to dataset definition.
@@ -153,6 +160,7 @@ final case class Dataset(name: String,
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
                           valueColumn: String,
+                          hasDownsampledData: Boolean = false,
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
@@ -164,14 +172,17 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
   }
 
   def toConfig: Config = {
-    val map: Map[String, Any] = Map(
+    val map: scala.collection.mutable.Map[String, Any] = scala.collection.mutable.Map(
       "shardKeyColumns" -> shardKeyColumns.asJava,
       "metricColumn" -> metricColumn,
       "valueColumn" -> valueColumn,
+      "hasDownsampledData" -> hasDownsampledData,
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
       "copyTags" -> copyTags.asJava)
+
+
     ConfigFactory.parseMap(map.asJava)
   }
 
@@ -202,6 +213,7 @@ object DatasetOptions {
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    valueColumn = config.getString("valueColumn"),
+                   hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
@@ -245,7 +257,8 @@ object Dataset {
             dataColumns: Seq[String],
             keyColumns: Seq[String],
             downsamplers: Seq[String], options : DatasetOptions): Dataset =
-    make(name, partitionColumns, dataColumns, keyColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
+    make(name, partitionColumns, dataColumns, keyColumns,
+      downsamplers, options).badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
