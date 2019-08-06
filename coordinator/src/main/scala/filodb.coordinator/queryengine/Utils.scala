@@ -12,11 +12,12 @@ import monix.reactive.Observable
 import org.scalactic._
 
 import filodb.coordinator.ShardMapper
-import filodb.core.{ErrorResponse, Types}
+import filodb.core.{ErrorResponse, SpreadProvider, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
+import filodb.query.QueryOptions
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -26,7 +27,6 @@ final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) exten
  * Logical -> Physical Plan conversion and implementing the Distribute* physical primitives
  */
 object Utils extends StrictLogging {
-  import filodb.coordinator.client.QueryCommands._
   import TrySugar._
   import filodb.coordinator.client.QueryCommands._
 

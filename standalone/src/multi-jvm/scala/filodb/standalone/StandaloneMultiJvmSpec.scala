@@ -2,7 +2,6 @@ package filodb.standalone
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
@@ -21,13 +20,14 @@ import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.client.LocalClient
+import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import filodb.core.DatasetRef
 import filodb.core.store.StoreConfig
-import filodb.http.PromCirceSupport
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
+import filodb.query.PromCirceSupport
+import filodb.query.SuccessResponse
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config
@@ -148,7 +148,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
 
     val curTime = System.currentTimeMillis
-    val result = client.logicalPlan2Query(dataset, logicalPlan) match {
+    val result = client.logicalPlan2Query(dataset, logicalPlan, UnavailablePromQlQueryParams ) match {
       case r: QueryResult2 =>
         val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
         // info(s"result values were $vals")
@@ -166,7 +166,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val logicalPlan = Parser.queryRangeToLogicalPlan(query1, TimeStepParams(startTime/1000, 60, endTime/1000))
 
     var totalSamples = 0
-    client.logicalPlan2Query(dataset, logicalPlan) match {
+    client.logicalPlan2Query(dataset, logicalPlan, UnavailablePromQlQueryParams) match {
       case r: QueryResult2 =>
         // Transform range query vectors
         val map = r.result.map { rv =>
@@ -190,7 +190,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   def printChunkMeta(client: LocalClient): Unit = {
     val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",_ns=\"App-2\"})"
     val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, TimeStepParams(0, 60, Int.MaxValue))
-    client.logicalPlan2Query(dataset, logicalPlan) match {
+    client.logicalPlan2Query(dataset, logicalPlan, UnavailablePromQlQueryParams) match {
       case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint()))
       case e: QueryError => fail(e.t)
     }

@@ -1,12 +1,12 @@
 package filodb.query.exec
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import monix.eval.Task
+import monix.execution.Scheduler
 
 import filodb.query.QueryResponse
 
@@ -16,7 +16,7 @@ import filodb.query.QueryResponse
   */
 trait PlanDispatcher extends java.io.Serializable {
   def dispatch(plan: ExecPlan)
-              (implicit sched: ExecutionContext,
+              (implicit sched: Scheduler,
                timeout: FiniteDuration): Task[QueryResponse]
 }
 
@@ -27,7 +27,7 @@ trait PlanDispatcher extends java.io.Serializable {
 case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan)
-              (implicit sched: ExecutionContext,
+              (implicit sched: Scheduler,
                timeout: FiniteDuration): Task[QueryResponse] = {
     implicit val _ = Timeout(timeout)
     val fut = (target ? plan).map {

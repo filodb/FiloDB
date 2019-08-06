@@ -4,9 +4,9 @@ import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.coordinator.queryengine2.TsdbQueryParams
 import filodb.core._
-import filodb.query.{LogicalPlan => LogicalPlan2}
-import filodb.query.{QueryResponse => QueryResponse2}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryOptions, QueryResponse => QueryResponse2}
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._
@@ -53,8 +53,9 @@ trait QueryOps extends ClientBase with StrictLogging {
     */
   def logicalPlan2Query(dataset: DatasetRef,
                        plan: LogicalPlan2,
+                        tsdbQueryParams: TsdbQueryParams,
                        options: QueryOptions = QueryOptions()): QueryResponse2 = {
-    val qCmd = LogicalPlan2Query(dataset, plan, options)
+    val qCmd = LogicalPlan2Query(dataset, plan, tsdbQueryParams, options)
     // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutSecs is
     // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted
     // back in case of internal timeouts.

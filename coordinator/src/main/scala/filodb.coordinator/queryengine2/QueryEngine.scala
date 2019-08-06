@@ -3,17 +3,18 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
+import monix.execution.Scheduler
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands.{QueryOptions, SpreadProvider, StaticSpreadProvider}
-import filodb.core.Types
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.core.{SpreadProvider, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
@@ -22,13 +23,23 @@ import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
 
+
+trait TsdbQueryParams
+case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
+                        spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
+
+object UnavailablePromQlQueryParams extends TsdbQueryParams
+
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
 class QueryEngine(dataset: Dataset,
-                  shardMapperFunc: => ShardMapper)
+                  shardMapperFunc: => ShardMapper,
+                  failureProvider: FailureProvider,
+                  spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                  queryEngineConfig: Config = ConfigFactory.empty())
                    extends StrictLogging {
 
   /**
@@ -46,7 +57,7 @@ class QueryEngine(dataset: Dataset,
     * It sends the ExecPlan to the destination where it will be executed.
     */
   def dispatchExecPlan(execPlan: ExecPlan)
-                      (implicit sched: ExecutionContext,
+                      (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
     val currentSpan = Kamon.currentSpan()
     Kamon.withSpan(currentSpan) {
@@ -55,13 +66,88 @@ class QueryEngine(dataset: Dataset,
   }
 
   /**
+    * Converts Routes to ExecPlan
+    */
+  private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan, queryId: String, submitTime: Long,
+                                  options: QueryOptions, spreadProvider: SpreadProvider, lookBackTime: Long,
+                                  tsdbQueryParams: TsdbQueryParams): ExecPlan = {
+
+    val execPlans : Seq[ExecPlan]= routes.map { route =>
+      route match {
+        case route: LocalRoute => if (!route.timeRange.isDefined)
+          generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, spreadProvider)
+        else
+          generateLocalExecPlan(QueryRoutingPlanner.copyWithUpdatedTimeRange(rootLogicalPlan,
+            route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime), queryId, submitTime, options, spreadProvider)
+        case route: RemoteRoute =>
+          val timeRange = route.timeRange.get
+          val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
+          val endpoint = queryEngineConfig.isEmpty() match {
+            case false => queryEngineConfig.getString("routing.buddy.http.endpoint")
+            case _     => ""
+          }
+
+          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis
+            /1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          logger.debug("PromQlExec params:" + promQlInvocationParams)
+          PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
+      }
+    }
+
+    if (execPlans.size == 1)
+       execPlans.head
+    else
+      // Stitch RemoteExec plan results with local using InProcessorDispatcher
+      // Sort to move RemoteExec in end as it does not have schema
+       StitchRvsExec(queryId, InProcessPlanDispatcher(dataset),
+        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
+  }
+
+  /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions, spreadProvider: SpreadProvider = StaticSpreadProvider()): ExecPlan = {
+                  options: QueryOptions,
+                  tsdbQueryParams: TsdbQueryParams): ExecPlan = {
     val queryId = UUID.randomUUID().toString
+    val submitTime = System.currentTimeMillis()
+    val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
-    val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(),
+    if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || // It is a raw data query
+      !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
+      (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
+        !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
+      // failure routing
+      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan)) // Sub queries have different time ranges (unusual)
+      {
+       generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+      } else {
+      val periodicSeriesTime = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(logicalPlan = rootLogicalPlan)
+      val lookBackTime: Long = QueryRoutingPlanner.getRawSeriesStartTime(rootLogicalPlan).
+        map(periodicSeriesTime.startInMillis - _).get
+
+      val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
+      val failures =
+        failureProvider.getFailures(dataset.ref, routingTime)
+                        .sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis)
+
+      if (failures.isEmpty) {
+        generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
+      } else {
+        val routes = QueryRoutingPlanner.plan(failures, periodicSeriesTime, lookBackTime,
+          tsdbQueryParams.asInstanceOf[PromQlQueryParams].step * 1000)
+        logger.debug("Routes:" + routes)
+        routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
+          tsdbQueryParams)
+      }
+    }
+  }
+
+  private def generateLocalExecPlan(logicalPlan: LogicalPlan,
+                          queryId: String,
+                          submitTime: Long,
+                          options: QueryOptions, spreadProvider: SpreadProvider) = {
+    val materialized = walkLogicalPlanTree(logicalPlan, queryId, System.currentTimeMillis(),
       options, spreadProvider)
     match {
       case PlanResult(Seq(justOne), stitch) =>
@@ -79,8 +165,9 @@ class QueryEngine(dataset: Dataset,
         }
     }
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
-      s" $rootLogicalPlan to \n${materialized.printTree()}")
+      s" $logicalPlan to \n${materialized.printTree()}")
     materialized
+
   }
 
   val shardColumns = dataset.options.shardKeyColumns.sorted

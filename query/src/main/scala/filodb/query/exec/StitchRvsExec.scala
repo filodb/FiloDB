@@ -73,7 +73,7 @@ final case class StitchRvsExec(id: String,
       case (QueryResult(_, _, result), _) => result
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map(_.flatten).map { srvs =>
-      val groups = srvs.groupBy(_.key)
+      val groups = srvs.groupBy(_.key.labelValues)
       groups.mapValues { toMerge =>
         val rows = StitchRvsExec.merge(toMerge.map(_.rows))
         val key = toMerge.head.key
