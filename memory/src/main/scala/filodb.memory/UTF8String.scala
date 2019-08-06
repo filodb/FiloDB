@@ -18,23 +18,13 @@ object UTF8String {
 }
 
 /**
- * A "medium length" UTF8 string of < 64KB bytes which can be on or offheap.
- * Since there can be many millions of strings and we want to save heap space, we don't want to create
- * an on-heap object for every string.  Instead, the idea is that we deal with containers of strings, such as
- * UTF8Vectors.  They have two options to avoid object allocation:
- * 1) Be offheap and deal with 64-bit native pointers, which are Long primitives.
- *     The UTF8StringMedium value class can be used to wrap the pointers.
- * 2) Instead of returning a tuple of (base, offset) which results in allocation, design APIs which pass in both
- *     the base and offset, and let the user invoke any methods on the object here as needed.
+ * Common traits for binary/UTF8 String types that are also BinaryRegions (have length prefixes)
  */
-object UTF8StringMedium extends BinaryRegion {
+trait BinaryString extends BinaryRegion {
   import format.UnsafeUtils
-  import UTF8String._
   import java.nio.charset.StandardCharsets
 
-  final def numBytes(base: Any, offset: Long): Int = UnsafeUtils.getShort(base, offset) & 0x0FFFF
-
-  val lenBytes = 2
+  def copyByteArrayTo(bytes: Array[Byte], dest: Any, destOffset: Long): Unit
 
   def apply(s: String, factory: MemFactory = MemFactory.onHeapFactory): (Any, Long) = {
     apply(s.getBytes(StandardCharsets.UTF_8), factory)
@@ -48,6 +38,46 @@ object UTF8StringMedium extends BinaryRegion {
     copyByteArrayTo(bytes, base, offset)
     (base, offset)
   }
+
+  private def matchAt(base: Any, offset: Long, other: Any, otherOffset: Long, pos: Int): Boolean = {
+    val numBytesUs = numBytes(base, offset)
+    val numBytesOther = numBytes(other, otherOffset)
+    if (numBytesOther + pos > numBytesUs || pos < 0) { false }
+    else { UnsafeUtils.equate(base, offset + lenBytes + pos, other, otherOffset + lenBytes, numBytesOther) }
+  }
+
+  /**
+   * Returns true if the UTF8String at (base, offset) starts with the UTF8String at (other, otherOffset)
+   */
+  final def startsWith(base: Any, offset: Long, other: Any, otherOffset: Long): Boolean =
+    matchAt(base, offset, other, otherOffset, 0)
+
+  final def endsWith(base: Any, offset: Long, other: Any, otherOffset: Long): Boolean =
+    matchAt(base, offset, other, otherOffset, numBytes(base, offset) - numBytes(other, otherOffset))
+
+  final def toString(base: Any, offset: Long): String = {
+    val bytes = asNewByteArray(base, offset)
+    new String(bytes, lenBytes, bytes.size - lenBytes, StandardCharsets.UTF_8)
+  }
+}
+
+/**
+ * A "medium length" UTF8 string of < 64KB bytes which can be on or offheap.
+ * Since there can be many millions of strings and we want to save heap space, we don't want to create
+ * an on-heap object for every string.  Instead, the idea is that we deal with containers of strings, such as
+ * UTF8Vectors.  They have two options to avoid object allocation:
+ * 1) Be offheap and deal with 64-bit native pointers, which are Long primitives.
+ *     The UTF8StringMedium value class can be used to wrap the pointers.
+ * 2) Instead of returning a tuple of (base, offset) which results in allocation, design APIs which pass in both
+ *     the base and offset, and let the user invoke any methods on the object here as needed.
+ */
+object UTF8StringMedium extends BinaryString {
+  import format.UnsafeUtils
+  import UTF8String._
+
+  final def numBytes(base: Any, offset: Long): Int = UnsafeUtils.getShort(base, offset) & 0x0FFFF
+
+  val lenBytes = 2
 
   def copyByteArrayTo(bytes: Array[Byte], dest: Any, destOffset: Long): Unit = {
     UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, dest, destOffset + lenBytes, bytes.size)
@@ -86,26 +116,36 @@ object UTF8StringMedium extends BinaryRegion {
     }
     len
   }
+}
 
-  private def matchAt(base: Any, offset: Long, other: Any, otherOffset: Long, pos: Int): Boolean = {
-    val numBytesUs = numBytes(base, offset)
-    val numBytesOther = numBytes(other, otherOffset)
-    if (numBytesOther + pos > numBytesUs || pos < 0) { false }
-    else { UnsafeUtils.equate(base, offset + lenBytes + pos, other, otherOffset + lenBytes, numBytesOther) }
+/**
+ * Methods for dealing with strings with a one-byte length prefix
+ */
+object UTF8StringShort extends BinaryString {
+  import format.UnsafeUtils
+
+  final def numBytes(base: Any, offset: Long): Int = UnsafeUtils.getByte(base, offset) & 0x00FF
+
+  val lenBytes = 1
+
+  def copyByteArrayTo(bytes: Array[Byte], dest: Any, destOffset: Long): Unit = {
+    require(bytes.size < 256)
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, dest, destOffset + lenBytes, bytes.size)
+    UnsafeUtils.setByte(dest, destOffset, bytes.size.toByte)
   }
 
-  /**
-   * Returns true if the UTF8String at (base, offset) starts with the UTF8String at (other, otherOffset)
-   */
-  final def startsWith(base: Any, offset: Long, other: Any, otherOffset: Long): Boolean =
-    matchAt(base, offset, other, otherOffset, 0)
+  def copyByteArrayTo(bytes: Array[Byte], byteIndex: Int, len: Int, dest: Any, destOffset: Long): Unit = {
+    require(len < 256)
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset + byteIndex, dest, destOffset + lenBytes, len)
+    UnsafeUtils.setByte(dest, destOffset, len.toByte)
+  }
 
-  final def endsWith(base: Any, offset: Long, other: Any, otherOffset: Long): Boolean =
-    matchAt(base, offset, other, otherOffset, numBytes(base, offset) - numBytes(other, otherOffset))
-
-  final def toString(base: Any, offset: Long): String = {
-    val bytes = asNewByteArray(base, offset)
-    new String(bytes, 2, bytes.size - 2, StandardCharsets.UTF_8)
+  implicit class StringToNative(str: String) {
+    def utf8short(factory: MemFactory): BinaryRegion.NativePointer = {
+      val (base, addr) = apply(str, factory)
+      require(base == UnsafeUtils.ZeroPointer, s"Native memory was not allocated, you used factory $factory")
+      addr
+    }
   }
 }
 

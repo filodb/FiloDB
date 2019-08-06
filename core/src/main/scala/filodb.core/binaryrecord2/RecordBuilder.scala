@@ -173,11 +173,11 @@ final class RecordBuilder(memFactory: MemFactory,
     * If this method is used, then caller needs to also update the partitionHash manually.
     */
   private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
-    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
-    checkFieldAndMemory(numBytes + 4)
-    UnsafeUtils.setInt(curBase, curRecEndOffset, numBytes) // length of blob
-    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 4, numBytes)
-    updateFieldPointerAndLens(numBytes + 4)
+    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addMap")
+    checkFieldAndMemory(numBytes + 2)
+    UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
+    updateFieldPointerAndLens(numBytes + 2)
     fieldNo += 1
   }
 
@@ -215,7 +215,7 @@ final class RecordBuilder(memFactory: MemFactory,
   final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
     var id = 0
     partKeySchema.columns.foreach {
-      case ColumnInfo(_, MapColumn) => addLargeBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, MapColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
@@ -288,10 +288,10 @@ final class RecordBuilder(memFactory: MemFactory,
    */
   final def startMap(): Unit = {
     require(mapOffset == -1L)
-    checkFieldAndMemory(4)   // 4 bytes for map length header
+    checkFieldAndMemory(2)   // 2 bytes for map length header
     mapOffset = curRecEndOffset
-    setInt(curBase, mapOffset, 0)
-    updateFieldPointerAndLens(4)
+    setShort(curBase, mapOffset, 0)
+    updateFieldPointerAndLens(2)
     // Don't update fieldNo, we'll be working on map for a while
   }
 
@@ -306,7 +306,7 @@ final class RecordBuilder(memFactory: MemFactory,
                            keyHash: Int = 7): Unit = {
     require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
     // check key size, must be < 60KB
-    require(keyLen < 60*1024, s"key is too large: ${keyLen} bytes")
+    require(keyLen < 192, s"key is too large: ${keyLen} bytes")
     require(valueLen < 64*1024, s"value is too large: $valueLen bytes")
 
     // Check if key is a predefined key
@@ -316,20 +316,22 @@ final class RecordBuilder(memFactory: MemFactory,
         val keyKey = RecordSchema.makeKeyKey(keyBytes, keyOffset, keyLen, keyHash)
         schema.predefKeyNumMap.getOrElse(keyKey, -1)
       }
-    val keyValueSize = if (predefKeyNum >= 0) { valueLen + 4 } else { keyLen + valueLen + 4 }
+    val keyValueSize = if (predefKeyNum >= 0) { valueLen + 3 } else { keyLen + valueLen + 3 }
     requireBytes(keyValueSize)
     if (predefKeyNum >= 0) {
-      setShort(curBase, curRecEndOffset, (0xF000 | predefKeyNum).toShort)
-      curRecEndOffset += 2
+      setByte(curBase, curRecEndOffset, (0x0C0 | predefKeyNum).toByte)
+      curRecEndOffset += 1
     } else {
-      UTF8StringMedium.copyByteArrayTo(keyBytes, keyOffset, keyLen, curBase, curRecEndOffset)
-      curRecEndOffset += keyLen + 2
+      UTF8StringShort.copyByteArrayTo(keyBytes, keyOffset, keyLen, curBase, curRecEndOffset)
+      curRecEndOffset += keyLen + 1
     }
     UTF8StringMedium.copyByteArrayTo(valueBytes, valueOffset, valueLen, curBase, curRecEndOffset)
     curRecEndOffset += valueLen + 2
 
     // update map length, BR length
-    setInt(curBase, mapOffset, (curRecEndOffset - mapOffset - 4).toInt)
+    val newMapLen = curRecEndOffset - mapOffset - 2
+    require(newMapLen < 65536, s"Map entries cannot total more than 64KB, but is now $newMapLen")
+    setShort(curBase, mapOffset, newMapLen.toShort)
     setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
   }
 
@@ -655,5 +657,4 @@ object RecordBuilder {
       case _                            => shardKeyColValue
     }
   }
-
 }

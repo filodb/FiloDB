@@ -1,12 +1,10 @@
 package filodb.core.downsample
 
-import scala.collection.mutable
-
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.{TestData, MachineMetricsData => MMD}
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer, StringifyMapItemConsumer}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
 import filodb.core.metadata._
 import filodb.core.metadata.Column.ColumnType._
@@ -102,18 +100,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
         // validate tags on the partition key
-        val partKeyInRecord = new mutable.HashMap[String, String]()
-        val consumer = new MapItemConsumer {
-          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
-                               UTF8StringMedium.numBytes(valueBase, valueOffset))
-            partKeyInRecord.put(key.toString, value.toString)
-          }
-        }
+        val consumer = new StringifyMapItemConsumer()
         dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
         dsSchema.consumeMapItems(c.base, off, 7, consumer)
-        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+        consumer.stringPairs.toMap shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
         promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual
@@ -155,18 +145,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
         // validate tags on the partition key
-        val partKeyInRecord = new mutable.HashMap[String, String]()
-        val consumer = new MapItemConsumer {
-          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
-              UTF8StringMedium.numBytes(valueBase, valueOffset))
-            partKeyInRecord.put(key.toString, value.toString)
-          }
-        }
+        val consumer = new StringifyMapItemConsumer()
         dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
         dsSchema.consumeMapItems(c.base, off, 7, consumer)
-        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+        consumer.stringPairs.toMap shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
         promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual

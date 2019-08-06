@@ -8,7 +8,7 @@ import org.agrona.concurrent.UnsafeBuffer
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
-import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => bv}
 
@@ -49,7 +49,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   val colNames = columns.map(_.name)
   val columnTypes = columns.map(_.colType)
   require(columnTypes.nonEmpty, "columnTypes cannot be empty")
-  require(predefinedKeys.length < 4096, "Too many predefined keys")
+  require(predefinedKeys.length <= 64, "Too many predefined keys")
   require(partitionFieldStart.isEmpty ||
           partitionFieldStart.get < columnTypes.length, s"partitionFieldStart $partitionFieldStart is too high")
 
@@ -252,20 +252,20 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    */
   def consumeMapItems(base: Any, offset: Long, index: Int, consumer: MapItemConsumer): Unit = {
     val mapOffset = offset + UnsafeUtils.getInt(base, offset + offsets(index))
-    val mapNumBytes = UnsafeUtils.getInt(base, mapOffset)
-    var curOffset = mapOffset + 4
+    val mapNumBytes = UnsafeUtils.getShort(base, mapOffset).toInt
+    var curOffset = mapOffset + 2
     val endOffset = curOffset + mapNumBytes
     var itemIndex = 0
     while (curOffset < endOffset) {
       // Read key length.  Is it a predefined key?
-      val keyLen = UnsafeUtils.getShort(base, curOffset) & 0x0FFFF
-      val keyIndex = keyLen ^ 0x0F000
-      if (keyIndex < 0x1000) {   // predefined key; no key bytes
-        consumer.consume(predefKeyBytes, predefKeyOffsets(keyIndex), base, curOffset + 2, itemIndex)
-        curOffset += 4 + (UnsafeUtils.getShort(base, curOffset + 2) & 0x0FFFF)
+      val keyLen = UnsafeUtils.getShort(base, curOffset) & 0x00FF
+      val keyIndex = keyLen ^ 0x0C0
+      if (keyIndex < 64) {   // predefined key; no key bytes
+        consumer.consume(predefKeyBytes, predefKeyOffsets(keyIndex), base, curOffset + 1, itemIndex)
+        curOffset += 3 + (UnsafeUtils.getShort(base, curOffset + 1) & 0x0FFFF)
       } else {
-        consumer.consume(base, curOffset, base, curOffset + 2 + keyLen, itemIndex)
-        curOffset += 4 + keyLen + (UnsafeUtils.getShort(base, curOffset + 2 + keyLen) & 0x0FFFF)
+        consumer.consume(base, curOffset, base, curOffset + 1 + keyLen, itemIndex)
+        curOffset += 3 + keyLen + (UnsafeUtils.getShort(base, curOffset + 1 + keyLen) & 0x0FFFF)
       }
       itemIndex += 1
     }
@@ -317,17 +317,18 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   import debox.{Map => DMap}   // An unboxed, fast Map
 
   private def makePredefinedStructures(predefinedKeys: Seq[String]): (Array[Long], Array[Byte], DMap[Long, Int]) = {
-    // Convert predefined keys to UTF8StringMediums.  First estimate size they would all take.
-    val totalNumBytes = predefinedKeys.map(_.length + 2).sum
+    // Convert predefined keys to UTF8StringShorts.  First estimate size they would all take.
+    val totalNumBytes = predefinedKeys.map(_.length + 1).sum
     val stringBytes = new Array[Byte](totalNumBytes)
     val keyToNum = DMap.empty[Long, Int]
     var index = 0
     val offsets = predefinedKeys.scanLeft(UnsafeUtils.arayOffset.toLong) { case (offset, str) =>
                     val bytes = str.getBytes
-                    UTF8StringMedium.copyByteArrayTo(bytes, stringBytes, offset)
+                    require(bytes.size < 192, s"Predefined key $str too long")
+                    UTF8StringShort.copyByteArrayTo(bytes, stringBytes, offset)
                     keyToNum(makeKeyKey(bytes)) = index
                     index += 1
-                    offset + bytes.size + 2
+                    offset + bytes.size + 1
                   }.toArray
     (offsets, stringBytes, keyToNum)
   }
@@ -339,10 +340,9 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
 
 trait MapItemConsumer {
   /**
-   * Invoked for each key and value pair.  The (base, offset) points to a UTF8StringMedium, use that objects
-   * methods to work with each UTF8 string.
-   * @param (keyBase,keyOffset) pointer to the key UTF8String
-   * @param (valueBase, valueOffset) pointer to the value UTF8String
+   * Invoked for each key and value pair.
+   * @param (keyBase, keyOffset) pointer to the key UTF8StringShort
+   * @param (valueBase, valueOffset) pointer to the value UTF8StringMedium
    * @param index an increasing index of the pair within the map, starting at 0
    */
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit
@@ -355,7 +355,7 @@ class StringifyMapItemConsumer extends MapItemConsumer {
   val stringPairs = new collection.mutable.ArrayBuffer[(String, String)]
   def prettyPrint: String = "{" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "}"
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    stringPairs += (UTF8StringMedium.toString(keyBase, keyOffset) ->
+    stringPairs += (UTF8StringShort.toString(keyBase, keyOffset) ->
                     UTF8StringMedium.toString(valueBase, valueOffset))
   }
 }

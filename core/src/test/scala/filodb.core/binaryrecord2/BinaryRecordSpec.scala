@@ -7,7 +7,7 @@ import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.ColumnInfo
-import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
+import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
@@ -255,14 +255,15 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
   }
 
-  val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8(nativeMem))
+  import UTF8StringShort._
+  val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8short(nativeMem))
   var lastIndex = -1
 
   val keyCheckConsumer = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
       // println(s"XXX: got key, ${UTF8StringMedium.toString(keyBase, keyOffset)}")
       lastIndex = index
-      UTF8StringMedium.equals(keyBase, keyOffset, null, sortedKeys(index).address) shouldEqual true
+      UTF8StringShort.equals(keyBase, keyOffset, null, sortedKeys(index)) shouldEqual true
     }
   }
 
@@ -359,8 +360,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       val containers = builder.allContainers
       containers should have length (1)
-      // 56 (len + 5 long/double + 2 var + hash) + 10 + 4 + extraTagsLen + 10 * 2)
-      containers.head.numBytes shouldEqual (12 + 3 * align4(72 + extraTagsLen + 2 + 20))
+      // 56 (len + 5 long/double + 2 var + hash) + 10 + 2 + extraTagsLen + 10 * 2)
+      containers.head.numBytes shouldEqual (12 + 3 * align4(68 + extraTagsLen + 2 + 18))
 
       containers.head.consumeRecords(consumer)
       records should have length (3)
