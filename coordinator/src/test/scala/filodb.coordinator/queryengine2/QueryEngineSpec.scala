@@ -242,7 +242,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should not generate PromQlExec plan when local overlapping failure is bigger") {
+  it("should not generate PromQlExec plan when local overlapping failure is smaller") {
     val to = 10000
     val from = 100
     val intervalSelector = IntervalSelector(from, to)
@@ -252,9 +252,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
-        Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(1500, 4000), false), FailureTimeRange("remote", datasetRef,
-          TimeRange(2000, 3000), true), FailureTimeRange("remote", datasetRef,
+        Seq(FailureTimeRange("remote", datasetRef,
+          TimeRange(1500, 4000), true),
+          FailureTimeRange("local", datasetRef, //Removed
+          TimeRange(2000, 3000), false), FailureTimeRange("remote", datasetRef,
           TimeRange(5000, 6000), true))
       }
     }

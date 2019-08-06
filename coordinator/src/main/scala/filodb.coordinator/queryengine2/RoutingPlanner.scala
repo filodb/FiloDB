@@ -14,9 +14,9 @@ trait RoutingPlanner extends StrictLogging {
 object QueryRoutingPlanner extends RoutingPlanner {
 
   /**
-    * Remove larger FailureTimeRange when more than one FailureTimeRanges have overlapping times
+    * Remove smaller FailureTimeRange when more than one FailureTimeRanges have overlapping times
     */
-  private def removeLargerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
+  private def removeSmallerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
 
     failures.sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis).
       foldLeft(Seq[FailureTimeRange]()) { (buildList, tail) =>
@@ -25,7 +25,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
           case head :+ value =>
             if (value.timeRange.endInMillis >= tail.timeRange.startInMillis) {
               // Remove larger overlapping interval
-              if ((value.timeRange.endInMillis - value.timeRange.startInMillis) >
+              if ((value.timeRange.endInMillis - value.timeRange.startInMillis) <
                 (tail.timeRange.endInMillis - tail.timeRange.startInMillis)) {
                 buildList.dropRight(1) :+ tail
               }
@@ -50,7 +50,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
     */
   def plan(failures: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route] = {
 
-    val nonOverlappingFailures = removeLargerOverlappingFailures(failures)
+    val nonOverlappingFailures = removeSmallerOverlappingFailures(failures)
     if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
       (nonOverlappingFailures.head.timeRange.startInMillis > time.endInMillis)) {
        Seq(LocalRoute(None)) // No failure in this time range
