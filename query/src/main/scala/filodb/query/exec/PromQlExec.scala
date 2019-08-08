@@ -28,7 +28,6 @@ case class PromQlExec(id: String,
   protected def args: String = params.toString
   import PromQlExec._
 
-  val recSchema = SerializableRangeVector.toSchema(columns)
   val builder = SerializableRangeVector.toBuilder(recSchema)
 
   /**
@@ -101,6 +100,7 @@ object PromQlExec extends  StrictLogging{
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
+  val recSchema = SerializableRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
