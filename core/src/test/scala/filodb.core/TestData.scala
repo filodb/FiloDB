@@ -10,7 +10,7 @@ import org.joda.time.DateTime
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schema}
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
@@ -92,8 +92,8 @@ object NamesTestData {
   val lastKey = dataset.timestamp(mapper(names).last)
   def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
 
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects(0)
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset.schema, 0)
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
     TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
@@ -145,9 +145,9 @@ object GdeltTestData {
 
   // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
     val routing = ds.ingestRouting(columnNames)
-    readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing)) }
+    readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing), ds.schema) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
@@ -157,7 +157,7 @@ object GdeltTestData {
   }
 
   def partKeyFromRecords(ds: Dataset, records: SomeData, builder: Option[RecordBuilder] = None): Seq[Long] = {
-    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem, ds.partKeySchema))
+    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem))
     records.records.map { case (base, offset) =>
       ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
     }.toVector
@@ -184,10 +184,12 @@ object GdeltTestData {
   // NOTE: For all datasets the row key is GLOBALEVENTID
   // Dataset1: Partition keys (Actor2Code, Year)
   val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), DatasetOptions.DefaultOptions)
+  val schema1 = dataset1.schema
 
   // Dataset2: Partition key (MonthYear)
   val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1))
-  val partBuilder2 = new RecordBuilder(TestData.nativeMem, dataset2.partKeySchema, 10240)
+  val schema2 = dataset2.schema
+  val partBuilder2 = new RecordBuilder(TestData.nativeMem, 10240)
 
   // Dataset3: same as Dataset1 for now
   val dataset3 = dataset1
@@ -230,14 +232,15 @@ object MachineMetricsData {
 
   // Dataset1: Partition keys (series) / Row key timestamp
   val dataset1 = Dataset("metrics", Seq("series:string"), columns)
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset1.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects("series0")
+  val schema1 = dataset1.schema
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
   def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
     stream.foreach { row =>
-      builder.startNewRecord()
+      builder.startNewRecord(ds.schema)
       row.foreach { thing => builder.addSlowly(thing) }
       builder.endRecord()
     }
@@ -252,7 +255,7 @@ object MachineMetricsData {
   // Works with linearMultiSeries() or multiSeriesData()
   def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
     val rawPartKey = stream(keyRecord)(5)
-    val partKey = partKeyBuilder.addFromObjects(rawPartKey)
+    val partKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, rawPartKey)
     TestData.toChunkSetStream(dataset1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
   }
 
@@ -280,9 +283,9 @@ object MachineMetricsData {
     }
   }
 
-  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]]): Unit = {
+  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]], schema: Schema = dataset1.schema): Unit = {
     data.foreach { values =>
-      builder.startNewRecord()
+      builder.startNewRecord(schema)
       builder.addLong(values(0).asInstanceOf[Long])     // timestamp
       builder.addDouble(values(1).asInstanceOf[Double])  // min
       builder.addDouble(values(2).asInstanceOf[Double])  // avg
@@ -302,6 +305,7 @@ object MachineMetricsData {
   }
 
   val dataset2 = Dataset("metrics", Seq("series:string", "tags:map"), columns)
+  val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
     data.zipWithIndex.map { case (row, idx) => row :+ (Map("n".utf8 -> (idx % n).toString.utf8) ++ extraTags) }
@@ -356,8 +360,8 @@ object MachineMetricsData {
       ((row take 3) :+ max) ++ (row drop 3)
     }
 
-  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
-  val histPartKey = histKeyBuilder.addFromObjects(extraTags)
+  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
   private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
@@ -403,8 +407,8 @@ object CustomMetricsData {
                         columns,
                         Seq.empty,
                         DatasetOptions(Seq("metric", "_ns"), "metric")).get
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
   //Partition Key with single map columns
   val partitionColumns2 = Seq("tags:map")
@@ -413,8 +417,9 @@ object CustomMetricsData {
                         columns,
                         Seq.empty,
                         DatasetOptions(Seq("__name__"), "__name__")).get
-  val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
-  val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
+  val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
+                                                           Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
 
 }
 
@@ -424,8 +429,9 @@ object MetricsTestData {
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
+  val timeseriesSchema = timeseriesDataset.schema
 
-  val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
+  val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
   final case class TagsRowReader(tags: Map[String, String]) extends SchemaRowReader {
     val extractors = Array[RowReader.TypedFieldExtractor[_]](ColumnType.MapColumn.keyType.extractor)

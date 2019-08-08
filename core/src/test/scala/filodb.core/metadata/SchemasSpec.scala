@@ -87,6 +87,18 @@ class SchemasSpec extends FunSpec with Matchers {
       errors.head shouldEqual BadColumnType("str")
     }
 
+    it("should return BadDownsampler if no downsample-schema given when downsamplers present") {
+      val conf2 = ConfigFactory.parseString("""
+                    {
+                      columns = ["timestamp:ts", "value:double:detectDrops=true"]
+                      value-column = "value"
+                      downsamplers = [ "tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)" ]
+                    }""")
+      val resp = DataSchema.fromConfig("dataset", conf2)
+      resp.isBad shouldEqual true
+      resp.swap.get shouldBe a[BadDownsampler]
+    }
+
     it("should return NoTimestampRowKey if non timestamp used for row key / first column") {
       val ds1 = DataSchema.make("dataset", Seq("first:string", "age:long"), Nil, "first")
       ds1.isBad shouldEqual true
@@ -212,6 +224,31 @@ class SchemasSpec extends FunSpec with Matchers {
       errors.map(_._2.getClass) shouldEqual Seq(classOf[HashConflict])
     }
 
+    it("should detect and report invalid downsample-schema references") {
+      val conf2 = ConfigFactory.parseString(s"""
+                    {
+                      partition-schema $partSchemaStr
+                      schemas {
+                        prom {
+                          columns = ["timestamp:ts", "value:double"]
+                          value-column = "value"
+                          downsamplers = ["tTime(0)", "dMin(1)"]
+                          downsample-schema = "foo"
+                        }
+                        prom-ds-gauge {
+                          columns = ["timestamp:ts", "min:double"]
+                          value-column = "timestamp"
+                          downsamplers = []
+                        }
+                      }
+                    }""")
+      val resp = Schemas.fromConfig(conf2)
+      resp.isBad shouldEqual true
+      val errors = resp.swap.get
+      errors.map(_._2.getClass) shouldEqual Seq(classOf[BadDownsampler])
+      errors.map(_._1) shouldEqual Seq("prom")
+    }
+
     it("should return Schemas instance with every schema parsed") {
       val conf2 = ConfigFactory.parseString(s"""
                     {
@@ -220,6 +257,12 @@ class SchemasSpec extends FunSpec with Matchers {
                         prom {
                           columns = ["timestamp:ts", "value:double"]
                           value-column = "value"
+                          downsamplers = ["tTime(0)", "dMin(1)"]
+                          downsample-schema = "prom-ds-gauge"
+                        }
+                        prom-ds-gauge {
+                          columns = ["timestamp:ts", "min:double"]
+                          value-column = "timestamp"
                           downsamplers = []
                         }
                         hist {
@@ -236,14 +279,13 @@ class SchemasSpec extends FunSpec with Matchers {
       schemas.part.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
       Dataset.isPartitionID(schemas.part.columns.head.id) shouldEqual true
 
-      schemas.data.keySet shouldEqual Set("prom", "hist")
-      schemas.schemas.keySet shouldEqual Set("prom", "hist")
-      schemas.data("prom").columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
-      schemas.data("prom").columns.map(_.id) shouldEqual Seq(0, 1)
-      schemas.data("prom").timestampColumn.name shouldEqual "timestamp"
-      schemas.data("hist").columns.map(_.columnType) shouldEqual
+      schemas.schemas.keySet shouldEqual Set("prom", "hist", "prom-ds-gauge")
+      schemas.schemas("prom").data.columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+      schemas.schemas("prom").data.columns.map(_.id) shouldEqual Seq(0, 1)
+      schemas.schemas("prom").data.timestampColumn.name shouldEqual "timestamp"
+      schemas.schemas("hist").data.columns.map(_.columnType) shouldEqual
         Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn)
-      // println(schemas.data.values.map(_.hash))
+      schemas.schemas("prom").downsample.get shouldEqual schemas.schemas("prom-ds-gauge")
     }
   }
 }

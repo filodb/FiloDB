@@ -670,8 +670,8 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-            builder.startNewRecord()
+            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.newBuilder())
+            builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))
             builder.addDouble(row.getDouble(i + 1))
             builder.endRecord()

@@ -141,12 +141,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingest(dataset1.ref, 0, records(dataset1, data))
 
     val minSeries0 = data(0)(1).asInstanceOf[Double]
-    val partKey0 = partKeyBuilder.addFromObjects(data(0)(5))
+    val partKey0 = partKeyBuilder.partKeyFromObjects(schema1, data(0)(5))
     val q = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey0, 0))
     q.map(_.getDouble(0)).toSeq.head shouldEqual minSeries0
 
     val minSeries1 = data(1)(1).asInstanceOf[Double]
-    val partKey1 = partKeyBuilder.addFromObjects("Series 1")
+    val partKey1 = partKeyBuilder.partKeyFromObjects(schema1, "Series 1")
     val q2 = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey1, 0))
     q2.map(_.getDouble(0)).toSeq.head shouldEqual minSeries1
   }
@@ -282,10 +282,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
         flushInterval = 10.minutes))
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset.ref, 0).get
-    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSegmentSize)
 
     partKeys.zipWithIndex.foreach { case (off, i) =>
-      timeBucketRb.startNewRecord()
+      timeBucketRb.startNewRecord(indexTimeBucketSchema, 0)
       timeBucketRb.addLong(i + 10) // startTime
       timeBucketRb.addLong(if (i%2 == 0) Long.MaxValue else i + 20) // endTime
       val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)

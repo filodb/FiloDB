@@ -1,13 +1,12 @@
 package filodb.core.downsample
 
-import scala.collection.mutable
-
+import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.{TestData, MachineMetricsData => MMD}
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer, StringifyMapItemConsumer}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
-import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata._
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
@@ -21,13 +20,26 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     Seq("someStr:string", "tags:map"),
     Seq("timestamp:ts", "value:double"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
-    DatasetOptions(Seq("__name__", "job"), "__name__")).get
+    DatasetOptions(Seq("__name__", "job"), "__name__"),
+    dsSchema = Some("ds")).get
+  val promSchema = promDataset.schema
+
+  val downsampleSchemaDS = DataSchema.fromConfig("ds", ConfigFactory.parseString("""
+    {
+      columns = [ "timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double" ]
+      value-column = "avg"
+      downsamplers = []
+    }
+  """))
+  val downsampleSchema = Schema(promSchema.partition, downsampleSchemaDS.get, None)
 
   val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string", "instance:string"),
     Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
-    DatasetOptions(Seq("name", "namespace"), "name")).get
+    DatasetOptions(Seq("name", "namespace"), "name"),
+    dsSchema = Some("custom2")).get
+  val customSchema = customDataset.schema
 
   private val blockStore = MMD.blockStore
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.blockMetaSize, true)
@@ -43,8 +55,8 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
 
   val partKeyTags = Map("dc".utf8 -> "dc1".utf8, "instance".utf8 -> "instance1".utf8)
 
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, promDataset.partKeySchema, 4096)
-  partKeyBuilder.startNewRecord()
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 4096)
+  partKeyBuilder.startNewRecord(promDataset.partKeySchema, promDataset.schema.data.hash)
   partKeyBuilder.addString("someStringValue")
   partKeyBuilder.addMap(partKeyTags)
   partKeyBuilder.endRecord(true)
@@ -62,24 +74,13 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
   }
 
-  val downsampleOps = new ShardDownsampler(promDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
+  val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
+    true, Seq(5000, 10000), NoOpDownsamplePublisher,
     new TimeSeriesShardStats(promDataset.ref, 0))
 
-  it ("should formulate downsample ingest schema correctly for custom1 schema") {
-    val dsSchema = downsampleOps.downsampleIngestSchema()
-    dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dMin", "dMax", "dSum", "dCount","dAvg", "someStr", "tags")
-    dsSchema.columns.map(_.colType) shouldEqual
-      Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn,
-        StringColumn, MapColumn)
-  }
-
   it ("should formulate downsample ingest schema correctly for custom2 schema") {
-    val downsampleOps = new ShardDownsampler(customDataset, 0, true, Seq(5000, 10000), NoOpDownsamplePublisher,
-      new TimeSeriesShardStats(customDataset.ref, 0))
-    val dsSchema = downsampleOps.downsampleIngestSchema()
-    dsSchema.columns.map(_.name) shouldEqual
-      Seq("tTime", "dSum", "dMin", "dMax", "dSum", "dAvgAc", "hSum", "name", "namespace", "instance")
+    // Again here the target schema is the same as the original one
+    val dsSchema = customSchema.ingestionSchema
     dsSchema.columns.map(_.colType) shouldEqual
       Seq(TimestampColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, DoubleColumn, HistogramColumn,
         StringColumn, StringColumn, StringColumn)
@@ -89,7 +90,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val data = (100000L until 200000L by 1000).map(i => (i, i*5d))
     val rv = timeValueRV(data)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
-    val dsSchema = downsampleOps.downsampleSchema
+    val dsSchema = downsampleSchema.ingestionSchema
     val dsRecords = downsampleOps.newEmptyDownsampleRecords
 
     downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
@@ -99,18 +100,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
         // validate tags on the partition key
-        val partKeyInRecord = new mutable.HashMap[String, String]()
-        val consumer = new MapItemConsumer {
-          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
-                               UTF8StringMedium.numBytes(valueBase, valueOffset))
-            partKeyInRecord.put(key.toString, value.toString)
-          }
-        }
+        val consumer = new StringifyMapItemConsumer()
         dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
         dsSchema.consumeMapItems(c.base, off, 7, consumer)
-        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+        consumer.stringPairs.toMap shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
         promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual
@@ -152,18 +145,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
       val c = RecordContainer(con)
       c.allOffsets.foreach { off =>
         // validate tags on the partition key
-        val partKeyInRecord = new mutable.HashMap[String, String]()
-        val consumer = new MapItemConsumer {
-          def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-            val key = new ZeroCopyUTF8String(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-            val value = new ZeroCopyUTF8String(valueBase, valueOffset + 2,
-              UTF8StringMedium.numBytes(valueBase, valueOffset))
-            partKeyInRecord.put(key.toString, value.toString)
-          }
-        }
+        val consumer = new StringifyMapItemConsumer()
         dsSchema.asZCUTF8Str(c.base, off, 6).toString shouldEqual "someStringValue"
         dsSchema.consumeMapItems(c.base, off, 7, consumer)
-        partKeyInRecord shouldEqual Map("dc"->"dc1", "instance"->"instance1")
+        consumer.stringPairs.toMap shouldEqual Map("dc"->"dc1", "instance"->"instance1")
 
         // validate partition hash on the record
         promDataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset) shouldEqual
@@ -205,10 +190,13 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
 
   val histDSDownsamplers = Seq("tTime(0)", "tTime(1)", "tTime(2)", "hSum(3)")
   val histDSDataset = modify(MMD.histDataset)(_.schema.data.downsamplers)
-                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers).get)
+                        .setTo(Dataset.validateDownsamplers(histDSDownsamplers, Some("hist-ds")).get)
+  val histDSSchema = histDSDataset.schema
 
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
-  val downsampleOpsH = new ShardDownsampler(histDSDataset, 0, true, Seq(60000), NoOpDownsamplePublisher,
+  // Also, downsampled schema is SAME as original schema, use for both
+  val downsampleOpsH = new ShardDownsampler(histDSDataset.name, 0, histDSSchema, histDSSchema,
+    true, Seq(60000), NoOpDownsamplePublisher,
     new TimeSeriesShardStats(histDSDataset.ref, 0))
 
   def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
@@ -217,7 +205,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val startTS = 610000L   // So we can group by minute easily
     val (data, rv) = MMD.histogramRV(startTS, numSamples = 200)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
-    val dsSchema = downsampleOpsH.downsampleSchema
+    val dsSchema = histDSSchema.ingestionSchema
     val dsRecords = downsampleOpsH.newEmptyDownsampleRecords
 
     downsampleOpsH.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)

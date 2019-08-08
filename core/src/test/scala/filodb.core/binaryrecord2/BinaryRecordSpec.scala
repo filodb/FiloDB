@@ -7,19 +7,25 @@ import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.ColumnInfo
-import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
+import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
   import UTF8StringMedium._
+  import RecordBuilder.ContainerHeaderLen
 
-  val schema1 = RecordSchema.ingestion(dataset1)
-  val schema2 = RecordSchema.ingestion(dataset2)
+  val recSchema1 = schema1.ingestionSchema
+  val recSchema2 = schema2.ingestionSchema
   val longStrSchema = new RecordSchema(Seq(ColumnInfo("lc", ColumnType.LongColumn),
                                            ColumnInfo("sc", ColumnType.StringColumn)))
 
   val records = new collection.mutable.ArrayBuffer[(Any, Long)]
+
+  import com.softwaremill.quicklens._
+
+  val dataset3 = modify(dataset2)(_.schema.partition.predefinedKeys).setTo(Seq("job", "instance"))
+  val schemaWithPredefKeys = dataset3.schema.ingestionSchema
 
   before {
     records.clear()
@@ -38,15 +44,15 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   describe("RecordBuilder & RecordContainer") {
     it("should not allow adding a field before startNewRecord()") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       intercept[IllegalArgumentException] {
         builder.addInt(1)
       }
     }
 
     it("should not allow adding a field beyond # of fields in schema") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1)
-      builder.startNewRecord()
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
+      builder.startNewRecord(schema1)
       val ts = System.currentTimeMillis
       builder.addLong(ts)     // timestamp
       builder.addDouble(1.0)  // min
@@ -61,8 +67,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("should not allow adding a string longer than 64KB...") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1)
-      builder.startNewRecord()
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
+      builder.startNewRecord(schema1)
       val ts = System.currentTimeMillis
       builder.addLong(ts)     // timestamp
       builder.addDouble(1.0)  // min
@@ -76,9 +82,9 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("should not write hash if schema does not have partition key") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, longStrSchema)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val sourceRow = SeqRowReader(Seq(10000L, "ABCDEfghij"))
-      builder.addFromReader(sourceRow)
+      builder.addFromReader(sourceRow, longStrSchema, 2345)
 
       builder.allContainers should have length (1)
       builder.allContainers.head.iterate(longStrSchema).foreach { row =>
@@ -88,11 +94,11 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     // 62 bytes per record, rounded to 64.  2048 max, what are the number of records we can have?
-    val maxNumRecords = (RecordBuilder.MinContainerSize - 8) / 64
-    val remainingBytes = RecordBuilder.MinContainerSize - 8 - maxNumRecords*64
+    val maxNumRecords = (RecordBuilder.MinContainerSize - ContainerHeaderLen) / 64
+    val remainingBytes = RecordBuilder.MinContainerSize - ContainerHeaderLen - maxNumRecords*64
 
     it("should add multiple records, return offsets, and roll over record to new container if needed") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1, RecordBuilder.MinContainerSize)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize)
 
       val data = linearMultiSeries().take(maxNumRecords + 1)
       addToBuilder(builder, data take maxNumRecords)
@@ -108,8 +114,12 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // should all have the same base
       records.map(_._1).forall(_ == records.head._1)
       // check min value
-      records.map { case (b, o) => schema1.getDouble(b, o, 1) } shouldEqual (1 to maxNumRecords).map(_.toDouble)
-      records.foreach { case (b, o) => schema1.partitionHash(b, o) should not be (0) }
+      records.map { case (b, o) => schema1.ingestionSchema.getDouble(b, o, 1) } shouldEqual
+        (1 to maxNumRecords).map(_.toDouble)
+      records.foreach { case (b, o) =>
+        schema1.ingestionSchema.partitionHash(b, o) should not be (0)
+        RecordSchema.schemaID(b, o) shouldEqual schema1.data.hash
+      }
       val container1Bytes = builder.allContainers.head.numBytes
 
       // Ok, now add one more record. With only 60 bytes remaining, we should start over again in 2nd container.
@@ -118,19 +128,23 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (2)
       containers.head.numBytes shouldEqual container1Bytes
-      containers.last.numBytes shouldEqual 68
+      containers.last.numBytes shouldEqual 76
 
       containers.last.countRecords shouldEqual 1
 
+      containers.foreach(_.version shouldEqual RecordBuilder.Version)
+      containers.foreach(_.isCurrentVersion shouldEqual true)
+      containers.foreach(_.timestamp should be > 0L)
+
       builder.nonCurrentContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize)
-      builder.optimalContainerBytes(true).map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 72)
+      builder.optimalContainerBytes(true).map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 80)
       builder.nonCurrentContainerBytes().size shouldEqual 0
       builder.optimalContainerBytes().size shouldEqual 0
 
     }
 
     it("should add multiple records and rollover for offheap containers") {
-      val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
+      val builder = new RecordBuilder(nativeMem, RecordBuilder.MinContainerSize)
 
       val data = linearMultiSeries().take(maxNumRecords + 1)
       addToBuilder(builder, data take maxNumRecords)
@@ -141,8 +155,11 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val addrs = builder.allContainers.head.allOffsets
       addrs should have length (maxNumRecords)
       // check min value
-      addrs.map(schema1.getDouble(_, 1)) shouldEqual Buffer.fromIterable((1 to maxNumRecords).map(_.toDouble))
-      addrs.foreach { a => schema1.partitionHash(a) should not be (0) }
+      addrs.map(recSchema1.getDouble(_, 1)) shouldEqual Buffer.fromIterable((1 to maxNumRecords).map(_.toDouble))
+      addrs.foreach { a =>
+        recSchema1.partitionHash(a) should not be (0)
+        RecordSchema.schemaID(a) shouldEqual schema1.data.hash
+      }
       val container1Bytes = builder.allContainers.head.numBytes
 
       // Ok, now add one more record. With only 60 bytes remaining, we should start over again in 2nd container.
@@ -151,7 +168,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val containers = builder.allContainers
       containers should have length (2)
       containers.head.numBytes shouldEqual container1Bytes
-      containers.last.numBytes shouldEqual 68
+      containers.last.numBytes shouldEqual 76
 
       // Cannot get byte array via optimalContainerBytes for offheap containers
       intercept[UnsupportedOperationException] {
@@ -164,7 +181,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("should add multiple records, return offsets, and rollover to same container if reuseOneContainer=true") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1, RecordBuilder.MinContainerSize,
+      val builder = new RecordBuilder(MemFactory.onHeapFactory, RecordBuilder.MinContainerSize,
                                       reuseOneContainer=true)
       // when reuseOneContainer = true, one container should be allocated on startup
       builder.allContainers should have length(1)
@@ -186,62 +203,67 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       addToBuilder(builder, data drop maxNumRecords)
       val containers = builder.allContainers
       containers should have length (1)
-      containers.head.numBytes shouldEqual 68
+      containers.head.numBytes shouldEqual 76
       containers.last.countRecords shouldEqual 1
     }
 
     it("should add records, reset, and be able to add records again") {
-      val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
+      val builder = new RecordBuilder(nativeMem, RecordBuilder.MinContainerSize)
       addToBuilder(builder, linearMultiSeries() take 10)
+      val curTime = System.currentTimeMillis
 
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.isEmpty shouldEqual false
       builder.currentContainer.get.isEmpty shouldEqual false
       builder.allContainers.head.countRecords shouldEqual 10
+      val origTimestamp = builder.allContainers.head.timestamp
+      origTimestamp shouldEqual curTime +- 20000   // 20 seconds
 
       val byteArrays = builder.optimalContainerBytes(reset = true)
       byteArrays.size shouldEqual 1
 
       // Check that we still have one container but it's empty
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual 4
+      builder.allContainers.head.numBytes shouldEqual 12
       builder.allContainers.head.isEmpty shouldEqual true
+      builder.allContainers.head.timestamp should be > origTimestamp
       builder.currentContainer.get.isEmpty shouldEqual true
 
       // Add some more records
       // CHeck amount of space left, should be same as before
       addToBuilder(builder, linearMultiSeries() take 9)
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*9)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*9)
       builder.allContainers.head.countRecords shouldEqual 9
     }
 
     it("should add records and iterate") {
-      val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
+      val builder = new RecordBuilder(nativeMem, RecordBuilder.MinContainerSize)
       val data = linearMultiSeries() take 10
       addToBuilder(builder, data)
 
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
-      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.numBytes shouldEqual (12 + 64*10)
       builder.allContainers.head.countRecords shouldEqual 10
 
-      val it = builder.allContainers.head.iterate(schema1)
+      val it = builder.allContainers.head.iterate(recSchema1)
       val doubles = data.map(_(1).asInstanceOf[Double])
       it.map(_.getDouble(1)).toBuffer shouldEqual doubles
     }
   }
 
-  val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8(nativeMem))
+  import UTF8StringShort._
+  val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8short(nativeMem))
   var lastIndex = -1
 
   val keyCheckConsumer = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
       // println(s"XXX: got key, ${UTF8StringMedium.toString(keyBase, keyOffset)}")
       lastIndex = index
-      UTF8StringMedium.equals(keyBase, keyOffset, null, sortedKeys(index).address) shouldEqual true
+      UTF8StringShort.equals(keyBase, keyOffset, null, sortedKeys(index)) shouldEqual true
     }
   }
 
@@ -257,8 +279,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   describe("RecordSchema & BinaryRecord") {
     it("should add and get double, long, UTF8 fields correctly") {
-      val builder = new RecordBuilder(nativeMem, schema1)
-      builder.startNewRecord()
+      val builder = new RecordBuilder(nativeMem)
+      builder.startNewRecord(schema1)
       val ts = System.currentTimeMillis
       builder.addLong(ts)     // timestamp
       builder.addDouble(1.0)  // min
@@ -271,41 +293,43 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // now test everything
       val containers = builder.allContainers
       containers should have length (1)
-      containers.head.numBytes shouldEqual 68   // versionWord + len + long + 4 doubles + stringptr + hash + 2+8 + padding
+      containers.head.numBytes shouldEqual 76   // versionWord + ts + len + long + 4 doubles + stringptr + hash + 2+8 + padding
 
       containers.head.consumeRecords(consumer)
       records should have length (1)
       val recordAddr = records.head._2
-      schema1.getLong(recordAddr, 0) shouldEqual ts
-      schema1.getDouble(recordAddr, 1) shouldEqual 1.0
-      schema1.getDouble(recordAddr, 2) shouldEqual 2.5
-      schema1.getDouble(recordAddr, 3) shouldEqual 10.1
-      schema1.getLong(recordAddr, 4) shouldEqual 123456L
-      schema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
+      recSchema1.getLong(recordAddr, 0) shouldEqual ts
+      recSchema1.getDouble(recordAddr, 1) shouldEqual 1.0
+      recSchema1.getDouble(recordAddr, 2) shouldEqual 2.5
+      recSchema1.getDouble(recordAddr, 3) shouldEqual 10.1
+      recSchema1.getLong(recordAddr, 4) shouldEqual 123456L
+      recSchema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
+      RecordSchema.schemaID(recordAddr) shouldEqual schema1.data.hash
     }
 
     it("should hash correctly with different ways of adding UTF8 fields") {
       // schema for part key with only a string
       val stringSchema = new RecordSchema(Seq(ColumnInfo("sc", ColumnType.StringColumn)), Some(0))
-      val builder = new RecordBuilder(nativeMem, stringSchema)
+      val builder = new RecordBuilder(nativeMem)
+      stringSchema.fixedStart shouldEqual 6
 
       val str = "Serie zero"
       val strBytes = str.getBytes()
       val utf8MedStr = str.utf8(nativeMem)
 
-      builder.startNewRecord()
+      builder.startNewRecord(stringSchema, 123)
       builder.addString(str)
       val addrStringAdd = builder.endRecord()
 
-      builder.startNewRecord()
+      builder.startNewRecord(stringSchema, 123)
       builder.addBlob(strBytes, UnsafeUtils.arayOffset, strBytes.size)
       val addrBlobAdd = builder.endRecord()
 
-      builder.startNewRecord()
+      builder.startNewRecord(stringSchema, 123)
       builder.addSlowly(strBytes)
       val addrAddSlowly = builder.endRecord()
 
-      val addrAddReader = builder.addFromReader(SeqRowReader(Seq(str)))
+      val addrAddReader = builder.addFromReader(SeqRowReader(Seq(str)), stringSchema, 123)
 
       // Should be able to extract and compare strings
       stringSchema.utf8StringPointer(addrStringAdd, 0).compare(utf8MedStr) shouldEqual 0
@@ -321,17 +345,23 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrBlobAdd)
       stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrAddReader)
       stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrAddSlowly)
+
+      // No schemaID should be added
+      RecordSchema.schemaID(addrStringAdd) shouldEqual (123)
+      RecordSchema.schemaID(addrBlobAdd) shouldEqual (123)
+      RecordSchema.schemaID(addrAddReader) shouldEqual (123)
+      RecordSchema.schemaID(addrAddSlowly) shouldEqual (123)
     }
 
     it("should add and get map fields with no predefined keys") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
-      addToBuilder(builder, data)
+      addToBuilder(builder, data, schema2)
 
       val containers = builder.allContainers
       containers should have length (1)
-      // 56 (len + 5 long/double + 2 var + hash) + 10 + 4 + extraTagsLen + 10 * 2)
-      containers.head.numBytes shouldEqual (4 + 3 * align4(70 + extraTagsLen + 2 + 20))
+      // 56 (len + 5 long/double + 2 var + hash) + 10 + 2 + extraTagsLen + 10 * 2)
+      containers.head.numBytes shouldEqual (12 + 3 * align4(68 + extraTagsLen + 2 + 18))
 
       containers.head.consumeRecords(consumer)
       records should have length (3)
@@ -339,19 +369,17 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       // in sorted order, the keys are: cloudProvider, instance, job, n, region
       lastIndex = -1
-      schema2.consumeMapItems(recordBase, recordOff, 6, keyCheckConsumer)
+      recSchema2.consumeMapItems(recordBase, recordOff, 6, keyCheckConsumer)
       lastIndex shouldEqual 4   // 5 key-value pairs: 0, 1, 2, 3, 4
 
-      schema2.consumeMapItems(recordBase, recordOff, 6, valuesCheckConsumer)
+      recSchema2.consumeMapItems(recordBase, recordOff, 6, valuesCheckConsumer)
     }
 
     it("should add and get map fields with predefined keys") {
-      val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
-                                                        Seq("job", "instance"))
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
-      addToBuilder(builder, data)
+      addToBuilder(builder, data, dataset3.schema)
 
       val containers = builder.allContainers
       containers should have length (1)
@@ -375,12 +403,12 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
                        "dc" -> "AWS-USE", "instance" -> "0123892E342342A90",
                        "__name__" -> "host_cpu_load")
 
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
       def addRec(n: Int): Long = {
         val pairs = (labels + ("n" -> n.toString)).map { case (k, v) => ZCUTF8(k) -> ZCUTF8(v) }.toMap
 
-        builder.startNewRecord()
+        builder.startNewRecord(schema2)
         val ts = System.currentTimeMillis
         builder.addLong(ts)     // timestamp
         builder.addDouble(1.0)  // min
@@ -400,7 +428,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       val brHashes = new collection.mutable.HashSet[Int]
       var lastHash = -1
       Seq(offset1, offset2, offset3).foreach { off =>
-        lastHash = schema2.partitionHash(basebase, off)
+        lastHash = recSchema2.partitionHash(basebase, off)
         brHashes += lastHash
         // println(s"XXX: offset = $off   hash = $lastHash")
       }
@@ -409,22 +437,22 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       // Adding the same content should result in the same hash
       val offset4 = addRec(3)
-      schema2.partitionHash(basebase, offset4) shouldEqual lastHash
+      recSchema2.partitionHash(basebase, offset4) shouldEqual lastHash
     }
 
     it("should copy records to new byte arrays and compare equally") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
-      addToBuilder(builder, data)
+      addToBuilder(builder, data, schema2)
 
       val containers = builder.allContainers
       containers should have length (1)
       containers.head.consumeRecords(consumer)
       records should have length (3)
       val (recordBase, recordOff) = records.head
-      val bytes = schema2.asByteArray(recordBase, recordOff)
+      val bytes = recSchema2.asByteArray(recordBase, recordOff)
       bytes should not equal (recordBase)
-      schema2.equals(recordBase, recordOff, bytes, UnsafeUtils.arayOffset) shouldEqual true
+      recSchema2.equals(recordBase, recordOff, bytes, UnsafeUtils.arayOffset) shouldEqual true
     }
   }
 
@@ -432,7 +460,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   // just to let us test partitionMatch() independently of buildPartKeyFromIngest()
   private def dataset2AddPartKeys(builder: RecordBuilder, data: Stream[Seq[Any]]) = {
     data.foreach { values =>
-      builder.startNewRecord()
+      builder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.data.hash)
       builder.addString(values(5).asInstanceOf[String])  // series (partition key)
       if (values.length > 6) {
         builder.startMap()
@@ -446,14 +474,12 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   }
 
   describe("RecordComparator") {
-    val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
-                                                      Seq("job", "instance"))
-    val comparator2 = new RecordComparator(schemaWithPredefKeys)
+    val comparator2 = dataset3.schema.comparator
     val partSchema2 = comparator2.partitionKeySchema
 
-    val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys)
+    val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
     val ingestData = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
-    addToBuilder(ingestBuilder, ingestData)
+    addToBuilder(ingestBuilder, ingestData, dataset3.schema)
     records.clear()
     ingestBuilder.allContainers.head.consumeRecords(consumer)
     val ingestRecords = records.toSeq.toBuffer   // make a copy
@@ -466,7 +492,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("partitionMatch() should return false for ingest/partKey records with different contents") {
-      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partSchema2)
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
 
       // different sized var areas / length var fields
       val diffData1 = withMap(linearMultiSeries(), extraTags=tagsWithDiffLen) take 1
@@ -489,7 +515,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("partitionMatch() should return true for ingest/partKey records with identical contents") {
-      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partSchema2)
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
       dataset2AddPartKeys(partKeyBuilder, ingestData)
 
       partKeyBuilder.allContainers.head.consumeRecords(consumer)
@@ -500,7 +526,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("should copy ingest BRs to partition key BRs correctly with buildPartKeyFromIngest()") {
-      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partSchema2)
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
 
       ingestRecords.foreach { case (base, off) =>
         comparator2.buildPartKeyFromIngest(base, off, partKeyBuilder)
@@ -524,16 +550,16 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     }
 
     it("should copy ingest BRs to partition key BRs correctly when data columns have a blob/histogram") {
-      val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema)
+      val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = linearHistSeries().take(3)
-      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row)) }
+      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row), histDataset.schema) }
 
       records.clear()
       ingestBuilder.allContainers.head.consumeRecords(consumer)
       val histRecords = records.toSeq.toBuffer   // make a copy
 
       // Now create partition keys
-      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.partKeySchema)
+      val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
       histRecords.foreach { case (base, off) =>
         histDataset.comparator.buildPartKeyFromIngest(base, off, partKeyBuilder)
       }
@@ -557,7 +583,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     import collection.JavaConverters._
 
     it("should sortAndComputeHashes") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
       val hashes = RecordBuilder.sortAndComputeHashes(pairs)
       hashes.size shouldEqual labels.size
@@ -591,7 +617,6 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   }
 
   it("should trim metric name for _bucket _sum _count") {
-
     val metricName = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_bucket")
     metricName shouldEqual "heap_usage"
 

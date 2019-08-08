@@ -103,7 +103,7 @@ object GatewayServer extends StrictLogging {
       val initIndex = buf.readerIndex
       val len = buf.readableBytes
       numInfluxMessages.increment
-      InfluxProtocolParser.parse(buf, dataset.options) map { record =>
+      InfluxProtocolParser.parse(buf, dataset.schema) map { record =>
         logger.trace(s"Enqueuing: $record")
         val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(record)) {
@@ -197,7 +197,7 @@ object GatewayServer extends StrictLogging {
     val shardQueues = (0 until numShards).map { _ =>
       new MpscGrowableArrayQueue[InputRecord](minQueueSize, maxQueueSize) }.toArray
     val lastSendTime = Array.fill(numShards)(0L)
-    val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema))
+    val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory))
                                       .toArray
     val producing = Array.fill(numShards)(false)
     var curShard = 0
