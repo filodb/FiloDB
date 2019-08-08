@@ -10,7 +10,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataSchema, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
@@ -219,10 +219,10 @@ object MemStore {
    * constant column for each partition.
    */
   def getAppendables(memFactory: MemFactory,
-                     dataset: Dataset,
+                     schema: DataSchema,
                      config: StoreConfig): Array[BinaryAppendableVector[_]] = {
     val maxElements = config.maxChunksSize
-    dataset.dataColumns.zipWithIndex.map { case (col, index) =>
+    schema.columns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
         // Time series data doesn't really need the NA/null functionality, so use more optimal vectors
         // to save memory and CPU

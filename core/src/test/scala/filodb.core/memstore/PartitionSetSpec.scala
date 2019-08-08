@@ -22,7 +22,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
 
   val reclaimer = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
-      assert(numBytes == dataset2.blockMetaSize)
+      assert(numBytes == dataset2.schema.data.blockMetaSize)
       val partID = UnsafeUtils.getInt(metaAddr)
       val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       part.removeChunksAt(chunkID)
@@ -31,8 +31,8 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1)
-  protected val bufferPool = new WriteBufferPool(memFactory, dataset2, TestData.storeConf)
-  private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.blockMetaSize, true)
+  protected val bufferPool = new WriteBufferPool(memFactory, dataset2.schema.data, TestData.storeConf)
+  private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.schema.data.blockMetaSize, true)
 
   val builder = new RecordBuilder(memFactory)
   val partSet = PartitionSet.empty()

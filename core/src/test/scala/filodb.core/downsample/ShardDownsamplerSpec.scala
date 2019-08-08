@@ -42,10 +42,10 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   val customSchema = customDataset.schema
 
   private val blockStore = MMD.blockStore
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.blockMetaSize, true)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.schema.data.blockMetaSize, true)
 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset, storeConf)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset.schema.data, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()

@@ -11,7 +11,7 @@ import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, MemFactory}
-import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -46,19 +46,11 @@ final case class Dataset(name: String, schema: Schema) {
   val comparator      = schema.comparator
   val partKeySchema   = schema.partKeySchema
 
-  // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
-  val dataReaders     = schema.data.readers
-  val numDataColumns  = schema.data.columns.length
-
   // Used for ChunkSetReader.binarySearchKeyChunks
   val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
 
   val timestampColumn = rowKeyColumns.head
   val timestampColID  = timestampColumn.id
-
-  // The number of bytes of chunkset metadata including vector pointers in memory
-  val chunkSetInfoSize = schema.data.chunkSetInfoSize
-  val blockMetaSize    = schema.data.blockMetaSize
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, Dataset.DefaultContainerSize)
 
@@ -71,27 +63,6 @@ final case class Dataset(name: String, schema: Schema) {
     partKeyBuilder.reset()
     bytes
   }
-
-  import Column.ColumnType._
-
-  /**
-   * Creates a TypedIterator for querying a constant partition key column.
-   */
-  def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
-    val partColPos = columnID - Dataset.PartColStartIndex
-    require(Dataset.isPartitionID(columnID) && partColPos < schema.partition.columns.length)
-    schema.partition.columns(partColPos).columnType match {
-      case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
-      case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
-      case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
-      case other: Column.ColumnType => ???
-    }
-  }
-
-  /**
-   * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
-   */
-  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
 
   import Accumulation._
   import OptionSugar._

@@ -7,7 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataSchema}
 import filodb.core.query.RawDataRangeVector
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
@@ -38,15 +38,15 @@ object ChunkSet {
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
+  def apply(schema: DataSchema, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
-    val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, chunkID(startTime), rows.length,
+    val startTime = rows.head.getLong(0)
+    val info = ChunkSetInfo(factory, schema, chunkID(startTime), rows.length,
                             startTime,
-                            dataset.timestamp(rows.last))
-    val filoSchema = Column.toFiloSchema(dataset.dataColumns)
+                            rows.last.getLong(0))
+    val filoSchema = Column.toFiloSchema(schema.columns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
-    val chunks = dataset.dataColumns.map(c => chunkMap(c.name))
+    val chunks = schema.columns.map(c => chunkMap(c.name))
     ChunkSet(info, part, Nil, chunks)
   }
 }
@@ -192,8 +192,8 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * Initializes a new ChunkSetInfo with some initial fields
    */
-  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, startTime: Long): ChunkSetInfo = {
-    val infoAddr = factory.allocateOffheap(dataset.chunkSetInfoSize)
+  def initialize(factory: MemFactory, schema: DataSchema, id: ChunkID, startTime: Long): ChunkSetInfo = {
+    val infoAddr = factory.allocateOffheap(schema.chunkSetInfoSize)
     setChunkID(infoAddr, id)
     resetNumRows(infoAddr)
     setStartTime(infoAddr, startTime)
@@ -201,9 +201,9 @@ object ChunkSetInfo extends StrictLogging {
     ChunkSetInfo(infoAddr)
   }
 
-  def apply(factory: MemFactory, dataset: Dataset,
+  def apply(factory: MemFactory, schema: DataSchema,
             id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
-    val newInfo = initialize(factory, dataset, id, startTime)
+    val newInfo = initialize(factory, schema, id, startTime)
     UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
     setEndTime(newInfo.infoAddr, endTime)
     newInfo

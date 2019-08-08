@@ -4,13 +4,13 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.binaryrecord2.{RecordComparator, RecordSchema}
+import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.core.Types._
 import filodb.memory.BinaryRegion
-import filodb.memory.format.BinaryVector
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator}
 
 /**
  * A DataSchema describes the data columns within a time series - the actual data that would vary from sample to
@@ -168,6 +168,32 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema
   val options         = partition.options
+
+  val dataReaders     = data.readers
+  val numDataColumns  = data.columns.length
+
+  def name: String = data.name
+
+  import Column.ColumnType._
+
+  /**
+   * Creates a TypedIterator for querying a constant partition key column.
+   */
+  def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
+    val partColPos = columnID - Dataset.PartColStartIndex
+    require(Dataset.isPartitionID(columnID) && partColPos < partition.columns.length)
+    partition.columns(partColPos).columnType match {
+      case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
+      case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case other: Column.ColumnType => ???
+    }
+  }
+
+  /**
+   * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
+   */
+  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
 }
 
 final case class Schemas(part: PartitionSchema,

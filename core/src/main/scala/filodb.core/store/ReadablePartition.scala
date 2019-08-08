@@ -1,13 +1,13 @@
 package filodb.core.store
 
 import filodb.core.Types.{ChunkID, ColumnId}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schema
 import filodb.core.query.PartitionTimeRangeReader
 import filodb.memory.format.{BinaryVector, RowReader, UnsafeUtils, VectorDataReader}
 
 
 trait FiloPartition {
-  def dataset: Dataset
+  def schema: Schema
   def partKeyBase: Array[Byte]
   def partKeyOffset: Long
   def partID: Int
@@ -16,17 +16,17 @@ trait FiloPartition {
     * Two FiloPartitions are equal if they have the same partition key.  This test is used in various
     * data structures.
     */
-  override def hashCode: Int = dataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
+  override def hashCode: Int = schema.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
 
   override def equals(other: Any): Boolean = other match {
     case UnsafeUtils.ZeroPointer => false
-    case f: FiloPartition => dataset.partKeySchema.equals(partKeyBase, partKeyOffset, f.partKeyBase, f.partKeyOffset)
+    case f: FiloPartition => schema.partKeySchema.equals(partKeyBase, partKeyOffset, f.partKeyBase, f.partKeyOffset)
     case _: Any           => false
   }
 
 }
 
-class EmptyPartition(val dataset: Dataset,
+class EmptyPartition(val schema: Schema,
                      val partKeyBase: Array[Byte],
                      val partKeyOffset: Long,
                      val partID: Int) extends FiloPartition
@@ -40,10 +40,10 @@ class EmptyPartition(val dataset: Dataset,
 trait ReadablePartition extends FiloPartition {
 
   // Returns string representation of partition key
-  def stringPartition: String = dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
+  def stringPartition: String = schema.partKeySchema.stringify(partKeyBase, partKeyOffset)
 
   // Returns binary partition key as a new, copied byte array
-  def partKeyBytes: Array[Byte] = dataset.partKeySchema.asByteArray(partKeyBase, partKeyOffset)
+  def partKeyBytes: Array[Byte] = schema.partKeySchema.asByteArray(partKeyBase, partKeyOffset)
 
   def numChunks: Int
 
@@ -81,8 +81,8 @@ trait ReadablePartition extends FiloPartition {
    * Obtains the correct VectorDataReader for the given column and pointer
    */
   final def chunkReader(columnID: Int, vector: BinaryVector.BinaryVectorPtr): VectorDataReader = {
-    require(columnID < dataset.numDataColumns)
-    dataset.dataReaders(columnID)(vector)
+    require(columnID < schema.numDataColumns)
+    schema.dataReaders(columnID)(vector)
   }
 
   /**

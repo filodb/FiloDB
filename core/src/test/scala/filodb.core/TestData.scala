@@ -20,11 +20,11 @@ import filodb.memory.format.{vectors => bv}
 import filodb.memory._
 
 object TestData {
-  def toChunkSetStream(ds: Dataset,
+  def toChunkSetStream(s: Schema,
                        part: PartitionKey,
                        rows: Seq[RowReader],
                        rowsPerChunk: Int = 10): Observable[ChunkSet] =
-    Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(ds, part, chunkRows, nativeMem) })
+    Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(s.data, part, chunkRows, nativeMem) })
 
   def toRawPartData(chunkSetStream: Observable[ChunkSet]): Task[RawPartData] = {
     var partKeyBytes: Array[Byte] = null
@@ -71,6 +71,7 @@ object NamesTestData {
 
   val dataColSpecs = Seq("age:long:interval=10", "first:string", "last:string")
   val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, DatasetOptions.DefaultOptions)
+  val schema = dataset.schema
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
   // or the data column rowReader
@@ -88,15 +89,15 @@ object NamesTestData {
                      (Some(39L), Some("Derek"),     Some("Carr"),     Some(0)),
                      (Some(29L), Some("Karl"),      Some("Joseph"),   Some(0)))
 
-  val firstKey = dataset.timestamp(mapper(names).head)
-  val lastKey = dataset.timestamp(mapper(names).last)
-  def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
+  val firstKey = schema.timestamp(mapper(names).head)
+  val lastKey = schema.timestamp(mapper(names).last)
+  def keyForName(rowNo: Int): Long = schema.timestamp(mapper(names)(rowNo))
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset.schema, 0)
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
-    TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
+    TestData.toChunkSetStream(schema, defaultPartKey, mapper(data))
 
   val firstNames = names.map(_._2.get)
   val utf8FirstNames = firstNames.map(_.utf8)
@@ -255,8 +256,8 @@ object MachineMetricsData {
   // Works with linearMultiSeries() or multiSeriesData()
   def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
     val rawPartKey = stream(keyRecord)(5)
-    val partKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, rawPartKey)
-    TestData.toChunkSetStream(dataset1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
+    val partKey = partKeyBuilder.partKeyFromObjects(schema1, rawPartKey)
+    TestData.toChunkSetStream(schema1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
   }
 
   def multiSeriesData(): Stream[Seq[Any]] = {
@@ -364,8 +365,8 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
-  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize, true)
+  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
@@ -380,7 +381,7 @@ object MachineMetricsData {
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
   }
 
-  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS, TestData.storeConf)
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with histMax(linearHistSeries) records
   def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):

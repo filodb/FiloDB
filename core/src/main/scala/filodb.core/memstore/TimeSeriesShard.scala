@@ -210,7 +210,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset.ref, dataset.schema.partition,
+                                                                    shardNum, storeConfig)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -224,12 +225,19 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   private final var _offset = Long.MinValue
 
+  /**
+   * The maximum blockMetaSize amongst all the schemas this Dataset could ingest
+   * TODO: actually compute the max
+   */
+  val maxMetaSize = dataset.schema.data.blockMetaSize
+
+  // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
-      assert(numBytes == dataset.blockMetaSize)
       val partID = UnsafeUtils.getInt(metaAddr)
-      val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       val partition = partitions.get(partID)
+      assert(numBytes == partition.schema.data.blockMetaSize)
+      val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       if (partition != UnsafeUtils.ZeroPointer) {
         partition.removeChunksAt(chunkID)
       }
@@ -261,16 +269,16 @@ class TimeSeriesShard(val dataset: Dataset,
   // The off-heap block store used for encoded chunks
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
+  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, maxMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
-  private[memstore] val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
+  private[memstore] val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset.schema.data, storeConfig)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 
@@ -1197,10 +1205,10 @@ class TimeSeriesShard(val dataset: Dataset,
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=${dataset.ref} shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(
-          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+          partId, dataset.schema, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       } else {
         new TimeSeriesPartition(
-          partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
+          partId, dataset.schema, partKeyAddr, shardNum, bufferPool, shardStats, bufferMemoryManager, initMapSize)
       }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment

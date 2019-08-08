@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
 import filodb.memory.data.ChunkMap
@@ -19,8 +19,8 @@ object TimeSeriesPartition extends StrictLogging {
   // Use global logger so we can save a few fields for each of millions of TSPartitions  :)
   val _log = logger
 
-  def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
-    dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
+  def partKeyString(schema: PartitionSchema, partKeyBase: Any, partKeyOffset: Long): String = {
+    schema.binSchema.stringify(partKeyBase, partKeyOffset)
   }
 }
 
@@ -55,7 +55,7 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  * speeds up GC and reduces memory overhead a bit.
  */
 class TimeSeriesPartition(val partID: Int,
-                          val dataset: Dataset,
+                          val schema: Schema,
                           partitionKey: BinaryRegion.NativePointer,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
@@ -65,14 +65,14 @@ class TimeSeriesPartition(val partID: Int,
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
-  require(bufferPool.dataset == dataset)  // Really important that buffer pool schema matches
+  require(bufferPool.schema == schema.data)  // Really important that buffer pool schema matches
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
 
   /**
     * Incoming, unencoded data gets appended to these BinaryAppendableVectors.
-    * There is one element for each column of the dataset. All of them have the same chunkId.
+    * There is one element for each column of the schema. All of them have the same chunkId.
     * Var mutates when buffers are switched for optimization back to NULL, until new data arrives.
     * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]],
     * and new chunk is added to the partition.
@@ -105,11 +105,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   private var appenders: List[InfoAppenders] = Nil
 
   /**
-    * Number of columns in the dataset
-    */
-  private final val numColumns = dataset.dataColumns.length
-
-  /**
    * Ingests a new row, adding it to currentChunks.
    * If ingesting a new row causes WriteBuffers to overflow, then the current chunks are encoded, a new set
    * of appending chunks are obtained, and we re-ingest into the new chunks.
@@ -118,7 +113,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    */
   def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
-    val ts = dataset.timestamp(row)
+    val ts = row.getLong(0)
     if (ts < timestampOfLatestSample) {
       shardStats.outOfOrderDropped.increment
       return
@@ -127,7 +122,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val newChunk = currentChunks == nullChunks
     if (newChunk) initNewChunk(ts)
 
-    for { col <- 0 until numColumns optimized } {
+    for { col <- 0 until schema.numDataColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
           // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
@@ -203,7 +198,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
       shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
-      if (dataset.dataColumns(i).columnType == Column.ColumnType.HistogramColumn)
+      if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
         shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
       optimized
     }
@@ -211,7 +206,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
 
     // Now, write metadata into offheap block metadata space and update infosChunks
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
-                                           dataset.blockMetaSize.toShort)
+                                           schema.data.blockMetaSize.toShort)
 
     infoPut(ChunkSetInfo(metaAddr + 4))
 
@@ -239,7 +234,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     infosToBeFlushed
       .map { info =>
         ChunkSet(info, partitionKey, Nil,
-                 (0 until numColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
+                 (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
                  // NOTE: by using a method instead of closure, we allocate less
                  updateFlushedID)
@@ -417,35 +412,35 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
  * So best way to keep changes small and balance out different needs
  */
 class TracingTimeSeriesPartition(partID: Int,
-                                 dataset: Dataset,
+                                 schema: Schema,
                                  partitionKey: BinaryRegion.NativePointer,
                                  shard: Int,
                                  bufferPool: WriteBufferPool,
                                  shardStats: TimeSeriesShardStats,
                                  memFactory: MemFactory,
                                  initMapSize: Int) extends
-TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
+TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
 
-  _log.debug(s"Creating TracingTimeSeriesPartition: dataset=${dataset.ref} partId=$partID $stringPartition")
+  _log.debug(s"Creating TracingTimeSeriesPartition: schema=${schema.name} partId=$partID $stringPartition")
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
-    val ts = dataset.timestamp(row)
-    _log.debug(s"Ingesting dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition ts=$ts " +
-               (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
+    val ts = row.getLong(0)
+    _log.debug(s"Ingesting schema=${schema.name} shard=$shard partId=$partID $stringPartition ts=$ts " +
+               (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"SwitchBuffers dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - encode=$encode" +
+    _log.debug(s"SwitchBuffers schema=${schema.name} shard=$shard partId=$partID $stringPartition - encode=$encode" +
                s" for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
   }
 
   override protected def initNewChunk(ts: Long): Unit = {
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
+    _log.debug(s"schema=${schema.name} shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
     super.initNewChunk(ts)
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
+    _log.debug(s"schema=${schema.name} shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
                s"${currentInfo.debugString}")
   }
 }

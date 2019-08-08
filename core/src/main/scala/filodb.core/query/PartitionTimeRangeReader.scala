@@ -22,7 +22,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
   private final val vectorIts = new Array[TypedIterator](columnIDs.size)
   private var rowNo = -1
   private var endRowNo = -1
-  private final val timestampCol = part.dataset.timestampColID
+  private final val timestampCol = 0
 
   private val rowReader = new RowReader {
     // TODO: fix this for blobs/UTF8 strings?
@@ -49,7 +49,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
       val colID = columnIDs(pos)
       if (Dataset.isPartitionID(colID)) {
         // Look up the TypedIterator for that partition key
-        vectorIts(pos) = part.dataset.partColIterator(colID, part.partKeyBase, part.partKeyOffset)
+        vectorIts(pos) = part.schema.partColIterator(colID, part.partKeyBase, part.partKeyOffset)
       } else {
         val vectorPtr = info.vectorPtr(colID)
         require(vectorPtr != UnsafeUtils.ZeroPointer, s"Column ID $colID is NULL")

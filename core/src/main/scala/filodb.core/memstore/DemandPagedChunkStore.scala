@@ -49,7 +49,7 @@ extends RawToPartitionMaker with StrictLogging {
     if (factory == UnsafeUtils.ZeroPointer) {
       val newFactory = new BlockMemFactory(blockManager,
                                            Some(bucket),
-                                           tsShard.dataset.blockMetaSize,
+                                           tsShard.maxMetaSize,
                                            markFullBlocksAsReclaimable = true)
       memFactories.put(bucket, newFactory)
       newFactory
@@ -75,7 +75,7 @@ extends RawToPartitionMaker with StrictLogging {
         memFactory.startMetaSpan()
         val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
         val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                                              tsShard.dataset.blockMetaSize.toShort)
+                                              tsPart.schema.data.blockMetaSize.toShort)
         require(metaAddr != 0)
         val infoAddr = metaAddr + 4   // Important: don't point at partID
         val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
