@@ -544,7 +544,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should generate PromQlExec for InstantQueries when all failures are remote") {
+  it("should generate PromQlExec for InstantQueries when all failures are local") {
     val to = 900
     val from = 900
     val lookBack = 300000
@@ -558,8 +558,8 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
         Seq(FailureTimeRange("local", datasetRef,
-          TimeRange(910000, 1030000), true), FailureTimeRange("remote", datasetRef,
-          TimeRange(2000000, 2500000), true))
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(2000000, 2500000), false))
       }
     }
 
