@@ -134,8 +134,17 @@ class QueryEngine(dataset: Dataset,
       if (failures.isEmpty) {
         generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
       } else {
-        val routes = QueryRoutingPlanner.plan(failures, periodicSeriesTime, lookBackTime,
-          tsdbQueryParams.asInstanceOf[PromQlQueryParams].step * 1000)
+        val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
+        val routes : Seq[Route] = if (promQlQueryParams.start == promQlQueryParams.end) { // Instant Query
+          if (failures.forall(_.isRemote.equals(true))) {
+          Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startInMillis, periodicSeriesTime.endInMillis))))
+          } else {
+            Seq(LocalRoute(None))
+          }
+        } else {
+          QueryRoutingPlanner.plan(failures, periodicSeriesTime, lookBackTime,
+            promQlQueryParams.step * 1000)
+          }
         logger.debug("Routes:" + routes)
         routeExecPlanMapper(routes, rootLogicalPlan, queryId, submitTime, options, querySpreadProvider, lookBackTime,
           tsdbQueryParams)
