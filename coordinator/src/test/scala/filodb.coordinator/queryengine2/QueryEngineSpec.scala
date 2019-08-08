@@ -530,7 +530,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
 
-    // Should ignore smaller local failure which is from 1500 - 4000 and generate local exec plan
     val reduceAggregateExec = execPlan.asInstanceOf[ReduceAggregateExec]
 
     reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
