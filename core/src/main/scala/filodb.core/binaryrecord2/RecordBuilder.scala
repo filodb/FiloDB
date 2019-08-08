@@ -82,7 +82,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * @param schemaID the schemaID to use.  It may not be the same as the schema of the recSchema - for example
    *        for partition keys.  However for ingestion records it would be the same.
    */
-  final def startNewRecord(recSchema: RecordSchema, schemaID: Int): Unit = {
+  private[core] final def startNewRecord(recSchema: RecordSchema, schemaID: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
 
     // Set schema, hashoffset, and write schema ID if needed
@@ -97,6 +97,13 @@ final class RecordBuilder(memFactory: MemFactory,
 
     fieldNo = 0
     recHash = HASH_INIT
+  }
+
+  // startNewRecord when one uses a RecordSchema for say query results, or where schemaID is not needed.
+  final def startNewRecord(schema: RecordSchema): Unit = {
+    // TODO: use types to eliminate this check?
+    require(schema.partitionFieldStart.isEmpty, s"Cannot use schema $schema with no schemaID")
+    startNewRecord(schema, 0)
   }
 
   // startNewRecord for an ingestion schema.  Use this if creating an ingestion record, ensures right ID is used.
