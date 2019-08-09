@@ -64,7 +64,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 0, 1, 0, None)
+  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan
@@ -503,6 +503,75 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child.params.start shouldEqual 900
     child.params.end shouldEqual 1980
     child.params.step shouldEqual 60
+    child.params.processFailure shouldEqual(false)
+  }
+
+  it("should not do routing for InstantQueries when there are local and remote failures") {
+    val to = 900
+    val from = 900
+    val lookBack = 300000
+    val step = 1000
+    val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(2000000, 2500000), true))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+
+    execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
+
+    val reduceAggregateExec = execPlan.asInstanceOf[ReduceAggregateExec]
+
+    reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
+
+    reduceAggregateExec.children.foreach { l1 =>
+      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      l1.rangeVectorTransformers.size shouldEqual 2
+      l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual from *1000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual  to * 1000
+      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+    }
+  }
+
+  it("should generate PromQlExec for InstantQueries when all failures are local") {
+    val to = 900
+    val from = 900
+    val lookBack = 300000
+    val step = 1000
+    val intervalSelector = IntervalSelector(from * 1000 - lookBack , to * 1000) // Lookback of 300
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef,
+          TimeRange(910000, 1030000), false), FailureTimeRange("remote", datasetRef,
+          TimeRange(2000000, 2500000), false))
+      }
+    }
+
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+
+    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+
+    val child = execPlan.asInstanceOf[PromQlExec]
+    child.params.start shouldEqual from
+    child.params.end shouldEqual to
+    child.params.step shouldEqual step
     child.params.processFailure shouldEqual(false)
   }
 }
