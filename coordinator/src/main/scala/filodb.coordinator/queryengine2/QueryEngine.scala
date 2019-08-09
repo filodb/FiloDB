@@ -137,7 +137,7 @@ class QueryEngine(dataset: Dataset,
         val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
         val routes : Seq[Route] = if (promQlQueryParams.start == promQlQueryParams.end) { // Instant Query
           if (failures.forall(_.isRemote.equals(false))) {
-          Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startInMillis, periodicSeriesTime.endInMillis))))
+            Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startInMillis, periodicSeriesTime.endInMillis))))
           } else {
             Seq(LocalRoute(None))
           }
