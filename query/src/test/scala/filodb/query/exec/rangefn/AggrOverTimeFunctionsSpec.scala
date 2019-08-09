@@ -22,9 +22,9 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 16)
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesSchema.data.blockMetaSize, true)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
-  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, storeConf)
+  protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()

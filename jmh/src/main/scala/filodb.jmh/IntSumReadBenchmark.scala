@@ -31,7 +31,8 @@ class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
 
-  val chunkSet = ChunkSet(dataset, partKey, rowIt.map(TupleRowReader).take(NumRows).toSeq, TestData.nativeMem)
+  val chunkSet = ChunkSet(dataset.schema.data, partKey,
+                          rowIt.map(TupleRowReader).take(NumRows).toSeq, TestData.nativeMem)
   val intVectAddr = UnsafeUtils.addressFromDirectBuffer(chunkSet.chunks(0))
   val intReader   = bv.IntBinaryVector(intVectAddr)
 

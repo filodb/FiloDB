@@ -189,7 +189,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
   val promHistDS = Dataset("histogram", Seq("tags:map"),
                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"))
-  val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS, TestData.storeConf)
+  val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS.schema.data, TestData.storeConf)
 
   it("should compute rate for Histogram RVs") {
     val (data, rv) = MachineMetricsData.histogramRV(100000L, numSamples=10, pool=histBufferPool, ds=promHistDS)
