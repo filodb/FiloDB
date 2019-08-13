@@ -92,7 +92,7 @@ case class PromQlExec(id: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializableRangeVector(rv, builder, recSchema, "test")
+      SerializableRangeVector(rv, builder, recSchema, printTree(useNewline = false))
     }
     QueryResult(id, resultSchema, rangeVectors)
   }
