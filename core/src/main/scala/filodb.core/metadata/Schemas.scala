@@ -10,7 +10,7 @@ import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.core.Types._
 import filodb.memory.BinaryRegion
-import filodb.memory.format.{BinaryVector, RowReader, TypedIterator}
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
 
 /**
  * A DataSchema describes the data columns within a time series - the actual data that would vary from sample to
@@ -168,6 +168,7 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema
   val options         = partition.options
+  val brRowReader     = new BinaryRecordRowReader(ingestionSchema)
 
   val dataReaders     = data.readers
   val numDataColumns  = data.columns.length
@@ -197,7 +198,18 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
 }
 
 final case class Schemas(part: PartitionSchema,
-                         schemas: Map[String, Schema])
+                         schemas: Map[String, Schema]) {
+  // A very fast array of the schemas by schemaID.  Since schemaID=16 bits, we just use a single 64K element array
+  // for super fast lookup.  Schemas object should really be a singleton anyways.
+  private val _schemas = Array.fill(64*1024)(Schemas.NullSchema)
+
+  schemas.values.foreach { s => _schemas(s.data.hash) = s }
+
+  /**
+   * Returns the Schema for a given schemaID, or NullSchema if not found
+   */
+  final def apply(id: Int): Schema = _schemas(id)
+}
 
 /**
  * Singleton with code to load all schemas from config, verify no conflicts, and ensure there is only
@@ -217,6 +229,8 @@ final case class Schemas(part: PartitionSchema,
 object Schemas {
   import Dataset._
   import Accumulation._
+
+  val NullSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
 
   // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
   // and that any downsample-schemas are valid

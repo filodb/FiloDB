@@ -100,15 +100,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   // Initial implementation: write each ChunkSet as its own transaction.  Will result in lots of writes.
   // Future optimization: group by token range and batch?
-  def write(dataset: Dataset,
+  def write(ref: DatasetRef,
             chunksets: Observable[ChunkSet],
             diskTimeToLive: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
                val span = Kamon.buildSpan("write-chunkset").start()
-               val partBytes = dataset.partKeySchema.asByteArray(chunkset.partition)
+               val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
                val future =
-                 for { writeChunksResp  <- writeChunks(dataset.ref, partBytes, chunkset, diskTimeToLive)
-                       writeIndexResp   <- writeIndices(dataset, partBytes, chunkset, diskTimeToLive)
+                 for { writeChunksResp  <- writeChunks(ref, partBytes, chunkset, diskTimeToLive)
+                       writeIndexResp   <- writeIndices(ref, partBytes, chunkset, diskTimeToLive)
                                            if writeChunksResp == Success
                  } yield {
                    span.finish()
@@ -136,12 +136,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def writeIndices(dataset: Dataset,
+  private def writeIndices(ref: DatasetRef,
                            partition: Array[Byte],
                            chunkset: ChunkSet,
                            diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-index", "ingestion") {
-      val indexTable = getOrCreateIndexTable(dataset.ref)
+      val indexTable = getOrCreateIndexTable(ref)
       val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(chunkset.info)))
       indexTable.writeIndices(partition, indices, sinkStats, diskTimeToLive)
     }
@@ -203,17 +203,17 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 
-  def getPartKeyTimeBucket(dataset: Dataset, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
-    getOrCreatePartitionIndexTable(dataset.ref).getPartKeySegments(shardNum, timeBucket)
+  def getPartKeyTimeBucket(ref: DatasetRef, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
+    getOrCreatePartitionIndexTable(ref).getPartKeySegments(shardNum, timeBucket)
   }
 
-  def writePartKeyTimeBucket(dataset: Dataset,
+  def writePartKeyTimeBucket(ref: DatasetRef,
                              shardNum: Int,
                              timeBucket: Int,
                              partitionIndex: Seq[Array[Byte]],
                              diskTimeToLive: Int): Future[Response] = {
 
-    val table = getOrCreatePartitionIndexTable(dataset.ref)
+    val table = getOrCreatePartitionIndexTable(ref)
     val write = table.writePartKeySegments(shardNum, timeBucket, partitionIndex.map(Util.toBuffer(_)), diskTimeToLive)
     write.map { response =>
       sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)
@@ -255,12 +255,11 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val partParallelism = 4
 
-  def readRawPartitions(dataset: Dataset,
-                        columnIDs: Seq[Types.ColumnId],
+  def readRawPartitions(ref: DatasetRef,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val indexTable = getOrCreateIndexTable(dataset.ref)
-    logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
+    val indexTable = getOrCreateIndexTable(ref)
+    logger.debug(s"Scanning partitions for $ref with method $partMethod...")
     val (filters, indexRecords) = partMethod match {
       case SinglePartitionScan(partition, _) =>
         (Nil, indexTable.getIndices(partition))
@@ -280,7 +279,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     partMethod match {
       // Compute minimum start time from index, then do efficient range query MULTIGET
       case MultiPartitionScan(partitions, _) =>
-        val chunkTable = getOrCreateChunkTable(dataset.ref)
+        val chunkTable = getOrCreateChunkTable(ref)
         Observable.fromTask(startTimeFromIndex(indexRecords, chunkMethod.startTime, chunkMethod.endTime))
           .flatMap { case startTime =>
             chunkTable.readRawPartitionRange(partitions, columnIDs.toArray, startTime, chunkMethod.endTime)
@@ -290,7 +289,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
         indexRecords.sortedGroupBy(_.binPartition.hashCode)
                     .mapAsync(partParallelism) { case (_, binIndices) =>
                       val infoBytes = binIndices.map(_.data.array)
-                      assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
+                      assembleRawPartData(ref, binIndices.head.binPartition.array, infoBytes,
                                           chunkMethod, columnIDs.toArray)
                     }
     }
@@ -331,13 +330,12 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def reset(): Unit = {}
 
-  private def assembleRawPartData(dataset: Dataset,
+  private def assembleRawPartData(ref: DatasetRef,
                                   partKeyBytes: Array[Byte],
                                   chunkInfos: Seq[Array[Byte]],
                                   chunkMethod: ChunkScanMethod,
                                   columnIds: Array[Types.ColumnId]): Task[RawPartData] = {
-    val chunkTable = getOrCreateChunkTable(dataset.ref)
-    logger.debug(s"Assembling chunks for partition ${dataset.partKeySchema.stringify(partKeyBytes)}...")
+    val chunkTable = getOrCreateChunkTable(ref)
 
     val filteredInfos = chunkInfos.filter { infoBytes =>
       ChunkSetInfo.getStartTime(infoBytes) <= chunkMethod.endTime &&

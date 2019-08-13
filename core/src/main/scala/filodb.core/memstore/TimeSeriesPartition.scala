@@ -3,6 +3,7 @@ package filodb.core.memstore
 import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
+import filodb.core.DatasetRef
 import filodb.core.Types._
 import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
@@ -145,6 +146,14 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // Publish it now that it has something.
       infoPut(currentInfo)
     }
+  }
+
+  // Alternative API intended solely for TimeSeriesShard ingestion from RecordContainers
+  private[core] def ingest(recordBase: Any, recordOff: Long, blockHolder: BlockMemFactory): Unit = {
+    val reader = schema.brRowReader
+    reader.recordBase = recordBase
+    reader.recordOffset = recordOff
+    ingest(reader, blockHolder)
   }
 
   protected def initNewChunk(ts: Long): Unit = {
@@ -412,6 +421,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
  * So best way to keep changes small and balance out different needs
  */
 class TracingTimeSeriesPartition(partID: Int,
+                                 ref: DatasetRef,
                                  schema: Schema,
                                  partitionKey: BinaryRegion.NativePointer,
                                  shard: Int,
@@ -422,25 +432,26 @@ class TracingTimeSeriesPartition(partID: Int,
 TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
 
-  _log.debug(s"Creating TracingTimeSeriesPartition: schema=${schema.name} partId=$partID $stringPartition")
+  val schName = schema.name
+  _log.debug(s"Creating TracingTimeSeriesPartition: dataset=$ref schema=$schName partId=$partID $stringPartition")
 
   override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = row.getLong(0)
-    _log.debug(s"Ingesting schema=${schema.name} shard=$shard partId=$partID $stringPartition ts=$ts " +
+    _log.debug(s"Ingesting dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"SwitchBuffers schema=${schema.name} shard=$shard partId=$partID $stringPartition - encode=$encode" +
-               s" for currentChunk ${currentInfo.debugString}")
+    _log.debug(s"SwitchBuffers dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - " +
+               s"encode=$encode for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
   }
 
   override protected def initNewChunk(ts: Long): Unit = {
-    _log.debug(s"schema=${schema.name} shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
+    _log.debug(s"dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
     super.initNewChunk(ts)
-    _log.debug(s"schema=${schema.name} shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
+    _log.debug(s"dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
                s"${currentInfo.debugString}")
   }
 }
