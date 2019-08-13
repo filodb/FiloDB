@@ -10,7 +10,11 @@ import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
+import akka.stream.scaladsl.Source
+import akka.util.ByteString
+
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -28,7 +32,7 @@ case class PromQlExec(id: String,
   protected def args: String = params.toString
   import PromQlExec._
 
-  val builder = SerializableRangeVector.toBuilder(recSchema)
+  val builder: RecordBuilder = SerializableRangeVector.toBuilder(recSchema)
 
   /**
     * Limit on number of samples returned by this ExecPlan
@@ -59,7 +63,7 @@ case class PromQlExec(id: String,
 
       response.unsafeBody match {
         case Left(error) => QueryError(id, error.error)
-        case Right(response) => toQueryResponse(response.data, id)
+        case Right(successResponse) => toQueryResponse(successResponse.data, id)
       }
 
     }
@@ -70,23 +74,34 @@ case class PromQlExec(id: String,
 
     val rangeVectors = data.result.map { r =>
 
-       val rv = new RangeVector {
-          val row = new TransientRow()
-
-          override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
-
-          override def rows: Iterator[RowReader] = {
-           r.values.iterator.map { v =>
-             row.setLong(0, (v.timestamp * 1000))
-             row.setDouble(1, v.value)
-             row
-           }
-         }
-
-         override def numRows: Option[Int] = Some(r.values.size)
-
+      val rv: RangeVector = new RangeVector {
+        val row = new TransientRow()
+        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map(m => m._1.utf8 -> m._2.utf8))
+        override def rows: Iterator[RowReader] = {
+          if (r.values.nonEmpty) {
+            r.values.iterator.map { v =>
+              row.setLong(0, v.timestamp * 1000)
+              row.setDouble(1, v.value)
+              row
+            }
+          } else {
+            Iterator {
+              row.setLong(0, r.value.timestamp * 1000)
+              row.setDouble(1, r.value.value)
+              row
+            }
+          }
         }
-      SerializableRangeVector(rv, builder, recSchema, printTree(false))
+        override def numRows: Option[Int] = {
+          if (r.values.nonEmpty) {
+            Option(r.values.size)
+          } else {
+            Option(1)
+          }
+        }
+      }
+
+      SerializableRangeVector(rv, builder, recSchema, "test")
     }
     QueryResult(id, resultSchema, rangeVectors)
   }
@@ -100,13 +115,13 @@ object PromQlExec extends  StrictLogging{
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema = SerializableRangeVector.toSchema(columns)
+  val recSchema: RecordSchema = SerializableRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._
-  implicit val backend = AkkaHttpBackend()
+  implicit val backend: SttpBackend[Future, Source[ByteString, Any]] = AkkaHttpBackend()
 
   ShutdownHookThread(shutdown())
 

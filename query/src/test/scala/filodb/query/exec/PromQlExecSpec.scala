@@ -26,7 +26,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
-  it ("should convert Data to QueryResponse ") {
+  it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
     val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams("", "", 0, 0 , 0))
     val result = query.Result (Map("instance" ->"inst1"), Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3)))
@@ -38,4 +38,18 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
     data.shouldEqual(expectedResult)
 
   }
+
+  it ("should convert vector Data to QueryResponse ") {
+    val expectedResult = List((1000000, 1.0))
+    val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams("", "", 0, 0 , 0))
+    val result = query.Result (Map("instance" ->"inst1"), Seq.empty, Sampl(1000, 1))
+    val res = exec.toQueryResponse(Data("vector", Seq(result)), "id")
+    res.isInstanceOf[QueryResult] shouldEqual true
+    val queryResult = res.asInstanceOf[QueryResult]
+    queryResult.result(0).numRows.get shouldEqual(1)
+    val data = queryResult.result.flatMap(x=>x.rows.map{ r => (r.getLong(0) , r.getDouble(1)) }.toList)
+    data.shouldEqual(expectedResult)
+
+  }
+
 }
