@@ -74,31 +74,18 @@ case class PromQlExec(id: String,
 
     val rangeVectors = data.result.map { r =>
 
+      val samples = r.values.getOrElse(Seq(r.value.get))
       val rv: RangeVector = new RangeVector {
         val row = new TransientRow()
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map(m => m._1.utf8 -> m._2.utf8))
         override def rows: Iterator[RowReader] = {
-          if (r.values.nonEmpty) {
-            r.values.iterator.map { v =>
-              row.setLong(0, v.timestamp * 1000)
-              row.setDouble(1, v.value)
-              row
-            }
-          } else {
-            Iterator {
-              row.setLong(0, r.value.timestamp * 1000)
-              row.setDouble(1, r.value.value)
-              row
-            }
+          samples.iterator.map { v =>
+            row.setLong(0, v.timestamp * 1000)
+            row.setDouble(1, v.value)
+            row
           }
         }
-        override def numRows: Option[Int] = {
-          if (r.values.nonEmpty) {
-            Option(r.values.size)
-          } else {
-            Option(1)
-          }
-        }
+        override def numRows: Option[Int] = Option(samples.size)
       }
 
       SerializableRangeVector(rv, builder, recSchema, "test")

@@ -89,9 +89,12 @@ object PrometheusModel {
       // remove NaN in HTTP results
       // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
       // in HTTP raw query results.
-      srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+      Some(
+        srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
           Sampl(r.getLong(0) / 1000, r.getDouble(1))
-      }.toSeq
+        }.toSeq
+      ),
+      None
     )
   }
 

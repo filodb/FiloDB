@@ -205,7 +205,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val url = uri"http://localhost:8080/promql/prometheus/api/v1/query?query=$query&time=${queryTimestamp/1000}"
     info(s"Querying: $url")
     val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
-    val result = result1.flatMap(_.values.map { d => (d.timestamp, d.value) })
+    val result = result1.flatMap(_.values.get.map { d => (d.timestamp, d.value) })
     info(s"result values were $result")
     result.length should be > 0
     val sum = result.map(_._2).sum
