@@ -10,11 +10,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.sys.ShutdownHookThread
 
-import akka.stream.scaladsl.Source
-import akka.util.ByteString
-
 import filodb.core.DatasetRef
-import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -32,7 +28,7 @@ case class PromQlExec(id: String,
   protected def args: String = params.toString
   import PromQlExec._
 
-  val builder: RecordBuilder = SerializableRangeVector.toBuilder(recSchema)
+  val builder = SerializableRangeVector.toBuilder(recSchema)
 
   /**
     * Limit on number of samples returned by this ExecPlan
@@ -106,13 +102,13 @@ object PromQlExec extends  StrictLogging{
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema: RecordSchema = SerializableRangeVector.toSchema(columns)
+  val recSchema = SerializableRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._
-  implicit val backend: SttpBackend[Future, Source[ByteString, Any]] = AkkaHttpBackend()
+  implicit val backend = AkkaHttpBackend()
 
   ShutdownHookThread(shutdown())
 
