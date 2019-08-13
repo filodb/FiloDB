@@ -59,7 +59,7 @@ case class PromQlExec(id: String,
 
       response.unsafeBody match {
         case Left(error) => QueryError(id, error.error)
-        case Right(response) => toQueryResponse(response.data, id)
+        case Right(successResponse) => toQueryResponse(successResponse.data, id)
       }
 
     }
@@ -70,23 +70,25 @@ case class PromQlExec(id: String,
 
     val rangeVectors = data.result.map { r =>
 
-       val rv = new RangeVector {
-          val row = new TransientRow()
+      val samples = r.values.getOrElse(Seq(r.value.get))
 
-          override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
+      val rv = new RangeVector {
+        val row = new TransientRow()
 
-          override def rows: Iterator[RowReader] = {
-           r.values.iterator.map { v =>
-             row.setLong(0, (v.timestamp * 1000))
-             row.setDouble(1, v.value)
-             row
-           }
-         }
+        override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
-         override def numRows: Option[Int] = Some(r.values.size)
-
+        override def rows: Iterator[RowReader] = {
+          samples.iterator.map { v =>
+            row.setLong(0, v.timestamp * 1000)
+            row.setDouble(1, v.value)
+            row
+          }
         }
-      SerializableRangeVector(rv, builder, recSchema, printTree(false))
+
+        override def numRows: Option[Int] = Option(samples.size)
+
+      }
+      SerializableRangeVector(rv, builder, recSchema, printTree(useNewline = false))
     }
     QueryResult(id, resultSchema, rangeVectors)
   }

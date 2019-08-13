@@ -12,7 +12,7 @@ final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "s
 
 final case class Data(resultType: String, result: Seq[Result])
 
-final case class Result(metric: Map[String, String], values: Seq[Sampl])
+final case class Result(metric: Map[String, String], values: Option[Seq[Sampl]], value: Option[Sampl] = None)
 
 /**
   * Metric value for a given timestamp
