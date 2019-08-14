@@ -10,7 +10,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.metadata.{Column, DataSchema, Dataset}
+import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
@@ -54,12 +54,13 @@ trait MemStore extends ChunkSource {
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
    * This method only succeeds if the dataset and shard has not already been setup.
+   * @param schemas the Schemas that the shards can ingest. Might vary depending on dataset.
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
    * @throws ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig,
             downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
 

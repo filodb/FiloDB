@@ -75,8 +75,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   }
 
   val downsampleOps = new ShardDownsampler(promDataset.name, 0, promSchema, downsampleSchema,
-    true, Seq(5000, 10000), NoOpDownsamplePublisher,
-    new TimeSeriesShardStats(promDataset.ref, 0))
+    true, new TimeSeriesShardStats(promDataset.ref, 0))
 
   it ("should formulate downsample ingest schema correctly for custom2 schema") {
     // Again here the target schema is the same as the original one
@@ -91,7 +90,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val rv = timeValueRV(data)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
     val dsSchema = downsampleSchema.ingestionSchema
-    val dsRecords = downsampleOps.newEmptyDownsampleRecords
+    val dsRecords = ShardDownsampler.newEmptyDownsampleRecords(Seq(5000, 10000), true)
 
     downsampleOps.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
 
@@ -196,8 +195,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   // Create downsampleOps for histogram dataset.  Samples every 10s, downsample freq 60s/1min
   // Also, downsampled schema is SAME as original schema, use for both
   val downsampleOpsH = new ShardDownsampler(histDSDataset.name, 0, histDSSchema, histDSSchema,
-    true, Seq(60000), NoOpDownsamplePublisher,
-    new TimeSeriesShardStats(histDSDataset.ref, 0))
+    true, new TimeSeriesShardStats(histDSDataset.ref, 0))
 
   def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
 
@@ -206,7 +204,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     val (data, rv) = MMD.histogramRV(startTS, numSamples = 200)
     val chunkInfos = rv.chunkInfos(0L, Long.MaxValue)
     val dsSchema = histDSSchema.ingestionSchema
-    val dsRecords = downsampleOpsH.newEmptyDownsampleRecords
+    val dsRecords = ShardDownsampler.newEmptyDownsampleRecords(Seq(60000), true)
 
     downsampleOpsH.populateDownsampleRecords(rv.partition.asInstanceOf[TimeSeriesPartition], chunkInfos, dsRecords)
 

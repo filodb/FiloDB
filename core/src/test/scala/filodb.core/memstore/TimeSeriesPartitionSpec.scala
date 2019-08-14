@@ -32,7 +32,7 @@ object TimeSeriesPartitionSpec {
   def tracingPart(partNo: Int, dataset: Dataset,
                partKey: NativePointer = defaultPartKey,
                bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
-    new TracingTimeSeriesPartition(partNo, dataset.schema, partKey, 0, bufferPool,
+    new TracingTimeSeriesPartition(partNo, dataset.ref, dataset.schema, partKey, 0, bufferPool,
           new TimeSeriesShardStats(dataset.ref, 0), memFactory, 40)
   }
 }

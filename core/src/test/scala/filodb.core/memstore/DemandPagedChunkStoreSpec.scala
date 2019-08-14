@@ -6,6 +6,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.FunSpec
 
 import filodb.core.{AsyncTest, TestData}
+import filodb.core.metadata.Schemas
 import filodb.core.store.{ColumnStore, InMemoryMetaStore, NullColumnStore, StoreConfig}
 import filodb.memory.PageAlignedBlockManager
 
@@ -25,7 +26,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with AsyncTest {
                                                |shard-mem-size = 200MB""".stripMargin)
                                 .withFallback(TestData.sourceConf.getConfig("store"))
 
-  memStore.setup(dataset1, 0, StoreConfig(sourceConf))
+  memStore.setup(dataset1.ref, Schemas(schema1), 0, StoreConfig(sourceConf))
   val onDemandPartMaker = memStore.getShardE(dataset1.ref, 0).partitionMaker
 
   after {

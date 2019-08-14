@@ -232,6 +232,9 @@ object Schemas {
 
   val NullSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
 
+  // Easy way to create Schemas from a single Schema, mostly useful for testing
+  def apply(sch: Schema): Schemas = Schemas(sch.partition, Map(sch.data.name -> sch))
+
   // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
   // and that any downsample-schemas are valid
   def validateDataSchemas(schemas: Map[String, Config]): Seq[DataSchema] Or Seq[(String, BadSchema)] = {

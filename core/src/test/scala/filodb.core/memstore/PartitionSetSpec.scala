@@ -78,34 +78,34 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
     partSet += part
     partSet.size shouldEqual 1
 
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, { throw new RuntimeException("error")} )
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), schema2, { throw new RuntimeException("error")} )
     got shouldEqual part
     partSet.size shouldEqual 1
   }
 
   it("should add new TSPartition if one doesnt exist with getOrAddWithIngestBR") {
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
-    partSet.getWithIngestBR(null, ingestRecordAddrs(0), dataset2) shouldEqual null
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), schema2.partition) shouldEqual None
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0), schema2) shouldEqual null
 
     val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, part)
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), schema2, part)
 
     partSet.size shouldEqual 1
     partSet.isEmpty shouldEqual false
     got shouldEqual part
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual Some(part)
-    partSet.getWithIngestBR(null, ingestRecordAddrs(0), dataset2) shouldEqual part
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), schema2.partition) shouldEqual Some(part)
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0), schema2) shouldEqual part
   }
 
   it("should not add new TSPartition if function returns null") {
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), schema2.partition) shouldEqual None
 
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, null)
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), schema2, null)
     got shouldEqual null
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), schema2.partition) shouldEqual None
   }
 
   it("should remove TSPartitions correctly") {

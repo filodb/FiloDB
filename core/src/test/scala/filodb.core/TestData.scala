@@ -10,7 +10,7 @@ import org.joda.time.DateTime
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.{Dataset, DatasetOptions, Schema}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
@@ -212,7 +212,7 @@ object GdeltTestData {
   """
 }
 
-// A simulation of machine metrics data
+// A simulation of machine metrics data, all with the same partition key.  Forms a set of schemas.
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
@@ -232,7 +232,7 @@ object MachineMetricsData {
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
-  val dataset1 = Dataset("metrics", Seq("series:string"), columns)
+  val dataset1 = Dataset("metrics1", Seq("series:string"), columns)
   val schema1 = dataset1.schema
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
@@ -305,7 +305,7 @@ object MachineMetricsData {
     }
   }
 
-  val dataset2 = Dataset("metrics", Seq("series:string", "tags:map"), columns)
+  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns)
   val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
@@ -322,7 +322,7 @@ object MachineMetricsData {
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
-  val histDataset = Dataset("histogram", Seq("tags:map"),
+  val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
 
   var histBucketScheme: bv.HistogramBuckets = _
@@ -341,11 +341,16 @@ object MachineMetricsData {
           (1 + n).toLong,
           buckets.sum.toLong,
           bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          "request-latency",
           extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 
-  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+  // dataset2 + histDataset
+  val schemas2h = Schemas(schema2.partition,
+                        Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
+
+  val histMaxDS = Dataset("histmax", Seq("metric:string", "tags:map"),
                           Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
 
   // Pass in the output of linearHistSeries here.
@@ -362,7 +367,7 @@ object MachineMetricsData {
     }
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
-  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, extraTags)
+  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
   private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize, true)
