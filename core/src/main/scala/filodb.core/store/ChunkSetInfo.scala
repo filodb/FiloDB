@@ -401,12 +401,12 @@ extends Iterator[ChunkQueryInfo] {
           val valueVector = next.vectorPtr(rv.valueColID)
           val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
           windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
-          lastEndTime = Math.max(next.endTime, lastEndTime)
         } catch {
           case e: Throwable => {
             ChunkSetInfo.log.error(s"Corrupt vector at ${java.lang.Long.toHexString(tsVector)}", e)
           }
         }
+        lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }
   }
