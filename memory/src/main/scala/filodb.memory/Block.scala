@@ -93,7 +93,7 @@ trait ReusableMemory extends StrictLogging {
     * Marks this memory as free and calls reclaimListener for every piece of metadata.
     */
   protected def free() = {
-    logger.debug(s"Reclaiming block at ${jLong.toHexString(address)}...")
+    logger.info(s"Reclaiming block at ${jLong.toHexString(address)}...")
     reclaimWithMetadata()
   }
 
