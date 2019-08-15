@@ -83,8 +83,9 @@ class QueryEngine(dataset: Dataset,
           val timeRange = route.timeRange.get
           val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
           val routingConfig = queryEngineConfig.getConfig("routing")
-          val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl, (timeRange.startInMillis
-            /1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
+            (timeRange.startInMillis / 1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread,
+            false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }

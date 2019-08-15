@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
@@ -8,8 +9,6 @@ import monix.reactive.Observable
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
-
-import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
