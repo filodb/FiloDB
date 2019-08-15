@@ -110,7 +110,7 @@ package object store {
    * @param ingestionTime seconds since 1970
    */
   @inline final def chunkID(startTime: Long, ingestionTime: Long): Long =
-    (startTime << startTimeShift) | (Math.floorMod(ingestionTime, (48 * 24 * 60 * 60)) & ingestionTimeMask)
+    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60))
 
   /**
    * Returns the start time portion of the chunk ID, as milliseconds from 1970.
