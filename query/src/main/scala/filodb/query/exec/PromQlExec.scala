@@ -116,7 +116,7 @@ object PromQlExec extends  StrictLogging{
 
   def httpGet(params: PromQlInvocationParams)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").getOrElse("")
+    val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").get
     val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
     var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
       "processFailure" -> params.processFailure)
