@@ -1,12 +1,12 @@
 package filodb.coordinator.queryengine2
 
+import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-
-import scala.concurrent.duration.FiniteDuration
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
