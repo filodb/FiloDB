@@ -3,7 +3,7 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory}
@@ -82,13 +82,13 @@ class QueryEngine(dataset: Dataset,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
-          val endpoint = queryEngineConfig.isEmpty() match {
-            case false => queryEngineConfig.getString("routing.buddy.http.endpoint")
-            case _     => ""
-          }
+          val endpoint = if (queryEngineConfig.hasPath("routing.buddy.http.endpoint"))
+            queryEngineConfig.getString("routing.buddy.http.endpoint") else ""
+          val readTimeout = if (queryEngineConfig.hasPath("routing.buddy.http.timeout"))
+            Duration(queryEngineConfig.getString("routing.buddy.http.timeout")) else 60.seconds
 
           val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis
-            /1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+            /1000), queryParams.step, (timeRange.endInMillis / 1000), readTimeout, queryParams.spread, false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }
