@@ -100,6 +100,7 @@ object PromQlExec extends  StrictLogging{
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
+  import net.ceedubs.ficus.Ficus._
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
@@ -115,17 +116,18 @@ object PromQlExec extends  StrictLogging{
 
   def httpGet(params: PromQlInvocationParams)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
+    val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").getOrElse("")
+    val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
     var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
       "processFailure" -> params.processFailure)
     if (params.spread.isDefined)
       urlParams = urlParams + ("spread" -> params.spread.get)
 
-    val endpoint = params.endpoint
     val url = uri"$endpoint?$urlParams"
     logger.debug("promqlexec url is {}", url)
     sttp
       .get(url)
-      .readTimeout(params.readTimeout)
+      .readTimeout(readTimeout)
       .response(asJson[SuccessResponse])
       .send()
   }

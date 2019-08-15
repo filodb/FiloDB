@@ -1,8 +1,7 @@
 package filodb.query
 
-import scala.concurrent.duration._
+import com.typesafe.config.Config
 
-case class PromQlInvocationParams(endpoint: String, promQl: String, start: Long, step: Long, end: Long,
-                                  readTimeout: Duration = 60.seconds, spread: Option[Int] = None,
-                                  processFailure: Boolean = true)
+case class PromQlInvocationParams(config: Config, promQl: String, start: Long, step: Long, end: Long,
+                                  spread: Option[Int] = None, processFailure: Boolean = true)
 

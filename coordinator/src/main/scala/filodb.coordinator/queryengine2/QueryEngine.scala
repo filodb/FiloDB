@@ -82,13 +82,9 @@ class QueryEngine(dataset: Dataset,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
-          val endpoint = if (queryEngineConfig.hasPath("routing.buddy.http.endpoint"))
-            queryEngineConfig.getString("routing.buddy.http.endpoint") else ""
-          val readTimeout = if (queryEngineConfig.hasPath("routing.buddy.http.timeout"))
-            Duration(queryEngineConfig.getString("routing.buddy.http.timeout")) else 60.seconds
-
-          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis
-            /1000), queryParams.step, (timeRange.endInMillis / 1000), readTimeout, queryParams.spread, false)
+          val routingConfig = queryEngineConfig.getConfig("routing")
+          val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl, (timeRange.startInMillis
+            /1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }
