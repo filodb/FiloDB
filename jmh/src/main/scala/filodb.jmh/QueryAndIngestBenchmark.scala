@@ -13,7 +13,9 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
+import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import filodb.core.GlobalConfig
+import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
@@ -21,7 +23,7 @@ import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.PrometheusInputRecord
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryOptions, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -114,7 +116,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   // Initial ingest just to populate index
   Await.result(ingestSamples(30), 30.seconds)
   Thread sleep 2000
-  memstore.commitIndexForTesting(dataset.ref) // commit lucene index
+  memstore.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Initial ingestion ended, indexes set up")
 
   /**
@@ -129,7 +131,8 @@ class QueryAndIngestBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 1000000))
+    LogicalPlan2Query(dataset.ref, plan, UnavailablePromQlQueryParams, QueryOptions(Some(new StaticSpreadProvider
+    (SpreadChange(0, 1))), 1000000))
   }
 
   private var testProducingFut: Option[Future[Unit]] = None

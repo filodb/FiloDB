@@ -90,6 +90,8 @@ object CustomRangeVectorKey {
 trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
+  def numRows: Option[Int] = None
+  def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 
 // First column of columnIDs should be the timestamp column
@@ -133,18 +135,21 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   * only serialized once as a single instance.
   */
 final class SerializableRangeVector(val key: RangeVectorKey,
-                                    val numRows: Int,
+                                    val numRowsInt: Int,
                                     containers: Seq[RecordContainer],
                                     val schema: RecordSchema,
                                     startRecordNo: Int) extends RangeVector with java.io.Serializable {
+
+  override val numRows = Some(numRowsInt)
+
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
-    containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
+    containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRowsInt)
 
   /**
     * Pretty prints all the elements into strings using record schema
     */
-  def prettyPrint(formatTime: Boolean = true): String = {
+  override def prettyPrint(formatTime: Boolean = true): String = {
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
       rows.map {

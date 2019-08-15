@@ -1,9 +1,11 @@
 package filodb.query.exec.rangefn
 
+import scalaxy.loops._
+
+import filodb.memory.format.{vectors => bv, CounterVectorReader}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.CounterVectorReader
 import filodb.query.QueryConfig
-import filodb.query.exec.TransientRow
+import filodb.query.exec.{TransientHistRow, TransientRow}
 
 object RateFunctions {
 
@@ -220,3 +222,82 @@ class ChunkedDeltaFunction extends ChunkedRateFunctionBase {
     }
   }
 }
+
+/**
+ * A base class for chunked calculation of rate etc for increasing/counter-like histograms.
+ * Note that the rate of two histograms is itself a histogram.
+ * Similar algorithm to ChunkedRateFunctionBase.
+ * It is O(nWindows * nChunks) which is usually << O(nSamples).
+ */
+abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[TransientHistRow] {
+  var numSamples = 0
+  var lowestTime = Long.MaxValue
+  var lowestValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+  var highestTime = 0L
+  var highestValue: bv.HistogramWithBuckets = bv.HistogramWithBuckets.empty
+
+  def isCounter: Boolean
+  def isRate: Boolean
+
+  override def reset(): Unit = {
+    numSamples = 0
+    lowestTime = Long.MaxValue
+    lowestValue = bv.HistogramWithBuckets.empty
+    highestTime = 0L
+    highestValue = bv.HistogramWithBuckets.empty
+    super.reset()
+  }
+
+  def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+                    startRowNum: Int, endRowNum: Int,
+                    startTime: Long, endTime: Long): Unit = reader match {
+    case histReader: bv.CounterHistogramReader =>
+      if (startTime < lowestTime || endTime > highestTime) {
+        numSamples += endRowNum - startRowNum + 1
+        if (startTime < lowestTime) {
+          lowestTime = startTime
+          lowestValue = histReader.correctedValue(startRowNum, correctionMeta)
+        }
+        if (endTime > highestTime) {
+          highestTime = endTime
+          highestValue = histReader.correctedValue(endRowNum, correctionMeta)
+        }
+      }
+    case other: CounterVectorReader =>
+  }
+
+  override def apply(windowStart: Long, windowEnd: Long, sampleToEmit: TransientHistRow): Unit = {
+    if (highestTime > lowestTime) {
+      // NOTE: It seems in order to match previous code, we have to adjust the windowStart by -1 so it's "inclusive"
+      // TODO: handle case where schemas are different and we need to interpolate schemas
+      if (highestValue.buckets == lowestValue.buckets) {
+        val rateArray = new Array[Double](lowestValue.numBuckets)
+        for { b <- 0 until rateArray.size optimized } {
+          rateArray(b) = RateFunctions.extrapolatedRate(
+                           windowStart - 1, windowEnd, numSamples,
+                           lowestTime, lowestValue.bucketValue(b),
+                           highestTime, highestValue.bucketValue(b),
+                           isCounter, isRate)
+        }
+        sampleToEmit.setValues(windowEnd, bv.MutableHistogram(lowestValue.buckets, rateArray))
+      } else {
+        sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+      }
+    } else {
+      sampleToEmit.setValues(windowEnd, bv.HistogramWithBuckets.empty)
+    }
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = ???
+}
+
+class HistRateFunction extends HistogramRateFunctionBase {
+  def isCounter: Boolean = true
+  def isRate: Boolean    = true
+}
+
+class HistIncreaseFunction extends HistogramRateFunctionBase {
+  def isCounter: Boolean = true
+  def isRate: Boolean    = false
+}
+

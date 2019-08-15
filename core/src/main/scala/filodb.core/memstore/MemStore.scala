@@ -139,7 +139,7 @@ trait MemStore extends ChunkSource {
    * all shards on this node
    * @return an index name and shard number
    */
-  def indexNames(dataset: DatasetRef): Iterator[(String, Int)]
+  def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)]
 
   /**
    * Returns values for a given index name (and # of series for each) for a dataset and shard,
@@ -193,7 +193,7 @@ trait MemStore extends ChunkSource {
   /**
    * Commits the index immediately so that queries can pick up the latest changes.  Used for testing.
    */
-  def commitIndexForTesting(dataset: DatasetRef): Unit
+  def refreshIndexForTesting(dataset: DatasetRef): Unit
 
   /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
@@ -232,7 +232,9 @@ object MemStore {
                                   detectDrops = col.params.as[Option[Boolean]]("detectDrops").getOrElse(false))
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
-        case HistogramColumn => bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
+        case HistogramColumn => val counter = col.params.as[Option[Boolean]]("counter").getOrElse(false)
+                                if (counter) bv.HistogramVector.appendingSect(memFactory, config.maxBlobBufferSize)
+                                else         bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
         case other: Column.ColumnType => ???
       }
     }.toArray

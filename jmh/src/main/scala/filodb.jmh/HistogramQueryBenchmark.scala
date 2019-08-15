@@ -14,15 +14,15 @@ import org.openjdk.jmh.annotations._
 
 import filodb.coordinator.{FilodbCluster, IngestionStarted, ShardMapper}
 import filodb.coordinator.client.QueryCommands._
-import filodb.coordinator.queryengine2.QueryEngine
-import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
+import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.memory.format.SeqRowReader
 import filodb.memory.MemFactory
+import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.QueryConfig
+import filodb.query.{QueryConfig, QueryOptions}
 
 //scalastyle:off regex
 /**
@@ -53,7 +53,7 @@ class HistogramQueryBenchmark {
   memStore.setup(histDataset, 0, ingestConf)
   val hShard = memStore.getShardE(histDataset.ref, 0)
   histSchemaBuilder.allContainers.foreach { c => hShard.ingest(c, 0) }
-  memStore.commitIndexForTesting(histDataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(histDataset.ref) // commit lucene index
 
   // Prometheus hist data: 10 series * 66 = 660 series * 180 samples
   println("Ingesting containers of prometheus schema data....")
@@ -65,7 +65,7 @@ class HistogramQueryBenchmark {
   memStore.setup(promDataset, 0, ingestConf)
   val pShard = memStore.getShardE(promDataset.ref, 0)
   promBuilder.allContainers.foreach { c => pShard.ingest(c, 0) }
-  memStore.commitIndexForTesting(promDataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(promDataset.ref) // commit lucene index
 
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
   private val cluster = FilodbCluster(system)
@@ -76,8 +76,8 @@ class HistogramQueryBenchmark {
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
   // Query configuration
-  val hEngine = new QueryEngine(histDataset, shardMapper)
-  val pEngine = new QueryEngine(promDataset, shardMapper)
+  val hEngine = new QueryEngine(histDataset, shardMapper, EmptyFailureProvider)
+  val pEngine = new QueryEngine(promDataset, shardMapper, EmptyFailureProvider)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total{job="prometheus",__col__="h"}[30s]))"""
@@ -88,12 +88,12 @@ class HistogramQueryBenchmark {
   val qOptions = QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
     copy(shardOverrides = Some(Seq(0)))
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
-  val hExecPlan = hEngine.materialize(hLogicalPlan, qOptions)
+  val hExecPlan = hEngine.materialize(hLogicalPlan, qOptions, UnavailablePromQlQueryParams)
   val querySched = Scheduler.singleThread(s"benchmark-query")
   val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val pLogicalPlan = Parser.queryToLogicalPlan(promQuery, startTime/1000)
-  val pExecPlan = pEngine.materialize(pLogicalPlan, qOptions)
+  val pExecPlan = pEngine.materialize(pLogicalPlan, qOptions, UnavailablePromQlQueryParams)
 
   @TearDown
   def shutdownFiloActors(): Unit = {

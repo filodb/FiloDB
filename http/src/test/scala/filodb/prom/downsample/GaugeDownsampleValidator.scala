@@ -14,8 +14,8 @@ import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
-import filodb.http.PromCirceSupport
-import filodb.prometheus.query.PrometheusModel.SuccessResponse
+import filodb.query.PromCirceSupport
+import filodb.query.SuccessResponse
 
 /**
   * Use this tool to validate raw data against downsampled data for gauges.

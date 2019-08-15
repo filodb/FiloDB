@@ -9,7 +9,8 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.QueryConfig
+import filodb.query.{Query, QueryConfig}
+import filodb.query.exec.rangefn.RangeFunction
 
 object SelectRawPartitionsExec {
   import Column.ColumnType._
@@ -18,8 +19,8 @@ object SelectRawPartitionsExec {
   def histMaxColumn(dataset: Dataset, colIDs: Seq[Types.ColumnId]): Option[Int] = {
     colIDs.find { id => dataset.dataColumns(id).columnType == HistogramColumn }
           .flatMap { histColID =>
-            dataset.dataColumns.find { c => c.name == "max" && c.columnType == DoubleColumn }
-          }.map(_.id)
+            dataset.dataColumns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
+          }
   }
 }
 
@@ -38,18 +39,39 @@ final case class SelectRawPartitionsExec(id: String,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
-  require(colIds.nonEmpty)
-
   protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    val numRowKeyCols = colIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length
+    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
+
+    val selectedColIds = selectColIds(dataset)
+    val numRowKeyCols = 1 // hardcoded since a future PR will indeed fix this to 1 timestamp column
 
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
     // But make sure the max column isn't already included
-    histMaxColumn(dataset, colIds).filter { mId => !(colIds contains mId) }
+    histMaxColumn(dataset, selectedColIds).filter { mId => !(colIds contains mId) }
                                   .map { maxColId =>
-      ResultSchema(dataset.infosFromIDs(colIds :+ maxColId), numRowKeyCols, colIDs = (colIds :+ maxColId))
+      ResultSchema(dataset.infosFromIDs(selectedColIds :+ maxColId),
+        numRowKeyCols, colIDs = (selectedColIds :+ maxColId))
     }.getOrElse {
-      ResultSchema(dataset.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
+      ResultSchema(dataset.infosFromIDs(selectedColIds), numRowKeyCols, colIDs = selectedColIds)
+    }
+  }
+
+  private def selectColIds(dataset: Dataset) = {
+    dataset.rowKeyIDs ++ {
+      if (colIds.nonEmpty) {
+        // query is selecting specific columns
+        colIds
+      } else if (!dataset.options.hasDownsampledData) {
+        // needs to select raw data
+        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
+      } else {
+        // need to select column based on range function
+        val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
+          RangeFunction.downsampleColsFromRangeFunction(dataset, p.asInstanceOf[PeriodicSamplesMapper].functionId)
+        }.getOrElse(Seq(dataset.options.valueColumn))
+        colIds ++ dataset.colIDs(colNames: _*).get
+      }
     }
   }
 
@@ -58,10 +80,14 @@ final case class SelectRawPartitionsExec(id: String,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
-    require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
+    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
+    val selectCols = selectColIds(dataset)
+    Query.qLogger.debug(s"queryId=$id on dataset=${dataset.ref} shard=$shard" +
+      s" is configured to use column=$selectCols to serve downsampled results")
+    source.rangeVectors(dataset, selectCols, partMethod, chunkMethod)
   }
 
   protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"

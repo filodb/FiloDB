@@ -30,7 +30,8 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
   it("should return value present at time - staleSampleAfterMs") {
 
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None)
-    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema)
+    val resultObs = periodicSamplesVectorFnMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema)
 
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))

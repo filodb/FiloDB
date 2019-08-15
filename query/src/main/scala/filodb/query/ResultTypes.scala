@@ -2,8 +2,8 @@ package filodb.query
 
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.{DatasetRef, ErrorResponse, NodeCommand, NodeResponse}
-import filodb.core.query.{ResultSchema, SerializableRangeVector}
+import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
+import filodb.core.query.{RangeVector, ResultSchema}
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
@@ -14,7 +14,7 @@ trait QueryResponse extends NodeResponse with java.io.Serializable {
   def id: String
 }
 
-final case class QueryError(id: String, t: Throwable) extends QueryResponse with ErrorResponse {
+final case class QueryError(id: String, t: Throwable) extends QueryResponse with filodb.core.ErrorResponse {
   override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
     t.getStackTrace.map(_.toString).mkString("\n")
 }
@@ -35,11 +35,11 @@ object QueryResultType extends Enum[QueryResultType] {
 
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
-                             result: Seq[SerializableRangeVector]) extends QueryResponse {
+                             result: Seq[RangeVector]) extends QueryResponse {
   def resultType: QueryResultType = {
     result match {
-      case Seq(one) => if (one.numRows == 1) QueryResultType.Scalar else QueryResultType.RangeVectors
-      case many: Seq[SerializableRangeVector] => if (many.forall(_.numRows == 1)) QueryResultType.InstantVector
+      case Seq(one) => if (one.numRows.contains(1)) QueryResultType.Scalar else QueryResultType.RangeVectors
+      case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
                                                  else QueryResultType.RangeVectors
     }
   }
