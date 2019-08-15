@@ -1,5 +1,8 @@
 package filodb.core.store
 
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+
 import filodb.core._
 import filodb.memory.format.vectors.NativeVectorTest
 
@@ -46,5 +49,26 @@ class ChunkSetInfoSpec extends NativeVectorTest {
 
     // wholly outside
     info1.intersection(ts + 30001, ts + 40000) should equal (None)
+  }
+
+  it("should wrap chunk id every 48 days") {
+    var startTime = 1234
+    var ingestionTime = Instant.EPOCH
+
+    for (i <- 0 to 1000) {
+      val id = chunkID(startTime, ingestionTime.getEpochSecond)
+
+      assert(startTime == startTimeFromChunkID(id))
+
+      val itSeconds = ingestionTimeFromChunkID(id)
+      assert(itSeconds == (ingestionTime.getEpochSecond % 4147200))
+
+      if ((i % 48) == 0) {
+        assert(0 == itSeconds)
+      }
+
+      startTime += 1
+      ingestionTime = ingestionTime.plus(1, ChronoUnit.DAYS)
+    }
   }
 }
