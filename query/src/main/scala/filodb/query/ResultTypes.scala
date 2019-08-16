@@ -38,11 +38,11 @@ final case class QueryResult(id: String,
                              result: Seq[RangeVector]) extends QueryResponse {
   def resultType: QueryResultType = {
     result match {
-      case Seq(one) => if (one.numRows.contains(1)) QueryResultType.Scalar else QueryResultType.RangeVectors
+      case Nil => QueryResultType.RangeVectors
+      case Seq(one)  if one.key.labelValues.isEmpty && one.numRows.contains(1) => QueryResultType.Scalar
       case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
-                                                 else QueryResultType.RangeVectors
+                                      else QueryResultType.RangeVectors
     }
   }
 }
-
 
