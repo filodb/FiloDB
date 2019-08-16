@@ -7,17 +7,16 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
+import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions, Schema}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
-import filodb.core.Types.{PartitionKey, UTF8Map}
-import filodb.memory.format._
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.{vectors => bv}
 import filodb.memory._
+import filodb.memory.format.{vectors => bv, _}
+import filodb.memory.format.ZeroCopyUTF8String._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -406,7 +405,7 @@ object CustomMetricsData {
                         partitionColumns,
                         columns,
                         Seq.empty,
-                        DatasetOptions(Seq("metric", "_ns"), "metric")).get
+                        DatasetOptions(Seq("metric", "_ns"), "metric", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
@@ -416,7 +415,7 @@ object CustomMetricsData {
                         partitionColumns2,
                         columns,
                         Seq.empty,
-                        DatasetOptions(Seq("__name__"), "__name__")).get
+                        DatasetOptions(Seq("__name__"), "__name__", true)).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
                                                            Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
@@ -430,6 +429,13 @@ object MetricsTestData {
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
+
+  val downsampleDataset = Dataset.make("tsdbdata",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double"),
+    Seq.empty,
+    options = DatasetOptions(Seq("__name__"), "__name__", true)
+  ).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

@@ -1,11 +1,11 @@
 package filodb.query.exec
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
+import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
@@ -27,7 +27,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
+                         (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 

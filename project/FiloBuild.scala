@@ -237,6 +237,10 @@ object FiloBuild extends Build {
 
   lazy val queryDeps = commonDeps ++ Seq(
     "com.tdunning"         % "t-digest"           % "3.1",
+    "com.softwaremill.sttp" %% "circe"                   % sttpVersion ,
+    "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion,
+    "com.softwaremill.sttp" %% "core"                    % sttpVersion,
+    circeGeneric,
     scalaxyDep
   )
 
@@ -270,7 +274,8 @@ object FiloBuild extends Build {
     logbackDep % "test,it")
 
   lazy val promDeps = Seq(
-    "com.google.protobuf" % "protobuf-java" % "2.5.0"
+    "com.google.protobuf" % "protobuf-java" % "2.5.0",
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(

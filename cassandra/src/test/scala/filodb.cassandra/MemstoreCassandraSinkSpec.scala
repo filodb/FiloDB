@@ -46,7 +46,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     memStore.store.sinkStats.chunksetsWritten should be >= 3
     memStore.store.sinkStats.chunksetsWritten should be <= 4
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     // Verify data still in MemStore... all of it
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))

@@ -2,7 +2,7 @@ package filodb.query
 
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 object QueryConfig {
@@ -20,3 +20,5 @@ class QueryConfig(queryConfig: Config) {
    */
   def has(feature: String): Boolean = queryConfig.as[Option[Boolean]](feature).getOrElse(false)
 }
+
+object EmptyQueryConfig extends QueryConfig(queryConfig = ConfigFactory.empty())

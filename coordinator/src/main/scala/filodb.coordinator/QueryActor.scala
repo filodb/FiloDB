@@ -11,7 +11,7 @@ import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 import scala.util.control.NonFatal
 
-import filodb.coordinator.queryengine2.QueryEngine
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
@@ -77,7 +77,8 @@ final class QueryActor(memStore: MemStore,
                    }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
-  val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
+  val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
+    EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)
@@ -121,7 +122,7 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, q.tsdbQueryParams)
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -133,7 +134,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, q.tsdbQueryParams)
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>
@@ -163,7 +164,7 @@ final class QueryActor(memStore: MemStore,
     case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
-      sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
+      sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
     case g: GetIndexValues         => processIndexValues(g, sender())
 
     case ThrowException(dataset) =>

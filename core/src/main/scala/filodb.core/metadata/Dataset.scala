@@ -79,8 +79,8 @@ final case class Dataset(name: String, schema: Schema) {
    */
   def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
     val partColPos = columnID - Dataset.PartColStartIndex
-    require(Dataset.isPartitionID(columnID) && partColPos < schema.partition.columns.length)
-    schema.partition.columns(partColPos).columnType match {
+    require(Dataset.isPartitionID(columnID) && partColPos < partitionColumns.length)
+    partitionColumns(partColPos).columnType match {
       case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
       case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
       case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
@@ -99,8 +99,8 @@ final case class Dataset(name: String, schema: Schema) {
    * Returns the column IDs for the named columns or the missing column names
    */
   def colIDs(colNames: String*): Seq[Int] Or Seq[String] =
-    colNames.map { n => schema.data.columns.find(_.name == n).map(_.id)
-                          .orElse { schema.partition.columns.find(_.name == n).map(_.id) }
+    colNames.map { n => dataColumns.find(_.name == n).map(_.id)
+                          .orElse { partitionColumns.find(_.name == n).map(_.id) }
                           .toOr(One(n)) }
             .combined.badMap(_.toSeq)
 
@@ -110,19 +110,19 @@ final case class Dataset(name: String, schema: Schema) {
    * over the input RowReader to return data columns corresponding to dataset definition.
    */
   def dataRouting(colNames: Seq[String]): Array[Int] =
-    schema.data.columns.map { c => colNames.indexOf(c.name) }.toArray
+    dataColumns.map { c => colNames.indexOf(c.name) }.toArray
 
   /**
    * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
    * the input RowReader columns whose names are passed in.
    */
   def ingestRouting(colNames: Seq[String]): Array[Int] =
-    dataRouting(colNames) ++ schema.partition.columns.map { c => colNames.indexOf(c.name) }
+    dataRouting(colNames) ++ partitionColumns.map { c => colNames.indexOf(c.name) }
 
   /** Returns the Column instance given the ID */
   def columnFromID(columnID: Int): Column =
-    if (Dataset.isPartitionID(columnID)) { schema.partition.columns(columnID - Dataset.PartColStartIndex) }
-    else                                 { schema.data.columns(columnID) }
+    if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }
+    else                                 { dataColumns(columnID) }
 
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
@@ -135,6 +135,7 @@ final case class Dataset(name: String, schema: Schema) {
  */
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
+                          hasDownsampledData: Boolean = false,
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
@@ -146,13 +147,15 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
   }
 
   def toConfig: Config = {
-    val map: Map[String, Any] = Map(
+    val map: scala.collection.mutable.Map[String, Any] = scala.collection.mutable.Map(
       "shardKeyColumns" -> shardKeyColumns.asJava,
       "metricColumn" -> metricColumn,
+      "hasDownsampledData" -> hasDownsampledData,
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
       "copyTags" -> copyTags.asJava)
+
     ConfigFactory.parseMap(map.asJava)
   }
 
@@ -181,6 +184,7 @@ object DatasetOptions {
   def fromConfig(config: Config): DatasetOptions =
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
+                   hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),

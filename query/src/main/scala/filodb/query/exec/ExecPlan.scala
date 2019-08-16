@@ -101,7 +101,7 @@ trait ExecPlan extends QueryCommand {
     *
     */
   // scalastyle:off method.length
-  final def execute(source: ChunkSource,
+  def execute(source: ChunkSource,
                     dataset: Dataset,
                     queryConfig: QueryConfig)
                    (implicit sched: Scheduler,
@@ -116,16 +116,15 @@ trait ExecPlan extends QueryCommand {
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
+        (transf.apply(dataset, acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.newBuilder()
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      qLogger.debug(s"queryId: ${id} Materializing SRVs from iterators if necessary")
       finalRes._1
         .map {
           case srv: SerializableRangeVector =>
-            numResultSamples += srv.numRows
+            numResultSamples += srv.numRowsInt
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
@@ -134,7 +133,7 @@ trait ExecPlan extends QueryCommand {
           case rv: RangeVector =>
             // materialize, and limit rows per RV
             val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
-            numResultSamples += srv.numRows
+            numResultSamples += srv.numRowsInt
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
               throw new BadQueryException(s"This query results in more than $limit samples. " +
@@ -222,7 +221,7 @@ trait ExecPlan extends QueryCommand {
     }
   }
 
-  protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
+  protected def rowIterAccumulator(srvsList: List[Seq[RangeVector]]): Iterator[RowReader] = {
 
     new Iterator[RowReader] {
       val listSize = srvsList.size

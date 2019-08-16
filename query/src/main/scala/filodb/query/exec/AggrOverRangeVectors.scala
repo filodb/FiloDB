@@ -61,7 +61,8 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -99,7 +100,8 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {

@@ -12,8 +12,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format._
-import filodb.memory.format.UTF8MapIteratorRowReader
+import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -87,13 +86,17 @@ final case class LabelValuesDistConcatExec(id: String,
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.foreach(rv => {
-        metadataResult ++= rv(0).rows.map(rowReader => {
-          val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-          rv(0).schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
-            .map(pair => pair._1.utf8 -> pair._2.utf8).toMap
-        })
-      })
+      resp.foreach { rv =>
+          metadataResult ++= rv.head.rows.map { rowReader =>
+            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+            rv.head match {
+              case srv: SerializableRangeVector =>
+                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                   .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+            }
+          }
+      }
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(metadataResult.toIterator))

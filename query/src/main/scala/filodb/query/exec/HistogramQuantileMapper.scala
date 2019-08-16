@@ -4,6 +4,7 @@ import monix.reactive.Observable
 import org.agrona.MutableDirectBuffer
 import scalaxy.loops._
 
+import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.Histogram
@@ -45,7 +46,7 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * but should be the rate of increase for that bucket counter. The histogram_quantile function should always
     * be preceded by a rate function or a sum-of-rate function.
     */
-  override def apply(source: Observable[RangeVector],
+  override def apply(dataset: Dataset, source: Observable[RangeVector],
                      queryConfig: QueryConfig, limit: Int,
                      sourceSchema: ResultSchema): Observable[RangeVector] = {
     val res = source.toListL.map { rvs =>

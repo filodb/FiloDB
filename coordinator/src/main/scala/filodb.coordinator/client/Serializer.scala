@@ -10,6 +10,7 @@ import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
+import filodb.query.QueryOptions
 
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
@@ -91,7 +92,7 @@ class KryoInit {
     kryo.register(classOf[ShardSplit])
 
     kryo.register(classOf[QueryCommands.BadQuery])
-    kryo.register(classOf[QueryCommands.QueryOptions])
+    kryo.register(classOf[QueryOptions])
     kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
   }
 }
