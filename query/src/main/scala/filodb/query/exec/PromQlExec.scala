@@ -1,13 +1,13 @@
 package filodb.query.exec
 
-import com.softwaremill.sttp.akkahttp.AkkaHttpBackend
+import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
 
 import filodb.core.DatasetRef
@@ -99,6 +99,7 @@ object PromQlExec extends  StrictLogging{
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
+  import net.ceedubs.ficus.Ficus._
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
@@ -108,21 +109,26 @@ object PromQlExec extends  StrictLogging{
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
   import PromCirceSupport._
-  implicit val backend = AkkaHttpBackend()
+  implicit val backend = AsyncHttpClientFutureBackend()
 
   ShutdownHookThread(shutdown())
 
   def httpGet(params: PromQlInvocationParams)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
+    val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").get
+    val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
     var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
       "processFailure" -> params.processFailure)
     if (params.spread.isDefined)
       urlParams = urlParams + ("spread" -> params.spread.get)
 
-    val endpoint = params.endpoint
     val url = uri"$endpoint?$urlParams"
     logger.debug("promqlexec url is {}", url)
-    sttp.get(url).response(asJson[SuccessResponse]).send()
+    sttp
+      .get(url)
+      .readTimeout(readTimeout)
+      .response(asJson[SuccessResponse])
+      .send()
   }
 
   def shutdown(): Unit =
