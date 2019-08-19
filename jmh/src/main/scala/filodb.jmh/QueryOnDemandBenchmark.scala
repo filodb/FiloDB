@@ -13,13 +13,14 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
+import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryOptions, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -113,7 +114,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                     }.countL.runAsync
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
-  memStore.commitIndexForTesting(dataset.ref) // commit lucene index
+  memStore.refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended.")
 
   // For each invocation, reclaim all blocks to make sure ODP is really happening
@@ -136,7 +137,8 @@ class QueryOnDemandBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
+    LogicalPlan2Query(dataset.ref, plan, UnavailablePromQlQueryParams, QueryOptions(Some(new StaticSpreadProvider
+    (SpreadChange(0, 1))), 20000))
   }
 
   @TearDown

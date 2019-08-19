@@ -8,8 +8,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.GlobalConfig
+import filodb.core.metadata.{Dataset, Schemas}
 
 /** Settings for the FiloCluster Akka Extension which gets
   * config from `GlobalConfig`. Uses Ficus.

@@ -8,7 +8,7 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.{MachineMetricsData => MMD}
+import filodb.core.{MetricsTestData, MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -22,7 +22,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val histSchema = ResultSchema(MMD.histDataset.infosFromIDs(Seq(0, 3)), 1)
-  val histMaxSchema = ResultSchema(MMD.histMaxDS.infosFromIDs(Seq(0, 4, 3)), 1, colIDs=Seq(0, 4, 3))
+  val histMaxSchema = ResultSchema(MMD.histMaxDS.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
@@ -254,8 +254,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Avg, Nil, Nil, Nil)
-    val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), queryConfig, 1000, tvSchema)
-    val mapped2 = aggMR(Observable.fromIterable(Seq(toRv(s2))), queryConfig, 1000, tvSchema)
+    val mapped1 = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(Seq(toRv(s1))),
+                        queryConfig, 1000, tvSchema)
+    val mapped2 = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(Seq(toRv(s2))),
+                        queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped1 ++ mapped2, rv=>rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue

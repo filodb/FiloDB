@@ -26,6 +26,9 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
 
+  protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleDataset.blockMetaSize, true)
+  protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleDataset, storeConf)
+
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
   }
@@ -52,6 +55,19 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+  }
+
+  def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
+                            colIds: Array[Int]): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, downsampleDataset, bufferPool = tsBufferPool2)
+    val readers = tuples.map { case (ts, d1, d2, d3, d4, d5) =>
+      TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
+    }
+    readers.foreach { row => part.ingest(row, ingestBlockHolder2) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(ingestBlockHolder2, encode = true)
+    // part.encodeAndReleaseBuffers(ingestBlockHolder)
+    RawDataRangeVector(null, part, AllChunkScan, colIds)
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {

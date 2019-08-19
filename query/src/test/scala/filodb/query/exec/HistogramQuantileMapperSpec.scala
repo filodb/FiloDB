@@ -10,6 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
+import filodb.core.MetricsTestData
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.QueryConfig
 
@@ -17,8 +18,8 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
-  import ZeroCopyUTF8String._
   import HistogramQuantileMapper._
+  import ZeroCopyUTF8String._
 
   private def genHistBuckets(histKey: Map[ZeroCopyUTF8String, ZeroCopyUTF8String]): Array[CustomRangeVectorKey] = {
     val numBuckets = 8
@@ -56,7 +57,8 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
                       expectedResult: Seq[(Map[ZeroCopyUTF8String, ZeroCopyUTF8String], Seq[(Int, Double)])]): Unit = {
     val hqMapper = HistogramQuantileMapper(Seq(q))
 
-    val result = hqMapper.apply(Observable.fromIterable(histRvs),
+    val result = hqMapper.apply(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(histRvs),
       queryConfig, 10, new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
         ColumnInfo("value", ColumnType.DoubleColumn)), 1))
       .toListL.runAsync.futureValue

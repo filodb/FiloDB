@@ -38,7 +38,7 @@ class PartKeyIndexBenchmark {
     }
   }
   partKeyBuilder.allContainers.foreach(_.consumeRecords(consumer))
-  partKeyIndex.commitBlocking()
+  partKeyIndex.refreshReadersBlocking()
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))

@@ -159,8 +159,18 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def partIdsEndedBefore(endedBefore: Long): EWAHCompressedBitmap = {
     val collector = new PartIdCollector()
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
-    searcherManager.acquire().search(deleteQuery, collector)
+
+    withNewSearcher(s => s.search(deleteQuery, collector))
     collector.result
+  }
+
+  private def withNewSearcher(func: IndexSearcher => Unit): Unit = {
+    val s = searcherManager.acquire()
+    try {
+      func(s)
+    } finally {
+      searcherManager.release(s)
+    }
   }
 
   /**
@@ -203,46 +213,54 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
     // FIXME this API returns duplicate values because same value can be present in multiple lucene segments
-    val searcher = searcherManager.acquire()
-    val indexReader = searcher.getIndexReader
-    val segments = indexReader.leaves()
+
     val freqOrder = Ordering.by[TermInfo, Int](_.freq)
     val topkResults = new PriorityQueue[TermInfo](topK, freqOrder)
-    var termsRead = 0
-    segments.asScala.foreach { segment =>
-      val terms = segment.reader().terms(fieldName)
 
-      //scalastyle:off
-      if (terms != null) {
-        val termsEnum = terms.iterator()
-        var nextVal: BytesRef = termsEnum.next()
-        while (nextVal != null && termsRead < MAX_TERMS_TO_ITERATE) {
-          //scalastyle:on
-          val valu = BytesRef.deepCopyOf(nextVal) // copy is needed since lucene uses a mutable cursor underneath
-          val ret = new UTF8Str(valu.bytes, bytesRefToUnsafeOffset(valu.offset), valu.length)
-          val freq = termsEnum.docFreq()
-          if (topkResults.size < topK) {
-            topkResults.add(TermInfo(ret, freq))
+    withNewSearcher { searcher =>
+      val indexReader = searcher.getIndexReader
+      val segments = indexReader.leaves()
+      var termsRead = 0
+      segments.asScala.foreach { segment =>
+        val terms = segment.reader().terms(fieldName)
+
+        //scalastyle:off
+        if (terms != null) {
+          val termsEnum = terms.iterator()
+          var nextVal: BytesRef = termsEnum.next()
+          while (nextVal != null && termsRead < MAX_TERMS_TO_ITERATE) {
+            //scalastyle:on
+            val valu = BytesRef.deepCopyOf(nextVal) // copy is needed since lucene uses a mutable cursor underneath
+            val ret = new UTF8Str(valu.bytes, bytesRefToUnsafeOffset(valu.offset), valu.length)
+            val freq = termsEnum.docFreq()
+            if (topkResults.size < topK) {
+              topkResults.add(TermInfo(ret, freq))
+            }
+            else if (topkResults.peek.freq < freq) {
+              topkResults.remove()
+              topkResults.add(TermInfo(ret, freq))
+            }
+            nextVal = termsEnum.next()
+            termsRead += 1
           }
-          else if (topkResults.peek.freq < freq) {
-            topkResults.remove()
-            topkResults.add(TermInfo(ret, freq))
-          }
-          nextVal = termsEnum.next()
-          termsRead += 1
         }
       }
     }
     topkResults.toArray(new Array[TermInfo](0)).sortBy(-_.freq).toSeq
   }
 
-  def indexNames: scala.Iterator[String] = {
-    val searcher = searcherManager.acquire()
-    val indexReader = searcher.getIndexReader
-    val segments = indexReader.leaves()
-    segments.asScala.iterator.flatMap { segment =>
-      segment.reader().getFieldInfos.asScala.toIterator.map(_.name)
-    }.filterNot { n => ignoreIndexNames.contains(n) }
+  def indexNames(limit: Int): Seq[String] = {
+
+    var ret: Seq[String] = Nil
+    withNewSearcher { searcher =>
+      val indexReader = searcher.getIndexReader
+      val segments = indexReader.leaves()
+      val iter = segments.asScala.iterator.flatMap { segment =>
+        segment.reader().getFieldInfos.asScala.toIterator.map(_.name)
+      }.filterNot { n => ignoreIndexNames.contains(n) }
+      ret = iter.take(limit).toSeq
+    }
+    ret
   }
 
   private def addIndexEntry(labelName: String, value: BytesRef, partIndex: Int): Unit = {
@@ -320,7 +338,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
-    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector) )
     Option(collector.singleResult)
   }
 
@@ -329,7 +347,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def startTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
-    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -348,7 +366,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene
-    searcherManager.acquire().search(new TermInSetQuery(PART_ID, terms), collector)
+    withNewSearcher(s => s.search(new TermInSetQuery(PART_ID, terms), collector))
     span.finish()
     collector.startTimes
   }
@@ -358,7 +376,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def endTimeFromPartId(partId: Int): Long = {
     val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
-    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
+    withNewSearcher(s => s.search(new TermQuery(new Term(PART_ID, partId.toString)), collector))
     collector.singleResult
   }
 
@@ -372,13 +390,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                               fromEndTime: Long = 0,
                               toEndTime: Long = Long.MaxValue): EWAHCompressedBitmap = {
     val coll = new TopKPartIdsCollector(topk)
-    searcherManager.acquire().search(LongPoint.newRangeQuery(END_TIME, fromEndTime, toEndTime), coll)
+    withNewSearcher(s => s.search(LongPoint.newRangeQuery(END_TIME, fromEndTime, toEndTime), coll))
     coll.topKPartIDsBitmap()
   }
 
   def foreachPartKeyStillIngesting(func: (Int, BytesRef) => Unit): Int = {
     val coll = new ActionCollector(func)
-    searcherManager.acquire().search(LongPoint.newExactQuery(END_TIME, Long.MaxValue), coll)
+    withNewSearcher(s => s.search(LongPoint.newExactQuery(END_TIME, Long.MaxValue), coll))
     coll.numHits
   }
 
@@ -404,7 +422,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     * Refresh readers with updates to index. May be expensive - use carefully.
     * @return
     */
-  def commitBlocking(): Unit = {
+  def refreshReadersBlocking(): Unit = {
     searcherManager.maybeRefreshBlocking()
     logger.info("Refreshed index searchers to make reads consistent")
   }
@@ -470,9 +488,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
-    val searcher = searcherManager.acquire()
     val collector = new PartIdCollector() // passing zero for unlimited results
-    searcher.search(query, collector)
+    withNewSearcher(s => s.search(query, collector))
     partKeySpan.finish()
     collector.result
   }

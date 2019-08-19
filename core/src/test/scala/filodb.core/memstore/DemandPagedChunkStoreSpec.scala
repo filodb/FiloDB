@@ -43,7 +43,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with AsyncTest {
     val initData = records(dataset1, linearMultiSeries(start).take(20))
     memStore.ingest(dataset1.ref, 0, initData)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
 
     val rawData = linearMultiSeries(start, timeStep=100000).drop(100).take(900)  // makes 9 chunks per partition?

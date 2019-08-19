@@ -140,7 +140,7 @@ trait MemStore extends ChunkSource {
    * all shards on this node
    * @return an index name and shard number
    */
-  def indexNames(dataset: DatasetRef): Iterator[(String, Int)]
+  def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)]
 
   /**
    * Returns values for a given index name (and # of series for each) for a dataset and shard,
@@ -194,7 +194,7 @@ trait MemStore extends ChunkSource {
   /**
    * Commits the index immediately so that queries can pick up the latest changes.  Used for testing.
    */
-  def commitIndexForTesting(dataset: DatasetRef): Unit
+  def refreshIndexForTesting(dataset: DatasetRef): Unit
 
   /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data

@@ -396,10 +396,16 @@ extends Iterator[ChunkQueryInfo] {
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         val tsVector = next.vectorPtr(tsColID)
-        val tsReader = vectors.LongBinaryVector(tsVector)
-        val valueVector = next.vectorPtr(rv.valueColID)
-        val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
-        windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        try {
+          val tsReader = vectors.LongBinaryVector(tsVector)
+          val valueVector = next.vectorPtr(rv.valueColID)
+          val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
+          windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        } catch {
+          case e: Throwable => {
+            ChunkSetInfo.log.error(s"Corrupt vector at ${java.lang.Long.toHexString(tsVector)}", e)
+          }
+        }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }

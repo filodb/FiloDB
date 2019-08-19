@@ -20,7 +20,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     Seq("someStr:string", "tags:map"),
     Seq("timestamp:ts", "value:double"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
-    DatasetOptions(Seq("__name__", "job"), "__name__"),
+    DatasetOptions(Seq("__name__", "job"), "__name__", true),
     dsSchema = Some("ds")).get
   val promSchema = promDataset.schema
 
@@ -37,7 +37,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
     Seq("name:string", "namespace:string", "instance:string"),
     Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
-    DatasetOptions(Seq("name", "namespace"), "name"),
+    DatasetOptions(Seq("name", "namespace"), "name", true),
     dsSchema = Some("custom2")).get
   val customSchema = customDataset.schema
 

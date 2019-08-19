@@ -75,9 +75,9 @@ extends MemStore with StrictLogging {
   /**
     * WARNING: use only for testing. Not performant
     */
-  def commitIndexForTesting(dataset: DatasetRef): Unit =
+  def refreshIndexForTesting(dataset: DatasetRef): Unit =
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
-      s.commitPartKeyIndexBlocking()
+      s.refreshPartKeyIndexBlocking()
     })
 
   /**
@@ -182,13 +182,13 @@ extends MemStore with StrictLogging {
     }
   }
 
-  def indexNames(dataset: DatasetRef): Iterator[(String, Int)] =
+  def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)] =
     datasets.get(dataset).map { shards =>
-      shards.entrySet.iterator.asScala.flatMap { entry =>
+      shards.entrySet.asScala.flatMap { entry =>
         val shardNum = entry.getKey.toInt
-        entry.getValue.indexNames.map { s => (s, shardNum) }
-      }
-    }.getOrElse(Iterator.empty)
+        entry.getValue.indexNames(limit).map { s => (s, shardNum) }
+      }.toSeq
+    }.getOrElse(Nil)
 
   def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.labelValues(labelName, topK)).getOrElse(Nil)

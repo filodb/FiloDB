@@ -46,7 +46,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
   override def beforeAll(): Unit = {
     memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
-    memStore.commitIndexForTesting(timeseriesDataset.ref)
+    memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }
 
   it ("should read the metadata") {
