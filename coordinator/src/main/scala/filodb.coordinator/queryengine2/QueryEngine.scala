@@ -422,9 +422,9 @@ class QueryEngine(dataset: Dataset,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       lp: RawChunkMeta,
-                                      spreadProvider : SpreadProvider): PlanResult = {
+                                      spreadProvider: SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
-    val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
+    val colName = if (lp.column.isEmpty) dataset.schema.data.valueColName else lp.column
     val colID = dataset.colIDs(colName).get.head
     val renamedFilters = renameMetricFilter(lp.filters)
     val metaExec = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>

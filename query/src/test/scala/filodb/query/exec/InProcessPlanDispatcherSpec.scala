@@ -13,7 +13,7 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.MetricsTestData.{builder, timeseriesDataset}
+import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
@@ -77,10 +77,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader(_, timeseriesSchema))
   val container: RecordContainer = builder.allContainers.head
 
-  val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory, MMD.dataset1.ingestionSchema)
+  val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   val mmdTuples: Stream[Seq[Any]] = MMD.linearMultiSeries().take(100)
   val mmdSomeData: SomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData: Stream[Seq[Any]] = MMD.linearHistSeries().take(100)

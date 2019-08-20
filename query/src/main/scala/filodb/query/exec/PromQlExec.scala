@@ -28,7 +28,7 @@ case class PromQlExec(id: String,
   protected def args: String = params.toString
   import PromQlExec._
 
-  val builder = SerializableRangeVector.toBuilder(recSchema)
+  val builder = SerializableRangeVector.newBuilder()
 
   /**
     * Limit on number of samples returned by this ExecPlan

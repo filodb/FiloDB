@@ -119,7 +119,7 @@ trait ExecPlan extends QueryCommand {
         (transf.apply(dataset, acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-      val builder = SerializableRangeVector.toBuilder(recSchema)
+      val builder = SerializableRangeVector.newBuilder()
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       finalRes._1
         .map {

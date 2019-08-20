@@ -34,7 +34,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   protected val bufferPool = new WriteBufferPool(memFactory, dataset2, TestData.storeConf)
   private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.blockMetaSize, true)
 
-  val builder = new RecordBuilder(memFactory, dataset2.ingestionSchema)
+  val builder = new RecordBuilder(memFactory)
   val partSet = PartitionSet.empty()
 
   before {
@@ -42,12 +42,12 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   }
 
   val tenRecords = withMap(linearMultiSeries(), extraTags=extraTags).take(10)
-  addToBuilder(builder, tenRecords)
+  addToBuilder(builder, tenRecords, schema2)
   val ingestRecordAddrs = builder.allContainers.head.allOffsets
   // println(s"XXX container base = ${builder.allContainers.head.base}")
   // println(s"ingestRecordAddrs=$ingestRecordAddrs")
   // println(s"\n---\n${ingestRecordAddrs.foreach(a => println(dataset2.ingestionSchema.stringify(a)))}")
-  val partKeyBuilder = new RecordBuilder(memFactory, dataset2.partKeySchema)
+  val partKeyBuilder = new RecordBuilder(memFactory)
   ingestRecordAddrs.foreach { addr =>
     dataset2.comparator.buildPartKeyFromIngest(null, addr, partKeyBuilder)
   }

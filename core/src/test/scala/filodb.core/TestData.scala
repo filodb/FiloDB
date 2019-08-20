@@ -10,7 +10,7 @@ import org.joda.time.DateTime
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schema}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
@@ -68,41 +68,41 @@ object TestData {
 object NamesTestData {
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
-  val dataColSpecs = Seq("first:string", "last:string", "age:long:interval=10")
-  val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
+  val dataColSpecs = Seq("age:long:interval=10", "first:string", "last:string")
+  val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, DatasetOptions.DefaultOptions)
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
   // or the data column rowReader
-  val names = Seq((Some("Khalil"),    Some("Mack"),     Some(24L), Some(0)),
-                  (Some("Ndamukong"), Some("Suh"),      Some(28L), Some(0)),
-                  (Some("Rodney"),    Some("Hudson"),   Some(25L), Some(0)),
-                  (Some("Jerry"),     None,             Some(40L), Some(0)),
-                  (Some("Peyton"),    Some("Manning"),  Some(39L), Some(0)),
-                  (Some("Terrance"),  Some("Knighton"), Some(29L), Some(0)))
+  val names = Seq((Some(24L), Some("Khalil"),    Some("Mack"),     Some(0)),
+                  (Some(28L), Some("Ndamukong"), Some("Suh"),      Some(0)),
+                  (Some(25L), Some("Rodney"),    Some("Hudson"),   Some(0)),
+                  (Some(40L), Some("Jerry"),     None,             Some(0)),
+                  (Some(39L), Some("Peyton"),    Some("Manning"),  Some(0)),
+                  (Some(29L), Some("Terrance"),  Some("Knighton"), Some(0)))
 
-  val altNames = Seq((Some("Stacy"),    Some("McGee"),     Some(24L), Some(0)),
-                  (Some("Bruce"),     Some("Irvin"),    Some(28L), Some(0)),
-                  (Some("Amari"),     Some("Cooper"),   Some(25L), Some(0)),
-                  (Some("Jerry"),     None,             Some(40L), Some(0)),
-                  (Some("Derek"),     Some("Carr"),     Some(39L), Some(0)),
-                  (Some("Karl"),      Some("Joseph"),   Some(29L), Some(0)))
+  val altNames = Seq((Some(24L), Some("Stacy"),    Some("McGee"),     Some(0)),
+                     (Some(28L), Some("Bruce"),     Some("Irvin"),    Some(0)),
+                     (Some(25L), Some("Amari"),     Some("Cooper"),   Some(0)),
+                     (Some(40L), Some("Jerry"),     None,             Some(0)),
+                     (Some(39L), Some("Derek"),     Some("Carr"),     Some(0)),
+                     (Some(29L), Some("Karl"),      Some("Joseph"),   Some(0)))
 
   val firstKey = dataset.timestamp(mapper(names).head)
   val lastKey = dataset.timestamp(mapper(names).last)
   def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
 
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects(0)
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset.schema, 0)
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
     TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
 
-  val firstNames = names.map(_._1.get)
+  val firstNames = names.map(_._2.get)
   val utf8FirstNames = firstNames.map(_.utf8)
   val sortedFirstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
   val sortedUtf8Firsts = sortedFirstNames.map(_.utf8)
 
-  val largeDataset = Dataset("dataset", Seq("league:string"), dataColSpecs, "age", DatasetOptions.DefaultOptions)
+  val largeDataset = Dataset("dataset", Seq("league:string"), dataColSpecs, DatasetOptions.DefaultOptions)
 
   val lotLotNames = {
     for { league <- Seq("nfc", "afc")
@@ -110,8 +110,8 @@ object NamesTestData {
           chunk  <- 0 to numChunks
           startRowNo = numChunks * 10000 + chunk * 100
           rowNo  <- startRowNo to (startRowNo + 99) }
-    yield { (names(rowNo % 6)._1, names(rowNo % 6)._2,
-             Some(rowNo.toLong),             // the unique row key
+    yield { (Some(rowNo.toLong),             // the unique row key
+             names(rowNo % 6)._1, names(rowNo % 6)._2,
              Some(rowNo / 10000 * 10000),    // the segment key
              Some(league)) }                 // partition key
   }
@@ -144,9 +144,9 @@ object GdeltTestData {
 
   // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
     val routing = ds.ingestRouting(columnNames)
-    readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing)) }
+    readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing), ds.schema) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
@@ -156,7 +156,7 @@ object GdeltTestData {
   }
 
   def partKeyFromRecords(ds: Dataset, records: SomeData, builder: Option[RecordBuilder] = None): Seq[Long] = {
-    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem, ds.partKeySchema))
+    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem))
     records.records.map { case (base, offset) =>
       ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
     }.toVector
@@ -180,25 +180,23 @@ object GdeltTestData {
   }
   val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
-  // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID
-  val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), "GLOBALEVENTID", DatasetOptions.DefaultOptions)
+  // NOTE: For all datasets the row key is GLOBALEVENTID
+  // Dataset1: Partition keys (Actor2Code, Year)
+  val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), DatasetOptions.DefaultOptions)
+  val schema1 = dataset1.schema
 
-  // Dataset2: Partition key (MonthYear) / Row keys (GLOBALEVENTID, Actor2Code)
-  val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1), Seq("GLOBALEVENTID", "Actor2Code"))
-  val partBuilder2 = new RecordBuilder(TestData.nativeMem, dataset2.partKeySchema, 10240)
+  // Dataset2: Partition key (MonthYear)
+  val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1))
+  val schema2 = dataset2.schema
+  val partBuilder2 = new RecordBuilder(TestData.nativeMem, 10240)
 
   // Dataset3: same as Dataset1 for now
   val dataset3 = dataset1
 
-  // Dataset4: One big partition (Year) with (Actor2Code, GLOBALEVENTID) rowkey
-  // to easily test row key scans
-  // val dataset4 = Dataset("gdelt", Seq(schema(3)), schema.patch(3, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
-  // val partBuilder4 = new RecordBuilder(TestData.nativeMem, dataset4.partKeySchema, 10240)
-
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
   val datasetOptions = DatasetOptions.DefaultOptions.copy(
     shardKeyColumns = Seq( "__name__","_ns"))
-  val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID", datasetOptions)
+  val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), datasetOptions)
 
   val datasetOptionConfig = """
     options {
@@ -233,14 +231,15 @@ object MachineMetricsData {
 
   // Dataset1: Partition keys (series) / Row key timestamp
   val dataset1 = Dataset("metrics", Seq("series:string"), columns)
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset1.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects("series0")
+  val schema1 = dataset1.schema
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
   def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
     stream.foreach { row =>
-      builder.startNewRecord()
+      builder.startNewRecord(ds.schema)
       row.foreach { thing => builder.addSlowly(thing) }
       builder.endRecord()
     }
@@ -255,7 +254,7 @@ object MachineMetricsData {
   // Works with linearMultiSeries() or multiSeriesData()
   def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
     val rawPartKey = stream(keyRecord)(5)
-    val partKey = partKeyBuilder.addFromObjects(rawPartKey)
+    val partKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, rawPartKey)
     TestData.toChunkSetStream(dataset1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
   }
 
@@ -283,9 +282,9 @@ object MachineMetricsData {
     }
   }
 
-  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]]): Unit = {
+  def addToBuilder(builder: RecordBuilder, data: Seq[Seq[Any]], schema: Schema = dataset1.schema): Unit = {
     data.foreach { values =>
-      builder.startNewRecord()
+      builder.startNewRecord(schema)
       builder.addLong(values(0).asInstanceOf[Long])     // timestamp
       builder.addDouble(values(1).asInstanceOf[Double])  // min
       builder.addDouble(values(2).asInstanceOf[Double])  // avg
@@ -305,6 +304,7 @@ object MachineMetricsData {
   }
 
   val dataset2 = Dataset("metrics", Seq("series:string", "tags:map"), columns)
+  val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
     data.zipWithIndex.map { case (row, idx) => row :+ (Map("n".utf8 -> (idx % n).toString.utf8) ++ extraTags) }
@@ -343,10 +343,8 @@ object MachineMetricsData {
     }
   }
 
-  val histMaxDS = Dataset.make("histmax", Seq("tags:map"),
-                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"),
-                          Seq("timestamp"),
-                          options = DatasetOptions.DefaultOptions).get
+  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max column before h/hist
@@ -361,8 +359,8 @@ object MachineMetricsData {
       ((row take 3) :+ max) ++ (row drop 3)
     }
 
-  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, histDataset.partKeySchema, 2048)
-  val histPartKey = histKeyBuilder.addFromObjects(extraTags)
+  val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
   private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
@@ -399,7 +397,6 @@ object MachineMetricsData {
 
 // A simulation of custom machine metrics data - for testing extractTimeBucket
 object CustomMetricsData {
-
   val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
 
   //Partition Key with multiple string columns
@@ -407,22 +404,21 @@ object CustomMetricsData {
   val metricdataset = Dataset.make("tsdbdata",
                         partitionColumns,
                         columns,
-                        Seq("timestamp"),
                         Seq.empty,
-                        options = DatasetOptions(Seq("metric", "_ns"), "metric", "count", true)).get
-  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
+                        DatasetOptions(Seq("metric", "_ns"), "metric", true)).get
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
   //Partition Key with single map columns
   val partitionColumns2 = Seq("tags:map")
   val metricdataset2 = Dataset.make("tsdbdata",
                         partitionColumns2,
                         columns,
-                        Seq("timestamp"),
                         Seq.empty,
-                        options = DatasetOptions(Seq("__name__"), "__name__", "count", true)).get
-  val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
-  val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
+                        DatasetOptions(Seq("__name__"), "__name__", true)).get
+  val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
+  val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
+                                                           Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
 
 }
 
@@ -430,19 +426,18 @@ object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
-                                  Seq("timestamp"),
                                   Seq.empty,
-                                  options = DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+                                  DatasetOptions(Seq("__name__", "job"), "__name__")).get
+  val timeseriesSchema = timeseriesDataset.schema
 
   val downsampleDataset = Dataset.make("tsdbdata",
     Seq("tags:map"),
     Seq("timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double"),
-    Seq("timestamp"),
     Seq.empty,
-    options = DatasetOptions(Seq("__name__"), "__name__", "average", true)
+    options = DatasetOptions(Seq("__name__"), "__name__", true)
   ).get
 
-  val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
+  val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
   final case class TagsRowReader(tags: Map[String, String]) extends SchemaRowReader {
     val extractors = Array[RowReader.TypedFieldExtractor[_]](ColumnType.MapColumn.keyType.extractor)

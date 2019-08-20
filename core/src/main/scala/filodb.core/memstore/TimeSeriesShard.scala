@@ -39,6 +39,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val oldContainers = Kamon.counter("memstore-incompatible-containers").refine(tags)
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").refine(tags)
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
@@ -267,8 +268,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
-  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
-    reuseOneContainer = true)
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
   private[memstore] val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig)
 
@@ -327,7 +327,8 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * Helper for downsampling ingested data for long term retention.
     */
-  private final val shardDownsampler = new ShardDownsampler(dataset, shardNum, downsampleConfig.enabled,
+  private final val shardDownsampler = new ShardDownsampler(dataset.name, shardNum,
+    dataset.schema, dataset.schema.downsample.getOrElse(dataset.schema), downsampleConfig.enabled,
     downsampleConfig.resolutions, downsamplePublisher, shardStats)
 
   private[memstore] val evictedPartKeys =
@@ -392,7 +393,6 @@ class TimeSeriesShard(val dataset: Dataset,
   class IngestConsumer(var numActuallyIngested: Int = 0, var ingestOffset: Long = -1L) extends BinaryRegionConsumer {
     // Receives a new ingestion BinaryRecord
     final def onNext(recBase: Any, recOffset: Long): Unit = {
-      assertThreadName(IngestSchedName)
       val group = partKeyGroup(ingestSchema, recBase, recOffset, numGroups)
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
@@ -424,14 +424,20 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   def ingest(container: RecordContainer, offset: Long): Long = {
     assertThreadName(IngestSchedName)
-    ingestConsumer.numActuallyIngested = 0
-    ingestConsumer.ingestOffset = offset
-    binRecordReader.recordBase = container.base
-    container.consumeRecords(ingestConsumer)
-    shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
-    shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
-    ingested += ingestConsumer.numActuallyIngested
-    if (!container.isEmpty) _offset = offset
+    if (container.isCurrentVersion) {
+      if (!container.isEmpty) {
+        ingestConsumer.numActuallyIngested = 0
+        ingestConsumer.ingestOffset = offset
+        binRecordReader.recordBase = container.base
+        container.consumeRecords(ingestConsumer)
+        shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
+        shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
+        ingested += ingestConsumer.numActuallyIngested
+        _offset = offset
+      }
+    } else {
+      shardStats.oldContainers.increment
+    }
     _offset
   }
 
@@ -751,7 +757,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    indexRb.startNewRecord()
+    indexRb.startNewRecord(indexTimeBucketSchema, 0)
     indexRb.addLong(startTime)
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
@@ -896,7 +902,7 @@ class TimeSeriesShard(val dataset: Dataset,
       timeBucketBitmaps.remove(earliestTimeBucket)
 
       /* create time bucket using record builder */
-      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSegmentSize)
       InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
         addPartKeyToTimebucketRb(cmd.timeBucket, timeBucketRb, p)
       }
@@ -1025,7 +1031,6 @@ class TimeSeriesShard(val dataset: Dataset,
   // scalastyle:off null
   private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, ingestOffset: Long) = {
-    assertThreadName(IngestSchedName)
     var part = partSet.getWithIngestBR(recordBase, recordOff, dataset)
     if (part == null) {
       part = addPartitionForIngestion(recordBase, recordOff, group)

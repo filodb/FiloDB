@@ -142,10 +142,12 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
+  import com.softwaremill.quicklens._
+
   it("should rename Prom __name__ filters if dataset has different metric column") {
     // Custom QueryEngine with different dataset with different metric name
-    val dataset2 = dataset.copy(options = dataset.options.copy(
-      metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
+    val datasetOpts = dataset.options.copy(metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job"))
+    val dataset2 = dataset.modify(_.schema.partition.options).setTo(datasetOpts)
     val engine2 = new QueryEngine(dataset2, mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
