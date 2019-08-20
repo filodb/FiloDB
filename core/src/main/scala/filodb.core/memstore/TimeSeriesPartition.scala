@@ -114,9 +114,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * If ingesting a new row causes WriteBuffers to overflow, then the current chunks are encoded, a new set
    * of appending chunks are obtained, and we re-ingest into the new chunks.
    *
+   * @param ingestionTime time (as milliseconds from 1970) at the data source
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = dataset.timestamp(row)
     if (ts < timestampOfLatestSample) {
@@ -125,7 +126,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     }
 
     val newChunk = currentChunks == nullChunks
-    if (newChunk) initNewChunk(ts)
+    if (newChunk) initNewChunk(ts, ingestionTime)
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -134,7 +135,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
           // So we do not call ingest again unless switcing buffers succeeds.
           // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode = true)) { ingest(row, blockHolder) }
+          if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder) }
           else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
                            s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
@@ -152,13 +153,13 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     }
   }
 
-  protected def initNewChunk(ts: Long): Unit = {
+  protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
     // First row of a chunk, set the start time to it
     val (infoAddr, newAppenders) = bufferPool.obtain()
-    val currentChunkID = chunkID(ts)
+    val currentChunkID = chunkID(startTime, ingestionTime / 1000) // convert to seconds
     ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
     ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-    ChunkSetInfo.setStartTime(infoAddr, ts)
+    ChunkSetInfo.setStartTime(infoAddr, startTime)
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
     // Don't publish the new chunk just yet. Wait until it has one row.
@@ -241,8 +242,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
         ChunkSet(info, partitionKey, Nil,
                  (0 until numColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
-                 // NOTE: by using a method instead of closure, we allocate less
-                 updateFlushedID)
+                 info => updateFlushedID(info))
       }
   }
 
@@ -429,11 +429,12 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
 
   _log.debug(s"Creating TracingTimeSeriesPartition: dataset=${dataset.ref} partId=$partID $stringPartition")
 
-  override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = dataset.timestamp(row)
-    _log.debug(s"Ingesting dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition ts=$ts " +
+    _log.debug(s"Ingesting dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition " +
+               s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until dataset.dataColumns.length).map(row.getAny).mkString("[", ",", "]"))
-    super.ingest(row, blockHolder)
+    super.ingest(ingestionTime, row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
@@ -442,9 +443,10 @@ TimeSeriesPartition(partID, dataset, partitionKey, shard, bufferPool, shardStats
     super.switchBuffers(blockHolder, encode)
   }
 
-  override protected def initNewChunk(ts: Long): Unit = {
-    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
-    super.initNewChunk(ts)
+  override protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
+    _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - " +
+               s"initNewChunk($startTime, $ingestionTime)")
+    super.initNewChunk(startTime, ingestionTime)
     _log.debug(s"dataset=${dataset.ref} shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
                s"${currentInfo.debugString}")
   }

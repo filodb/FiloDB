@@ -98,19 +98,17 @@ package object store {
    * no wraparound in the middle of the day (full binary encoding supports 48.545 days)
    *
    * @param startTime milliseconds since 1970
+   * @param ingestionTime seconds since 1970
    */
-  @inline final def chunkID(startTime: Long): Long =
-    chunkID(startTime, System.currentTimeMillis() / 1000)
-
-  @inline final def chunkID(startTime: Instant, ingestionTime: Instant): Long =
-    chunkID(startTime.toEpochMilli(), ingestionTime.getEpochSecond())
+  @inline final def chunkID(startTime: Long, ingestionTime: Long): Long =
+    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60))
 
   /**
    * @param startTime milliseconds since 1970
    * @param ingestionTime seconds since 1970
    */
-  @inline final def chunkID(startTime: Long, ingestionTime: Long): Long =
-    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60))
+  @inline final def chunkID(startTime: Instant, ingestionTime: Instant): Long =
+    chunkID(startTime.toEpochMilli(), ingestionTime.getEpochSecond())
 
   /**
    * Returns the start time portion of the chunk ID, as milliseconds from 1970.
