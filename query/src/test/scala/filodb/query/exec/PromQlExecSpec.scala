@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
@@ -12,13 +13,10 @@ import filodb.query
 import filodb.query.{Data, PromQlInvocationParams, QueryResponse, QueryResult, Sampl}
 
 class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
-
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),
-    Seq("timestamp"),
-    Seq.empty,
-    DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+    options = DatasetOptions(Seq("__name__", "job"), "__name__")).get
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
@@ -28,7 +26,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
-    val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams("", "", 0, 0 , 0))
+    val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams(ConfigFactory.empty(), "", 0, 0 , 0))
     val result = query.Result (Map("instance" ->"inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))), None)
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id")
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -41,7 +39,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should convert vector Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0))
-    val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams("", "", 0, 0 , 0))
+    val exec = PromQlExec("test", dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams(ConfigFactory.empty(), "", 0, 0 , 0))
     val result = query.Result (Map("instance" ->"inst1"), None, Some(Sampl(1000, 1)))
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id")
     res.isInstanceOf[QueryResult] shouldEqual true

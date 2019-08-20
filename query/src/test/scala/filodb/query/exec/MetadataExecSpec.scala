@@ -50,7 +50,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
   partTagsUTF8s.map( partTagsUTF8 => tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }
-    .foreach(builder.addFromReader))
+    .foreach(builder.addFromReader(_, timeseriesSchema)))
   val container = builder.allContainers.head
 
   implicit val execTimeout = 5.seconds

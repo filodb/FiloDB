@@ -19,7 +19,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import Filter._
 
   val keyIndex = new PartKeyLuceneIndex(dataset6, 0, TestData.storeConf)
-  val partBuilder = new RecordBuilder(TestData.nativeMem, dataset6.partKeySchema)
+  val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(dataset: Dataset,
                    base: Any,

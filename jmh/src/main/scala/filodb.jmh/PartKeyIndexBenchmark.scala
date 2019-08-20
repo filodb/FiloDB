@@ -25,7 +25,7 @@ class PartKeyIndexBenchmark {
   val partKeyIndex = new PartKeyLuceneIndex(dataset, 0, TestData.storeConf)
   val numSeries = 1000000
   val partKeyData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
-  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema)
+  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   partKeyData.foreach(_.addToBuilder(partKeyBuilder))
 
   var partId = 1

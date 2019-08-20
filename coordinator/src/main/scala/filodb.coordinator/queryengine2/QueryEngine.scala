@@ -3,7 +3,7 @@ package filodb.coordinator.queryengine2
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory}
@@ -82,13 +82,10 @@ class QueryEngine(dataset: Dataset,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
-          val endpoint = queryEngineConfig.isEmpty() match {
-            case false => queryEngineConfig.getString("routing.buddy.http.endpoint")
-            case _     => ""
-          }
-
-          val promQlInvocationParams = PromQlInvocationParams(endpoint, queryParams.promQl, (timeRange.startInMillis
-            /1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread, false)
+          val routingConfig = queryEngineConfig.getConfig("routing")
+          val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
+            (timeRange.startInMillis / 1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread,
+            false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
           PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
       }
@@ -425,9 +422,9 @@ class QueryEngine(dataset: Dataset,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       lp: RawChunkMeta,
-                                      spreadProvider : SpreadProvider): PlanResult = {
+                                      spreadProvider: SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
-    val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
+    val colName = if (lp.column.isEmpty) dataset.schema.data.valueColName else lp.column
     val colID = dataset.colIDs(colName).get.head
     val renamedFilters = renameMetricFilter(lp.filters)
     val metaExec = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>

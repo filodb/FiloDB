@@ -56,10 +56,10 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader(_, timeseriesSchema))
   val container = builder.allContainers.head
 
-  val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory, MMD.dataset1.ingestionSchema)
+  val mmdBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   val mmdTuples = MMD.linearMultiSeries().take(100)
   val mmdSomeData = MMD.records(MMD.dataset1, mmdTuples)
   val histData = MMD.linearHistSeries().take(100)

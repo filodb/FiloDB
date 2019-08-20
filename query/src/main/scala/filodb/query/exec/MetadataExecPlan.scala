@@ -140,12 +140,9 @@ final case class PartKeysExec(id: String,
     * Schema of QueryResponse returned by running execute()
     */
   def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    val partKeyResultSchema = new ResultSchema(dataset.partitionColumns.map(c=>ColumnInfo(c.name, c.columnType)),
-                                               dataset.partitionColumns.length)
     new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
-      Map(0->partKeyResultSchema.columns.map(c => ColumnInfo(c.name, c.colType))))
+                     Map(0 -> dataset.partKeySchema))
   }
-
 }
 
 final case class  LabelValuesExec(id: String,

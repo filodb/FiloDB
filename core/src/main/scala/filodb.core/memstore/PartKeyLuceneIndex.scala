@@ -28,7 +28,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
 import filodb.core.store.StoreConfig
-import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
+import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
@@ -103,8 +103,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
   private val mapConsumer = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
       import filodb.core._
-      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 2,
-                                                           UTF8StringMedium.numBytes(keyBase, keyOffset)),
+      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 1,
+                                                           UTF8StringShort.numBytes(keyBase, keyOffset)),
                                                _.toString)
       val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
                                unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes

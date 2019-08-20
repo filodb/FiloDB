@@ -5,8 +5,9 @@ import akka.testkit.TestProbe
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-
 import scala.concurrent.duration.FiniteDuration
+
+import com.typesafe.config.ConfigFactory
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
@@ -16,7 +17,7 @@ import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query
-import filodb.query.{_}
+import filodb.query._
 import filodb.query.exec._
 
 class QueryEngineSpec extends FunSpec with Matchers {
@@ -38,6 +39,9 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
   val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
 
+  val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+
+  val queryEngineConfig = ConfigFactory.parseString(queryEngineConfigString)
   /*
   This is the PromQL
 
@@ -138,10 +142,12 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
+  import com.softwaremill.quicklens._
+
   it("should rename Prom __name__ filters if dataset has different metric column") {
     // Custom QueryEngine with different dataset with different metric name
-    val dataset2 = dataset.copy(options = dataset.options.copy(
-      metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
+    val datasetOpts = dataset.options.copy(metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job"))
+    val dataset2 = dataset.modify(_.schema.partition.options).setTo(datasetOpts)
     val engine2 = new QueryEngine(dataset2, mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
@@ -295,7 +301,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -320,7 +326,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
@@ -367,7 +373,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -390,7 +396,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -413,7 +419,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -441,7 +447,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
     //900K to 1020K and 1020+60 k to 2000K
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
@@ -493,7 +499,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -525,7 +531,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
@@ -563,7 +569,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
