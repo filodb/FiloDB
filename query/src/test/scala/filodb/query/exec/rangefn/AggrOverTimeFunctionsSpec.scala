@@ -50,7 +50,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   def timeValueRV(tuples: Seq[(Long, Double)]): RawDataRangeVector = {
     val part = TimeSeriesPartitionSpec.makePart(0, timeseriesDataset, bufferPool = tsBufferPool)
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(row, ingestBlockHolder) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
@@ -63,7 +63,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val readers = tuples.map { case (ts, d1, d2, d3, d4, d5) =>
       TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
     }
-    readers.foreach { row => part.ingest(row, ingestBlockHolder2) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder2) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(ingestBlockHolder2, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
@@ -80,7 +80,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val part = rv.partition.asInstanceOf[TimeSeriesPartition]
     val startingNumChunks = part.numChunks
     val readers = tuples.map { case (ts, d) => TupleRowReader((Some(ts), Some(d))) }
-    readers.foreach { row => part.ingest(row, ingestBlockHolder) }
+    readers.foreach { row => part.ingest(0, row, ingestBlockHolder) }
     part.switchBuffers(ingestBlockHolder, encode = true)
     part.numChunks shouldEqual (startingNumChunks + 1)
   }

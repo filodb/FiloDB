@@ -6,7 +6,7 @@ import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.core.metadata.Column
-import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
+import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
@@ -436,7 +436,14 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getString(columnNo: Int): String = filoUTF8String(columnNo).toString
   override def getHistogram(columnNo: Int): bv.Histogram =
     bv.BinaryHistogram.BinHistogram(blobAsBuffer(columnNo)).toHistogram
-  def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
+
+  // getAny is not used for anything fast, and we can make sure Map items are returned correctly
+  def getAny(columnNo: Int): Any = schema.columnTypes(columnNo) match {
+    case MapColumn => val consumer = new StringifyMapItemConsumer
+                      schema.consumeMapItems(recordBase, recordOffset, columnNo, consumer)
+                      consumer.stringPairs.toMap
+    case _: Any    => schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
+  }
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 
   def getBlobBase(columnNo: Int): Any = schema.blobBase(recordBase, recordOffset, columnNo)

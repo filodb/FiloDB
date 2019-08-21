@@ -110,9 +110,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * If ingesting a new row causes WriteBuffers to overflow, then the current chunks are encoded, a new set
    * of appending chunks are obtained, and we re-ingest into the new chunks.
    *
+   * @param ingestionTime time (as milliseconds from 1970) at the data source
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = row.getLong(0)
     if (ts < timestampOfLatestSample) {
@@ -121,7 +122,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     }
 
     val newChunk = currentChunks == nullChunks
-    if (newChunk) initNewChunk(ts)
+    if (newChunk) initNewChunk(ts, ingestionTime)
 
     for { col <- 0 until schema.numDataColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -130,7 +131,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
           // So we do not call ingest again unless switcing buffers succeeds.
           // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode = true)) { ingest(row, blockHolder) }
+          if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder) }
           else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
                            s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
           return
@@ -149,20 +150,20 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   }
 
   // Alternative API intended solely for TimeSeriesShard ingestion from RecordContainers
-  private[core] def ingest(recordBase: Any, recordOff: Long, blockHolder: BlockMemFactory): Unit = {
+  private[core] def ingest(ingestTime: Long, recordBase: Any, recordOff: Long, blockHolder: BlockMemFactory): Unit = {
     val reader = schema.brRowReader
     reader.recordBase = recordBase
     reader.recordOffset = recordOff
-    ingest(reader, blockHolder)
+    ingest(ingestTime, reader, blockHolder)
   }
 
-  protected def initNewChunk(ts: Long): Unit = {
+  protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
     // First row of a chunk, set the start time to it
     val (infoAddr, newAppenders) = bufferPool.obtain()
-    val currentChunkID = chunkID(ts)
+    val currentChunkID = chunkID(startTime, ingestionTime / 1000) // convert to seconds
     ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
     ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-    ChunkSetInfo.setStartTime(infoAddr, ts)
+    ChunkSetInfo.setStartTime(infoAddr, startTime)
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
     // Don't publish the new chunk just yet. Wait until it has one row.
@@ -245,8 +246,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
         ChunkSet(info, partitionKey, Nil,
                  (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
-                 // NOTE: by using a method instead of closure, we allocate less
-                 updateFlushedID)
+                 info => updateFlushedID(info))
       }
   }
 
@@ -432,27 +432,28 @@ class TracingTimeSeriesPartition(partID: Int,
 TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
 
-  val schName = schema.name
-  _log.debug(s"Creating TracingTimeSeriesPartition: dataset=$ref schema=$schName partId=$partID $stringPartition")
+  _log.debug(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
 
-  override def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
     val ts = row.getLong(0)
-    _log.debug(s"Ingesting dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition ts=$ts " +
+    _log.debug(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
+               s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
-    super.ingest(row, blockHolder)
+    super.ingest(ingestionTime, row, blockHolder)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"SwitchBuffers dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - " +
+    _log.debug(s"SwitchBuffers dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"encode=$encode for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
   }
 
-  override protected def initNewChunk(ts: Long): Unit = {
-    _log.debug(s"dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - initNewChunk($ts)")
-    super.initNewChunk(ts)
-    _log.debug(s"dataset=$ref schema=$schName shard=$shard partId=$partID $stringPartition - newly created ChunkInfo " +
-               s"${currentInfo.debugString}")
+  override protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
+    _log.debug(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
+               s"initNewChunk($startTime, $ingestionTime)")
+    super.initNewChunk(startTime, ingestionTime)
+    _log.debug(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
+               s"newly created ChunkInfo ${currentInfo.debugString}")
   }
 }
 

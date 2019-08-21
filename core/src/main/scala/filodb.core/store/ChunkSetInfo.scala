@@ -38,10 +38,11 @@ object ChunkSet {
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(schema: DataSchema, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
+  def apply(schema: DataSchema, part: PartitionKey, ingestionTime: Long,
+            rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = rows.head.getLong(0)
-    val info = ChunkSetInfo(factory, schema, chunkID(startTime), rows.length,
+    val info = ChunkSetInfo(factory, schema, chunkID(startTime, ingestionTime), rows.length,
                             startTime,
                             rows.last.getLong(0))
     val filoSchema = Column.toFiloSchema(schema.columns)

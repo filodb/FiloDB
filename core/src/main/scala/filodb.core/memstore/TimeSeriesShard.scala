@@ -401,7 +401,8 @@ class TimeSeriesShard(ref: DatasetRef,
 
   // RECOVERY: Check the watermark for the group that this record is part of.  If the ingestOffset is < watermark,
   // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
-  class IngestConsumer(var numActuallyIngested: Int = 0,
+  class IngestConsumer(var ingestionTime: Long = 0,
+                       var numActuallyIngested: Int = 0,
                        var ingestOffset: Long = -1L) extends BinaryRegionConsumer {
     // Receives a new ingestion BinaryRecord
     final def onNext(recBase: Any, recOffset: Long): Unit = {
@@ -423,7 +424,7 @@ class TimeSeriesShard(ref: DatasetRef,
             case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
           }
         } else {
-          getOrAddPartitionAndIngest(recBase, recOffset, group, schema)
+          getOrAddPartitionAndIngest(ingestionTime, recBase, recOffset, group, schema)
           numActuallyIngested += 1
         }
       } else {
@@ -444,6 +445,7 @@ class TimeSeriesShard(ref: DatasetRef,
     assertThreadName(IngestSchedName)
     if (container.isCurrentVersion) {
       if (!container.isEmpty) {
+        ingestConsumer.ingestionTime = container.timestamp
         ingestConsumer.numActuallyIngested = 0
         ingestConsumer.ingestOffset = offset
         container.consumeRecords(ingestConsumer)
@@ -1161,7 +1163,9 @@ class TimeSeriesShard(ref: DatasetRef,
     * @param recordOff the offset of the ingestion BinaryRecord
     * @param group the group number, from abs(record.partitionHash % numGroups)
     */
-  def getOrAddPartitionAndIngest(recordBase: Any, recordOff: Long, group: Int, schema: Schema): Unit = {
+  def getOrAddPartitionAndIngest(ingestionTime: Long,
+                                 recordBase: Any, recordOff: Long,
+                                 group: Int, schema: Schema): Unit = {
     assertThreadName(IngestSchedName)
     try {
       val part: FiloPartition = getOrAddPartitionForIngestion(recordBase, recordOff, group, schema)
@@ -1170,7 +1174,7 @@ class TimeSeriesShard(ref: DatasetRef,
       }
       else {
         val tsp = part.asInstanceOf[TimeSeriesPartition]
-        tsp.ingest(recordBase, recordOff, overflowBlockFactory)
+        tsp.ingest(ingestionTime, recordBase, recordOff, overflowBlockFactory)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
