@@ -259,17 +259,17 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                         columnIDs: Seq[Types.ColumnId],
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val indexTable = getOrCreateIndexTable(dataset.ref)
+    val chunkTable = getOrCreateChunkTable(dataset.ref)
     logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
-    val (filters, indexRecords) = partMethod match {
+    val (filters, infoRecords) = partMethod match {
       case SinglePartitionScan(partition, _) =>
-        (Nil, indexTable.getIndices(partition))
+        (Nil, chunkTable.getInfos(partition))
 
       case MultiPartitionScan(partitions, _) =>
-        (Nil, indexTable.getMultiIndices(partitions))
+        (Nil, chunkTable.getMultiInfos(partitions))
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
-        (filters, indexTable.scanIndices(tokens))
+        (filters, chunkTable.scanInfos(tokens))
 
       case other: PartitionScanMethod =>  ???
     }
@@ -280,28 +280,27 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     partMethod match {
       // Compute minimum start time from index, then do efficient range query MULTIGET
       case MultiPartitionScan(partitions, _) =>
-        val chunkTable = getOrCreateChunkTable(dataset.ref)
-        Observable.fromTask(startTimeFromIndex(indexRecords, chunkMethod.startTime, chunkMethod.endTime))
+        Observable.fromTask(startTimeFromInfo(infoRecords, chunkMethod.startTime, chunkMethod.endTime))
           .flatMap { case startTime =>
             chunkTable.readRawPartitionRange(partitions, columnIDs.toArray, startTime, chunkMethod.endTime)
           }
       case other: PartitionScanMethod =>
         // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
-        indexRecords.sortedGroupBy(_.binPartition.hashCode)
-                    .mapAsync(partParallelism) { case (_, binIndices) =>
-                      val infoBytes = binIndices.map(_.data.array)
-                      assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
-                                          chunkMethod, columnIDs.toArray)
-                    }
+        infoRecords.sortedGroupBy(_.binPartition.hashCode)
+                   .mapAsync(partParallelism) { case (_, binIndices) =>
+                     val infoBytes = binIndices.map(_.data.array)
+                     assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
+                                         chunkMethod, columnIDs.toArray)
+                   }
     }
   }
 
   // Returns the minimum start time from all the ChunkInfos that are within [startTime, endTime) query range
   // Needed so we can do range queries efficiently by chunkID
-  private def startTimeFromIndex(indexRecords: Observable[IndexRecord],
-                                 startTime: Long,
-                                 endTime: Long): Task[Long] = {
-    indexRecords.foldLeftL(Long.MaxValue) { case (curStart, IndexRecord(_, data)) =>
+  private def startTimeFromInfo(infoRecords: Observable[InfoRecord],
+                                startTime: Long,
+                                endTime: Long): Task[Long] = {
+    infoRecords.foldLeftL(Long.MaxValue) { case (curStart, InfoRecord(_, data)) =>
       val infoStartTime = ChunkSetInfo.getStartTime(data.array)
       val infoEndTime = ChunkSetInfo.getEndTime(data.array)
       if (infoStartTime <= endTime && infoEndTime >= startTime) {

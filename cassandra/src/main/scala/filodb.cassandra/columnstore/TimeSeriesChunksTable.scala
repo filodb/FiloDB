@@ -12,6 +12,12 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store._
+import filodb.memory.format.UnsafeUtils
+
+// Typical record read from serialized incremental index (ChunkInfo + Skips) entries
+case class InfoRecord(binPartition: ByteBuffer, data: ByteBuffer) {
+  def partBaseOffset: (Any, Long, Int) = UnsafeUtils.BOLfromBuffer(binPartition)
+}
 
 /**
  * Represents the table which holds the actual columnar chunks, but
@@ -121,6 +127,40 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     Observable.fromFuture(futRawParts).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) }
   }
 
+  // Queries for selecting InfoRecords.
+  val selectCql = s"SELECT partition, info FROM $tableString WHERE "
+  lazy val allPartReadCql = session.prepare(selectCql + "partition = ?")
+  lazy val inPartReadCql = session.prepare(selectCql + "partition IN ?")
+
+  def fromRow(row: Row): InfoRecord = InfoRecord(row.getBytes("partition"), row.getBytes("info"))
+
+  /**
+   * Retrieves all indices from a single partition.
+   */
+  def getInfos(binPartition: Array[Byte]): Observable[InfoRecord] = {
+    val it = session.execute(allPartReadCql.bind(toBuffer(binPartition)))
+                    .asScala.toIterator.map(fromRow)
+    Observable.fromIterator(it).handleObservableErrors
+  }
+
+  def getMultiInfos(partitions: Seq[Array[Byte]]): Observable[InfoRecord] = {
+    val query = inPartReadCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
+    val it = session.execute(query).asScala.toIterator.map(fromRow)
+    Observable.fromIterator(it).handleObservableErrors
+  }
+
+  val tokenQ = "TOKEN(partition)"
+
+  def scanInfos(tokens: Seq[(String, String)]): Observable[InfoRecord] = {
+    def cql(start: String, end: String): String =
+      s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end " +
+      s"ALLOW FILTERING"
+    val it = tokens.iterator.flatMap { case (start, end) =>
+        session.execute(cql(start, end)).iterator.asScala
+               .map { row => fromRow(row) }
+      }
+    Observable.fromIterator(it).handleObservableErrors
+  }
 
   private def compressChunk(orig: ByteBuffer): ByteBuffer =
     if (compressChunks) compress(orig) else orig
