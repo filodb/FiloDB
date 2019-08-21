@@ -1,7 +1,6 @@
 package filodb.core
 
 import java.nio.ByteBuffer
-import java.time.Instant
 
 import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 
@@ -104,13 +103,6 @@ package object store {
     (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60))
 
   /**
-   * @param startTime milliseconds since 1970
-   * @param ingestionTime seconds since 1970
-   */
-  @inline final def chunkID(startTime: Instant, ingestionTime: Instant): Long =
-    chunkID(startTime.toEpochMilli(), ingestionTime.getEpochSecond())
-
-  /**
    * Returns the start time portion of the chunk ID, as milliseconds from 1970.
    */
   @inline final def startTimeFromChunkID(chunkID: Long): Long = chunkID >>> startTimeShift
@@ -118,7 +110,7 @@ package object store {
   /**
    * Returns the ingestion time portion of the chunk ID, as seconds from 1970, modulo 48 days.
    */
-  @inline final def ingestionTimeFromChunkID(chunkID: Long): Long = chunkID & ingestionTimeMask
+  @inline final def modIngestionTimeFromChunkID(chunkID: Long): Long = chunkID & ingestionTimeMask
 
   /**
    * Adds a few useful methods to ChunkSource

@@ -60,7 +60,7 @@ class ChunkSetInfoSpec extends NativeVectorTest {
 
       assert(startTime == startTimeFromChunkID(id))
 
-      val itSeconds = ingestionTimeFromChunkID(id)
+      val itSeconds = modIngestionTimeFromChunkID(id)
       assert(itSeconds == (ingestionTime.getEpochSecond % 4147200))
 
       if ((i % 48) == 0) {
