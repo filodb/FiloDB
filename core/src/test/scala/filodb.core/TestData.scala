@@ -443,6 +443,7 @@ object MetricsTestData {
     Seq.empty,
     options = DatasetOptions(Seq("__name__"), "__name__", true)
   ).get
+  val downsampleSchema = downsampleDataset.schema
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

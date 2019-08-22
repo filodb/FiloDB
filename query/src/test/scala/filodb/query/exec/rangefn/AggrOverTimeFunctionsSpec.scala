@@ -26,8 +26,8 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
 
-  protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleDataset.blockMetaSize, true)
-  protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleDataset, storeConf)
+  protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleSchema.data.blockMetaSize, true)
+  protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()

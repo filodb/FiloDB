@@ -187,7 +187,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
-  val promHistDS = Dataset("histogram", Seq("tags:map"),
+  val promHistDS = Dataset("histogram", Seq("metric:string", "tags:map"),
                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"))
   val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS.schema.data, TestData.storeConf)
 
