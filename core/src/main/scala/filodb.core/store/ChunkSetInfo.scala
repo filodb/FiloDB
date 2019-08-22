@@ -18,10 +18,10 @@ import filodb.memory.format._
   * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
   * Chunk is the unit of encoded data that is stored in memory or in a column store.
   *
-  * @param info          records common metadata about a ChunkSet
-  * @param partition     64-bit native address of the BinaryRecord partition key
+  * @param info      records common metadata about a ChunkSet
+  * @param partition 64-bit native address of the BinaryRecord partition key
   * @param skips
-  * @param chunks        each item in the Seq is a ByteBuffer for the encoded chunks.  First item = data column 0,
+  * @param chunks    each item in the Seq is a ByteBuffer for the encoded chunks.  First item = data column 0,
   *                  second item = data column 1, and so forth
   * @param listener a callback for when that chunkset is successfully flushed
   */
