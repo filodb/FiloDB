@@ -149,14 +149,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     }
   }
 
-  // Alternative API intended solely for TimeSeriesShard ingestion from RecordContainers
-  private[core] def ingest(ingestTime: Long, recordBase: Any, recordOff: Long, blockHolder: BlockMemFactory): Unit = {
-    val reader = schema.brRowReader
-    reader.recordBase = recordBase
-    reader.recordOffset = recordOff
-    ingest(ingestTime, reader, blockHolder)
-  }
-
   protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
     // First row of a chunk, set the start time to it
     val (infoAddr, newAppenders) = bufferPool.obtain()

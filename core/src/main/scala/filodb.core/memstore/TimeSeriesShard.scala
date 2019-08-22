@@ -352,6 +352,8 @@ class TimeSeriesShard(ref: DatasetRef,
     })
   private var evictedPartKeysDisposed = false
 
+  private val brRowReader = new MultiSchemaBRRowReader()
+
   /**
     * Detailed filtered ingestion record logging.  See "trace-filters" StoreConfig setting.  Warning: may blow up
     * logs, use at your own risk.
@@ -448,6 +450,7 @@ class TimeSeriesShard(ref: DatasetRef,
         ingestConsumer.ingestionTime = container.timestamp
         ingestConsumer.numActuallyIngested = 0
         ingestConsumer.ingestOffset = offset
+        brRowReader.recordBase = container.base
         container.consumeRecords(ingestConsumer)
         shardStats.rowsIngested.increment(ingestConsumer.numActuallyIngested)
         shardStats.rowsPerContainer.record(ingestConsumer.numActuallyIngested)
@@ -1174,7 +1177,9 @@ class TimeSeriesShard(ref: DatasetRef,
       }
       else {
         val tsp = part.asInstanceOf[TimeSeriesPartition]
-        tsp.ingest(ingestionTime, recordBase, recordOff, overflowBlockFactory)
+        brRowReader.schema = schema.ingestionSchema
+        brRowReader.recordOffset = recordOff
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {

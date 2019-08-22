@@ -168,7 +168,6 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema
   val options         = partition.options
-  val brRowReader     = new BinaryRecordRowReader(ingestionSchema)
 
   val dataReaders     = data.readers
   val numDataColumns  = data.columns.length

@@ -200,7 +200,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     val initChunksWritten = chunksetsWritten
 
-    // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
     val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)
     val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)
