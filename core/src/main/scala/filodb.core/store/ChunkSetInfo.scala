@@ -18,10 +18,10 @@ import filodb.memory.format._
   * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
   * Chunk is the unit of encoded data that is stored in memory or in a column store.
   *
-  * @param info      records common metadata about a ChunkSet
-  * @param partition 64-bit native address of the BinaryRecord partition key
+  * @param info          records common metadata about a ChunkSet
+  * @param partition     64-bit native address of the BinaryRecord partition key
   * @param skips
-  * @param chunks    each item in the Seq is a ByteBuffer for the encoded chunks.  First item = data column 0,
+  * @param chunks        each item in the Seq is a ByteBuffer for the encoded chunks.  First item = data column 0,
   *                  second item = data column 1, and so forth
   * @param listener a callback for when that chunkset is successfully flushed
   */
@@ -42,9 +42,8 @@ object ChunkSet {
             rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, chunkID(startTime, ingestionTime), rows.length,
-                            startTime,
-                            dataset.timestamp(rows.last))
+    val info = ChunkSetInfo(factory, dataset, chunkID(startTime, ingestionTime), ingestionTime,
+                            rows.length, startTime, dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
     val chunks = dataset.dataColumns.map(c => chunkMap(c.name))
@@ -58,6 +57,8 @@ object ChunkSet {
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
   def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
+  // ingestion time as milliseconds from 1970
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(infoAddr)
   // number of rows encoded by this chunkset
   def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
   // the starting timestamp of this chunkset
@@ -129,18 +130,26 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * ChunkSetInfo metadata schema:
    * +0  long   chunkID
-   * +8  int    # rows in chunkset
-   * +12 long   start timestamp
-   * +20 long   end timestamp
-   * +28 long[] pointers to each vector
+   * +8  long   ingestion time (milliseconds from 1970)
+   * +16 int    # rows in chunkset
+   * +20 long   start timestamp
+   * +28 long   end timestamp
+   * +36 long[] pointers to each vector
    *
    * Note that block metadata has a 4-byte partition ID appended to the front also.
+   *
+   * Note 2: The chunkID is currently defined from the start timestamp and the ingestion time,
+   * and so it can be derived instead of being stored explicitly. The ChunkMap requires that
+   * the chunkID be readily available at offset 0, which is one reason to have it. It's
+   * possible that ChunkMap could call a method instead, but storing the chunkID also offers
+   * flexibility in the future, in case the definition changes.
    */
   val OffsetChunkID = 0
-  val OffsetNumRows = 8
-  val OffsetStartTime = 12
-  val OffsetEndTime = 20
-  val OffsetVectors = 28
+  val OffsetIngestionTime = 8
+  val OffsetNumRows = 16
+  val OffsetStartTime = 20
+  val OffsetEndTime = 28
+  val OffsetVectors = 36
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
@@ -150,6 +159,12 @@ object ChunkSetInfo extends StrictLogging {
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
+
+  def getIngestionTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetIngestionTime)
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+  def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
 
   def getNumRows(infoPointer: NativePointer): Int = UnsafeUtils.getInt(infoPointer + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
@@ -193,9 +208,11 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * Initializes a new ChunkSetInfo with some initial fields
    */
-  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, startTime: Long): ChunkSetInfo = {
+  def initialize(factory: MemFactory, dataset: Dataset,
+                 id: ChunkID, ingestionTime: Long, startTime: Long): ChunkSetInfo = {
     val infoAddr = factory.allocateOffheap(dataset.chunkSetInfoSize)
     setChunkID(infoAddr, id)
+    setIngestionTime(infoAddr, ingestionTime)
     resetNumRows(infoAddr)
     setStartTime(infoAddr, startTime)
     setEndTime(infoAddr, Long.MaxValue)
@@ -203,8 +220,8 @@ object ChunkSetInfo extends StrictLogging {
   }
 
   def apply(factory: MemFactory, dataset: Dataset,
-            id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
-    val newInfo = initialize(factory, dataset, id, startTime)
+            id: ChunkID, ingestionTime: Long, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
+    val newInfo = initialize(factory, dataset, id, ingestionTime, startTime)
     UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
     setEndTime(newInfo.infoAddr, endTime)
     newInfo
