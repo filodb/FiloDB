@@ -130,8 +130,8 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * ChunkSetInfo metadata schema:
    * +0  long   chunkID
-   * +8  long   ingestion time (milliseconds from 1970)
-   * +16 int    # rows in chunkset
+   * +8  int    # rows in chunkset
+   * +12 long   ingestion time (milliseconds from 1970)
    * +20 long   end timestamp
    * +28 long[] pointers to each vector
    *
@@ -140,11 +140,11 @@ object ChunkSetInfo extends StrictLogging {
    * Note 2: The chunkID is defined from the start timestamp, and so the start time doesn't need
    * to be explicitly stored in a separate field.
    */
-  val OffsetChunkID = 0
-  val OffsetIngestionTime = 8
-  val OffsetNumRows = 16
-  val OffsetEndTime = 20
-  val OffsetVectors = 28
+  val OffsetChunkID       = 0
+  val OffsetNumRows       = 8
+  val OffsetIngestionTime = 12
+  val OffsetEndTime       = 20
+  val OffsetVectors       = 28
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
