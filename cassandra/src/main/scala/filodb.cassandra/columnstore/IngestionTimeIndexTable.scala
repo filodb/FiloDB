@@ -19,10 +19,10 @@ case class InfoRecord(binPartition: ByteBuffer, data: ByteBuffer) {
 /**
  * Mapping to chunk set info records using a full ingestion time, positioned in the cluster key
  * before the chunk start time. This makes it possible to find chunks based on the time they
- * were actually ingested, which is useful for performing cross-DC repairs. In addition,
- * queries for all chunk set infos for a given partition are more efficient than using
- * TimeSeriesChunksTable. This is because the chunks are likely to be fetched from Cassandra
- * due to locality when using TimeSeriesChunksTable.
+ * were actually ingested, which is useful for performing cross-DC repairs and downsampling. In
+ * addition, queries for all chunk set infos for a given partition are more efficient than
+ * using TimeSeriesChunksTable. This is because the chunks are likely to be fetched from
+ * Cassandra due to locality when using TimeSeriesChunksTable, and the chunks table is smaller.
  */
 sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
                                     (implicit ec: ExecutionContext) extends BaseDatasetTable {
@@ -86,10 +86,10 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
    * chunk set info bytes
    * @return Success, or an exception as a Future.failure
    */
-  def writeIngestion(partition: Array[Byte],
-                     infos: Seq[(Long, Long, Array[Byte])],
-                     stats: ChunkSinkStats,
-                     diskTimeToLive: Int): Future[Response] = {
+  def writeIndexes(partition: Array[Byte],
+                   infos: Seq[(Long, Long, Array[Byte])],
+                   stats: ChunkSinkStats,
+                   diskTimeToLive: Int): Future[Response] = {
     var infoBytes = 0
     val partitionBuf = toBuffer(partition)
     val statements = infos.map { case (ingestionTime, startTime, info) =>
@@ -100,7 +100,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
                          ByteBuffer.wrap(info),
                          diskTimeToLive: java.lang.Integer)
     }
-    stats.addIngestionWriteStats(infoBytes)
+    stats.addIndexWriteStats(infoBytes)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))
   }
 }

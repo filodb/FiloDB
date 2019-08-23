@@ -64,8 +64,8 @@ class ChunkSinkStats {
   private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call")
   private val chunkLenHist       = Kamon.histogram("chunk-length")
 
-  private val numIngestionWriteCalls = Kamon.counter("ingestion-write-calls-num")
-  private val ingestionBytesHist     = Kamon.histogram("ingestion-bytes-per-call")
+  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num")
+  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
 
   private val chunksetWrites     = Kamon.counter("chunkset-writes")
   var chunksetsWritten = 0
@@ -77,9 +77,9 @@ class ChunkSinkStats {
     chunkLenHist.record(chunkLen)
   }
 
-  def addIngestionWriteStats(infoBytes: Long): Unit = {
-    numIngestionWriteCalls.increment
-    ingestionBytesHist.record(infoBytes)
+  def addIndexWriteStats(indexBytes: Long): Unit = {
+    numIndexWriteCalls.increment
+    indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {

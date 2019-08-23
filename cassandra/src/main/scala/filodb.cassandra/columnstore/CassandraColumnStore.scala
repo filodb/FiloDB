@@ -63,36 +63,36 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
-    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
+    val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.initialize()
-          ingResp   <- ingestionTable.initialize()
-          pitResp   <- partIndexTable.initialize() } yield pitResp
+    for { ctResp   <- chunkTable.initialize()
+          ixResp   <- indexTable.initialize()
+          pitResp  <- partIndexTable.initialize() } yield pitResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
-    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
+    val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.clearAll()
-          ingResp   <- ingestionTable.clearAll()
-          pitResp   <- partIndexTable.clearAll() } yield pitResp
+    for { ctResp   <- chunkTable.clearAll()
+          ixResp   <- indexTable.clearAll()
+          pitResp  <- partIndexTable.clearAll() } yield pitResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
-    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
+    val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.drop() if ctResp == Success
-          ingResp   <- ingestionTable.drop() if ingResp == Success
-          pitResp   <- partIndexTable.drop() if ingResp == Success }
+    for { ctResp   <- chunkTable.drop() if ctResp == Success
+          ixResp   <- indexTable.drop() if ixResp == Success
+          pitResp  <- partIndexTable.drop() if pitResp == Success }
     yield {
       chunkTableCache.remove(dataset)
-      ingestionTableCache.remove(dataset)
+      indexTableCache.remove(dataset)
       partitionIndexTableCache.remove(dataset)
       pitResp
     }
@@ -107,13 +107,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                val span = Kamon.buildSpan("write-chunkset").start()
                val partBytes = dataset.partKeySchema.asByteArray(chunkset.partition)
                val future =
-                 for { writeChunksResp    <- writeChunks(dataset.ref, partBytes, chunkset, diskTimeToLive)
-                       writeIngestionResp <- writeIngestion(dataset, partBytes, chunkset, diskTimeToLive)
-                                             if writeChunksResp == Success
+                 for { writeChunksResp   <- writeChunks(dataset.ref, partBytes, chunkset, diskTimeToLive)
+                       writeIndexesResp  <- writeIndexes(dataset, partBytes, chunkset, diskTimeToLive)
+                                            if writeChunksResp == Success
                  } yield {
                    span.finish()
                    sinkStats.chunksetWrite()
-                   writeIngestionResp
+                   writeIndexesResp
                  }
                Task.fromFuture(future)
              }.takeWhile(_ == Success)
@@ -136,15 +136,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def writeIngestion(dataset: Dataset,
-                             partition: Array[Byte],
-                             chunkset: ChunkSet,
-                             diskTimeToLive: Int): Future[Response] = {
-    asyncSubtrace("write-ingestion", "ingestion") {
+  private def writeIndexes(dataset: Dataset,
+                           partition: Array[Byte],
+                           chunkset: ChunkSet,
+                           diskTimeToLive: Int): Future[Response] = {
+    asyncSubtrace("write-index", "ingestion") {
       val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
       val info = chunkset.info
       val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
-      ingestionTable.writeIngestion(partition, infos, sinkStats, diskTimeToLive)
+      ingestionTable.writeIndexes(partition, infos, sinkStats, diskTimeToLive)
     }
   }
 
@@ -245,7 +245,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
-  val ingestionTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
+  val indexTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
   val partitionIndexTableCache = concurrentCache[DatasetRef, PartitionIndexTable](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
@@ -319,9 +319,9 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   }
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
-    ingestionTableCache.getOrElseUpdate(dataset,
-                                        { (dataset: DatasetRef) =>
-                                          new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
+    indexTableCache.getOrElseUpdate(dataset,
+                                    { (dataset: DatasetRef) =>
+                                      new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
   }
 
   def getOrCreatePartitionIndexTable(dataset: DatasetRef): PartitionIndexTable = {
