@@ -14,6 +14,7 @@ import scalaxy.loops._
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{NibblePack, SeqRowReader}
@@ -69,8 +70,8 @@ class HistogramIngestBenchmark {
   val policy = new FixedMaxPartitionsEvictionPolicy(1000)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 100)
-  memStore.setup(histDataset, 0, ingestConf)
-  memStore.setup(promDataset, 0, ingestConf)
+  memStore.setup(histDataset.ref, Schemas(histDataset.schema), 0, ingestConf)
+  memStore.setup(promDataset.ref, Schemas(promDataset.schema), 0, ingestConf)
 
   val hShard = memStore.getShardE(histDataset.ref, 0)
   val pShard = memStore.getShardE(promDataset.ref, 0)
