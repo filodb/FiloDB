@@ -17,7 +17,7 @@ object LogicalPlanUtil {
     }
   }
 
- private def getLabelFromFilters(filters: Seq[ColumnFilter], metricColumnName: String): Option[Set[String]] = {
+ private def getLabelValueFromFilters(filters: Seq[ColumnFilter], metricColumnName: String): Option[Set[String]] = {
    val matchingFilters = filters.filter(_.column.equals(metricColumnName))
     if (matchingFilters.isEmpty)
       None
@@ -25,32 +25,31 @@ object LogicalPlanUtil {
       Some(getFilterValue(matchingFilters.head.filter))
   }
 
-  def getLabelNameFromLogicalPlan(logicalPlan: LogicalPlan, labelValue: String): Option[Set[String]] = {
+  def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Set[String]] = {
 
     logicalPlan match {
-      case lp: PeriodicSeries => getLabelNameFromLogicalPlan(lp.rawSeries, labelValue)
-      case lp: PeriodicSeriesWithWindowing => getLabelNameFromLogicalPlan(lp.rawSeries, labelValue)
-      case lp: ApplyInstantFunction => getLabelNameFromLogicalPlan(lp.vectors, labelValue)
-      case lp: Aggregate => getLabelNameFromLogicalPlan(lp.vectors, labelValue)
-      case lp: BinaryJoin => val lhs = getLabelNameFromLogicalPlan(lp.lhs, labelValue)
-        val rhs = getLabelNameFromLogicalPlan(lp.rhs, labelValue)
+      case lp: PeriodicSeries => getLabelValueFromLogicalPlan(lp.rawSeries, labelName)
+      case lp: PeriodicSeriesWithWindowing => getLabelValueFromLogicalPlan(lp.rawSeries, labelName)
+      case lp: ApplyInstantFunction => getLabelValueFromLogicalPlan(lp.vectors, labelName)
+      case lp: Aggregate => getLabelValueFromLogicalPlan(lp.vectors, labelName)
+      case lp: BinaryJoin => val lhs = getLabelValueFromLogicalPlan(lp.lhs, labelName)
+        val rhs = getLabelValueFromLogicalPlan(lp.rhs, labelName)
         if (lhs.isEmpty)
           rhs
         else if (rhs.isEmpty)
           lhs
         else
           Some(lhs.get.union(rhs.get))
-      case lp: ScalarVectorBinaryOperation => getLabelNameFromLogicalPlan(lp.vector, labelValue)
-      case lp: ApplyMiscellaneousFunction => getLabelNameFromLogicalPlan(lp.vectors, labelValue)
-      case lp: LabelValues => val label = lp.labelConstraints.filter(_._2.equals(labelValue)).toList
+      case lp: ScalarVectorBinaryOperation => getLabelValueFromLogicalPlan(lp.vector, labelName)
+      case lp: ApplyMiscellaneousFunction => getLabelValueFromLogicalPlan(lp.vectors, labelName)
+      case lp: LabelValues => val label = lp.labelConstraints.filter(_._2.equals(labelName)).toList
                               if (label.isEmpty)
                                 None
                               else
                                 Some(Set(label.head._1))
-      case lp: RawSeries => getLabelFromFilters(lp.filters, labelValue)
-      case lp: RawChunkMeta => getLabelFromFilters(lp.filters, labelValue)
-      case lp: SeriesKeysByFilters => getLabelFromFilters(lp.filters, labelValue)
-      case _ => throw new BadQueryException("Invalid logical plan")
+      case lp: RawSeries => getLabelValueFromFilters(lp.filters, labelName)
+      case lp: RawChunkMeta => getLabelValueFromFilters(lp.filters, labelName)
+      case lp: SeriesKeysByFilters => getLabelValueFromFilters(lp.filters, labelName)
     }
   }
 }
