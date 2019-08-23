@@ -86,7 +86,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
    * chunk set info bytes
    * @return Success, or an exception as a Future.failure
    */
-  def writeIndexes(partition: Array[Byte],
+  def writeIndices(partition: Array[Byte],
                    infos: Seq[(Long, Long, Array[Byte])],
                    stats: ChunkSinkStats,
                    diskTimeToLive: Int): Future[Response] = {

@@ -66,9 +66,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
-    for { ctResp   <- chunkTable.initialize()
-          ixResp   <- indexTable.initialize()
-          pitResp  <- partIndexTable.initialize() } yield pitResp
+    for { ctResp    <- chunkTable.initialize()
+          ixResp    <- indexTable.initialize()
+          pitResp   <- partIndexTable.initialize() } yield pitResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
@@ -77,9 +77,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp   <- chunkTable.clearAll()
-          ixResp   <- indexTable.clearAll()
-          pitResp  <- partIndexTable.clearAll() } yield pitResp
+    for { ctResp    <- chunkTable.clearAll()
+          ixResp    <- indexTable.clearAll()
+          pitResp   <- partIndexTable.clearAll() } yield pitResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
@@ -87,9 +87,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp   <- chunkTable.drop() if ctResp == Success
-          ixResp   <- indexTable.drop() if ixResp == Success
-          pitResp  <- partIndexTable.drop() if pitResp == Success }
+    for { ctResp    <- chunkTable.drop() if ctResp == Success
+          ixResp    <- indexTable.drop() if ixResp == Success
+          pitResp   <- partIndexTable.drop() if pitResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
@@ -108,12 +108,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                val partBytes = dataset.partKeySchema.asByteArray(chunkset.partition)
                val future =
                  for { writeChunksResp   <- writeChunks(dataset.ref, partBytes, chunkset, diskTimeToLive)
-                       writeIndexesResp  <- writeIndexes(dataset, partBytes, chunkset, diskTimeToLive)
+                       writeIndicesResp  <- writeIndices(dataset, partBytes, chunkset, diskTimeToLive)
                                             if writeChunksResp == Success
                  } yield {
                    span.finish()
                    sinkStats.chunksetWrite()
-                   writeIndexesResp
+                   writeIndicesResp
                  }
                Task.fromFuture(future)
              }.takeWhile(_ == Success)
@@ -136,15 +136,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def writeIndexes(dataset: Dataset,
+  private def writeIndices(dataset: Dataset,
                            partition: Array[Byte],
                            chunkset: ChunkSet,
                            diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-index", "ingestion") {
-      val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
+      val indexTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
       val info = chunkset.info
       val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
-      ingestionTable.writeIndexes(partition, infos, sinkStats, diskTimeToLive)
+      indexTable.writeIndices(partition, infos, sinkStats, diskTimeToLive)
     }
   }
 
@@ -260,17 +260,17 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                         columnIDs: Seq[Types.ColumnId],
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
+    val indexTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
     logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
     val (filters, infoRecords) = partMethod match {
       case SinglePartitionScan(partition, _) =>
-        (Nil, ingestionTable.getInfos(partition))
+        (Nil, indexTable.getInfos(partition))
 
       case MultiPartitionScan(partitions, _) =>
-        (Nil, ingestionTable.getMultiInfos(partitions))
+        (Nil, indexTable.getMultiInfos(partitions))
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
-        (filters, ingestionTable.scanInfos(tokens))
+        (filters, indexTable.scanInfos(tokens))
 
       case other: PartitionScanMethod =>  ???
     }
