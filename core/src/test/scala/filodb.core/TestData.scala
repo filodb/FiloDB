@@ -147,13 +147,13 @@ object GdeltTestData {
   // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory)
-    val routing = ds.ingestRouting(columnNames)
+    val routing = ds.schema.ingestRouting(columnNames)
     readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing), ds.schema) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
   def dataRows(ds: Dataset, readerSeq: Seq[RowReader] = readers): Seq[RowReader] = {
-    val routing = ds.dataRouting(columnNames)
+    val routing = ds.schema.dataRouting(columnNames)
     readerSeq.map { r => RoutingRowReader(r, routing) }
   }
 

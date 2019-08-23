@@ -191,6 +191,21 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   }
 
   /**
+   * Given a list of column names representing say CSV columns, returns a routing from each data column
+   * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
+   * over the input RowReader to return data columns corresponding to dataset definition.
+   */
+  def dataRouting(colNames: Seq[String]): Array[Int] =
+    data.columns.map { c => colNames.indexOf(c.name) }.toArray
+
+  /**
+   * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
+   * the input RowReader columns whose names are passed in.
+   */
+  def ingestRouting(colNames: Seq[String]): Array[Int] =
+    dataRouting(colNames) ++ partition.columns.map { c => colNames.indexOf(c.name) }
+
+  /**
    * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
    */
   final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)

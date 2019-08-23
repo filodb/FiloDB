@@ -75,21 +75,6 @@ final case class Dataset(name: String, schema: Schema) {
                           .toOr(One(n)) }
             .combined.badMap(_.toSeq)
 
-  /**
-   * Given a list of column names representing say CSV columns, returns a routing from each data column
-   * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
-   * over the input RowReader to return data columns corresponding to dataset definition.
-   */
-  def dataRouting(colNames: Seq[String]): Array[Int] =
-    dataColumns.map { c => colNames.indexOf(c.name) }.toArray
-
-  /**
-   * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
-   * the input RowReader columns whose names are passed in.
-   */
-  def ingestRouting(colNames: Seq[String]): Array[Int] =
-    dataRouting(colNames) ++ partitionColumns.map { c => colNames.indexOf(c.name) }
-
   /** Returns the Column instance given the ID */
   def columnFromID(columnID: Int): Column =
     if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }

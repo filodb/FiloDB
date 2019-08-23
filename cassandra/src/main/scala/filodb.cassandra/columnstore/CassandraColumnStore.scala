@@ -15,8 +15,8 @@ import monix.reactive.Observable
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
 import filodb.cassandra.Util
 import filodb.core._
-import filodb.core.metadata.Dataset
 import filodb.core.store._
+import filodb.memory.BinaryRegionLarge
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -282,15 +282,14 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
         val chunkTable = getOrCreateChunkTable(ref)
         Observable.fromTask(startTimeFromIndex(indexRecords, chunkMethod.startTime, chunkMethod.endTime))
           .flatMap { case startTime =>
-            chunkTable.readRawPartitionRange(partitions, columnIDs.toArray, startTime, chunkMethod.endTime)
+            chunkTable.readRawPartitionRange(partitions, startTime, chunkMethod.endTime)
           }
       case other: PartitionScanMethod =>
         // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
         indexRecords.sortedGroupBy(_.binPartition.hashCode)
                     .mapAsync(partParallelism) { case (_, binIndices) =>
                       val infoBytes = binIndices.map(_.data.array)
-                      assembleRawPartData(ref, binIndices.head.binPartition.array, infoBytes,
-                                          chunkMethod, columnIDs.toArray)
+                      assembleRawPartData(ref, binIndices.head.binPartition.array, infoBytes, chunkMethod)
                     }
     }
   }
@@ -333,8 +332,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   private def assembleRawPartData(ref: DatasetRef,
                                   partKeyBytes: Array[Byte],
                                   chunkInfos: Seq[Array[Byte]],
-                                  chunkMethod: ChunkScanMethod,
-                                  columnIds: Array[Types.ColumnId]): Task[RawPartData] = {
+                                  chunkMethod: ChunkScanMethod): Task[RawPartData] = {
     val chunkTable = getOrCreateChunkTable(ref)
 
     val filteredInfos = chunkInfos.filter { infoBytes =>
@@ -342,6 +340,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       ChunkSetInfo.getEndTime(infoBytes) >= chunkMethod.startTime
     }
 
-    chunkTable.readRawPartitionData(partKeyBytes, columnIds, filteredInfos)
+    chunkTable.readRawPartitionData(partKeyBytes, filteredInfos)
   }
 }
