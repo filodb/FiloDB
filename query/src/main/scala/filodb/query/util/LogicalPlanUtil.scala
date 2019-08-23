@@ -42,11 +42,7 @@ object LogicalPlanUtil {
           Some(lhs.get.union(rhs.get))
       case lp: ScalarVectorBinaryOperation => getLabelValueFromLogicalPlan(lp.vector, labelName)
       case lp: ApplyMiscellaneousFunction => getLabelValueFromLogicalPlan(lp.vectors, labelName)
-      case lp: LabelValues => val label = lp.labelConstraints.filter(_._2.equals(labelName)).toList
-                              if (label.isEmpty)
-                                None
-                              else
-                                Some(Set(label.head._1))
+      case lp: LabelValues => lp.labelConstraints.get(labelName).map(Set(_))
       case lp: RawSeries => getLabelValueFromFilters(lp.filters, labelName)
       case lp: RawChunkMeta => getLabelValueFromFilters(lp.filters, labelName)
       case lp: SeriesKeysByFilters => getLabelValueFromFilters(lp.filters, labelName)
