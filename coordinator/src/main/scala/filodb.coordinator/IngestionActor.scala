@@ -362,7 +362,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     logger.info(s"stopIngestion handler done. Ingestion success for dataset=${ref} shard=$shard")
   }
 
-  private def invalid(ref: DatasetRef): Boolean = ref != ref
+  private def invalid(dsRef: DatasetRef): Boolean = dsRef != ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
     logger.error(s"Exception thrown during ingestion stream for dataset=$ref shard=$shard." +

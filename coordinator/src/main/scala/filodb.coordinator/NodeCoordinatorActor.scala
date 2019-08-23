@@ -139,7 +139,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     clusterActor match {
       case Some(nca) =>
         val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
-        logger.info(s"Overriding schemas from settings: this better be a test!")
+        if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
         val props = IngestionActor.props(dataset.ref, schemas, memStore,
                                          source, downsample, storeConf, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")

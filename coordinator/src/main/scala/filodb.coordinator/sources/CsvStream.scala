@@ -81,8 +81,6 @@ class CsvStreamFactory extends IngestionStreamFactory {
  * Either the CSV file has no headers, in which case the column names must be supplied,
  * or you can read the first line and parse the headers and then invoke this class.
  *
- * NOTE: For now, we only work with one schema, so schemas.size == 1
- *
  * @param offset the number of lines to skip; must be >=0 and <= Int.MaxValue or will reset to 0
  */
 private[filodb] class CsvStream(csvReader: CSVReader,
