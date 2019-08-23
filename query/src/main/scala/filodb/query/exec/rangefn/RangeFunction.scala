@@ -369,6 +369,7 @@ object RangeFunction {
     case Some(AvgOverTime)      => () => new AvgOverTimeFunction()
     case Some(StdDevOverTime)   => () => new StdDevOverTimeFunction()
     case Some(StdVarOverTime)   => () => new StdVarOverTimeFunction()
+    case Some(Changes)          => () => new ChangesFunction()
     case _                      => ???
   }
 }

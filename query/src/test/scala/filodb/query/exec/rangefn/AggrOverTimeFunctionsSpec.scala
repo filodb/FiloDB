@@ -290,5 +290,62 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregated5 shouldEqual data.sliding(windowSize, step).map(d => Math.sqrt(stdVar(d drop 1))).toBuffer
     }
   }
+  it("should correctly do changes") {
+    val data = (1 to 5).map(_.toDouble)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+    val windowSize = 100
+    val step = 20
+
+    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 20000, 150000, 30000,
+      new ChangesFunction(), queryConfig)
+    val aggregated = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val expectedResult = List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+    expectedResult shouldEqual (aggregated)
+  }
+
+  it("should correctly do changes when values is NaN") {
+    var data = Seq(Double.NaN, 1d, 2d, 3d, 4d, 5d)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val windowSize = 100
+    val step = 20
+
+    val slidingIt = slidingWindowIt(data, rv, new ChangesFunction(), windowSize, step)
+    val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
+
+  }
+
+
+  it("should yield 0 when changes is done on data having NaN  after a value") {
+    var data = Seq(0, 5, Double.NaN)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val windowSize = 100
+    val step = 20
+
+    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 20000, 150000, 30000,
+      new ChangesFunction(), queryConfig)
+    val aggregated = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val expectedResult = List((100000, 0.0), (120000, 1.0), (140000, 0.0))
+    aggregated shouldEqual (expectedResult)
+
+  }
+
+  it("should yield NaN when changes is done on data having 2 or more consecutive NaN's after a value") {
+    var data = Seq(0, 5, 6, Double.NaN, Double.NaN, Double.NaN, Double.NaN)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    val windowSize = 100
+    val step = 20
+
+    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 10000, 160000, 20000, new ChangesFunction(), queryConfig)
+    val aggregated = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated(6)._2.isNaN shouldEqual(true)
+    aggregated(5)._2.isNaN shouldEqual(true)
+    aggregated(4)._2.isNaN shouldEqual(true)
+    aggregated(3)._2.isNaN shouldEqual(true)
+  }
 
 }

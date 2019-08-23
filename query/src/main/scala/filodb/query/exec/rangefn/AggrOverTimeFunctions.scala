@@ -133,6 +133,45 @@ class SumOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   }
 }
 
+class ChangesFunction(var prev1: Double = Double.NaN, var changes: Double = Double.NaN) extends RangeFunction {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
+    if (!JLDouble.isNaN(row.value)) {
+      val prev = if (window.size >= 2)
+        window(window.size - 2).value
+      else
+        Double.NaN
+      if (changes.isNaN) {
+        changes = 0d
+      }
+      if (row.value != prev && !prev.isNaN) {
+        changes += 1
+      }
+    }
+    else {
+      changes = Double.NaN //Changes should be NaN if row changes to NaN from a non NaN value
+    }
+  }
+
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
+    if (!JLDouble.isNaN(row.value)) {
+      if ( (window.size > 0) && !window.head.value.isNaN && (window.head.value != row.value)) {
+        changes -= 1
+      }
+    }
+  }
+
+  override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+                     sampleToEmit: TransientRow,
+                     queryConfig: QueryConfig): Unit = {
+    if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
+    else {
+      sampleToEmit.setValues(endTimestamp, changes)
+    }
+  }
+}
+
 abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { sum = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
