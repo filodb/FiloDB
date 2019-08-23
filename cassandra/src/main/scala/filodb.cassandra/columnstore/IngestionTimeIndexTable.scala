@@ -24,8 +24,8 @@ case class InfoRecord(binPartition: ByteBuffer, data: ByteBuffer) {
  * TimeSeriesChunksTable. This is because the chunks are likely to be fetched from Cassandra
  * due to locality when using TimeSeriesChunksTable.
  */
-sealed class IngestionTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
-                           (implicit ec: ExecutionContext) extends BaseDatasetTable {
+sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
+                                    (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import scala.collection.JavaConverters._
 
   import filodb.cassandra.Util._
@@ -63,11 +63,9 @@ sealed class IngestionTable(val dataset: DatasetRef, val connector: FiloCassandr
     Observable.fromIterator(it).handleObservableErrors
   }
 
-  val tokenQ = "TOKEN(partition)"
-
   def scanInfos(tokens: Seq[(String, String)]): Observable[InfoRecord] = {
     def cql(start: String, end: String): String =
-      s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end " +
+      s"SELECT * FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
       s"ALLOW FILTERING"
     val it = tokens.iterator.flatMap { case (start, end) =>
         session.execute(cql(start, end)).iterator.asScala

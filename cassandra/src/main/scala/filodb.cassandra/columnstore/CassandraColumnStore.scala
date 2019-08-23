@@ -63,7 +63,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
-    val ingestionTable = getOrCreateIngestionTable(dataset)
+    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.initialize()
@@ -74,7 +74,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def truncate(dataset: DatasetRef): Future[Response] = {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
-    val ingestionTable = getOrCreateIngestionTable(dataset)
+    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.clearAll()
@@ -84,7 +84,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
-    val ingestionTable = getOrCreateIngestionTable(dataset)
+    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset)
     val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.drop() if ctResp == Success
@@ -141,7 +141,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                              chunkset: ChunkSet,
                              diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-ingestion", "ingestion") {
-      val ingestionTable = getOrCreateIngestionTable(dataset.ref)
+      val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
       val info = chunkset.info
       val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
       ingestionTable.writeIngestion(partition, infos, sinkStats, diskTimeToLive)
@@ -245,7 +245,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
-  val ingestionTableCache = concurrentCache[DatasetRef, IngestionTable](tableCacheSize)
+  val ingestionTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
   val partitionIndexTableCache = concurrentCache[DatasetRef, PartitionIndexTable](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
@@ -260,7 +260,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                         columnIDs: Seq[Types.ColumnId],
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val ingestionTable = getOrCreateIngestionTable(dataset.ref)
+    val ingestionTable = getOrCreateIngestionTimeIndexTable(dataset.ref)
     logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
     val (filters, infoRecords) = partMethod match {
       case SinglePartitionScan(partition, _) =>
@@ -318,10 +318,10 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
-  def getOrCreateIngestionTable(dataset: DatasetRef): IngestionTable = {
+  def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     ingestionTableCache.getOrElseUpdate(dataset,
                                         { (dataset: DatasetRef) =>
-                                          new IngestionTable(dataset, clusterConnector)(readEc) })
+                                          new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
   }
 
   def getOrCreatePartitionIndexTable(dataset: DatasetRef): PartitionIndexTable = {
