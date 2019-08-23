@@ -316,7 +316,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   }
 
-
   it("should yield NaN when changes is done on data having NaN  after a value") {
     var data = Seq(0, 5, Double.NaN)
     val rv = timeValueRV(data)
