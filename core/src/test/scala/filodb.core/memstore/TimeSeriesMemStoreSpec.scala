@@ -130,6 +130,21 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
   }
 
+  it("should ingest multiple schemas simultaneously into one shard") {
+    val ref = dataset2.ref
+    memStore.setup(ref, schemas2h, 0, TestData.storeConf)
+    val data = linearHistSeries().take(40)
+    memStore.ingest(ref, 0, records(histDataset, data))
+    val data2 = records(dataset2, withMap(linearMultiSeries()).take(30))   // 3 records per series x 10 series
+    memStore.ingest(ref, 0, data2)
+
+    memStore.refreshIndexForTesting(ref)
+
+    memStore.numRowsIngested(ref, 0) shouldEqual 70L
+    // Below will catch any partition match errors.  Should be 20 (10 hist + 10 dataset2)
+    memStore.numPartitions(ref, 0) shouldEqual 20
+  }
+
   it("should be able to handle nonexistent partition keys") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
