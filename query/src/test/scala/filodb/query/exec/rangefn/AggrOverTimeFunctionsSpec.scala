@@ -308,7 +308,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   it("should correctly do changes when values is NaN") {
     var data = Seq(Double.NaN, 1d, 2d, 3d, 4d, 5d)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
     val windowSize = 100
     val step = 20
 
@@ -318,25 +317,23 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
 
-  it("should yield 0 when changes is done on data having NaN  after a value") {
+  it("should yield NaN when changes is done on data having NaN  after a value") {
     var data = Seq(0, 5, Double.NaN)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
     val windowSize = 100
     val step = 20
 
     val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 20000, 150000, 30000,
       new ChangesFunction(), queryConfig)
     val aggregated = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val expectedResult = List((100000, 0.0), (120000, 1.0), (140000, 0.0))
-    aggregated shouldEqual (expectedResult)
+    aggregated(0)._2 shouldEqual(0.0)
+    aggregated(1)._2.isNaN shouldEqual(true)
 
   }
 
   it("should yield NaN when changes is done on data having 2 or more consecutive NaN's after a value") {
     var data = Seq(0, 5, 6, Double.NaN, Double.NaN, Double.NaN, Double.NaN)
     val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
     val windowSize = 100
     val step = 20
 
