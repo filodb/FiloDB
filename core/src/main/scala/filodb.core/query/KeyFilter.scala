@@ -7,35 +7,42 @@ import filodb.memory.format.{SingleValueRowReader, UTF8Wrapper, ZeroCopyUTF8Stri
 
 sealed trait Filter {
   def filterFunc: Any => Boolean
+  def valuesStrings : Set[Any]
 }
 
 object Filter {
   final case class Equals(value: Any) extends Filter {
     val filterFunc: Any => Boolean = (item: Any) => value.equals(item)
+    override def valuesStrings: Set[Any] = Set(value)
   }
 
   final case class In(values: Set[Any]) extends Filter {
     val filterFunc: (Any) => Boolean = (item: Any) => values.contains(item)
+    override def valuesStrings: Set[Any] = values
   }
 
   final case class And(left: Filter, right: Filter) extends Filter {
     private val leftFunc = left.filterFunc
     private val rightFunc = right.filterFunc
     val filterFunc: (Any) => Boolean = (item: Any) => leftFunc(item) && rightFunc(item)
+    override def valuesStrings: Set[Any] = left.valuesStrings.union(right.valuesStrings)
   }
 
   final case class NotEquals(value: Any) extends Filter {
     val filterFunc: (Any) => Boolean = (item: Any) => !value.equals(item)
+    override def valuesStrings: Set[Any] = Set(value)
   }
 
   final case class EqualsRegex(value: Any) extends Filter {
     val pattern = Pattern.compile(value.toString, Pattern.DOTALL)
     val filterFunc: (Any) => Boolean = (item: Any) =>  pattern.matcher(item.toString).matches()
+    override def valuesStrings: Set[Any] = Set(value)
   }
 
   final case class NotEqualsRegex(value: Any) extends Filter {
     val pattern = Pattern.compile(value.toString, Pattern.DOTALL)
     val filterFunc: (Any) => Boolean = (item: Any) =>  !pattern.matcher(item.toString).matches()
+    override def valuesStrings: Set[Any] = Set(value)
   }
 
 }

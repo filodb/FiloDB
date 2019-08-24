@@ -1,51 +1,34 @@
 package filodb.query.util
 
-import filodb.core.query
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.ColumnFilter
 import filodb.query._
 
 object LogicalPlanUtil {
 
-  private def getFilterValue(filter: Filter): Set[String] = {
-    filter match {
-      case f: query.Filter.Equals => Set(f.value.toString)
-      case f: query.Filter.And => getFilterValue(f.left).union(getFilterValue(f.right))
-      case f: query.Filter.In => f.values.map(_.toString)
-      case f: query.Filter.NotEquals => Set(f.value.toString)
-      case f: query.Filter.NotEqualsRegex => Set(f.value.toString)
-      case f: query.Filter.EqualsRegex => Set(f.value.toString)
-    }
-  }
-
- private def getLabelValueFromFilters(filters: Seq[ColumnFilter], metricColumnName: String): Option[Set[String]] = {
-   val matchingFilters = filters.filter(_.column.equals(metricColumnName))
+  private def getLabelValueFromFilters(filters: Seq[ColumnFilter], metricColumnName: String): Option[Set[String]] = {
+    val matchingFilters = filters.filter(_.column.equals(metricColumnName))
     if (matchingFilters.isEmpty)
       None
     else
-      Some(getFilterValue(matchingFilters.head.filter))
+     Some(matchingFilters.head.filter.valuesStrings.map(_.toString))
   }
 
   def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Set[String]] = {
-
-    logicalPlan match {
-      case lp: PeriodicSeries => getLabelValueFromLogicalPlan(lp.rawSeries, labelName)
-      case lp: PeriodicSeriesWithWindowing => getLabelValueFromLogicalPlan(lp.rawSeries, labelName)
-      case lp: ApplyInstantFunction => getLabelValueFromLogicalPlan(lp.vectors, labelName)
-      case lp: Aggregate => getLabelValueFromLogicalPlan(lp.vectors, labelName)
-      case lp: BinaryJoin => val lhs = getLabelValueFromLogicalPlan(lp.lhs, labelName)
-        val rhs = getLabelValueFromLogicalPlan(lp.rhs, labelName)
-        if (lhs.isEmpty)
-          rhs
-        else if (rhs.isEmpty)
-          lhs
-        else
-          Some(lhs.get.union(rhs.get))
-      case lp: ScalarVectorBinaryOperation => getLabelValueFromLogicalPlan(lp.vector, labelName)
-      case lp: ApplyMiscellaneousFunction => getLabelValueFromLogicalPlan(lp.vectors, labelName)
-      case lp: LabelValues => lp.labelConstraints.get(labelName).map(Set(_))
-      case lp: RawSeries => getLabelValueFromFilters(lp.filters, labelName)
-      case lp: RawChunkMeta => getLabelValueFromFilters(lp.filters, labelName)
-      case lp: SeriesKeysByFilters => getLabelValueFromFilters(lp.filters, labelName)
+    val labelValues = LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
+      lp match {
+        case lp: LabelValues         => lp.labelConstraints.get(labelName).map(Set(_))
+        case lp: RawSeries           => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: RawChunkMeta        => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: SeriesKeysByFilters => getLabelValueFromFilters(lp.filters, labelName)
+        case _                       => throw new BadQueryException("Invalid logical plan")
+      }
+    }
+println("labelValues:" + labelValues)
+    if (labelValues.isEmpty) {
+      None
+    } else {
+      var res: Set[String] = Set()
+      Some(labelValues.foldLeft(res) { (acc, i) => i.union(acc) })
     }
   }
 }

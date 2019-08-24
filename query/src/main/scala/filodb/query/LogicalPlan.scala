@@ -9,6 +9,10 @@ sealed trait LogicalPlan
   */
 sealed trait RawSeriesPlan extends LogicalPlan
 
+trait NonLeafLogicalPlan extends LogicalPlan {
+  def children: Seq[LogicalPlan]
+}
+
 /**
   * Super class for a query that results in range vectors with samples
   * in regular steps
@@ -68,7 +72,9 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
 case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
-                          end: Long) extends PeriodicSeriesPlan
+                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan{
+  override def children: Seq[LogicalPlan] = Seq(rawSeries)
+}
 
 /**
   * Concrete logical plan to query for data in a given range
@@ -83,7 +89,10 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        end: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
+                                       functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan
+{
+  override def children: Seq[LogicalPlan] = Seq(rawSeries)
+}
 
 /**
   * Aggregate data across partitions (not in the time dimension).
@@ -96,7 +105,9 @@ case class Aggregate(operator: AggregationOperator,
                      vectors: PeriodicSeriesPlan,
                      params: Seq[Any] = Nil,
                      by: Seq[String] = Nil,
-                     without: Seq[String] = Nil) extends PeriodicSeriesPlan
+                     without: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
 
 /**
   * Binary join between collections of RangeVectors.
@@ -114,6 +125,9 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
                       ignoring: Seq[String] = Nil, include: Seq[String] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
+}
 
 /**
   * Apply Scalar Binary operation to a collection of RangeVectors
@@ -121,18 +135,35 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
 case class ScalarVectorBinaryOperation(operator: BinaryOperator,
                                        scalar: AnyVal,
                                        vector: PeriodicSeriesPlan,
-                                       scalarIsLhs: Boolean) extends PeriodicSeriesPlan
+                                       scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vector)
+}
 
 /**
   * Apply Instant Vector Function to a collection of RangeVectors
   */
 case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
+                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
 
 /**
   * Apply Miscellaneous Function to a collection of RangeVectors
   */
 case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
                                 function: MiscellaneousFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
+                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+object LogicalPlan {
+  def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
+   logicalPlan match {
+     case lp: BinaryJoin         => findLeafLogicalPlans(lp.lhs) ++ findLeafLogicalPlans(lp.rhs)
+     case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans(_))
+     case _                      => Seq(logicalPlan)
+   }
+
+  }
+}
