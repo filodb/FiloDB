@@ -23,7 +23,6 @@ object LogicalPlanUtil {
         case _                       => throw new BadQueryException("Invalid logical plan")
       }
     }
-println("labelValues:" + labelValues)
     if (labelValues.isEmpty) {
       None
     } else {
