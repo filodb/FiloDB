@@ -72,7 +72,7 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
 case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
-                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan{
+                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -158,12 +158,15 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
 }
 
 object LogicalPlan {
+
+  /**
+    * Get leaf Logical Plans
+    */
   def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
    logicalPlan match {
-     case lp: BinaryJoin         => findLeafLogicalPlans(lp.lhs) ++ findLeafLogicalPlans(lp.rhs)
+     // Find leaf logical plans for all children and concatenate results
      case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans(_))
      case _                      => Seq(logicalPlan)
    }
-
   }
 }
