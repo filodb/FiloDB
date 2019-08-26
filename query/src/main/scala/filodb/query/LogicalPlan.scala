@@ -9,7 +9,7 @@ sealed trait LogicalPlan
   */
 sealed trait RawSeriesPlan extends LogicalPlan
 
-trait NonLeafLogicalPlan extends LogicalPlan {
+sealed trait NonLeafLogicalPlan extends LogicalPlan {
   def children: Seq[LogicalPlan]
 }
 
