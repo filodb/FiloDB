@@ -1,14 +1,13 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.InstantFunctionId.HistogramQuantile
-import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace, Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
 
@@ -199,6 +198,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
       case LabelJoin    => LabelJoinFunction(funcParams)
+      case Sort         => SortFunction()
+      case SortDesc     => SortFunction(false)
       case _            => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
