@@ -196,7 +196,7 @@ object BinaryOperator extends Enum[BinaryOperator] {
   def isRightAssociative(operator: BinaryOperator): Boolean = {
     operator match {
       case BinaryOperator.POW => return true
-      case _ => return false
+      case _                  => return false
     }
   }
 
