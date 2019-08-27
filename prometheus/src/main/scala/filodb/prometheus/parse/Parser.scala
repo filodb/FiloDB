@@ -358,29 +358,36 @@ object Parser extends Expression {
     }
   }
 
+  /**
+    * Recursively assign precedence to BinaryExpression
+    */
   def assignPrecedence(lhs: Expression,
                        operator: Operator,
                        vectorMatch: Option[VectorMatch],
                        rhs: Expression): Expression = {
+    rhs match {
+      case rhsBE: BinaryExpression => val rhsWithPrecedence = assignPrecedence(rhsBE.lhs, rhsBE.operator,
+                                    rhsBE.vectorMatch, rhsBE.rhs) // Assign Precedence to RHS Expression
+                                      rhsWithPrecedence match {
+                                      case rhsWithPrecBE: BinaryExpression => val rhsOp = rhsWithPrecBE.operator.
+                                        getPlanOperator
+                                        val precd = BinaryOperator.precedence(rhsOp) -
+                                          BinaryOperator.precedence(operator.getPlanOperator)
+                                        if ((precd < 0) || (precd == 0 && !BinaryOperator.isRightAssociative(rhsOp))) {
+                                          val lhsWithPrecedence: Expression = assignPrecedence(lhs, operator,
+                                            vectorMatch, rhsWithPrecBE.lhs) // Assign Precedence to LHS Expression
 
-    if (rhs.isInstanceOf[BinaryExpression]) {
-      val rhsWithoutPrecedence = rhs.asInstanceOf[BinaryExpression]
-      val rhsWithPrecedence = assignPrecedence(rhsWithoutPrecedence.lhs, rhsWithoutPrecedence.operator,
-        rhsWithoutPrecedence.vectorMatch, rhsWithoutPrecedence.rhs)
-      if (rhsWithPrecedence.isInstanceOf[BinaryExpression]) {
-
-        val rhsWithPrecedenceBE = rhsWithPrecedence.asInstanceOf[BinaryExpression]
-        val rhsOp = rhsWithPrecedenceBE.asInstanceOf[BinaryExpression].operator
-        val precd = rhsOp.precedence - operator.precedence
-        if ((precd < 0) || (precd == 0 && !rhsOp.isRightAssociative())) {
-          val lhsWithPrecedence: Expression = assignPrecedence(lhs, operator, vectorMatch, rhsWithPrecedenceBE.lhs)
-          return BinaryExpression(lhsWithPrecedence, rhsWithPrecedenceBE.operator, rhsWithPrecedenceBE.vectorMatch,
-            rhsWithPrecedenceBE.rhs)
-        }
-      }
-      return BinaryExpression(lhs, operator, vectorMatch, rhsWithPrecedence)
+                                           // Create new BinaryExpression as existing precedence is not correct
+                                           // LHS Expression should be evaluated first
+                                           BinaryExpression(lhsWithPrecedence, rhsWithPrecBE.operator,
+                                            rhsWithPrecBE.vectorMatch, rhsWithPrecBE.rhs)
+                                        } else {
+                                          BinaryExpression(lhs, operator, vectorMatch, rhsWithPrecedence)
+                                        }
+                                      case _  =>  BinaryExpression(lhs, operator, vectorMatch, rhsWithPrecedence)
+                                    }
+      case _                       => BinaryExpression(lhs, operator, vectorMatch, rhs)
     }
-    return BinaryExpression(lhs, operator, vectorMatch, rhs)
   }
 
   private def handleError(e: Error, input: String) = {
