@@ -158,8 +158,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val (infoAddr, newAppenders) = bufferPool.obtain()
     val currentChunkID = chunkID(startTime, ingestionTime / 1000) // convert to seconds
     ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
+    ChunkSetInfo.setIngestionTime(infoAddr, ingestionTime)
     ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
-    ChunkSetInfo.setStartTime(infoAddr, startTime)
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
     // Don't publish the new chunk just yet. Wait until it has one row.

@@ -44,7 +44,7 @@ class WriteBufferPool(memFactory: MemFactory,
     // Fill queue up
     (0 until AllocStepSize).foreach { n =>
       val builders = MemStore.getAppendables(memFactory, dataset, storeConf)
-      val info = ChunkSetInfo(memFactory, dataset, 0, 0, Long.MinValue, Long.MaxValue)
+      val info = ChunkSetInfo(memFactory, dataset, 0, 0, 0, Long.MaxValue)
       // Point vectors in chunkset metadata to builders addresses
       for { colNo <- 0 until dataset.numDataColumns optimized } {
         ChunkSetInfo.setVectorPtr(info.infoAddr, colNo, builders(colNo).addr)

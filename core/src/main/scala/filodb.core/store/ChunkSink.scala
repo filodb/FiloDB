@@ -77,9 +77,9 @@ class ChunkSinkStats {
     chunkLenHist.record(chunkLen)
   }
 
-  def addIndexWriteStats(totalIndexBytes: Long): Unit = {
+  def addIndexWriteStats(indexBytes: Long): Unit = {
     numIndexWriteCalls.increment
-    indexBytesHist.record(totalIndexBytes)
+    indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {

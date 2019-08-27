@@ -42,9 +42,8 @@ object ChunkSet {
             rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, chunkID(startTime, ingestionTime), rows.length,
-                            startTime,
-                            dataset.timestamp(rows.last))
+    val info = ChunkSetInfo(factory, dataset, chunkID(startTime, ingestionTime), ingestionTime,
+                            rows.length, dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
     val chunks = dataset.dataColumns.map(c => chunkMap(c.name))
@@ -58,6 +57,8 @@ object ChunkSet {
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
   def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
+  // ingestion time as milliseconds from 1970
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(infoAddr)
   // number of rows encoded by this chunkset
   def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
   // the starting timestamp of this chunkset
@@ -130,17 +131,20 @@ object ChunkSetInfo extends StrictLogging {
    * ChunkSetInfo metadata schema:
    * +0  long   chunkID
    * +8  int    # rows in chunkset
-   * +12 long   start timestamp
+   * +12 long   ingestion time (milliseconds from 1970)
    * +20 long   end timestamp
    * +28 long[] pointers to each vector
    *
    * Note that block metadata has a 4-byte partition ID appended to the front also.
+   *
+   * Note 2: The chunkID is defined from the start timestamp, and so the start time doesn't need
+   * to be explicitly stored in a separate field.
    */
-  val OffsetChunkID = 0
-  val OffsetNumRows = 8
-  val OffsetStartTime = 12
-  val OffsetEndTime = 20
-  val OffsetVectors = 28
+  val OffsetChunkID       = 0
+  val OffsetNumRows       = 8
+  val OffsetIngestionTime = 12
+  val OffsetEndTime       = 20
+  val OffsetVectors       = 28
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
@@ -151,22 +155,25 @@ object ChunkSetInfo extends StrictLogging {
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
+  def getIngestionTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetIngestionTime)
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+  def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
+
   def getNumRows(infoPointer: NativePointer): Int = UnsafeUtils.getInt(infoPointer + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetStartTime)
-  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
-  def setStartTime(infoPointer: NativePointer, time: Long): Unit =
-    UnsafeUtils.setLong(infoPointer + OffsetStartTime, time)
-  def setEndTime(infoPointer: NativePointer, time: Long): Unit =
-    UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
+  def getStartTime(infoPointer: NativePointer): Long = startTimeFromChunkID(getChunkID(infoPointer))
+  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
 
-  def getStartTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetStartTime)
+  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
   def getEndTime(infoBytes: Array[Byte]): Long =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
+  def setEndTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
 
   def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr = {
     require(infoPointer != 0, s"ERROR: getVectorPtr on infoPointer==0")
@@ -193,18 +200,18 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * Initializes a new ChunkSetInfo with some initial fields
    */
-  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, startTime: Long): ChunkSetInfo = {
+  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, ingestionTime: Long): ChunkSetInfo = {
     val infoAddr = factory.allocateOffheap(dataset.chunkSetInfoSize)
     setChunkID(infoAddr, id)
+    setIngestionTime(infoAddr, ingestionTime)
     resetNumRows(infoAddr)
-    setStartTime(infoAddr, startTime)
     setEndTime(infoAddr, Long.MaxValue)
     ChunkSetInfo(infoAddr)
   }
 
   def apply(factory: MemFactory, dataset: Dataset,
-            id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
-    val newInfo = initialize(factory, dataset, id, startTime)
+            id: ChunkID, ingestionTime: Long, numRows: Int, endTime: Long): ChunkSetInfo = {
+    val newInfo = initialize(factory, dataset, id, ingestionTime)
     UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
     setEndTime(newInfo.infoAddr, endTime)
     newInfo

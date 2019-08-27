@@ -9,7 +9,7 @@ import filodb.memory.format.vectors.NativeVectorTest
 class ChunkSetInfoSpec extends NativeVectorTest {
   import NamesTestData._
 
-  val info1 = ChunkSetInfo(memFactory, dataset, 13, 5000, firstKey, lastKey)
+  val info1 = ChunkSetInfo(memFactory, dataset, chunkID(firstKey, 0), 0, 5000, lastKey)
 
   it("should serialize and deserialize ChunkSetInfo and no skips") {
     val infoRead1 = ChunkSetInfo.initialize(memFactory, dataset, 0, 0)
@@ -19,7 +19,7 @@ class ChunkSetInfoSpec extends NativeVectorTest {
 
   it("should find intersection range when one of timestamps match") {
     val ts = System.currentTimeMillis
-    val info1 = ChunkSetInfo(memFactory, dataset, 1, 1, ts - 10000, ts + 30000)
+    val info1 = ChunkSetInfo(memFactory, dataset, chunkID(ts - 10000, 0), 0, 1, ts + 30000)
 
     // left edge touches
     info1.intersection(ts - 10001, ts - 10000) should equal (Some((ts - 10000, ts - 10000)))
@@ -30,13 +30,13 @@ class ChunkSetInfoSpec extends NativeVectorTest {
   }
 
   it("should not find intersection if key1 is greater than key2") {
-    val info1 = ChunkSetInfo(memFactory, dataset, 1, 1, 1000, 2000)
+    val info1 = ChunkSetInfo(memFactory, dataset, chunkID(1000, 0), 0, 1, 2000)
     info1.intersection(1999, 1888) should equal (None)
   }
 
   it("should find intersection range of nonmatching timestamps") {
     val ts = System.currentTimeMillis
-    val info1 = ChunkSetInfo(memFactory, dataset, 1, 1, ts - 10000, ts + 30000)
+    val info1 = ChunkSetInfo(memFactory, dataset, chunkID(ts - 10000, 0), 0, 1, ts + 30000)
 
     // wholly inside
     info1.intersection(ts, ts + 15000) should equal (Some((ts, ts + 15000)))
