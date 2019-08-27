@@ -34,7 +34,7 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType)
  * @param colIDs the column IDs of the columns, used to access additional columns if needed
  */
 final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
-                              brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty,
+                              brSchemas: Map[Int, RecordSchema] = Map.empty,
                               fixedVectorLen: Option[Int] = None,
                               colIDs: Seq[Int] = Nil) {
   import Column.ColumnType._

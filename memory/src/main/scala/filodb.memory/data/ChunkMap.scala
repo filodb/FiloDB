@@ -139,7 +139,7 @@ object ChunkMap extends StrictLogging {
  * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param capacity initial capacity of the map; must be more than 0
  */
-class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogging {
+class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
   require(capacity > 0)
 
   private var lockState: Int = 0
@@ -283,9 +283,9 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) extends StrictLogg
         val locks2 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         locks2.entrySet().retainAll(locks1.entrySet())
         val lockState = UnsafeUtils.getIntVolatile(this, lockStateOffset)
-        logger.error(s"Following execPlan locks have not been released for a while: " +
+        _logger.error(s"Following execPlan locks have not been released for a while: " +
           s"$locks2 $locks1 $execPlanTracker $lockState")
-        logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
+        _logger.error(s"Shutting down process since it may be in an unstable/corrupt state.")
         Runtime.getRuntime.halt(1)
       }
     }

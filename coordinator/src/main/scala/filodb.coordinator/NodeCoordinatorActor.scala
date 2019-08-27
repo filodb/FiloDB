@@ -8,7 +8,6 @@ import scala.concurrent.duration._
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
-import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
@@ -41,13 +40,13 @@ object NodeCoordinatorActor {
 
   def props(metaStore: MetaStore,
             memStore: MemStore,
-            config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, config)
+            settings: FilodbSettings): Props =
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, settings)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
-                                                 config: Config) extends NamingAwareBaseActor {
+                                                 settings: FilodbSettings) extends NamingAwareBaseActor {
   import context.dispatcher
 
   import NodeClusterActor._
@@ -55,7 +54,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   import client.DatasetCommands._
   import client.IngestionCommands._
 
-  val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
   val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
@@ -63,7 +61,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   var statusActor: Option[ActorRef] = None
   var datasetsInitialized = false
 
-  private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
+  private val statusAckTimeout = settings.config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
@@ -146,7 +144,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
-        nca.tell(SubscribeShardUpdates(ref), self)
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
@@ -160,7 +157,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, db) =>
       // used only for unit testing now
-      createDataset(sender(), datasetObj.copy(database = db))
+      createDataset(sender(), datasetObj)
 
     case TruncateDataset(ref) =>
       truncateDataset(sender(), ref)
@@ -190,16 +187,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case e: ShardIngestionState       => forward(e, e.ref, sender())
+    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+                                         shardMaps.put(s.ref, s.map)
+                                         forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
     case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
     case ClearState(ref)              => clearState(ref)
     case NodeProtocol.ResetState      => reset(sender())
-    case CurrentShardSnapshot(ds, mapper) =>
-      logger.debug(s"Received ShardSnapshot $mapper")
-      shardMaps.put(ds, mapper)
-      // NOTE: QueryActor has AtomicRef so no need to forward message to it
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
@@ -214,9 +209,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     }
 
     if (!datasetsInitialized) {
-      settings.datasets.foreach { d =>
-        val config = ConfigFactory.parseFile(new java.io.File(d))
-        val dataset = Dataset.fromConfig(config)
+      logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
+      settings.streamConfigs.foreach { config =>
+        val dataset = settings.datasetFromStream(config)
         val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
         initializeDataset(dataset, ingestion)
       }

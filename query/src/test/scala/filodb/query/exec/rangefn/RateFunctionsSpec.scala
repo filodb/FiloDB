@@ -2,7 +2,11 @@ package filodb.query.exec.rangefn
 
 import scala.util.Random
 
-import filodb.query.exec.{ChunkedWindowIteratorD, QueueBasedWindow, TransientRow}
+import filodb.core.{MachineMetricsData, TestData}
+import filodb.core.memstore.{TimeSeriesPartition, WriteBufferPool}
+import filodb.core.metadata.Dataset
+import filodb.memory.format.vectors.MutableHistogram
+import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
 class RateFunctionsSpec extends RawDataWindowingSpec {
@@ -148,7 +152,6 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
                                         new ChunkedRateFunction, queryConfig)
     it.next.getDouble(1) shouldEqual 0.0
-
   }
 
   // Also ensures that chunked rate works across chunk boundaries
@@ -183,6 +186,75 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
       rates shouldEqual slidingResults
     }
   }
+
+  val promHistDS = Dataset("histogram", Seq("tags:map"),
+                           Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"))
+  val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS, TestData.storeConf)
+
+  it("should compute rate for Histogram RVs") {
+    val (data, rv) = MachineMetricsData.histogramRV(100000L, numSamples=10, pool=histBufferPool, ds=promHistDS)
+    val startTs = 99500L
+    val endTs =   161000L // just past 7th sample
+    val lastTime = 160000L
+    val headTime = 100000L
+    val headHist = data(0)(3).asInstanceOf[MutableHistogram]
+    val lastHist = data(6)(3).asInstanceOf[MutableHistogram]
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b) - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
+    }
+    val expected = MutableHistogram(MachineMetricsData.histBucketScheme, expectedRates.toArray)
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
+                                        new HistRateFunction, queryConfig)
+    // Scheme should have remained the same
+    val answer = it.next.getHistogram(1)
+    answer.numBuckets shouldEqual expected.numBuckets
+
+    // Have to compare each bucket with floating point error tolerance
+    for { b <- 0 until expected.numBuckets } {
+      answer.bucketTop(b) shouldEqual expected.bucketTop(b)
+      answer.bucketValue(b) shouldEqual expected.bucketValue(b) +- errorOk
+    }
+  }
+
+  it("should compute rate for Histogram RVs with drop") {
+    val (data, rv) = MachineMetricsData.histogramRV(100000L, numSamples=7, pool=histBufferPool, ds=promHistDS)
+
+    // Inject a few more samples with original data, which means a drop
+    val part = rv.partition.asInstanceOf[TimeSeriesPartition]
+    val dropData = data.map(d => (d.head.asInstanceOf[Long] + 70000L) +: d.drop(1))
+    val container = MachineMetricsData.records(promHistDS, dropData).records
+    container.iterate(promHistDS.ingestionSchema).foreach { row => part.ingest(0, row, ingestBlockHolder) }
+    part.switchBuffers(ingestBlockHolder, encode = true)
+
+
+    val startTs = 99500L
+    val endTs =   171000L // just past 8th sample, the first dropped one
+    val lastTime = 170000L
+    val headTime = 100000L
+    val headHist = data(0)(3).asInstanceOf[MutableHistogram]
+    val corrHist = data(6)(3).asInstanceOf[MutableHistogram]
+    val lastHist = headHist.copy   // 8th sample == first sample + correction
+    lastHist.add(corrHist)
+    val expectedRates = (0 until headHist.numBuckets).map { b =>
+      (lastHist.bucketValue(b) - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
+    }
+    val expected = MutableHistogram(MachineMetricsData.histBucketScheme, expectedRates.toArray)
+
+    // One window, start=end=endTS
+    val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, endTs - startTs,
+                                        new HistRateFunction, queryConfig)
+    // Scheme should have remained the same
+    val answer = it.next.getHistogram(1)
+    answer.numBuckets shouldEqual expected.numBuckets
+
+    // Have to compare each bucket with floating point error tolerance
+    for { b <- 0 until expected.numBuckets } {
+      answer.bucketTop(b) shouldEqual expected.bucketTop(b)
+      answer.bucketValue(b) shouldEqual expected.bucketValue(b) +- errorOk
+    }
+}
 
   it ("irate should work when start and end are outside window") {
     val startTs = 8071950L

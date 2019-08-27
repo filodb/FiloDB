@@ -154,7 +154,7 @@ Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
-./filodb-dev-start.sh -s
+./filodb-dev-start.sh
 ```
 
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
@@ -327,9 +327,15 @@ The **partition key** differentiates time series and also controls distribution 
 
 The data points use a configurable schema consisting of multiple columns.  Each column definition consists of `name:columntype`, with optional parameters. For examples, see the examples below, or see the introductory walk-through above where two datasets are created.
 
+A single partition key schema is used for a running FiloDB cluster, though multiple data schemas may be supported.  These schemas are defined in the config file - see the `partition-schema` and `schemas` sections of `filodb-defaults.conf`.  The CLI command `validateSchemas` may be run to verify schemas defined in config files, as follows:
+
+    ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command validateSchemas
+
 ### Dataset Configuration
 
 THIS IS IMPORTANT TO READ AND UNDERSTAND.
+
+Each "dataset" ingests one stream or Kafka topic of raw time series data, and is also the unit of isolation.  Each dataset contains its own offheap memory, and can have independent data retention and ingestion properties.
 
 Datasets are setup and loaded into the server via configuration files referred to by application.conf loaded by the server.
 See `conf/timeseries-dev-source.conf` for an example. It is important to note that some aspects of the dataset,
@@ -344,21 +350,19 @@ that part of the cluster could be with the old config and the rest could have ne
 ### Prometheus FiloDB Schema for Operational Metrics
 
 * Partition key = `tags:map`
-* Row key = `timestamp`
-* Columns: `timestamp:ts,value:double:counter=true`
+* Columns: `timestamp:ts,value:double:detectDrops=true`
 
 The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
 
 Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
 
-NOTE: `counter=true` allows for proper and efficient rate calculation on Prometheus counters.
+NOTE: `detectDrops=true` allows for proper and efficient rate calculation on Prometheus counters.
  
 ### Traditional, Multi-Column Schema
 
 Let's say that one had a metrics client, such as CodaHale metrics, which pre-aggregates percentiles and sends them along with the metric.  If we used the Prometheus schema, each percentile would wind up in its own time series.  This is fine, but incurs significant overhead as the partition key has to then be sent with each percentile over the wire.  Instead we can have a schema which includes all the percentiles together when sending the data:
 
 * Partition key = `metricName:string,tags:map`
-* Row key = `timestamp`
 * Columns: `timestamp:ts,min:double,max:double,p50:double,p90:double,p95:double,p99:double,p999:double`
 
 ### Data Modelling and Performance Considerations

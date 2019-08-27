@@ -11,7 +11,8 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
-import filodb.coordinator.{GlobalConfig, ShardMapper}
+import filodb.coordinator.ShardMapper
+import filodb.core.GlobalConfig
 import filodb.core.metadata.{Column, Dataset}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}

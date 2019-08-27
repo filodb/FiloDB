@@ -34,20 +34,20 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   protected val bufferPool = new WriteBufferPool(memFactory, dataset2, TestData.storeConf)
   private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.blockMetaSize, true)
 
-  val builder = new RecordBuilder(memFactory, dataset2.ingestionSchema)
-  val partSet = PartitionSet.empty(dataset2.ingestionSchema, dataset2.comparator)
+  val builder = new RecordBuilder(memFactory)
+  val partSet = PartitionSet.empty()
 
   before {
     partSet.clear()
   }
 
   val tenRecords = withMap(linearMultiSeries(), extraTags=extraTags).take(10)
-  addToBuilder(builder, tenRecords)
+  addToBuilder(builder, tenRecords, schema2)
   val ingestRecordAddrs = builder.allContainers.head.allOffsets
   // println(s"XXX container base = ${builder.allContainers.head.base}")
   // println(s"ingestRecordAddrs=$ingestRecordAddrs")
   // println(s"\n---\n${ingestRecordAddrs.foreach(a => println(dataset2.ingestionSchema.stringify(a)))}")
-  val partKeyBuilder = new RecordBuilder(memFactory, dataset2.partKeySchema)
+  val partKeyBuilder = new RecordBuilder(memFactory)
   ingestRecordAddrs.foreach { addr =>
     dataset2.comparator.buildPartKeyFromIngest(null, addr, partKeyBuilder)
   }
@@ -78,34 +78,34 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
     partSet += part
     partSet.size shouldEqual 1
 
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), { throw new RuntimeException("error")} )
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, { throw new RuntimeException("error")} )
     got shouldEqual part
     partSet.size shouldEqual 1
   }
 
   it("should add new TSPartition if one doesnt exist with getOrAddWithIngestBR") {
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
-    partSet.getWithIngestBR(null, ingestRecordAddrs(0)) shouldEqual null
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0), dataset2) shouldEqual null
 
     val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), part)
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, part)
 
     partSet.size shouldEqual 1
     partSet.isEmpty shouldEqual false
     got shouldEqual part
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual Some(part)
-    partSet.getWithIngestBR(null, ingestRecordAddrs(0)) shouldEqual part
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual Some(part)
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0), dataset2) shouldEqual part
   }
 
   it("should not add new TSPartition if function returns null") {
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
 
-    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), null)
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), dataset2, null)
     got shouldEqual null
     partSet.isEmpty shouldEqual true
-    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0), dataset2) shouldEqual None
   }
 
   it("should remove TSPartitions correctly") {

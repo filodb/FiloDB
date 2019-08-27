@@ -2,32 +2,12 @@ package filodb.prometheus.query
 
 import remote.RemoteStorage._
 
-import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
-import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
+import filodb.core.query.{ColumnFilter, Filter, RangeVector}
+import filodb.query.{Data, ErrorResponse, ExplainPlanResponse, IntervalSelector, LogicalPlan, QueryResultType,
+  RawSeries, Result, Sampl, SuccessResponse}
 import filodb.query.exec.ExecPlan
 
 object PrometheusModel {
-
-  sealed trait PromQueryResponse {
-    def status: String
-  }
-
-  final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
-
-  final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse
-
-  final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "success") extends PromQueryResponse
-
-  final case class Data(resultType: String, result: Seq[Result])
-
-  final case class Result(metric: Map[String, String], values: Seq[Sampl])
-
-  /**
-    * Metric value for a given timestamp
-    * @param timestamp in seconds since epoch
-    * @param value value of metric
-    */
-  final case class Sampl(timestamp: Long, value: Double)
 
   /**
     * Converts a prometheus read request to a Seq[LogicalPlan]
@@ -67,7 +47,7 @@ object PrometheusModel {
   /**
     * Used to send out raw data
     */
-  def toPromTimeSeries(srv: SerializableRangeVector): TimeSeries = {
+  def toPromTimeSeries(srv: RangeVector): TimeSeries = {
     val b = TimeSeries.newBuilder()
     srv.key.labelValues.foreach {lv =>
       b.addLabels(LabelPair.newBuilder().setName(lv._1.toString).setValue(lv._2.toString))
@@ -99,7 +79,7 @@ object PrometheusModel {
   /**
     * Used to send out HTTP response
     */
-  def toPromResult(srv: SerializableRangeVector, verbose: Boolean): Result = {
+  def toPromResult(srv: RangeVector, verbose: Boolean): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
                                   "_partIds_" -> srv.key.partIds.mkString(","))
@@ -109,9 +89,12 @@ object PrometheusModel {
       // remove NaN in HTTP results
       // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
       // in HTTP raw query results.
-      srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+      Some(
+        srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
           Sampl(r.getLong(0) / 1000, r.getDouble(1))
-      }.toSeq
+        }.toSeq
+      ),
+      None
     )
   }
 

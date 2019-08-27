@@ -16,6 +16,7 @@ object FiloBuild extends Build {
   lazy val memory = project
     .in(file("memory"))
     .settings(commonSettings: _*)
+    .settings(assemblySettings: _*)
     .settings(name := "filodb-memory")
     .settings(scalacOptions += "-language:postfixOps")
     .settings(libraryDependencies ++= memoryDeps)
@@ -193,6 +194,7 @@ object FiloBuild extends Build {
     "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     logbackDep % Test,
     scalaTest  % Test,
+    "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
     scalaCheck % "test"
   )
 
@@ -234,7 +236,11 @@ object FiloBuild extends Build {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
-    "com.tdunning"         % "t-digest"           % "3.1",
+    "com.tdunning"          % "t-digest"                              % "3.1",
+    "com.softwaremill.sttp" %% "circe"                                % sttpVersion ,
+    "com.softwaremill.sttp" %% "async-http-client-backend-future"     % sttpVersion,
+    "com.softwaremill.sttp" %% "core"                                 % sttpVersion,
+    circeGeneric,
     scalaxyDep
   )
 
@@ -268,11 +274,13 @@ object FiloBuild extends Build {
     logbackDep % "test,it")
 
   lazy val promDeps = Seq(
-    "com.google.protobuf" % "protobuf-java" % "2.5.0"
+    "com.google.protobuf" % "protobuf-java" % "2.5.0",
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
     scalaxyDep,
+    logbackDep,
     "io.monix" %% "monix-kafka-1x" % monixKafkaVersion,
     "org.rogach" %% "scallop" % "3.1.1"
   )

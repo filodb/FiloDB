@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -20,9 +21,10 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
-                        (implicit val ec: ExecutionContext)
+                        (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
+  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -71,9 +73,9 @@ extends MemStore with StrictLogging {
   /**
     * WARNING: use only for testing. Not performant
     */
-  def commitIndexForTesting(dataset: DatasetRef): Unit =
+  def refreshIndexForTesting(dataset: DatasetRef): Unit =
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
-      s.commitPartKeyIndexBlocking()
+      s.refreshPartKeyIndexBlocking()
     })
 
   /**
@@ -101,9 +103,10 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int = 259200,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -116,7 +119,8 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int,
+                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -124,15 +128,19 @@ extends MemStore with StrictLogging {
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
-                    case FlushCommand(group) => shard.switchGroupBuffers(group)
+                    case FlushCommand(group) => assertThreadName(IngestSchedName)
+                                                shard.switchGroupBuffers(group)
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
                                                                 diskTimeToLiveSeconds, flushTimeBucket))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
-                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
-                  .foreach({ x => })(shard.ingestSched)
+                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
+                           // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+                  .completedL
+                  .doOnCancel(cancelTask)
+                  .runAsync(shard.ingestSched)
   }
 
   // a more optimized ingest stream handler specifically for recovery
@@ -149,7 +157,20 @@ extends MemStore with StrictLogging {
     if (endOffset < startOffset) Observable.empty
     else {
       var targetOffset = startOffset + reportingInterval
-      stream.map(shard.ingest(_)).collect {
+      var startOffsetValidated = false
+      stream.map { r =>
+        if (!startOffsetValidated) {
+          if (r.offset > startOffset) {
+            val offsetsNotRecovered = r.offset - startOffset
+            logger.error(s"Could not recover dataset=$dataset shard=$shardNum from check pointed offset possibly " +
+                         s"because of retention issues. recoveryStartOffset=$startOffset " +
+                         s"firstRecordOffset=${r.offset} offsetsNotRecovered=$offsetsNotRecovered")
+            shard.shardStats.offsetsNotRecovered.increment(offsetsNotRecovered)
+          }
+          startOffsetValidated = true
+        }
+        shard.ingest(r)
+      }.collect {
         case offset: Long if offset >= endOffset => // last offset reached
           offset
         case offset: Long if offset > targetOffset => // reporting interval reached
@@ -159,13 +180,13 @@ extends MemStore with StrictLogging {
     }
   }
 
-  def indexNames(dataset: DatasetRef): Iterator[(String, Int)] =
+  def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)] =
     datasets.get(dataset).map { shards =>
-      shards.entrySet.iterator.asScala.flatMap { entry =>
+      shards.entrySet.asScala.flatMap { entry =>
         val shardNum = entry.getKey.toInt
-        entry.getValue.indexNames.map { s => (s, shardNum) }
-      }
-    }.getOrElse(Iterator.empty)
+        entry.getValue.indexNames(limit).map { s => (s, shardNum) }
+      }.toSeq
+    }.getOrElse(Nil)
 
   def labelValues(dataset: DatasetRef, shard: Int, labelName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.labelValues(labelName, topK)).getOrElse(Nil)

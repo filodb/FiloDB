@@ -19,7 +19,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import Filter._
 
   val keyIndex = new PartKeyLuceneIndex(dataset6, 0, TestData.storeConf)
-  val partBuilder = new RecordBuilder(TestData.nativeMem, dataset6.partKeySchema)
+  val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(dataset: Dataset,
                    base: Any,
@@ -27,7 +27,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   before {
     keyIndex.reset()
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
   }
 
   after {
@@ -50,7 +50,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
     val end = System.currentTimeMillis()
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     // Should get empty iterator when passing no filters
     val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
@@ -90,7 +90,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
         keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time)()
         if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time, time + 300)()
     }
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     keyIndex.indexNumEntries shouldEqual 10
 
@@ -112,7 +112,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       .zipWithIndex.foreach { case (addr, i) =>
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, start + i)()
     }
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     val startTimes = keyIndex.startTimeFromPartIds((0 until numPartIds).iterator)
     for { i <- 0 until numPartIds} {
@@ -129,7 +129,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       .zipWithIndex.foreach { case (addr, i) =>
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, start + i, start + i + 100)()
     }
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     val pIds = keyIndex.partIdsEndedBefore(start + 200)
     for { i <- 0 until numPartIds} {
@@ -137,7 +137,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     keyIndex.removePartKeys(pIds)
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     for { i <- 0 until numPartIds} {
       keyIndex.partKeyFromPartId(i).isDefined shouldEqual (if (i <= 100) false else true)
@@ -152,11 +152,11 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       .zipWithIndex.foreach { case (addr, i) =>
       val time = System.currentTimeMillis()
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time)()
-      keyIndex.commitBlocking() // updates need to be able to read startTime from index, so commit
+      keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
       keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time + 10000)()
     }
     val end = System.currentTimeMillis()
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     // Should get empty iterator when passing no filters
     val partNums1 = keyIndex.partIdsFromFilters(Nil, start, end)
@@ -194,7 +194,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
 
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     val filter2 = ColumnFilter("Actor2Name", Equals(UTF8Wrapper("REGIME".utf8)))
     val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), 0, Long.MaxValue)
@@ -212,9 +212,9 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
 
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
-    keyIndex.indexNames.toList shouldEqual Seq("Actor2Code", "Actor2Name")
+    keyIndex.indexNames(10).toList shouldEqual Seq("Actor2Code", "Actor2Name")
     keyIndex.indexValues("not_found").toSeq should equal (Nil)
 
     val infos = Seq("AFR", "CHN", "COP", "CVL", "EGYEDU").map(_.utf8).map(TermInfo(_, 1))
@@ -233,7 +233,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
 
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
       ColumnFilter("Actor2Name", Equals("REGIME".utf8)))
@@ -251,7 +251,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)), ColumnFilter("Year", Equals(1979)))
     val partNums1 = index2.partIdsFromFilters(filters1, 0, Long.MaxValue)
@@ -264,7 +264,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       .zipWithIndex.foreach { case (addr, i) =>
       val partKeyBytes = partKeyOnHeap(dataset6, ZeroPointer, addr)
       keyIndex.addPartKey(partKeyBytes, i, System.currentTimeMillis())()
-      keyIndex.commitBlocking()
+      keyIndex.refreshReadersBlocking()
       keyIndex.partKeyFromPartId(i).get.bytes shouldEqual partKeyBytes
 //      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
     }
@@ -276,12 +276,12 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       .zipWithIndex.map { case (addr, i) =>
         val start = Math.abs(Random.nextLong())
         keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, start)()
-        keyIndex.commitBlocking() // updates need to be able to read startTime from index, so commit
+        keyIndex.refreshReadersBlocking() // updates need to be able to read startTime from index, so commit
         val end = start + Random.nextInt()
         keyIndex.updatePartKeyWithEndTime(partKeyOnHeap(dataset6, ZeroPointer, addr), i, end)()
         (end, start, i)
       }
-    keyIndex.commitBlocking()
+    keyIndex.refreshReadersBlocking()
 
     for {
       from <- 0 until 99 // for various from values

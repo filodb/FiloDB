@@ -3,15 +3,14 @@ package filodb.coordinator
 import java.net.InetAddress
 
 import scala.concurrent.duration._
-
 import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
+import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
@@ -23,7 +22,6 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 // TODO disabled since several tests in this class are flaky in Travis.
-@org.scalatest.Ignore
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
 
@@ -70,7 +68,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
-  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, config)
+  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, cluster.settings)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -131,13 +129,13 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
-      Thread.sleep(1000) // wait for Lucene index flush to happen correctly.  Wish there was a listener for this
       dataset1.ref
     }
 
     it("should return UnknownDataset if attempting to query before ingestion set up") {
       val ref = MachineMetricsData.dataset1.ref
-      val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")))
+      val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"),
+        Seq("min")), UnavailablePromQlQueryParams)
       probe.send(coordinatorActor, q1)
       probe.expectMsg(UnknownDataset)
     }
@@ -147,37 +145,39 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, multiSeriesData().take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       // Query existing partition: Series 1
-      val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")), qOpt)
+      val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"),
+        Seq("min")),UnavailablePromQlQueryParams, qOpt)
+
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (1)
           srvs(0).rows.toSeq should have length (2)   // 2 samples per series
       }
 
       // Query nonexisting partition
-      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "NotSeries"), Seq("min")), qOpt)
+      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "NotSeries"),
+        Seq("min")), UnavailablePromQlQueryParams, qOpt)
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, Nil) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
       }
     }
 
-    // This actually returns a QueryError, but it should be validation done instead
-    ignore("should return BadArgument if arguments could not be parsed successfully") {
+    it("should return QueryError if bad arguments or could not execute") {
       val ref = setupTimeSeries()
       val to = System.currentTimeMillis() / 1000
       val from = to - 50
       val qParams = TimeStepParams(from, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, series_1)", qParams)
-      val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
+      val q1 = LogicalPlan2Query(ref, logPlan, UnavailablePromQlQueryParams, qOpt)
       probe.send(coordinatorActor, q1)
-      probe.expectMsgClass(classOf[BadArgument])
+      probe.expectMsgClass(classOf[QueryError])
     }
 
     it("should return results in QueryResult if valid LogicalPlanQuery") {
@@ -189,15 +189,13 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       // Try a filtered partition query
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
-      val q2 = LogicalPlan2Query(ref,
-                 Aggregate(AggregationOperator.Avg,
-                   PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
-      memStore.commitIndexForTesting(dataset1.ref)
+      val q2 = LogicalPlan2Query(ref, Aggregate(AggregationOperator.Avg, PeriodicSeries(RawSeries(AllChunksSelector,
+        multiFilter, Seq("min")), 120000L, 10000L, 130000L)), UnavailablePromQlQueryParams, qOpt)
+      memStore.refreshIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
@@ -206,11 +204,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q3 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)), qOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)),
+        UnavailablePromQlQueryParams, qOpt)
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual countSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual countSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
@@ -219,12 +218,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q4 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, filters("series" -> "foobar"), Seq("min")),
-                     120000L, 10000L, 130000L)), qOpt)
+                     RawSeries(AllChunksSelector, filters("series" -> "foobar"), Seq("min")), 120000L,
+                     10000L, 130000L)), UnavailablePromQlQueryParams,  qOpt)
       probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (0)
       }
     }
@@ -234,7 +233,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       val numQueries = 6
 
@@ -243,27 +242,29 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q2 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)),
+                UnavailablePromQlQueryParams, qOpt)
       (0 until numQueries).foreach { i => probe.send(coordinatorActor, q2) }
 
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
           case QueryResult(_, schema, vectors) =>
-            schema shouldEqual timeMinSchema.copy(fixedVectorLen = Some(2))
+            schema.columns shouldEqual timeMinSchema.columns
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
       }
     }
 
-    ignore("should aggregate from multiple shards") {
+    it("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
+      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
@@ -273,13 +274,14 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q2 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 140000L)), queryOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 140000L)),
+                  UnavailablePromQlQueryParams, queryOpt)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           vectors should have length (1)
-          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 4.0)
+          vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
       }
     }
 
@@ -292,16 +294,17 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
-      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min")), queryOpt)
+      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min")),
+        UnavailablePromQlQueryParams, queryOpt)
       probe.send(coordinatorActor, q2)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs) =>
-          schema shouldEqual timeMinSchema
+          schema.columns shouldEqual timeMinSchema.columns
           srvs should have length (6)
           val groupedByKey = srvs.groupBy(_.key.labelValues)
           groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
@@ -313,14 +316,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     implicit val askTimeout = Timeout(5.seconds)
 
-    it("should return QueryError if physical plan execution errors out") (pending)
-
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
@@ -334,7 +335,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
@@ -365,18 +366,18 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, StatusActor.GetCurrentEvents)
     probe.expectMsg(Map(ref -> Seq(IngestionStarted(ref, 0, coordinatorActor))))
 
-    memStore.commitIndexForTesting(dataset6.ref)
+    memStore.refreshIndexForTesting(dataset6.ref)
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
                  PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
-                   RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
+                   RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), UnavailablePromQlQueryParams , qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>
-        schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                            ColumnInfo("AvgTone", DoubleColumn)), 1, fixedVectorLen = Some(10))
+        schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
+                                       ColumnInfo("AvgTone", DoubleColumn))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
@@ -405,8 +406,5 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1)))
     probe.expectMsg(UnknownDataset)
   }
-
-
-
 }
 

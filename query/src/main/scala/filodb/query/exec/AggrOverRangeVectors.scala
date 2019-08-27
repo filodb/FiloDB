@@ -10,6 +10,8 @@ import monix.reactive.Observable
 import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -59,7 +61,8 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -97,7 +100,8 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  def apply(source: Observable[RangeVector],
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -431,7 +435,7 @@ object HistMaxSumAggregator extends RowAggregator {
       case h if newHist.numBuckets > 0  => acc.h.add(newHist.asInstanceOf[bv.HistogramWithBuckets])
       case h                            =>
     }
-    acc.m = if (acc.m == Double.NaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
+    acc.m = if (acc.m.isNaN) aggRes.getDouble(2) else Math.max(acc.m, aggRes.getDouble(2))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -660,6 +664,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
+      FiloSchedulers.assertThreadName(QuerySchedName)
       ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
@@ -667,8 +672,8 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-            builder.startNewRecord()
+            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.newBuilder())
+            builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))
             builder.addDouble(row.getDouble(i + 1))
             builder.endRecord()

@@ -12,8 +12,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format._
-import filodb.memory.format.UTF8MapIteratorRowReader
+import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -87,13 +86,17 @@ final case class LabelValuesDistConcatExec(id: String,
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-      resp.foreach(rv => {
-        metadataResult ++= rv(0).rows.map(rowReader => {
-          val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-          rv(0).schema.toStringPairs(binaryRowReader.recordBase, binaryRowReader.recordOffset)
-            .map(pair => pair._1.utf8 -> pair._2.utf8).toMap
-        })
-      })
+      resp.foreach { rv =>
+          metadataResult ++= rv.head.rows.map { rowReader =>
+            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+            rv.head match {
+              case srv: SerializableRangeVector =>
+                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                   .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
+            }
+          }
+      }
       //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(metadataResult.toIterator))
@@ -137,12 +140,9 @@ final case class PartKeysExec(id: String,
     * Schema of QueryResponse returned by running execute()
     */
   def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    val partKeyResultSchema = new ResultSchema(dataset.partitionColumns.map(c=>ColumnInfo(c.name, c.columnType)),
-                                               dataset.partitionColumns.length)
     new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
-      Map(0->partKeyResultSchema.columns.map(c => ColumnInfo(c.name, c.colType))))
+                     Map(0 -> dataset.partKeySchema))
   }
-
 }
 
 final case class  LabelValuesExec(id: String,

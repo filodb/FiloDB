@@ -262,7 +262,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   def prettyPrint: String = {
     val sortedCoords = allNodes.toSeq.sorted
-    "Status legend: U=Unassigned N=Assigned A=Active E=Error R=Recovery S=Stopped D=Down\n----- Status Map-----\n" +
+    "Status legend: .=Unassigned N=Assigned A=Active E=Error R=Recovery S=Stopped D=Down\n----- Status Map-----\n" +
     statusMap.toSeq.grouped(16).zipWithIndex.map { case (statGroup, i) =>
       f"  ${i * 16}%4d-${Math.min(i * 16 + 15, numShards)}%4d   " +
       statGroup.grouped(8).map(_.map(statusToLetter).mkString("")).mkString("  ")

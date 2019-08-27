@@ -17,6 +17,8 @@ import filodb.memory.format.{RowReader, UnsafeUtils}
  * A RecordContainer is compatible with BinaryRegionLarge.
  *
  * +0000 4 bytes  length header - number of bytes following this
+ * +0004 4 bytes  version word and metadata
+ * +0008 8 bytes  server timestamp at container creation/reset
  *
  * @param base null for offheap, or an Array[Byte] for onheap
  * @param offset 64-bit native pointer or offset into Array[Byte] object memory
@@ -28,7 +30,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
   import RecordBuilder._
 
   @inline final def numBytes: Int = UnsafeUtils.getInt(base, offset)
-  @inline final def isEmpty: Boolean = numBytes <= 4
+  @inline final def isEmpty: Boolean = numBytes <= EmptyNumBytes
 
   /**
    * Used only by the RecordBuilder to update the length field.
@@ -43,6 +45,14 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
     val word = Version << 24
     UnsafeUtils.setInt(base, offset + 4, word)
   }
+
+  private[binaryrecord2] def updateTimestamp(): Unit = {
+    UnsafeUtils.setLong(base, offset + 8, System.currentTimeMillis())
+  }
+
+  @inline final def version: Int = (UnsafeUtils.getInt(base, offset + 4) >> 24) & 0x00ff
+  @inline final def isCurrentVersion: Boolean = version == Version
+  @inline final def timestamp: Long = UnsafeUtils.getLong(base, offset + 8)
 
   /**
    * Iterates through each BinaryRecord location, passing it to the Consumer so that no object allocations

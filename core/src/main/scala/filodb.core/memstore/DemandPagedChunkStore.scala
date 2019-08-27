@@ -62,6 +62,7 @@ extends RawToPartitionMaker with StrictLogging {
    * Stores raw chunks into offheap memory and populates chunks into partition
    */
   def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition] = Task {
+    FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
       tsShard.shardStats.partitionsPagedFromColStore.increment()

@@ -68,7 +68,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
   final def getMetric: String = metric
 
   final def addToBuilder(builder: RecordBuilder): Unit = {
-    builder.startNewRecord()
+    builder.startNewRecord(dataset.schema)
     builder.addLong(timestamp)
     builder.addDouble(value)
     builder.startMap()
@@ -150,9 +150,7 @@ class MetricTagInputRecord(values: Seq[Any],
   final def getMetric: String = metric
 
   def addToBuilder(builder: RecordBuilder): Unit = {
-    require(builder.schema == dataset.ingestionSchema)
-
     val reader = SeqRowReader(values :+ metric :+ tags)
-    builder.addFromReader(reader)
+    builder.addFromReader(reader, dataset.schema)
   }
 }

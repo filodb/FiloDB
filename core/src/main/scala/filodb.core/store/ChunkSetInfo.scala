@@ -38,10 +38,11 @@ object ChunkSet {
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
+  def apply(dataset: Dataset, part: PartitionKey, ingestionTime: Long,
+            rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
     val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, chunkID(startTime), rows.length,
+    val info = ChunkSetInfo(factory, dataset, chunkID(startTime, ingestionTime), rows.length,
                             startTime,
                             dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
@@ -396,10 +397,16 @@ extends Iterator[ChunkQueryInfo] {
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         val tsVector = next.vectorPtr(tsColID)
-        val tsReader = vectors.LongBinaryVector(tsVector)
-        val valueVector = next.vectorPtr(rv.valueColID)
-        val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
-        windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        try {
+          val tsReader = vectors.LongBinaryVector(tsVector)
+          val valueVector = next.vectorPtr(rv.valueColID)
+          val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
+          windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        } catch {
+          case e: Throwable => {
+            ChunkSetInfo.log.error(s"Corrupt vector at ${java.lang.Long.toHexString(tsVector)}", e)
+          }
+        }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }

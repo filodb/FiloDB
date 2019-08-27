@@ -1,6 +1,7 @@
 package filodb.core.store
 
 import com.typesafe.config.ConfigFactory
+import monix.eval.Task
 import monix.reactive.Observable
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -27,21 +28,17 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val policy = new FixedMaxPartitionsEvictionPolicy(100)   // Since 99 GDELT rows, this will never evict
   val memStore = new TimeSeriesMemStore(config, colStore, metaStore, Some(policy))
 
-  val datasetDb2 = dataset.copy(database = Some("unittest2"))
-
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
     colStore.initialize(dataset.ref).futureValue
     colStore.initialize(GdeltTestData.dataset2.ref).futureValue
-    colStore.initialize(datasetDb2.ref).futureValue
   }
 
   before {
     colStore.truncate(dataset.ref).futureValue
     colStore.truncate(GdeltTestData.dataset2.ref).futureValue
-    colStore.truncate(datasetDb2.ref).futureValue
     memStore.reset()
     metaStore.clearAllData()
   }
@@ -106,24 +103,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rowIt2.map(_.getLong(0)).toSeq should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
   }
 
-  it should "read back rows written in another database" ignore {
-    whenReady(colStore.write(datasetDb2, chunkSetStream())) { response =>
-      response should equal (Success)
-    }
-
-    val paramSet = colStore.getScanSplits(dataset.ref, 1)
-    paramSet should have length (1)
-
-    val rowIt = memStore.scanRows(datasetDb2, Seq(0, 1, 2), FilteredPartitionScan(paramSet.head))
-    rowIt.map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
-
-    // Check that original keyspace/database has no data
-    memStore.scanRows(dataset, Seq(0), partScan).toSeq should have length (0)
-  }
-
   it should "read back rows written with multi-column row keys" ignore {
     import GdeltTestData._
-    val stream = toChunkSetStream(dataset2, partBuilder2.addFromObjects(197901), dataRows(dataset2))
+    val stream = toChunkSetStream(dataset2, partBuilder2.partKeyFromObjects(schema2, 197901), dataRows(dataset2))
     colStore.write(dataset2, stream).futureValue should equal (Success)
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
@@ -140,7 +122,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -157,7 +139,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)

@@ -11,10 +11,11 @@ import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
 import scala.util.control.NonFatal
 
-import filodb.coordinator.queryengine2.QueryEngine
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core._
-import filodb.core.memstore.{MemStore, TermInfo}
+import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
+import filodb.core.query.ColumnFilter
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
@@ -53,11 +54,12 @@ final class QueryActor(memStore: MemStore,
                        shardMapFunc: => ShardMapper) extends BaseActor {
   import QueryActor._
   import client.QueryCommands._
+  import filodb.core.memstore.FiloSchedulers._
 
   val config = context.system.settings.config
 
   var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
-  val applicationShardKeyName = dataset.options.nonMetricShardColumns(0)
+  val applicationShardKeyName = dataset.options.nonMetricShardColumns.headOption
   val defaultSpread = config.getInt("filodb.spread-default")
 
   implicit val spreadOverrideReader: ValueReader[SpreadAssignment] = ValueReader.relative { spreadAssignmentConfig =>
@@ -70,13 +72,16 @@ final class QueryActor(memStore: MemStore,
   val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
   spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
-  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyName, filodbSpreadMap, defaultSpread)
+  val spreadFunc = applicationShardKeyName.map { appKey =>
+                     QueryOptions.simpleMapSpreadFunc(appKey, filodbSpreadMap, defaultSpread)
+                   }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
-  val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
+  val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
+    EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
-  implicit val scheduler = Scheduler.fixedPool(s"query-${dataset.ref}", numSchedThreads.toInt)
+  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)
 
   private val tags = Map("dataset" -> dataset.ref.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
@@ -90,9 +95,9 @@ final class QueryActor(memStore: MemStore,
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
       .withTag("query-id", q.id)
       .start()
-    implicit val _ = queryConfig.askTimeout
-    q.execute(memStore, dataset, queryConfig)
+    q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
+       FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
@@ -101,12 +106,12 @@ final class QueryActor(memStore: MemStore,
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
        }
        span.finish()
-     }.recover { case ex =>
+     }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
        logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
        replyTo ! QueryError(q.id, ex)
        span.finish()
-     }
+     }(queryScheduler)
   }
 
   private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
@@ -117,7 +122,7 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, q.tsdbQueryParams)
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -129,7 +134,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, getSpreadProvider(q.queryOptions))
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, q.tsdbQueryParams)
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>
@@ -159,7 +164,7 @@ final class QueryActor(memStore: MemStore,
     case q: ExecPlan              =>  execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
-      sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
+      sender() ! memStore.indexNames(ref, limit).map(_._1).toBuffer
     case g: GetIndexValues         => processIndexValues(g, sender())
 
     case ThrowException(dataset) =>

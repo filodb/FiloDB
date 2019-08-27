@@ -106,8 +106,8 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                         .grouped(settings.batchSize)
                         .zipWithIndex
                         .flatMap { case (readers, idx) =>
-                          val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
-                          readers.foreach(builder.addFromReader)
+                          val builder = new RecordBuilder(MemFactory.onHeapFactory)
+                          readers.foreach(builder.addFromReader(_, dataset.schema))
                           // Most likely to have only one container.  Just assign same offset.
                           builder.allContainers.map { c => SomeData(c, idx) }
                         }

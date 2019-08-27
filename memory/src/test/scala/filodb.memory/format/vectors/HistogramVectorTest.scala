@@ -21,11 +21,11 @@ class HistogramVectorTest extends NativeVectorTest {
 
   val buffer = new UnsafeBuffer(new Array[Byte](4096))
 
-  def verifyHistogram(h: Histogram, itemNo: Int): Unit = {
+  def verifyHistogram(h: Histogram, itemNo: Int, rawBuckets: Seq[Array[Double]] = rawHistBuckets): Unit = {
     h.numBuckets shouldEqual bucketScheme.numBuckets
     for { i <- 0 until bucketScheme.numBuckets } {
       h.bucketTop(i) shouldEqual bucketScheme.bucketTop(i)
-      h.bucketValue(i) shouldEqual rawHistBuckets(itemNo)(i)
+      h.bucketValue(i) shouldEqual rawBuckets(itemNo)(i)
     }
   }
 
@@ -100,6 +100,71 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.length shouldEqual 0
   }
 
+  val lastIncrHist = LongHistogram(bucketScheme, incrHistBuckets.last.map(_.toLong))
+
+  it("should append, optimize, and query SectDelta histograms") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual incrHistBuckets.length
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    reader.length shouldEqual rawHistBuckets.length
+    println(reader.dumpAllSections)  //  XXX
+
+    (0 until incrHistBuckets.length).foreach { i =>
+      verifyHistogram(reader(i), i, incrHistBuckets)
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+    optReader.length(optimized) shouldEqual incrHistBuckets.length
+    (0 until incrHistBuckets.length).foreach { i =>
+      val h = optReader(i)
+      verifyHistogram(h, i, incrHistBuckets)
+    }
+
+    val oReader2 = optReader.asInstanceOf[CounterHistogramReader]
+    oReader2.updateCorrection(optimized, NoCorrection) shouldEqual
+      HistogramCorrection(lastIncrHist, LongHistogram.empty(bucketScheme))
+    oReader2.updateCorrection(optimized, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+      HistogramCorrection(lastIncrHist, correction1)
+  }
+
+  it("SectDelta vectors should detect and handle drops correctly") {
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual incrHistBuckets.length*2
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    // One normal section, one dropped section
+    reader.iterateSections.toSeq.map(_.sectionType) shouldEqual Seq(SectionType(0), SectionType(1))
+
+    (0 until incrHistBuckets.length).foreach { i =>
+      verifyHistogram(reader(i), i, incrHistBuckets)
+      verifyHistogram(reader(4 + i), i, incrHistBuckets)
+    }
+
+    // Now, verify updateCorrection will propagate correction correctly
+    reader.updateCorrection(appender.addr, NoCorrection) shouldEqual
+      HistogramCorrection(lastIncrHist, lastIncrHist)
+    val corr2 = correction1.copy
+    corr2.add(lastIncrHist)
+    reader.updateCorrection(appender.addr, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+      HistogramCorrection(lastIncrHist, corr2)
+  }
+
   it("should reject BinaryHistograms of schema different from first schema ingested") {
     val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
@@ -159,5 +224,61 @@ class HistogramVectorTest extends NativeVectorTest {
       val elemNo = scala.util.Random.nextInt(numElements)
       verifyHistogram(optReader(elemNo), elemNo % (rawLongBuckets.length))
     }
+  }
+
+  val incrAppender = HistogramVector.appendingSect(memFactory, 1024)
+  incrHistBuckets.foreach { rawBuckets =>
+    BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+    incrAppender.addData(buffer) shouldEqual Ack
+  }
+  val incrAddr = incrAppender.addr
+  val incrReader = incrAppender.reader.asInstanceOf[CounterHistogramReader]
+
+  it("should detect drop correctly at beginning of chunk and adjust CorrectionMeta") {
+    incrReader.detectDropAndCorrection(incrAddr, NoCorrection) shouldEqual NoCorrection
+
+    // No drop in first value, correction should be returned unchanged
+    val meta1 = HistogramCorrection(correction1, correction2.copy)
+    incrReader.detectDropAndCorrection(incrAddr, meta1) shouldEqual meta1
+
+    // Drop in first value, correction should be done
+    val meta2 = HistogramCorrection(lastIncrHist, correction2.copy)
+    val corr3 = correction2.copy
+    corr3.add(lastIncrHist)
+    incrReader.detectDropAndCorrection(incrAddr, meta2) shouldEqual
+      HistogramCorrection(lastIncrHist, corr3)
+  }
+
+  it("should return correctedValue with correction adjustment even if vector has no drops") {
+    val incr1 = LongHistogram(bucketScheme, incrHistBuckets(1).map(_.toLong))
+    incrReader.correctedValue(1, NoCorrection) shouldEqual incr1
+
+    val meta1 = HistogramCorrection(correction1, correction2.copy)
+    val adjustedHist = correction2.copy
+    adjustedHist.add(incr1)
+    incrReader.correctedValue(1, meta1) shouldEqual adjustedHist
+  }
+
+  it("should return correctedValue with vector with drops") {
+    val appender2 = HistogramVector.appendingSect(memFactory, 1024)
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender2.addData(buffer) shouldEqual Ack
+    }
+    incrHistBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets.map(_.toLong + 15L), buffer)
+      appender2.addData(buffer) shouldEqual Ack
+    }
+    val reader = appender2.reader.asInstanceOf[CounterHistogramReader]
+
+    // now check corrected hist
+    val incr5 = LongHistogram(bucketScheme, incrHistBuckets(1).map(_.toLong + 15L))
+    incr5.add(lastIncrHist)
+    reader.correctedValue(5, NoCorrection) shouldEqual incr5
+
+    // value @5 plus correction plus carryover correction from meta
+    val meta1 = HistogramCorrection(correction1, correction2.copy)
+    incr5.add(correction2)
+    reader.correctedValue(5, meta1) shouldEqual incr5
   }
 }

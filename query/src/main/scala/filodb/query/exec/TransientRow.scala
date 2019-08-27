@@ -43,7 +43,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
-  def getDouble(columnNo: Int): Double = if (columnNo == 1) value else throw new IllegalArgumentException()
+  def getDouble(columnNo: Int): Double = if (columnNo == 1) value
+                                         else throw new IllegalArgumentException(s"Invalid col $columnNo")
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
@@ -84,7 +85,7 @@ class TransientHistRow(var timestamp: Long = 0L,
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 
-  override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
+  override def toString: String = s"TransientHistRow(t=$timestamp, v=$value)"
 }
 
 // 0: Timestamp, 1: Histogram, 2: Max/Double
@@ -93,6 +94,8 @@ final class TransientHistMaxRow(var max: Double = 0.0) extends TransientHistRow(
     if (columnNo == 2) max = valu else throw new IllegalArgumentException()
   override def getDouble(columnNo: Int): Double =
     if (columnNo == 2) max else throw new IllegalArgumentException()
+
+  override def toString: String = s"TransientHistMaxRow(t=$timestamp, h=$value, max=$max)"
 }
 
 final class AvgAggTransientRow extends MutableRowReader {

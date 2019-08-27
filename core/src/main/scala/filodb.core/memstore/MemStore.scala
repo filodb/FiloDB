@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -99,8 +100,8 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit]
-
+                   diskTimeToLiveSeconds: Int = 259200,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
 
@@ -138,7 +139,7 @@ trait MemStore extends ChunkSource {
    * all shards on this node
    * @return an index name and shard number
    */
-  def indexNames(dataset: DatasetRef): Iterator[(String, Int)]
+  def indexNames(dataset: DatasetRef, limit: Int): Seq[(String, Int)]
 
   /**
    * Returns values for a given index name (and # of series for each) for a dataset and shard,
@@ -190,6 +191,11 @@ trait MemStore extends ChunkSource {
   def activeShards(dataset: DatasetRef): Seq[Int]
 
   /**
+   * Commits the index immediately so that queries can pick up the latest changes.  Used for testing.
+   */
+  def refreshIndexForTesting(dataset: DatasetRef): Unit
+
+  /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
@@ -223,10 +229,12 @@ object MemStore {
         case IntColumn       => bv.IntBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements,
-                                  counter = col.params.as[Option[Boolean]]("counter").getOrElse(false))
+                                  detectDrops = col.params.as[Option[Boolean]]("detectDrops").getOrElse(false))
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
-        case HistogramColumn => bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
+        case HistogramColumn => val counter = col.params.as[Option[Boolean]]("counter").getOrElse(false)
+                                if (counter) bv.HistogramVector.appendingSect(memFactory, config.maxBlobBufferSize)
+                                else         bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
         case other: Column.ColumnType => ???
       }
     }.toArray

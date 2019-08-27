@@ -77,6 +77,9 @@ trait BinaryRegion {
   final def compare(address1: NativePointer, address2: NativePointer): Int =
     compare(UnsafeUtils.ZeroPointer, address1, UnsafeUtils.ZeroPointer, address2)
 
+  /**
+   * Copies the bytes, including the lnegth prefix, to a byte array on heap
+   */
   final def asNewByteArray(base: Any, offset: Long): Array[Byte] = {
     val numBytes1 = numBytes(base, offset)
     val bytes = new Array[Byte](numBytes1 + lenBytes)

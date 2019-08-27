@@ -9,12 +9,14 @@ import scala.util.Try
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import monix.reactive.Observable
+import org.scalactic._
 
 import filodb.coordinator._
 import filodb.coordinator.client._
-import filodb.coordinator.client.QueryCommands.{SpreadChange, SpreadProvider, StaticSpreadProvider}
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
+import filodb.coordinator.queryengine2.{PromQlQueryParams, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Schemas}
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
@@ -144,6 +146,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           val (remote, ref) = getClientAndRef(args)
           dumpShardStatus(remote, ref)
 
+        case Some("validateSchemas") => validateSchemas()
+
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
           val remote = Client.standaloneClient(system, args.host.get, args.port)
@@ -202,6 +206,23 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     }
   }
 
+  def validateSchemas(): Unit = {
+    Schemas.fromConfig(config) match {
+      case Good(Schemas(partSchema, schemas)) =>
+        println("Schema validated.\nPartition schema:")
+        partSchema.columns.foreach(c => println(s"\t$c"))
+        schemas.foreach { case (schemaName, sch) =>
+          println(s"Schema $schemaName:")
+          sch.data.columns.foreach(c => println(s"\t$c"))
+          println(s"\n\tDownsamplers: ${sch.data.downsamplers}\n\tDownsample schema: ${sch.data.downsampleSchema}")
+        }
+      case Bad(errors) =>
+        println(s"Schema validation errors:")
+        errors.foreach { case (name, err) => println(s"$name\t$err")}
+        exitCode = 1
+    }
+  }
+
   final case class QOptions(limit: Int, sampleLimit: Int,
                             everyN: Option[Int], timeout: FiniteDuration,
                             shardOverrides: Option[Seq[Int]],
@@ -211,27 +232,29 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                                    timeParams: TimeRangeParams,
                                    options: QOptions): Unit = {
     val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options)
+    executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
   def parseLabelValuesQuery(client: LocalClient, labelNames: Seq[String], constraints: Map[String, String], dataset: String,
                             timeParams: TimeRangeParams,
                             options: QOptions): Unit = {
     val logicalPlan = LabelValues(labelNames, constraints, 3.days.toMillis)
-    executeQuery2(client, dataset, logicalPlan, options)
+    executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
                       timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options)
+    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(query,timeParams.start, timeParams.step,
+      timeParams.end))
   }
 
-  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
+  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions, tsdbQueryParams:
+  TsdbQueryParams): Unit = {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
-    val qOpts = QueryCommands.QueryOptions(spreadProvider, options.sampleLimit)
+    val qOpts = QueryOptions(spreadProvider, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
@@ -239,7 +262,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     options.everyN match {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
-          client.logicalPlan2Query(ref, plan, qOpts) match {
+          client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
             case QueryResult(_, schema, result) => result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case err: QueryError                => throw new ClientException(err)
           }
@@ -250,7 +273,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         while (!fut.isCompleted) { Thread sleep 1000 }
       case None =>
         try {
-          client.logicalPlan2Query(ref, plan, qOpts) match {
+          client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
             case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")

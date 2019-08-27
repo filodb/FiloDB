@@ -56,9 +56,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, rawData)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset1.ref)
+    memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0)))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 0
 
     val minSet = rawData.map(_(1).asInstanceOf[Double]).toSet
@@ -83,7 +83,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       memStore.ingest(dataset1.ref, 0, data)
     }
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split)).map(_.getDouble(0)).sum
     agg1 shouldEqual (1 to 20).map(_.toDouble).sum
@@ -94,7 +94,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
     memStore.ingest(dataset2.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset2.ref)
+    memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset2.ref)
     val split = memStore.getScanSplits(dataset2.ref, 1).head
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter))).map(_.getDouble(0)).sum
@@ -105,7 +105,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(histDataset, 0, TestData.storeConf)
     val data = linearHistSeries().take(40)
     memStore.ingest(histDataset.ref, 0, records(histDataset, data))
-    memStore.commitIndexForTesting(histDataset.ref)
+    memStore.refreshIndexForTesting(histDataset.ref)
 
     memStore.numRowsIngested(histDataset.ref, 0) shouldEqual 40L
     // Below will catch any partition match errors.  Should only be 10 tsParts.
@@ -141,12 +141,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingest(dataset1.ref, 0, records(dataset1, data))
 
     val minSeries0 = data(0)(1).asInstanceOf[Double]
-    val partKey0 = partKeyBuilder.addFromObjects(data(0)(5))
+    val partKey0 = partKeyBuilder.partKeyFromObjects(schema1, data(0)(5))
     val q = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey0, 0))
     q.map(_.getDouble(0)).toSeq.head shouldEqual minSeries0
 
     val minSeries1 = data(1)(1).asInstanceOf[Double]
-    val partKey1 = partKeyBuilder.addFromObjects("Series 1")
+    val partKey1 = partKeyBuilder.partKeyFromObjects(schema1, "Series 1")
     val q2 = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey1, 0))
     q2.map(_.getDouble(0)).toSeq.head shouldEqual minSeries1
   }
@@ -155,7 +155,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
 
     val filter =  ColumnFilter("series", Filter.Equals("Series 1".utf8))
     val split = memStore.getScanSplits(dataset1.ref, 1).head
@@ -170,7 +170,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingest(dataset2.ref, 0, data)
     val data2 = records(dataset2, withMap(linearMultiSeries(200000L, 6), 6).take(20))   // 5 series only
     memStore.ingest(dataset2.ref, 1, data2)
-    memStore.commitIndexForTesting(dataset2.ref)
+    memStore.refreshIndexForTesting(dataset2.ref)
 
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
     memStore.numRowsIngested(dataset1.ref, 0) should equal (20L)
@@ -178,7 +178,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val splits = memStore.getScanSplits(dataset2.ref, 1)
     splits should have length (2)
 
-    memStore.indexNames(dataset2.ref).toSet should equal (
+    memStore.indexNames(dataset2.ref, 10).toSet should equal (
       Set(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
 
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
@@ -206,7 +206,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     fut1.futureValue
     fut2.futureValue
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
                        .map(_.getDouble(0)).sum
@@ -245,7 +245,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
@@ -282,10 +282,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
         flushInterval = 10.minutes))
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset.ref, 0).get
-    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSegmentSize)
 
     partKeys.zipWithIndex.foreach { case (off, i) =>
-      timeBucketRb.startNewRecord()
+      timeBucketRb.startNewRecord(indexTimeBucketSchema, 0)
       timeBucketRb.addLong(i + 10) // startTime
       timeBucketRb.addLong(if (i%2 == 0) Long.MaxValue else i + 20) // endTime
       val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
@@ -299,18 +299,18 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
       tsShard.extractTimeBucket(new IndexData(1, 0, RecordContainer(bytes)), partIdMap)
     }
-    tsShard.commitPartKeyIndexBlocking()
+    tsShard.refreshPartKeyIndexBlocking()
     partIdMap.size shouldEqual partKeys.size
     partKeys.zipWithIndex.foreach { case (off, i) =>
       val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
       val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
       readPartKey.bytes.slice(readPartKey.offset, readPartKey.offset + readPartKey.length) shouldEqual expectedPartKey
       if (i%2 == 0) {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off).get.partID shouldEqual i
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset).get.partID shouldEqual i
         tsShard.partitions.containsKey(i) shouldEqual true // since partition is ingesting
       }
       else {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off) shouldEqual None
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset) shouldEqual None
         tsShard.partitions.containsKey(i) shouldEqual false // since partition is not ingesting
       }
     }
@@ -353,7 +353,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // no flushes
     chunksetsWritten shouldEqual initChunksWritten
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     // Should have less than 50 records ingested
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
@@ -367,9 +367,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, multiSeriesData().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
-    memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
+    memStore.indexNames(dataset1.ref, 10).toSeq should equal (Seq(("series", 0)))
 
     memStore.truncate(dataset1.ref)
 
@@ -390,7 +390,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
       endTime = part.timestampOfLatestSample
     }
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     endTime
   }
 
@@ -401,7 +401,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
@@ -419,7 +419,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
@@ -437,7 +437,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
@@ -473,7 +473,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
 
     val shard0 = memStore.getShard(dataset1.ref, 0).get
     val shard0Partitions = shard0.partitions
@@ -517,7 +517,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.labelValues(dataset1.ref, 0, "series").toSeq should have length (10)
@@ -531,7 +531,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual 0
 
-    memStore.commitIndexForTesting(dataset1.ref)
+    memStore.refreshIndexForTesting(dataset1.ref)
     // Check partitions are now 0 to 20, 21/22 did not get added
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
@@ -554,7 +554,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
       val data = records(dataset1, linearMultiSeries(numSeries = numSeries).take(numSeries))
       store2.ingest(dataset1.ref, 0, data)
-      store2.commitIndexForTesting(dataset1.ref)
+      store2.refreshIndexForTesting(dataset1.ref)
 
       store2.numPartitions(dataset1.ref, 0) shouldEqual numSeries
       shard.bufferPool.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100

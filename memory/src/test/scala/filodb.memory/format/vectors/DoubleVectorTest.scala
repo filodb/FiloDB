@@ -213,7 +213,7 @@ class DoubleVectorTest extends NativeVectorTest {
       reader.detectDropAndCorrection(frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1201.2)
     }
 
-    it("should return correctedValue with correction adjustment even if vector has no resets") {
+    it("should return correctedValue with correction adjustment even if vector has no drops") {
       reader.correctedValue(frozen, 1, NoCorrection) shouldEqual 2001.1
 
       val corr1 = DoubleCorrection(999.9, 100.0)
@@ -221,14 +221,14 @@ class DoubleVectorTest extends NativeVectorTest {
     }
 
     it("should updateCorrections correctly") {
-      reader.updateCorrection(frozen, 0, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
+      reader.updateCorrection(frozen, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
 
       val corr1 = DoubleCorrection(999.9, 50.0)
-      reader.updateCorrection(frozen, 0, corr1) shouldEqual DoubleCorrection(7678, 50.0)
+      reader.updateCorrection(frozen, corr1) shouldEqual DoubleCorrection(7678, 50.0)
     }
 
-    it("should detect resets with DoubleCounterAppender and carry flag to optimized version") {
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, counter=true)
+    it("should detect drops with DoubleCounterAppender and carry flag to optimized version") {
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
       cb.addData(101)
       cb.addData(102.5)
 
@@ -257,7 +257,7 @@ class DoubleVectorTest extends NativeVectorTest {
 
     it("should read out corrected values properly") {
       val orig = Seq(101, 102.5, 9, 13.3, 21.1)
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, counter=true)
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
       orig.foreach(cb.addData)
       cb.length shouldEqual orig.length
       val sc = cb.optimize(memFactory)
@@ -273,12 +273,12 @@ class DoubleVectorTest extends NativeVectorTest {
       reader.correctedValue(sc, 2, corr1) shouldEqual 161.5
       reader.correctedValue(sc, 4, corr1) shouldEqual (21.1 + 102.5 + 50)
 
-      reader.updateCorrection(sc, 0, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
+      reader.updateCorrection(sc, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
     }
 
     it("should read out length and values correctly for corrected vectors") {
       val orig = Seq(4419.00, 4511.00, 4614.00, 4724.00, 4909.00, 948.00, 1000.00, 1095.00, 1102.00, 1201.00)
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, counter=true)
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
       orig.foreach(cb.addData)
       cb.length shouldEqual orig.length
       val sc = cb.optimize(memFactory)

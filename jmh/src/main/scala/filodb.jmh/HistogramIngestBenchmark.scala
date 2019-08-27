@@ -2,11 +2,14 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
+import scala.language.postfixOps
+
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
+import org.agrona.{ExpandableArrayBuffer, ExpandableDirectByteBuffer}
 import org.agrona.concurrent.UnsafeBuffer
-import org.agrona.ExpandableArrayBuffer
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
+import scalaxy.loops._
 
 import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
@@ -33,9 +36,9 @@ class HistogramIngestBenchmark {
   println("Be patient, generating lots of containers of histogram schema data....")
   val histSchemaData = linearHistSeries(numBuckets = 64).map(SeqRowReader)
   // sized just big enough for ~300 entries per container 700 * 300
-  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema, 230000)
+  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, 230000)
   histSchemaData.take(300*100).grouped(300).foreach { rows =>
-    rows.foreach(histSchemaBuilder.addFromReader)
+    rows.foreach(histSchemaBuilder.addFromReader(_, histDataset.schema))
     println(s"We have ${histSchemaBuilder.allContainers.length} containers, " +
             s"remaining = ${histSchemaBuilder.containerRemaining}")
     histSchemaBuilder.newContainer()   // Force switching to new container
@@ -46,9 +49,9 @@ class HistogramIngestBenchmark {
   println("Be patient, generating lots of containers of prometheus schema data....")
   val promDataset = MetricsTestData.timeseriesDataset
   val promData = MetricsTestData.promHistSeries(numBuckets = 64).map(SeqRowReader)
-  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, promDataset.ingestionSchema, 4200000)
+  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, 4200000)
   promData.take(300*66*100).grouped(300*66).foreach { rows =>
-    rows.foreach(promBuilder.addFromReader)
+    rows.foreach(promBuilder.addFromReader(_, promDataset.schema))
     println(s"We have ${promBuilder.allContainers.length} containers, " +
             s"remaining = ${promBuilder.containerRemaining}")
     promBuilder.newContainer()   // Force switching to new container
@@ -155,7 +158,41 @@ class HistogramIngestBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def nibbleUnpackDelta64(): Unit = {
     bufSlice.wrap(buf, 0, bytesWritten)
+    sink.reset()
     val res = NibblePack.unpackToSink(bufSlice, sink, inputs.size)
     require(res == NibblePack.Ok)
+  }
+
+  // Add additional inputs for 2D Delta benchmark
+  val numInputs = 100
+  val increasingBuf = new ExpandableDirectByteBuffer()
+  var lastPos = 0
+  val increasingHistPos = (0 until numInputs).map { i =>
+    val longs = inputs.zipWithIndex.map { case (a, j) => a + i + j }
+    lastPos = NibblePack.packDelta(longs, increasingBuf, lastPos)
+    lastPos
+  }.toArray
+
+  // Now, use DeltaDiffPackSink to recompress to deltas from initial inputs
+  val outBuf = new ExpandableDirectByteBuffer()
+  val ddsink = NibblePack.DeltaDiffPackSink(new Array[Long](inputs.size), outBuf)
+  val ddSlice = new UnsafeBuffer(buf, 0, bytesWritten)
+
+  // Simulates DeltaDiffPackSink for many inputs... decompressing and recompressing delta of deltas
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(100)
+  def nibble2DDeltaRepack(): Unit = {
+    ddsink.writePos = 0
+    java.util.Arrays.fill(ddsink.lastHistDeltas, 0)
+    var lastPos = 0
+    for { i <- 0 until numInputs optimized } {
+      ddSlice.wrap(increasingBuf, lastPos, increasingHistPos(i) - lastPos)
+      val res = NibblePack.unpackToSink(ddSlice, ddsink, inputs.size)
+      require(res == NibblePack.Ok)
+      lastPos = increasingHistPos(i)
+      ddsink.reset()
+    }
   }
 }

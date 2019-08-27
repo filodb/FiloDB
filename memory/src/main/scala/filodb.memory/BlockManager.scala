@@ -216,12 +216,22 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def timeBuckets: Seq[Long] = usedBlocksTimeOrdered.keySet.asScala.toSeq
 
   def markBucketedBlocksReclaimable(upTo: Long): Unit = {
-    usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
-      list.asScala.foreach(_.markReclaimable)
+    lock.lock()
+    try {
+      usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
+        list.asScala.foreach(_.markReclaimable)
+      }
+    } finally {
+      lock.unlock()
     }
   }
 
-  def hasTimeBucket(bucket: Long): Boolean = usedBlocksTimeOrdered.containsKey(bucket)
+  def hasTimeBucket(bucket: Long): Boolean = {
+    lock.lock()
+    val result = usedBlocksTimeOrdered.containsKey(bucket)
+    lock.unlock()
+    result
+  }
 
   /**
    * Used during testing only to try and reclaim all existing blocks

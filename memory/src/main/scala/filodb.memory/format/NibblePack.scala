@@ -26,12 +26,7 @@ object NibblePack {
     }
 
     // Flush remainder - if any left
-    if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
-      pos = pack8(inputArray, buf, pos)
-    }
-
-    pos
+    packRemainder(inputArray, buf, pos, i)
   }
 
   /**
@@ -55,13 +50,17 @@ object NibblePack {
     }
 
     // Flush remainder - if any left
-    if (i % 8 != 0) {
-      for { j <- (i % 8) until 8 optimized } { inputArray(j) = 0 }
-      pos = pack8(inputArray, buf, pos)
-    }
-
-    pos
+    packRemainder(inputArray, buf, pos, i)
   }
+
+  @inline
+  private def packRemainder(input: Array[Long], buf: MutableDirectBuffer, pos: Int, i: Int): Int =
+    if (i % 8 != 0) {
+      for { j <- (i % 8) until 8 optimized } { input(j) = 0 }
+      pack8(input, buf, pos)
+    } else {
+      pos
+    }
 
   /**
    * Packs Double values using XOR encoding to find minimal # of bits difference between successive values.
@@ -194,36 +193,141 @@ object NibblePack {
 
   val empty = Array.empty[Byte]
 
+  val zeroOutput = new Array[Long](8)
+
   trait Sink {
-    def process(data: Long): Unit
+    /**
+     * Process 8 u64's/Longs of output at a time
+     */
+    def process(data: Array[Long]): Unit
   }
 
   final case class DeltaSink(outArray: Array[Long]) extends Sink {
     private var current: Long = 0L
-    private var pos: Int = 0
-    def process(data: Long): Unit = {
+    private var i: Int = 0
+    final def process(data: Array[Long]): Unit = {
       // It's necessary to ignore "extra" elements because NibblePack always unpacks in multiples of 8, but the
       // user might not intuitively allocate output arrays in elements of 8.
-      if (pos < outArray.size) {
-        current += data
-        outArray(pos) = current
-        pos += 1
+      val numElems = Math.min(outArray.size - i, 8)
+      require(numElems > 0)
+      for { n <- 0 until numElems optimized } {
+        current += data(n)
+        outArray(i + n) = current
       }
+      i += 8
+    }
+    def reset(): Unit = {
+      i = 0
+      current = 0L
     }
   }
 
   final case class DoubleXORSink(outArray: Array[Double], initial: Long) extends Sink {
     private var lastBits = initial
     private var pos: Int = 1
-    def process(data: Long): Unit = {
-      if (pos < outArray.size) {
-        val nextBits = lastBits ^ data
-        outArray(pos) = java.lang.Double.longBitsToDouble(nextBits)
+    def process(data: Array[Long]): Unit = {
+      val numElems = Math.min(outArray.size - pos, 8)
+      for { n <- 0 until numElems optimized } {
+        val nextBits = lastBits ^ data(n)
+        outArray(pos + n) = java.lang.Double.longBitsToDouble(nextBits)
         lastBits = nextBits
-        pos += 1
       }
+      pos += 8
     }
   }
+
+  /**
+   * A sink used for increasing histogram counters.  In one shot:
+   * - Unpacks a delta-encoded NibblePack compressed Histogram
+   * - Subtracts the values from lastHistValues, noting if the difference is not >= 0 (means counter reset)
+   * - Packs the subtracted values
+   * - Updates lastHistValues to the latest unpacked values so this sink can be used again
+   *
+   * Basically the delta from the last histogram is stored. This is great for compression, but not so great at
+   * query time as it means arriving at the original value requires adding up most of the histograms in a section.
+   *
+   * It is designed to be reused for delta repacking successive histograms.  Thus, the initial write position
+   * pos is not reset after finish(), instead it keeps increasing.  writePos may be adjusted by users, make sure
+   * you know what you are doing.
+   *
+   * For more details, see the "2D Delta" section in [compression.md](doc/compression.md)
+   *
+   * @param lastHistDeltas last histogram deltas as they arrive "over the wire"
+   * @param outBuf the MutableDirectBuffer to write the compressed 2D delta histogram to
+   * @param pos the initial write position for the outBuf
+   */
+  final case class DeltaDiffPackSink(lastHistDeltas: Array[Long], outBuf: MutableDirectBuffer, pos: Int = 0)
+  extends Sink {
+    // True if a packed value dropped
+    var valueDropped: Boolean = false
+    private var i: Int = 0
+    private val packArray = new Array[Long](8)
+    var writePos: Int = pos
+
+    def reset(): Unit = {
+      i = 0
+      valueDropped = false
+    }
+
+    final def process(data: Array[Long]): Unit = {
+      val numElems = Math.min(lastHistDeltas.size - i, 8)
+      for { n <- 0 until numElems optimized } {
+        val diff = data(n) - lastHistDeltas(i + n)
+        if (diff < 0) valueDropped = true
+        packArray(n) = diff
+      }
+      // Copy in bulk current data to lastHistDeltas
+      System.arraycopy(data, 0, lastHistDeltas, i, numElems)
+      // if numElems < 8, zero out remainder of packArray
+      if (numElems < 8) java.util.Arrays.fill(packArray, numElems, 8, 0L)
+      writePos = pack8(packArray, outBuf, writePos)
+      i += 8
+    }
+  }
+
+  /**
+   * Very similar to the DeltaDiffPackSink, except that instead of storing deltas from the last histogram, it
+   * stores the delta from the originalDeltas.  This allows any original histogram to be reconstructed just by adding
+   * originalDeltas to the stored value.  Doesn't compress quite as well but much less work needs to be done
+   * at query time.
+   * It still checks for any drops.
+   * This sink is initialized with the number of buckets and fed the FIRST histogram.  After that reset() is called.
+   * If a new section is to be started or after first histogram then setOriginal() should be called.
+   */
+  final class DeltaSectDiffPackSink(numBuckets: Int, outBuf: MutableDirectBuffer, pos: Int = 0)
+  extends Sink {
+    val originalDeltas = new Array[Long](numBuckets)
+    val lastHistDeltas = new Array[Long](numBuckets)
+    var valueDropped: Boolean = false
+    private var i: Int = 0
+    private val packArray = new Array[Long](8)
+    var writePos: Int = pos
+
+    def reset(): Unit = {
+      i = 0
+      valueDropped = false
+    }
+
+    final def process(data: Array[Long]): Unit = {
+      val numElems = Math.min(numBuckets - i, 8)
+      for { n <- 0 until numElems optimized } {
+        if (data(n) < lastHistDeltas(i + n)) valueDropped = true
+        packArray(n) = data(n) - originalDeltas(i + n)
+      }
+      System.arraycopy(data, 0, lastHistDeltas, i, numElems)
+      // if numElems < 8, zero out remainder of packArray
+      if (numElems < 8) java.util.Arrays.fill(packArray, numElems, 8, 0L)
+      writePos = pack8(packArray, outBuf, writePos)
+      i += 8
+    }
+
+    /**
+     * After process(), call this method if it was the start of a new section or first histogram
+     */
+    def setOriginal(): Unit = {
+      System.arraycopy(lastHistDeltas, 0, originalDeltas, 0, numBuckets)
+    }
+ }
 
   /**
    * Generic unpack function which outputs values to a Sink which can process raw 64-bit values from unpack8.
@@ -232,17 +336,11 @@ object NibblePack {
    *                   can be unpacked.
    */
   final def unpackToSink(compressed: DirectBuffer, sink: Sink, numValues: Int): UnpackResult = {
-    val array = tempArray
     var res: UnpackResult = Ok
     var valuesLeft = numValues
     while (valuesLeft > 0 && res == Ok && compressed.capacity > 0) {
-      res = unpack8(compressed, array)
-      if (res == Ok) {
-        for { i <- 0 until 8 optimized } {
-          sink.process(array(i))
-        }
-        valuesLeft -= 8
-      }
+      res = unpack8(compressed, sink)
+      valuesLeft -= 8
     }
     res
   }
@@ -264,13 +362,14 @@ object NibblePack {
    * @param compressed a DirectBuffer wrapping the compressed bytes. Position 0 must be the beginning of the buffer
    *                   to unpack.  NOTE: the passed in DirectBuffer will be mutated to wrap the NEXT bytes that
    *                   can be unpacked.
-   * @param outArray an output array with at least 8 slots for Long values
+   * @param sink a Sink for processing output values.  8 Longs will be passed to it.
    * @return an UnpackResult
    */
-  final def unpack8(compressed: DirectBuffer, outArray: Array[Long]): UnpackResult = {
+  //scalastyle:off method.length
+  final def unpack8(compressed: DirectBuffer, sink: Sink): UnpackResult = {
     val nonzeroMask = compressed.getByte(0)
     if (nonzeroMask == 0) {
-      java.util.Arrays.fill(outArray, 0L)
+      sink.process(zeroOutput)
       subslice(compressed, 1)
       Ok
     } else {
@@ -281,6 +380,7 @@ object NibblePack {
       val mask = if (numBits >= 64) -1L else (1L << numBits) - 1
       var bufIndex = 2
       var bitCursor = 0
+      val outArray = tempArray
 
       var inWord = readLong(compressed, bufIndex)
       bufIndex += 8
@@ -313,11 +413,13 @@ object NibblePack {
         }
       }
 
+      sink.process(outArray)
       // Return the "remaining slice" for easy and clean chaining of nibble_unpack8 calls with no mutable state
       subslice(compressed, totalBytes)
       Ok
     }
   }
+  //scalastyle:on method.length
 
   private def subslice(buffer: DirectBuffer, start: Int): Unit =
     if (buffer.capacity > start) {
