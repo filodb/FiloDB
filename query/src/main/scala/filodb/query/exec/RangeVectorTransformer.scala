@@ -198,8 +198,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   val miscFunction: MiscellaneousFunction = {
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
-      case LabelJoin => LabelJoinFunction(funcParams)
-      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      case LabelJoin    => LabelJoinFunction(funcParams)
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
 
