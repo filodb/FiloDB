@@ -1,6 +1,5 @@
 package filodb.memory
 
-import java.lang.{Long => jLong}
 import java.nio.ByteBuffer
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -93,7 +92,6 @@ trait ReusableMemory extends StrictLogging {
     * Marks this memory as free and calls reclaimListener for every piece of metadata.
     */
   protected def free() = {
-    logger.info(s"Reclaiming block at ${jLong.toHexString(address)}...")
     reclaimWithMetadata()
   }
 
@@ -121,6 +119,20 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
 
   protected var _position: Int = 0
   protected var _metaPosition: Int = capacity.toInt
+
+  /**
+   * Keeps track of which BlockMemFactory "owns" this block.  Set when block is requested by a BMF,
+   * cleared when the block is reclaimed.
+   */
+  var owner: Option[BlockMemFactory] = None
+
+  def setOwner(bmf: BlockMemFactory): Unit = {
+    owner = bmf.optionSelf
+  }
+
+  def clearOwner(): Unit = {
+    owner = None
+  }
 
   /**
     * Marks this memory as free. Also zeroes all the bytes from the beginning address until capacity
@@ -183,6 +195,8 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
     byteArr.foreach(b => stringBuf.append(b))
     stringBuf.toString
   }
+
+  def debugString: String = f"Block @0x$address%016x canReclaim=$canReclaim remaining=$remaining"
 
   // debug method to set memory to specific value for testing
   private[memory] def set(value: Byte): Unit =

@@ -1,5 +1,6 @@
 package filodb.memory
 
+import java.lang.{Long => jLong}
 import java.util
 import java.util.concurrent.locks.ReentrantLock
 
@@ -31,15 +32,17 @@ trait BlockManager {
   /**
     * @param memorySize The size of memory in bytes for which blocks are to be allocated
     * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
+    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
     * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
     */
-  def requestBlocks(memorySize: Long, bucketTime: Option[Long]): Seq[Block]
+  def requestBlocks(memorySize: Long, bucketTime: Option[Long], owner: Option[BlockMemFactory] = None): Seq[Block]
 
   /**
     * @param bucketTime the timebucket from which to allocate block(s), or None for the general list
+    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
     * @return One block of memory
     */
-  def requestBlock(bucketTime: Option[Long]): Option[Block]
+  def requestBlock(bucketTime: Option[Long], owner: Option[BlockMemFactory] = None): Option[Block]
 
   /**
     * Releases all blocks allocated by this store.
@@ -101,8 +104,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   override def numFreeBlocks: Int = freeBlocks.size
 
-  override def requestBlock(bucketTime: Option[Long]): Option[Block] = {
-    val blocks = requestBlocks(blockSizeInBytes, bucketTime)
+  override def requestBlock(bucketTime: Option[Long], bmf: Option[BlockMemFactory] = None): Option[Block] = {
+    val blocks = requestBlocks(blockSizeInBytes, bucketTime, bmf)
     blocks.size match {
       case 0 => None
       case 1 => Some(blocks.head)
@@ -123,7 +126,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * then uses the ReclaimPolicy to check if blocks can be reclaimed
     * Uses a lock to ensure that concurrent requests are safe.
     */
-  override def requestBlocks(memorySize: Long, bucketTime: Option[Long]): Seq[Block] = {
+  override def requestBlocks(memorySize: Long,
+                             bucketTime: Option[Long],
+                             bmf: Option[BlockMemFactory] = None): Seq[Block] = {
     lock.lock()
     try {
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
@@ -135,6 +140,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         val allocated = new Array[Block](num)
         (0 until num).foreach { i =>
           val block = freeBlocks.remove()
+          if (bmf.nonEmpty) block.setOwner(bmf.get)
           use(block, bucketTime)
           allocated(i) = block
         }
@@ -185,10 +191,11 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
             timeOrderedListIt.hasNext ) {
       val entry = timeOrderedListIt.next
       val prevReclaimed = reclaimed
-      reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric)
-      if (reclaimed > prevReclaimed) {
-        logger.info(s"timeBlockReclaim: Reclaimed ${reclaimed - prevReclaimed} time ordered blocks " +
-                    s"from list at t=${entry.getKey} (${(System.currentTimeMillis - entry.getKey)/3600000} hrs ago)")
+      val removed = reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric)
+      if (removed.nonEmpty) {
+        logger.info(s"timeBlockReclaim: Reclaimed ${removed.length} time ordered blocks " +
+                    s"from list at t=${entry.getKey} (${(System.currentTimeMillis - entry.getKey)/3600000} hrs ago) " +
+                    s"\nReclaimed blocks: ${removed.map(b => jLong.toHexString(b.address)).mkString(" ")}")
       }
       // If the block list is now empty, remove it from tree map
       if (entry.getValue.isEmpty) timeOrderedListIt.remove()
@@ -200,19 +207,23 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                   s"usedBlocksTimeOrdered=${usedBlocksTimeOrdered.asScala.toList.map{case(n, l) => (n, l.size)}}")
     }
 
-    def reclaimFrom(list: util.LinkedList[Block], reclaimedCounter: Counter): Unit = {
+    def reclaimFrom(list: util.LinkedList[Block], reclaimedCounter: Counter): Seq[Block] = {
       val entries = list.iterator
+      val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {
         val block = entries.next
         if (block.canReclaim) {
           entries.remove()
+          removed += block
           block.reclaim()
+          block.clearOwner()
           freeBlocks.add(block)
           stats.freeBlocksMetric.set(freeBlocks.size())
           reclaimedCounter.increment()
           reclaimed = reclaimed + 1
         }
       }
+      removed
     }
   }
 
