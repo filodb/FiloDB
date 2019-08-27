@@ -30,7 +30,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
 
   import filodb.cassandra.Util._
 
-  val suffix = "ingestion"
+  val suffix = "ingestion_time_index"
 
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                      |    partition blob,
