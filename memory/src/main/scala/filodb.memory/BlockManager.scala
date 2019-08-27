@@ -184,8 +184,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     while ( reclaimed < num &&
             timeOrderedListIt.hasNext ) {
       val entry = timeOrderedListIt.next
-      logger.info(s"timeBlockReclaim: Attempting to reclaim time ordered block list at t=${}")
+      val prevReclaimed = reclaimed
       reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric)
+      if (reclaimed > prevReclaimed) {
+        logger.info(s"timeBlockReclaim: Reclaimed ${reclaimed - prevReclaimed} time ordered blocks " +
+                    s"from list at t=${entry.getKey} (${(System.currentTimeMillis - entry.getKey)/3600000} hrs ago)")
+      }
       // If the block list is now empty, remove it from tree map
       if (entry.getValue.isEmpty) timeOrderedListIt.remove()
     }
