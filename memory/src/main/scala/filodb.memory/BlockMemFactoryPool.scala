@@ -6,6 +6,10 @@ import com.typesafe.scalalogging.StrictLogging
  * This class allows BlockMemFactory's to be reused so that the blocks can be fully utilized, instead of left stranded
  * and half empty.  It has a checkout and return semantics.  Multiple parallel tasks each do their own
  * checkout and return, thus there should be one blockholder outstanding per task.
+ *
+ * @param blockStore the underlying BlockManager to allocate blocks from for each BlockMemFactory
+ * @param metadataAllocSize size of each metadata set per allocation
+ * @param baseContext a set of labels to identify each BlockMemFactory, used only for debugging
  */
 class BlockMemFactoryPool(blockStore: BlockManager,
                           metadataAllocSize: Int,
@@ -14,6 +18,9 @@ class BlockMemFactoryPool(blockStore: BlockManager,
 
   def poolSize: Int = factoryPool.length
 
+  /**
+   * Checks out a BlockMemFactory, optionally adding in extra labels for this particular BMF
+   */
   def checkout(moreContext: Map[String, String] = Map.empty): BlockMemFactory = synchronized {
     val fact = if (factoryPool.nonEmpty) {
       logger.debug(s"Checking out BlockMemFactory from pool.  poolSize=$poolSize")
