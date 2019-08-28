@@ -69,6 +69,12 @@ class MemoryStats(tags: Map[String, String]) {
   val blocksReclaimedMetric = Kamon.counter("blockstore-blocks-reclaimed").refine(tags)
 }
 
+final case class ReclaimEvent(block: Block, reclaimTime: Long, oldOwner: Option[BlockMemFactory], remaining: Long)
+
+object PageAlignedBlockManager {
+  val MaxReclaimLogSize = 10000
+}
+
 /**
   * Pre Allocates blocks totalling to the passed memory size.
   * Each block size is the same as the OS page size.
@@ -84,6 +90,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               reclaimer: ReclaimListener,
                               numPagesPerBlock: Int)
   extends BlockManager with StrictLogging {
+  import PageAlignedBlockManager._
+
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
   import collection.JavaConverters._
@@ -93,6 +101,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   protected val freeBlocks: util.LinkedList[Block] = allocate()
   protected[memory] val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
   protected[memory] val usedBlocksTimeOrdered = new util.TreeMap[Long, util.LinkedList[Block]]
+  val reclaimLog = new collection.mutable.Queue[ReclaimEvent]
 
   protected val lock = new ReentrantLock()
 
@@ -183,6 +192,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     stats.freeBlocksMetric.set(freeBlocks.size())
   }
 
+  private def addToReclaimLog(block: Block): Unit = {
+    val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining)
+    if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
+    reclaimLog += event
+  }
+
   protected def tryReclaim(num: Int): Unit = {
     var reclaimed = 0
     var currList = 0
@@ -215,6 +230,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         if (block.canReclaim) {
           entries.remove()
           removed += block
+          addToReclaimLog(block)
           block.reclaim()
           block.clearOwner()
           freeBlocks.add(block)
@@ -261,6 +277,18 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     usedBlocks.asScala.foreach(_.markReclaimable)
     tryReclaim(usedBlocks.size + numTimeOrderedBlocks)
   }
+
+  /**
+   * Finds all reclaim events in the log whose Block contains the pointer passed in.
+   * Useful for debugging.  O(n) - not performant.
+   */
+  def reclaimEventsForPtr(ptr: BinaryRegion.NativePointer): Seq[ReclaimEvent] =
+    reclaimLog.filter { ev => ptr >= ev.block.address && ptr < (ev.block.address + ev.block.capacity) }
+
+  def timeBlocksForPtr(ptr: BinaryRegion.NativePointer): Seq[Block] =
+    usedBlocksTimeOrdered.entrySet.iterator.asScala.flatMap { entry =>
+      BlockDetective.containsPtr(ptr, entry.getValue)
+    }.toSeq
 
   def releaseBlocks(): Unit = {
     lock.lock()

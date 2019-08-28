@@ -299,6 +299,9 @@ class BlockMemFactory(blockStore: BlockManager,
   // We don't free memory, because many BlockHolders will share a single BlockManager, and we rely on
   // the BlockManager's own shutdown mechanism
   def shutdown(): Unit = {}
+
+  def debugString: String =
+    s"BlockMemFactory($bucketTime) ${context.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
 }
 
 

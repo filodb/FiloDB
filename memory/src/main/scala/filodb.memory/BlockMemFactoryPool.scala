@@ -30,4 +30,10 @@ class BlockMemFactoryPool(blockStore: BlockManager,
     logger.debug(s"Returning factory $factory to the pool.  New size ${poolSize + 1}")
     factoryPool += factory
   }
+
+  def blocksContainingPtr(ptr: BinaryRegion.NativePointer): Seq[Block] =
+    factoryPool.flatMap { bmf =>
+      val blocks = bmf.fullBlocks ++ Option(bmf.currentBlock.get).toList
+      BlockDetective.containsPtr(ptr, blocks)
+    }
 }
