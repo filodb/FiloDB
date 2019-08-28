@@ -1259,6 +1259,9 @@ class TimeSeriesShard(val dataset: Dataset,
     id
   }
 
+  def analyzeAndLogCorruptPtr(cve: CorruptVectorException): Unit =
+    logger.error(cve.getMessage + "\n" + BlockDetective.stringReport(cve.ptr, blockStore, blockFactoryPool))
+
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions

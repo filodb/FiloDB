@@ -16,6 +16,7 @@ import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.core.query.ColumnFilter
+import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
 
@@ -104,6 +105,10 @@ final class QueryActor(memStore: MemStore,
          case e: QueryError =>
            queryErrors.increment
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
+           e.t match {
+             case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dataset.ref, cve)
+             case t: Throwable =>
+           }
        }
        span.finish()
      }(queryScheduler).recover { case ex =>
