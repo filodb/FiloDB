@@ -121,86 +121,70 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
 }
 
-sealed abstract class BinaryOperator extends EnumEntry
+sealed abstract class BinaryOperator extends EnumEntry {
+  def precedence: Int
+  def isRightAssociative : Boolean
+}
 
-sealed class MathOperator extends BinaryOperator
+sealed class MathOperator (val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
-sealed class SetOperator extends BinaryOperator
+sealed class SetOperator(val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
-sealed class ComparisonOperator extends BinaryOperator
+sealed class ComparisonOperator(val precedence: Int = 0, val isRightAssociative: Boolean = false) extends BinaryOperator
 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
+  case object SUB extends MathOperator(4)
 
-  case object SUB extends MathOperator
+  case object ADD extends MathOperator(4)
 
-  case object ADD extends MathOperator
+  case object MUL extends MathOperator(5)
 
-  case object MUL extends MathOperator
+  case object MOD extends MathOperator(5)
 
-  case object MOD extends MathOperator
+  case object DIV extends MathOperator(5)
 
-  case object DIV extends MathOperator
+  case object POW extends MathOperator(6, true)
 
-  case object POW extends MathOperator
+  case object LAND extends SetOperator(2)
 
-  case object LAND extends SetOperator
+  case object LOR extends SetOperator(1)
 
-  case object LOR extends SetOperator
+  case object LUnless extends SetOperator(2)
 
-  case object LUnless extends SetOperator
+  case object EQL extends ComparisonOperator(3)
 
-  case object EQL extends ComparisonOperator
+  case object NEQ extends ComparisonOperator(3)
 
-  case object NEQ extends ComparisonOperator
+  case object LTE extends ComparisonOperator(3)
 
-  case object LTE extends ComparisonOperator
+  case object LSS extends ComparisonOperator(3)
 
-  case object LSS extends ComparisonOperator
+  case object GTE extends ComparisonOperator(3)
 
-  case object GTE extends ComparisonOperator
+  case object GTR extends ComparisonOperator(3)
 
-  case object GTR extends ComparisonOperator
+  case object EQL_BOOL extends ComparisonOperator(3)
 
-  case object EQL_BOOL extends ComparisonOperator
+  case object NEQ_BOOL extends ComparisonOperator(3)
 
-  case object NEQ_BOOL extends ComparisonOperator
+  case object LTE_BOOL extends ComparisonOperator(3)
 
-  case object LTE_BOOL extends ComparisonOperator
+  case object LSS_BOOL extends ComparisonOperator(3)
 
-  case object LSS_BOOL extends ComparisonOperator
+  case object GTE_BOOL extends ComparisonOperator(3)
 
-  case object GTE_BOOL extends ComparisonOperator
+  case object GTR_BOOL extends ComparisonOperator(3)
 
-  case object GTR_BOOL extends ComparisonOperator
-
-  case object EQLRegex extends BinaryOperator // FIXME when implemented
-
-  case object NEQRegex extends BinaryOperator // FIXME when implemented
-
-  def precedence (operator: BinaryOperator) : Int = {
-    operator match {
-      case BinaryOperator.LOR                                                                             => return 1
-      case BinaryOperator.LAND | BinaryOperator.LUnless                                                   => return 2
-      case BinaryOperator.EQL | BinaryOperator.EQL_BOOL | BinaryOperator.NEQ |
-           BinaryOperator.NEQ_BOOL | BinaryOperator.LSS | BinaryOperator.LSS_BOOL |
-           BinaryOperator.LTE | BinaryOperator.LTE_BOOL | BinaryOperator.GTE | BinaryOperator.GTE_BOOL |
-           BinaryOperator.GTR | BinaryOperator.GTR_BOOL                                                   => return 3
-      case BinaryOperator.ADD | BinaryOperator.SUB                                                        => return 4
-      case BinaryOperator.MUL | BinaryOperator.DIV | BinaryOperator.MOD                                   => return 5
-      case BinaryOperator.POW                                                                             => return 6
-      case _                                                                                              => return 0
-    }
+  case object EQLRegex extends BinaryOperator { // FIXME when implemented
+    override def precedence: Int = 0
+    override def isRightAssociative: Boolean = false
   }
 
-  def isRightAssociative(operator: BinaryOperator): Boolean = {
-    operator match {
-      case BinaryOperator.POW => return true
-      case _                  => return false
-    }
+  case object NEQRegex extends BinaryOperator { // FIXME when implemented
+    override def precedence: Int = 0
+    override def isRightAssociative: Boolean = false
   }
-
-
 }
 
 sealed trait Cardinality extends EnumEntry
