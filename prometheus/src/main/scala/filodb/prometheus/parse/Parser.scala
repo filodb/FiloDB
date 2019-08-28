@@ -371,10 +371,9 @@ object Parser extends Expression {
                                       rhsWithPrecedence match {
                                       case rhsWithPrecBE: BinaryExpression => val rhsOp = rhsWithPrecBE.operator.
                                         getPlanOperator
-                                        val precd = BinaryOperator.precedence(rhsOp) -
-                                          BinaryOperator.precedence(operator.getPlanOperator)
-                                        if ((precd < 0) || (precd == 0 && !BinaryOperator.isRightAssociative(rhsOp))) {
-                                          val lhsWithPrecedence: Expression = assignPrecedence(lhs, operator,
+                                        val precd = rhsOp.precedence - operator.getPlanOperator.precedence
+                                        if ((precd < 0) || (precd == 0 && !rhsOp.isRightAssociative)) {
+                                          val lhsWithPrecedence = assignPrecedence(lhs, operator,
                                             vectorMatch, rhsWithPrecBE.lhs) // Assign Precedence to LHS Expression
 
                                            // Create new BinaryExpression as existing precedence is not correct
