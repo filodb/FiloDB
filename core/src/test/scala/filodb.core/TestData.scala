@@ -217,6 +217,7 @@ object MachineMetricsData {
   import scala.util.Random.nextInt
 
   val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
+  val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
                        incr: Long = 1000): Stream[Product] = {
@@ -365,7 +366,7 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.addFromObjects(extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
