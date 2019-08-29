@@ -9,27 +9,27 @@ import com.typesafe.scalalogging.StrictLogging
  *
  * @param blockStore the underlying BlockManager to allocate blocks from for each BlockMemFactory
  * @param metadataAllocSize size of each metadata set per allocation
- * @param baseContext a set of labels to identify each BlockMemFactory, used only for debugging
+ * @param baseTags a set of tags to identify each BlockMemFactory, used only for debugging
  */
 class BlockMemFactoryPool(blockStore: BlockManager,
                           metadataAllocSize: Int,
-                          baseContext: Map[String, String]) extends StrictLogging {
+                          baseTags: Map[String, String]) extends StrictLogging {
   private val factoryPool = new collection.mutable.Queue[BlockMemFactory]()
 
   def poolSize: Int = factoryPool.length
 
   /**
-   * Checks out a BlockMemFactory, optionally adding in extra labels for this particular BMF
+   * Checks out a BlockMemFactory, optionally adding in extra tags for this particular BMF
    */
-  def checkout(moreContext: Map[String, String] = Map.empty): BlockMemFactory = synchronized {
+  def checkout(moreTags: Map[String, String] = Map.empty): BlockMemFactory = synchronized {
     val fact = if (factoryPool.nonEmpty) {
       logger.debug(s"Checking out BlockMemFactory from pool.  poolSize=$poolSize")
       factoryPool.dequeue
     } else {
       logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one")
-      new BlockMemFactory(blockStore, None, metadataAllocSize, baseContext)
+      new BlockMemFactory(blockStore, None, metadataAllocSize, baseTags)
     }
-    fact.context = baseContext ++ moreContext
+    fact.tags = baseTags ++ moreTags
     fact
   }
 

@@ -197,14 +197,14 @@ class ArrayBackedMemFactory extends MemFactory {
   *                   block is full.
   * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
   * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
-  * @param context a set of keys/values to identify the purpose of this MemFactory for debugging
+  * @param tags a set of keys/values to identify the purpose of this MemFactory for debugging
   * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
   *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
 class BlockMemFactory(blockStore: BlockManager,
                       bucketTime: Option[Long],
                       metadataAllocSize: Int,
-                      var context: Map[String, String],
+                      var tags: Map[String, String],
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
   def numFreeBytes: Long = blockStore.numFreeBlocks * blockStore.blockSizeInBytes
   val optionSelf = Some(this)
@@ -301,7 +301,7 @@ class BlockMemFactory(blockStore: BlockManager,
   def shutdown(): Unit = {}
 
   def debugString: String =
-    s"BlockMemFactory($bucketTime) ${context.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
+    s"BlockMemFactory($bucketTime) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
 }
 
 
