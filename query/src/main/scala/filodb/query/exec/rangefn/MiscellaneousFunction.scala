@@ -132,7 +132,7 @@ case class SortFunction(sortAscending: Boolean = true)
   extends MiscellaneousFunction {
 
   def sortByValue (rv1: RangeVector, rv2: RangeVector) : Boolean = {
-    val res = rv1.rows.toList.head.getDouble(0).compareTo(rv2.rows.toList.head.getDouble(0))
+    val res = rv1.rows.toList.head.getDouble(1).compareTo(rv2.rows.toList.head.getDouble(1))
     if (sortAscending) {
       res < 0
     } else {
@@ -144,7 +144,8 @@ case class SortFunction(sortAscending: Boolean = true)
 
       val t = source.toListL.map{ rvs =>
         //Should sort only for Instant Vectors
-        if (rvs.forall(_.numRows.get.equals(1))) {
+       // if (rvs.forall(_.rows.size==1))
+        if (rvs.forall(_.rows.size==1)) {
         rvs.sortWith(sortByValue)
       }
       else {
