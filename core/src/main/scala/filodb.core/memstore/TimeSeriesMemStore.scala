@@ -240,6 +240,9 @@ extends MemStore with StrictLogging {
   def groupsInDataset(dataset: Dataset): Int =
     datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
+  def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
+    getShard(ref, cve.shard).get.analyzeAndLogCorruptPtr(cve)
+
   def reset(): Unit = {
     datasets.clear()
     downsamplePublishers.valuesIterator.foreach { _.stop() }

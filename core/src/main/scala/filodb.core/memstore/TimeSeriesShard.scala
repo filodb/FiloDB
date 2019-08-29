@@ -259,13 +259,15 @@ class TimeSeriesShard(val dataset: Dataset,
   private[memstore] final val partSetLock = new StampedLock
 
   // The off-heap block store used for encoded chunks
+  private val context = Map("dataset" -> dataset.ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize, context)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
+  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize,
+                                             context ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, reuseOneContainer = true)
@@ -780,7 +782,7 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = blockFactoryPool.checkout()
+    val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
 
     // This initializes the containers for the downsample records. Yes, we create new containers
     // and not reuse them at the moment and there is allocation for every call of this method
@@ -1256,6 +1258,9 @@ class TimeSeriesShard(val dataset: Dataset,
 
     id
   }
+
+  def analyzeAndLogCorruptPtr(cve: CorruptVectorException): Unit =
+    logger.error(cve.getMessage + "\n" + BlockDetective.stringReport(cve.ptr, blockStore, blockFactoryPool))
 
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion

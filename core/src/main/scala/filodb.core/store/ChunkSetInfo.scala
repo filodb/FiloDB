@@ -345,6 +345,13 @@ final case class ChunkQueryInfo(infoPtr: NativePointer,
   def info: ChunkSetInfo = ChunkSetInfo(infoPtr)
 }
 
+final case class CorruptVectorException(ptr: NativePointer,
+                                        chunkStartTime: Long,
+                                        partKeyString: String,
+                                        shard: Int,
+                                        innerErr: Throwable) extends
+Exception(f"CorruptVector at 0x$ptr%016x startTime=$chunkStartTime shard=$shard partition=$partKeyString", innerErr)
+
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
  * Assumes the ChunkInfos are in increasing time order.
@@ -410,9 +417,9 @@ extends Iterator[ChunkQueryInfo] {
           val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
           windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
         } catch {
-          case e: Throwable => {
-            ChunkSetInfo.log.error(s"Corrupt vector at ${java.lang.Long.toHexString(tsVector)}", e)
-          }
+          case m: MatchError =>
+            throw CorruptVectorException(tsVector, next.startTime, rv.partition.stringPartition,
+                                         rv.partition.shard, m)
         }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
