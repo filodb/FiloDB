@@ -38,6 +38,8 @@ final case class DataSchema private(name: String,
   val blockMetaSize    = chunkSetInfoSize + 4
 
   def valueColName: String = columns(valueColumn).name
+
+  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
 }
 
 /**

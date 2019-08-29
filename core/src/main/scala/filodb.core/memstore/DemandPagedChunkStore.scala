@@ -44,12 +44,16 @@ extends RawToPartitionMaker with StrictLogging {
   import TimeSeriesShard._
   import collection.JavaConverters._
 
+  private val baseContext = Map("dataset" -> tsShard.ref.toString,
+                                "shard"   -> tsShard.shardNum.toString)
+
   private def getMemFactory(bucket: Long): BlockMemFactory = {
     val factory = memFactories.get(bucket)
     if (factory == UnsafeUtils.ZeroPointer) {
       val newFactory = new BlockMemFactory(blockManager,
                                            Some(bucket),
                                            tsShard.maxMetaSize,
+                                           baseContext ++ Map("bucket" -> bucket.toString),
                                            markFullBlocksAsReclaimable = true)
       memFactories.put(bucket, newFactory)
       newFactory

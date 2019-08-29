@@ -14,7 +14,7 @@ import filodb.memory._
 import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String, vectors => bv}
 
 // scalastyle:off null
-class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll {
+class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll {
 
   val promDataset = Dataset.make("custom1",
     Seq("someStr:string", "tags:map"),
@@ -42,7 +42,8 @@ class ShardDownsamplerSpec extends FunSpec with Matchers  with BeforeAndAfterAll
   val customSchema = customDataset.schema
 
   private val blockStore = MMD.blockStore
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.schema.data.blockMetaSize, true)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, promDataset.schema.data.blockMetaSize,
+                                                        MMD.dummyContext, true)
 
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, promDataset.schema.data, storeConf)

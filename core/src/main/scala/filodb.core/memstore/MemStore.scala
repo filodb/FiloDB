@@ -13,7 +13,7 @@ import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
-import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
+import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
 
@@ -195,6 +195,11 @@ trait MemStore extends ChunkSource {
    * Commits the index immediately so that queries can pick up the latest changes.  Used for testing.
    */
   def refreshIndexForTesting(dataset: DatasetRef): Unit
+
+  /**
+   * Analyzes a corrupt pointer/vector for reclaim and ownership history, and logs details
+   */
+  def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit
 
   /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data

@@ -41,10 +41,9 @@ object ChunkSet {
   def apply(schema: DataSchema, part: PartitionKey, ingestionTime: Long,
             rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
-    val startTime = rows.head.getLong(0)
-    val info = ChunkSetInfo(factory, schema, chunkID(startTime, ingestionTime), rows.length,
-                            startTime,
-                            rows.last.getLong(0))
+    val startTime = schema.timestamp(rows.head)
+    val info = ChunkSetInfo(factory, schema, chunkID(startTime, ingestionTime), ingestionTime,
+                            rows.length, schema.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(schema.columns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
     val chunks = schema.columns.map(c => chunkMap(c.name))
@@ -58,6 +57,8 @@ object ChunkSet {
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
   def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
+  // ingestion time as milliseconds from 1970
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(infoAddr)
   // number of rows encoded by this chunkset
   def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
   // the starting timestamp of this chunkset
@@ -130,17 +131,20 @@ object ChunkSetInfo extends StrictLogging {
    * ChunkSetInfo metadata schema:
    * +0  long   chunkID
    * +8  int    # rows in chunkset
-   * +12 long   start timestamp
+   * +12 long   ingestion time (milliseconds from 1970)
    * +20 long   end timestamp
    * +28 long[] pointers to each vector
    *
    * Note that block metadata has a 4-byte partition ID appended to the front also.
+   *
+   * Note 2: The chunkID is defined from the start timestamp, and so the start time doesn't need
+   * to be explicitly stored in a separate field.
    */
-  val OffsetChunkID = 0
-  val OffsetNumRows = 8
-  val OffsetStartTime = 12
-  val OffsetEndTime = 20
-  val OffsetVectors = 28
+  val OffsetChunkID       = 0
+  val OffsetNumRows       = 8
+  val OffsetIngestionTime = 12
+  val OffsetEndTime       = 20
+  val OffsetVectors       = 28
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
@@ -151,22 +155,25 @@ object ChunkSetInfo extends StrictLogging {
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
+  def getIngestionTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetIngestionTime)
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+  def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
+
   def getNumRows(infoPointer: NativePointer): Int = UnsafeUtils.getInt(infoPointer + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetStartTime)
-  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
-  def setStartTime(infoPointer: NativePointer, time: Long): Unit =
-    UnsafeUtils.setLong(infoPointer + OffsetStartTime, time)
-  def setEndTime(infoPointer: NativePointer, time: Long): Unit =
-    UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
+  def getStartTime(infoPointer: NativePointer): Long = startTimeFromChunkID(getChunkID(infoPointer))
+  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
 
-  def getStartTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetStartTime)
+  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
   def getEndTime(infoBytes: Array[Byte]): Long =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
+  def setEndTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
 
   def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr = {
     require(infoPointer != 0, s"ERROR: getVectorPtr on infoPointer==0")
@@ -193,18 +200,18 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * Initializes a new ChunkSetInfo with some initial fields
    */
-  def initialize(factory: MemFactory, schema: DataSchema, id: ChunkID, startTime: Long): ChunkSetInfo = {
+  def initialize(factory: MemFactory, schema: DataSchema, id: ChunkID, ingestionTime: Long): ChunkSetInfo = {
     val infoAddr = factory.allocateOffheap(schema.chunkSetInfoSize)
     setChunkID(infoAddr, id)
+    setIngestionTime(infoAddr, ingestionTime)
     resetNumRows(infoAddr)
-    setStartTime(infoAddr, startTime)
     setEndTime(infoAddr, Long.MaxValue)
     ChunkSetInfo(infoAddr)
   }
 
   def apply(factory: MemFactory, schema: DataSchema,
-            id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
-    val newInfo = initialize(factory, schema, id, startTime)
+            id: ChunkID, ingestionTime: Long, numRows: Int, endTime: Long): ChunkSetInfo = {
+    val newInfo = initialize(factory, schema, id, ingestionTime)
     UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
     setEndTime(newInfo.infoAddr, endTime)
     newInfo
@@ -338,6 +345,13 @@ final case class ChunkQueryInfo(infoPtr: NativePointer,
   def info: ChunkSetInfo = ChunkSetInfo(infoPtr)
 }
 
+final case class CorruptVectorException(ptr: NativePointer,
+                                        chunkStartTime: Long,
+                                        partKeyString: String,
+                                        shard: Int,
+                                        innerErr: Throwable) extends
+Exception(f"CorruptVector at 0x$ptr%016x startTime=$chunkStartTime shard=$shard partition=$partKeyString", innerErr)
+
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
  * Assumes the ChunkInfos are in increasing time order.
@@ -403,9 +417,9 @@ extends Iterator[ChunkQueryInfo] {
           val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
           windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
         } catch {
-          case e: Throwable => {
-            ChunkSetInfo.log.error(s"Corrupt vector at ${java.lang.Long.toHexString(tsVector)}", e)
-          }
+          case m: MatchError =>
+            throw CorruptVectorException(tsVector, next.startTime, rv.partition.stringPartition,
+                                         rv.partition.shard, m)
         }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
