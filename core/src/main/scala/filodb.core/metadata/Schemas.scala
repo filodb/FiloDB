@@ -4,13 +4,13 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
-import filodb.core.binaryrecord2.{RecordComparator, RecordSchema}
+import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.core.Types._
 import filodb.memory.BinaryRegion
-import filodb.memory.format.BinaryVector
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
 
 /**
  * A DataSchema describes the data columns within a time series - the actual data that would vary from sample to
@@ -38,6 +38,8 @@ final case class DataSchema private(name: String,
   val blockMetaSize    = chunkSetInfoSize + 4
 
   def valueColName: String = columns(valueColumn).name
+
+  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
 }
 
 /**
@@ -168,10 +170,62 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema
   val options         = partition.options
+
+  val dataReaders     = data.readers
+  val numDataColumns  = data.columns.length
+
+  def name: String = data.name
+
+  import Column.ColumnType._
+
+  /**
+   * Creates a TypedIterator for querying a constant partition key column.
+   */
+  def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
+    val partColPos = columnID - Dataset.PartColStartIndex
+    require(Dataset.isPartitionID(columnID) && partColPos < partition.columns.length)
+    partition.columns(partColPos).columnType match {
+      case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
+      case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case other: Column.ColumnType => ???
+    }
+  }
+
+  /**
+   * Given a list of column names representing say CSV columns, returns a routing from each data column
+   * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
+   * over the input RowReader to return data columns corresponding to dataset definition.
+   */
+  def dataRouting(colNames: Seq[String]): Array[Int] =
+    data.columns.map { c => colNames.indexOf(c.name) }.toArray
+
+  /**
+   * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
+   * the input RowReader columns whose names are passed in.
+   */
+  def ingestRouting(colNames: Seq[String]): Array[Int] =
+    dataRouting(colNames) ++ partition.columns.map { c => colNames.indexOf(c.name) }
+
+  /**
+   * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
+   */
+  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
 }
 
 final case class Schemas(part: PartitionSchema,
-                         schemas: Map[String, Schema])
+                         schemas: Map[String, Schema]) {
+  // A very fast array of the schemas by schemaID.  Since schemaID=16 bits, we just use a single 64K element array
+  // for super fast lookup.  Schemas object should really be a singleton anyways.
+  private val _schemas = Array.fill(64*1024)(Schemas.UnknownSchema)
+
+  schemas.values.foreach { s => _schemas(s.data.hash) = s }
+
+  /**
+   * Returns the Schema for a given schemaID, or UnknownSchema if not found
+   */
+  final def apply(id: Int): Schema = _schemas(id)
+}
 
 /**
  * Singleton with code to load all schemas from config, verify no conflicts, and ensure there is only
@@ -191,6 +245,11 @@ final case class Schemas(part: PartitionSchema,
 object Schemas {
   import Dataset._
   import Accumulation._
+
+  val UnknownSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
+
+  // Easy way to create Schemas from a single Schema, mostly useful for testing
+  def apply(sch: Schema): Schemas = Schemas(sch.partition, Map(sch.data.name -> sch))
 
   // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
   // and that any downsample-schemas are valid

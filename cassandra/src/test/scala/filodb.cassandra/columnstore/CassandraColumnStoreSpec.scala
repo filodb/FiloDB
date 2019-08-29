@@ -35,13 +35,13 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s)
 
   "lz4-chunk-compress" should "write and read compressed chunks successfully" in {
-    whenReady(lz4ColStore.write(dataset, chunkSetStream(names take 3))) { response =>
+    whenReady(lz4ColStore.write(dataset.ref, chunkSetStream(names take 3))) { response =>
       response should equal (Success)
     }
 
     val sourceChunks = chunkSetStream(names take 3).toListL.runAsync.futureValue
 
-    val parts = lz4ColStore.readRawPartitions(dataset, Seq(0, 1, 2), partScan).toListL.runAsync.futureValue
+    val parts = lz4ColStore.readRawPartitions(dataset.ref, partScan).toListL.runAsync.futureValue
     parts should have length (1)
     parts(0).chunkSets should have length (1)
     parts(0).chunkSets(0).vectors.toSeq shouldEqual sourceChunks.head.chunks

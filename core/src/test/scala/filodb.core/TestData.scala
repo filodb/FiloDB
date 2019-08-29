@@ -10,7 +10,7 @@ import org.joda.time.DateTime
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.{Dataset, DatasetOptions, Schema}
+import filodb.core.metadata.{Dataset, DatasetOptions, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
@@ -19,12 +19,12 @@ import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.ZeroCopyUTF8String._
 
 object TestData {
-  def toChunkSetStream(ds: Dataset,
+  def toChunkSetStream(s: Schema,
                        part: PartitionKey,
                        rows: Seq[RowReader],
                        rowsPerChunk: Int = 10): Observable[ChunkSet] =
     Observable.fromIterator(rows.grouped(rowsPerChunk).map {
-      chunkRows => ChunkSet(ds, part, 0, chunkRows, nativeMem) })
+      chunkRows => ChunkSet(s.data, part, 0, chunkRows, nativeMem) })
 
   def toRawPartData(chunkSetStream: Observable[ChunkSet]): Task[RawPartData] = {
     var partKeyBytes: Array[Byte] = null
@@ -71,6 +71,7 @@ object NamesTestData {
 
   val dataColSpecs = Seq("age:long:interval=10", "first:string", "last:string")
   val dataset = Dataset("dataset", Seq("seg:int"), dataColSpecs, DatasetOptions.DefaultOptions)
+  val schema = dataset.schema
 
   // NOTE: first 3 columns are the data columns, thus names could be used for either complete record
   // or the data column rowReader
@@ -88,15 +89,15 @@ object NamesTestData {
                      (Some(39L), Some("Derek"),     Some("Carr"),     Some(0)),
                      (Some(29L), Some("Karl"),      Some("Joseph"),   Some(0)))
 
-  val firstKey = dataset.timestamp(mapper(names).head)
-  val lastKey = dataset.timestamp(mapper(names).last)
-  def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
+  val firstKey = schema.timestamp(mapper(names).head)
+  val lastKey = schema.timestamp(mapper(names).last)
+  def keyForName(rowNo: Int): Long = schema.timestamp(mapper(names)(rowNo))
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset.schema, 0)
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
-    TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
+    TestData.toChunkSetStream(schema, defaultPartKey, mapper(data))
 
   val firstNames = names.map(_._2.get)
   val utf8FirstNames = firstNames.map(_.utf8)
@@ -146,13 +147,13 @@ object GdeltTestData {
   // Routes input records to the dataset schema correctly
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory)
-    val routing = ds.ingestRouting(columnNames)
+    val routing = ds.schema.ingestRouting(columnNames)
     readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing), ds.schema) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
   def dataRows(ds: Dataset, readerSeq: Seq[RowReader] = readers): Seq[RowReader] = {
-    val routing = ds.dataRouting(columnNames)
+    val routing = ds.schema.dataRouting(columnNames)
     readerSeq.map { r => RoutingRowReader(r, routing) }
   }
 
@@ -211,7 +212,7 @@ object GdeltTestData {
   """
 }
 
-// A simulation of machine metrics data
+// A simulation of machine metrics data, all with the same partition key.  Forms a set of schemas.
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
@@ -232,7 +233,7 @@ object MachineMetricsData {
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
-  val dataset1 = Dataset("metrics", Seq("series:string"), columns)
+  val dataset1 = Dataset("metrics1", Seq("series:string"), columns)
   val schema1 = dataset1.schema
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
@@ -256,8 +257,8 @@ object MachineMetricsData {
   // Works with linearMultiSeries() or multiSeriesData()
   def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
     val rawPartKey = stream(keyRecord)(5)
-    val partKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, rawPartKey)
-    TestData.toChunkSetStream(dataset1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
+    val partKey = partKeyBuilder.partKeyFromObjects(schema1, rawPartKey)
+    TestData.toChunkSetStream(schema1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
   }
 
   def multiSeriesData(): Stream[Seq[Any]] = {
@@ -305,7 +306,7 @@ object MachineMetricsData {
     }
   }
 
-  val dataset2 = Dataset("metrics", Seq("series:string", "tags:map"), columns)
+  val dataset2 = Dataset("metrics2", Seq("series:string", "tags:map"), columns)
   val schema2 = dataset2.schema
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
@@ -322,7 +323,7 @@ object MachineMetricsData {
 
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
-  val histDataset = Dataset("histogram", Seq("tags:map"),
+  val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
                             Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
 
   var histBucketScheme: bv.HistogramBuckets = _
@@ -341,11 +342,16 @@ object MachineMetricsData {
           (1 + n).toLong,
           buckets.sum.toLong,
           bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          "request-latency",
           extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
   }
 
-  val histMaxDS = Dataset("histmax", Seq("tags:map"),
+  // dataset2 + histDataset
+  val schemas2h = Schemas(schema2.partition,
+                        Map(schema2.name -> schema2, "histogram" -> histDataset.schema))
+
+  val histMaxDS = Dataset("histmax", Seq("metric:string", "tags:map"),
                           Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
 
   // Pass in the output of linearHistSeries here.
@@ -362,11 +368,12 @@ object MachineMetricsData {
     }
 
   val histKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
-  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, extraTags)
+  val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, dummyContext, true)
-  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
+                                                 dummyContext, true)
+  private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
@@ -381,7 +388,7 @@ object MachineMetricsData {
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
   }
 
-  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS, TestData.storeConf)
+  private val histMaxBP = new WriteBufferPool(TestData.nativeMem, histMaxDS.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with histMax(linearHistSeries) records
   def histMaxRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
@@ -438,6 +445,7 @@ object MetricsTestData {
     Seq.empty,
     options = DatasetOptions(Seq("__name__"), "__name__", true)
   ).get
+  val downsampleSchema = downsampleDataset.schema
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 

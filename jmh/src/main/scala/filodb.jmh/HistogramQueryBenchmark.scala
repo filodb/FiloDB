@@ -18,6 +18,7 @@ import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, Unava
 import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
@@ -50,7 +51,7 @@ class HistogramQueryBenchmark {
   val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, 230000)
   histSchemaData.take(10 * 180).foreach(histSchemaBuilder.addFromReader(_, histDataset.schema))
 
-  memStore.setup(histDataset, 0, ingestConf)
+  memStore.setup(histDataset.ref, Schemas(histDataset.schema), 0, ingestConf)
   val hShard = memStore.getShardE(histDataset.ref, 0)
   histSchemaBuilder.allContainers.foreach { c => hShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(histDataset.ref) // commit lucene index
@@ -62,7 +63,7 @@ class HistogramQueryBenchmark {
   val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, 4200000)
   promData.take(10*66*180).foreach(promBuilder.addFromReader(_, promDataset.schema))
 
-  memStore.setup(promDataset, 0, ingestConf)
+  memStore.setup(promDataset.ref, Schemas(promDataset.schema), 0, ingestConf)
   val pShard = memStore.getShardE(promDataset.ref, 0)
   promBuilder.allContainers.foreach { c => pShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(promDataset.ref) // commit lucene index

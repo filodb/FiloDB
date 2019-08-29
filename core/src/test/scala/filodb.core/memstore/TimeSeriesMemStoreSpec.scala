@@ -14,7 +14,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize, PartKey}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
@@ -39,10 +39,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.metastore.clearAllData()
   }
 
+  val schemas1 = Schemas(schema1)
+
   it("should detect duplicate setup") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     try {
-      memStore.setup(dataset1, 0, TestData.storeConf)
+      memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
       fail()
     } catch {
       case e: ShardAlreadySetup => { } // expected
@@ -51,7 +53,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   // Look mama!  Real-time time series ingestion and querying across multiple partitions!
   it("should ingest into multiple series and be able to query across all partitions in real time") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val rawData = multiSeriesData().take(20)
     val data = records(dataset1, rawData)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
@@ -74,7 +76,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingest into multiple series and query across partitions") {
-    memStore.setup(dataset1, 1, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 1, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 1, data)
 
@@ -90,7 +92,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingest map/tags column as partition key and aggregate") {
-    memStore.setup(dataset2, 0, TestData.storeConf)
+    memStore.setup(dataset2.ref, schemas2h, 0, TestData.storeConf)
     val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
     memStore.ingest(dataset2.ref, 0, data)
 
@@ -102,7 +104,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingest histograms and read them back properly") {
-    memStore.setup(histDataset, 0, TestData.storeConf)
+    memStore.setup(histDataset.ref, schemas2h, 0, TestData.storeConf)
     val data = linearHistSeries().take(40)
     memStore.ingest(histDataset.ref, 0, records(histDataset, data))
     memStore.refreshIndexForTesting(histDataset.ref)
@@ -128,15 +130,30 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
   }
 
+  it("should ingest multiple schemas simultaneously into one shard") {
+    val ref = dataset2.ref
+    memStore.setup(ref, schemas2h, 0, TestData.storeConf)
+    val data = linearHistSeries().take(40)
+    memStore.ingest(ref, 0, records(histDataset, data))
+    val data2 = records(dataset2, withMap(linearMultiSeries()).take(30))   // 3 records per series x 10 series
+    memStore.ingest(ref, 0, data2)
+
+    memStore.refreshIndexForTesting(ref)
+
+    memStore.numRowsIngested(ref, 0) shouldEqual 70L
+    // Below will catch any partition match errors.  Should be 20 (10 hist + 10 dataset2)
+    memStore.numPartitions(ref, 0) shouldEqual 20
+  }
+
   it("should be able to handle nonexistent partition keys") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     val q = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(Array[Byte]()))
     q.toBuffer.length should equal (0)
   }
 
   it("should ingest into multiple series and be able to query on one partition in real time") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val data = multiSeriesData().take(20)     // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, records(dataset1, data))
 
@@ -152,7 +169,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should query on multiple partitions using filters") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
     memStore.refreshIndexForTesting(dataset1.ref)
@@ -164,16 +181,16 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingest into multiple shards, getScanSplits, query, get index info from shards") {
-    memStore.setup(dataset2, 0, TestData.storeConf)
-    memStore.setup(dataset2, 1, TestData.storeConf)
+    memStore.setup(dataset2.ref, schemas2h, 0, TestData.storeConf)
+    memStore.setup(dataset2.ref, schemas2h, 1, TestData.storeConf)
     val data = records(dataset2, withMap(linearMultiSeries()).take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset2.ref, 0, data)
     val data2 = records(dataset2, withMap(linearMultiSeries(200000L, 6), 6).take(20))   // 5 series only
     memStore.ingest(dataset2.ref, 1, data2)
     memStore.refreshIndexForTesting(dataset2.ref)
 
-    memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
-    memStore.numRowsIngested(dataset1.ref, 0) should equal (20L)
+    memStore.activeShards(dataset2.ref) should equal (Seq(0, 1))
+    memStore.numRowsIngested(dataset2.ref, 0) should equal (20L)
 
     val splits = memStore.getScanSplits(dataset2.ref, 1)
     splits should have length (2)
@@ -192,13 +209,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingestStream into multiple shards and not flush with empty flush stream") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
-    memStore.setup(dataset1, 1, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 1, TestData.storeConf)
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
 
     val initChunksWritten = chunksetsWritten
 
-    // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
     val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)
     val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)
@@ -221,7 +237,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should handle errors from ingestStream") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                               .endWithError(new NumberFormatException)
     val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s)
@@ -231,7 +247,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingestStream and flush on interval") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val initChunksWritten = chunksetsWritten
 
     // Flush every 50 records.
@@ -254,7 +270,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should flush index time buckets during one group of a flush interval") {
-    memStore.setup(dataset1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
     val initTimeBuckets = timebucketsWritten
@@ -278,7 +294,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     */
   def indexRecoveryTest(dataset: Dataset, partKeys: Seq[Long]): Unit = {
     memStore.metastore.writeHighestIndexTimeBucket(dataset.ref, 0, 0)
-    memStore.setup(dataset, 0,
+    val schemas = Schemas(dataset.schema)
+    memStore.setup(dataset.ref, schemas, 0,
       TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
         flushInterval = 10.minutes))
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset.ref, 0).get
@@ -306,11 +323,11 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
       readPartKey.bytes.slice(readPartKey.offset, readPartKey.offset + readPartKey.length) shouldEqual expectedPartKey
       if (i%2 == 0) {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset).get.partID shouldEqual i
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, schemas.part).get.partID shouldEqual i
         tsShard.partitions.containsKey(i) shouldEqual true // since partition is ingesting
       }
       else {
-        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, dataset) shouldEqual None
+        tsShard.partSet.getWithPartKeyBR(UnsafeUtils.ZeroPointer, off, schemas.part) shouldEqual None
         tsShard.partitions.containsKey(i) shouldEqual false // since partition is not ingesting
       }
     }
@@ -339,7 +356,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // 0 -> 2L, 1 -> 4L, 2 -> 6L, 3 -> 8L
     // A whole bunch of records should be skipped.  However, remember that each group of 5 records gets one offset.
 
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val initChunksWritten = chunksetsWritten
     val checkpoints = Map(0 -> 2L, 1 -> 21L, 2 -> 6L, 3 -> 8L)
 
@@ -363,7 +380,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should truncate shards properly") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val data = records(dataset1, multiSeriesData().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
@@ -395,7 +412,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should be able to evict partitions properly, flush, and still query") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
@@ -431,7 +448,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should be able to ODP/query partitions evicted from memory structures when doing index/tag query") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
@@ -467,7 +484,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should assign same previously assigned partId using bloom filter when evicted series starts re-ingesting") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
@@ -511,7 +528,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should be able to skip ingestion/add partitions if there is no more space left") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
@@ -548,7 +565,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     try {
       // Ingest >250 partitions.  Note how much memory is left after all the allocations
-      store2.setup(dataset1, 0, TestData.storeConf)
+      store2.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
       val shard = store2.getShardE(dataset1.ref, 0)
 
       // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
@@ -557,7 +574,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       store2.refreshIndexForTesting(dataset1.ref)
 
       store2.numPartitions(dataset1.ref, 0) shouldEqual numSeries
-      shard.bufferPool.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100
+      shard.bufferPools.size shouldEqual 1
+      shard.bufferPools.valuesArray.head.poolSize shouldEqual 100    // Two allocations of 200 each = 400; used up 300; 400-300=100
       val afterIngestFree = shard.bufferMemoryManager.numFreeBytes
 
       // Switch buffers, encode and release/return buffers for all partitions
@@ -568,7 +586,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
       }
 
       // Ensure queue length does not get beyond 250, and some memory was freed (free bytes increases)
-      shard.bufferPool.poolSize shouldEqual 250
+      shard.bufferPools.valuesArray.head.poolSize shouldEqual 250
       val nowFree = shard.bufferMemoryManager.numFreeBytes
       nowFree should be > (afterIngestFree)
     } finally {

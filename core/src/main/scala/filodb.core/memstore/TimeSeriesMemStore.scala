@@ -12,14 +12,16 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
+class TimeSeriesMemStore(config: Config,
+                         val store: ColumnStore,
+                         val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
@@ -50,21 +52,21 @@ extends MemStore with StrictLogging {
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
-    val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
+    val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards.containsKey(shard)) {
-      throw ShardAlreadySetup(dataset.ref, shard)
+      throw ShardAlreadySetup(ref, shard)
     } else {
-      val memFactory = datasetMemFactories.getOrElseUpdate(dataset.ref, {
+      val memFactory = datasetMemFactories.getOrElseUpdate(ref, {
         val bufferMemorySize = storeConf.ingestionBufferMemSize
-        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
-        val tags = Map("dataset" -> dataset.ref.toString)
+        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${ref}")
+        val tags = Map("dataset" -> ref.toString)
         new NativeMemoryManager(bufferMemorySize, tags)
       })
 
-      val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, memFactory, store, metastore,
+      val publisher = downsamplePublishers.getOrElseUpdate(ref, makeAndStartPublisher(downsample))
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, shard, memFactory, store, metastore,
                               partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
@@ -204,8 +206,7 @@ extends MemStore with StrictLogging {
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
-  def readRawPartitions(dataset: Dataset,
-                        columnIDs: Seq[Types.ColumnId],
+  def readRawPartitions(ref: DatasetRef,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 

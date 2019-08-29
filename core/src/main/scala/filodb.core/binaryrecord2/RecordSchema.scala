@@ -418,14 +418,16 @@ final class PartKeyLongIterator(schema: RecordSchema, base: Any, offset: Long, f
 }
 
 /**
- * This is a class meant to provide a RowReader API for the new BinaryRecord v2.
+ * This is a trait meant to provide a RowReader API for the new BinaryRecord v2.
  * NOTE: Strings cause an allocation of a ZeroCopyUTF8String instance.  TODO: provide a better API that does
  * not result in allocations.
  * It is meant to be reused again and again and is MUTABLE.
  */
-final class BinaryRecordRowReader(schema: RecordSchema,
-                                  var recordBase: Any = UnsafeUtils.ZeroPointer,
-                                  var recordOffset: Long = 0L) extends RowReader {
+trait BinaryRecordRowReaderBase extends RowReader {
+  def schema: RecordSchema
+  def recordBase: Any
+  def recordOffset: Long
+
   // BinaryRecordV2 fields always have a value
   def notNull(columnNo: Int): Boolean = columnNo >= 0 && columnNo < schema.numFields
   def getBoolean(columnNo: Int): Boolean = schema.getInt(recordBase, recordOffset, columnNo) != 0
@@ -457,4 +459,13 @@ final class BinaryRecordRowReader(schema: RecordSchema,
                               getBlobNumBytes(columnNo) + 2, buf)
     buf
   }
+}
+
+final class BinaryRecordRowReader(val schema: RecordSchema,
+                                  var recordBase: Any = UnsafeUtils.ZeroPointer,
+                                  var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase
+
+final class MultiSchemaBRRowReader(var recordBase: Any = UnsafeUtils.ZeroPointer,
+                                   var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase {
+  var schema: RecordSchema = _
 }
