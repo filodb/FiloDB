@@ -115,7 +115,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    */
   def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
-    val ts = row.getLong(0)
+    val ts = schema.timestamp(row)
     if (ts < timestampOfLatestSample) {
       shardStats.outOfOrderDropped.increment
       return

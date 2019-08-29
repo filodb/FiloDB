@@ -39,6 +39,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
+  val unknownSchemaDropped = Kamon.counter("memstore-unknown-schema-dropped").refine(tags)
   val oldContainers = Kamon.counter("memstore-incompatible-containers").refine(tags)
   val offsetsNotRecovered = Kamon.counter("memstore-offsets-not-recovered").refine(tags)
   val outOfOrderDropped = Kamon.counter("memstore-out-of-order-samples").refine(tags)
@@ -412,7 +413,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     final def onNext(recBase: Any, recOffset: Long): Unit = {
       val schemaId = RecordSchema.schemaID(recBase, recOffset)
       val schema = schemas(schemaId)
-      if (schema != Schemas.NullSchema) {
+      if (schema != Schemas.UnknownSchema) {
         val group = partKeyGroup(schema.ingestionSchema, recBase, recOffset, numGroups)
         if (ingestOffset < groupWatermark(group)) {
           shardStats.rowsSkipped.increment
@@ -433,7 +434,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       } else {
         logger.debug(s"Unknown schema ID $schemaId will be ignored during ingestion")
-        //TODO: add stats for unknown schema records
+        shardStats.unknownSchemaDropped.increment
       }
     }
   }
@@ -534,7 +535,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           val group = partKeyGroup(schemas.part.binSchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
           val schemaId = RecordSchema.schemaID(partKeyBaseOnHeap, partKeyOffset)
           val schema = schemas(schemaId)
-          if (schema != Schemas.NullSchema) {
+          if (schema != Schemas.UnknownSchema) {
             val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, CREATE_NEW_PARTID, schema, 4)
             // In theory, we should not get an OutOfMemPartition here since
             // it should have occurred before node failed too, and with data stopped,
@@ -555,6 +556,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             }
           } else {
             logger.info(s"Ignoring part key with unknown schema ID $schemaId")
+            shardStats.unknownSchemaDropped.increment
             None
           }
         } else {

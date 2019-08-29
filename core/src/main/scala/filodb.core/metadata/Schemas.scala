@@ -217,12 +217,12 @@ final case class Schemas(part: PartitionSchema,
                          schemas: Map[String, Schema]) {
   // A very fast array of the schemas by schemaID.  Since schemaID=16 bits, we just use a single 64K element array
   // for super fast lookup.  Schemas object should really be a singleton anyways.
-  private val _schemas = Array.fill(64*1024)(Schemas.NullSchema)
+  private val _schemas = Array.fill(64*1024)(Schemas.UnknownSchema)
 
   schemas.values.foreach { s => _schemas(s.data.hash) = s }
 
   /**
-   * Returns the Schema for a given schemaID, or NullSchema if not found
+   * Returns the Schema for a given schemaID, or UnknownSchema if not found
    */
   final def apply(id: Int): Schema = _schemas(id)
 }
@@ -246,7 +246,7 @@ object Schemas {
   import Dataset._
   import Accumulation._
 
-  val NullSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
+  val UnknownSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
 
   // Easy way to create Schemas from a single Schema, mostly useful for testing
   def apply(sch: Schema): Schemas = Schemas(sch.partition, Map(sch.data.name -> sch))

@@ -176,7 +176,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                 group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
                 sch   = schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset))
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4))
-                          if sch != Schemas.NullSchema } yield {
+                          if sch != Schemas.UnknownSchema } yield {
             val stamp = partSetLock.writeLock()
             try {
               part.ingesting = false
