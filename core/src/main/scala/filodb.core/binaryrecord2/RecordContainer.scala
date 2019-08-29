@@ -47,12 +47,30 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
   }
 
   private[binaryrecord2] def updateTimestamp(): Unit = {
-    UnsafeUtils.setLong(base, offset + 8, System.currentTimeMillis())
+    setTimestamp(System.currentTimeMillis())
   }
 
   @inline final def version: Int = (UnsafeUtils.getInt(base, offset + 4) >> 24) & 0x00ff
   @inline final def isCurrentVersion: Boolean = version == Version
   @inline final def timestamp: Long = UnsafeUtils.getLong(base, offset + 8)
+  @inline private def setTimestamp(ts: Long): Unit = UnsafeUtils.setLong(base, offset + 8, ts)
+
+  /**
+   * Adjusts the timestamp to be monotonic by updating it to match the given timestamp, but
+   * only when it's higher. If the current timestamp is greater than or equal to the given
+   * timestamp, then the current timestamp is returned unmodified. The caller should remember
+   * the highest timestamp and pass it to the next container it receives.
+   *
+   * @return the current timestamp of this container
+   */
+  final def monotonicTimestamp(highestTimestamp: Long): Long = {
+    var ts = timestamp
+    if (highestTimestamp > ts) {
+      ts = highestTimestamp
+      setTimestamp(ts)
+    }
+    ts
+  }
 
   /**
    * Iterates through each BinaryRecord location, passing it to the Consumer so that no object allocations

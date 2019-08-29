@@ -4,6 +4,7 @@ import java.lang.{Long => JLong}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.reactive.Observable
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
@@ -33,6 +34,11 @@ class KafkaIngestionStream(config: Config,
 
   private val tp = new TopicPartition(IngestionTopic, shard)
 
+  private var highestTimestamp = JLong.MIN_VALUE
+
+  val lagSeconds = Kamon.gauge("kafka-lag-seconds")
+    .refine("topic" -> IngestionTopic, "shard" -> shard.toString())
+
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
   protected lazy val consumer: Observable[ConsumerRecord[JLong, Any]] =
     PartitionedConsumerObservable.create(sc, tp, offset)
@@ -48,7 +54,19 @@ class KafkaIngestionStream(config: Config,
    */
   override def get: Observable[SomeData] =
     consumer.map { record =>
-      SomeData(record.value.asInstanceOf[RecordContainer], record.offset)
+      val rc = record.value.asInstanceOf[RecordContainer]
+      // We want to maintain the illusion that ingestion time never moves backwards. Because
+      // the record containers come from different sources, they might have clocks which are
+      // slightly skewed. Also choose the highest one, for simplicity and consistency.
+      highestTimestamp = rc.monotonicTimestamp(highestTimestamp)
+
+      // Note that if the lag is negative, report it as such. This makes it possible to observe
+      // cases where this server has a clock set to the past, or a source has a clock set to
+      // the future.
+      val lag = System.currentTimeMillis() - highestTimestamp
+      lagSeconds.set(lag / 1000)
+
+      SomeData(rc, record.offset)
     }
 
   override def teardown(): Unit = {
