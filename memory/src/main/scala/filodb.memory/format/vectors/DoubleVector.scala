@@ -143,6 +143,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    */
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int
 
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double
+
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
@@ -211,6 +213,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
 
   // end is inclusive
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
+    println("In DoubleVector sum")
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
@@ -228,10 +231,12 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
         addr += 8
       }
     }
+    println ("sum:" + sum)
     sum
   }
 
   final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+    println("in count in DoubleVector")
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
@@ -242,7 +247,25 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
       if (!java.lang.Double.isNaN(nextDbl)) count += 1
       addr += 8
     }
+    println("count:" + count)
     count
+  }
+
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    var prev = Double.NaN
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var changes = 0d
+    while (addr < untilAddr) {
+      val nextDbl = UnsafeUtils.getDouble(addr)
+      println("nextDbl:" + nextDbl)
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!java.lang.Double.isNaN(nextDbl) && prev != nextDbl && !java.lang.Double.isNaN(prev)) changes += 1
+      addr += 8
+      prev = nextDbl
+    }
+    changes
   }
 }
 
@@ -257,6 +280,7 @@ extends DoubleVectorDataReader {
   def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     inner.sum(vector, start, end, ignoreNaN)
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = inner.count(vector, start, end)
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = inner.changes(vector, start, end)
 
   var _correction = 0.0
   // Lazily correct - not all queries want corrected data
@@ -315,6 +339,9 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+
+  override def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    DoubleVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end)
 }
 
 class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
@@ -452,4 +479,7 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
+
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    LongBinaryVector(vector).changes(vector, start, end)
 }

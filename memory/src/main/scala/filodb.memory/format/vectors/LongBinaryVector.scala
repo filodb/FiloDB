@@ -138,6 +138,7 @@ trait LongVectorDataReader extends VectorDataReader {
    */
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int
 
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double
   /**
    * Searches for the last element # whose element is <= the item, assuming all elements are increasing.
    * Typically used to find the last timestamp <= item.
@@ -227,6 +228,21 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     }
     if (element == item) first else first | 0x80000000
   }
+
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    val prev = Double.NaN
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var changes = 0
+    while (addr < untilAddr) {
+      val nextDbl = UnsafeUtils.getLong(addr)
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!java.lang.Double.isNaN(nextDbl) && prev != nextDbl) changes += 1
+      addr += 8
+    }
+    changes
+  }
 }
 
 /**
@@ -249,6 +265,9 @@ object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
 
   def binarySearch(vector: BinaryVectorPtr, item: Long): Int =
     LongBinaryVector(subvectAddr(vector)).binarySearch(subvectAddr(vector), item)
+
+   def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+     LongBinaryVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end)
 }
 
 class LongAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)

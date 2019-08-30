@@ -188,6 +188,7 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
 
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     val inner = vector + InnerVectorOffset
+   // DeltaDeltaConstDataReader.iterate(vector, start).
     DeltaDeltaConstDataReader.slopeSum(initValue(vector), slope(vector), start, end) +
       IntBinaryVector.simple(inner).sum(inner, start, end)
   }
@@ -206,6 +207,9 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
     new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
+
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = DeltaDeltaConstDataReader.changes(vector,
+    start, end)
 }
 
 /**
@@ -252,6 +256,22 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
       curBase += slope(vector)
       out
     }
+  }
+
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    println(s"In Changes. start: ${start} end: ${end} " )
+    var prev = Double.NaN
+    var changes = 0
+    var i = start
+    while (i <= end) {
+      val current = iterate(vector, i).next
+      println("current:" + current)
+      if (!java.lang.Double.isNaN(current) && prev != current && !java.lang.Double.isNaN(prev) ) changes += 1
+      i+=1
+      prev = current
+    }
+    changes
   }
 }
 

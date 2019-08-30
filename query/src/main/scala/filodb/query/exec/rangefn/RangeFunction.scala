@@ -172,6 +172,7 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
+    println(s"startTime: ${startTime} endTime: ${endTime} startRowNum: ${startRowNum}  endRowNum: ${endRowNum} ")
     // At least one sample is present
     if (startRowNum <= endRowNum)
       addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
@@ -303,6 +304,7 @@ object RangeFunction {
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
       case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionL
+      case Some(Changes)        => () => new ChangesChunkedFunctionL
       case _                    => iteratingFunction(func, funcParams)
     }
   }
@@ -331,6 +333,7 @@ object RangeFunction {
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
       case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
+      case Some(Changes)        => () => new ChangesChunkedFunctionD()
       case _                    => iteratingFunction(func, funcParams)
     }
   }

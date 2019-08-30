@@ -189,6 +189,8 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
       sum = 0d
     }
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
+    println("sum in addTimeDoubleChunks:" + sum)
+    //sum
   }
 }
 
@@ -588,5 +590,40 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
     val avg = if (count > 0) sum/count else 0d
     val stdVar = squaredSum/count - avg*avg
     sampleToEmit.setValues(endTimestamp, stdVar)
+  }
+}
+
+abstract class ChangesChunkedFunction(var changes: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { changes = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, changes)
+  }
+}
+
+class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
+  ChunkedDoubleRangeFunction {
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    if (changes.isNaN) {
+      changes = 0d
+    }
+    //doubleReader.count()
+    changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+    //changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+  }
+}
+
+class ChangesChunkedFunctionL extends ChangesChunkedFunction with
+  ChunkedLongRangeFunction{
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    if (changes.isNaN) {
+      changes = 0d
+    }
+    changes += longReader.sum(longVect, startRowNum, endRowNum)
   }
 }
