@@ -9,10 +9,10 @@ import filodb.core.metadata.{Dataset, DatasetOptions}
  */
 object FormatConversion {
   // An official Prometheus-format Dataset object with a single timestamp and value
-  val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:ts", "value:double"))
-                  .copy(options = DatasetOptions(Seq("__name__", "_ns"),
-                    "__name__", "value", false, Map("__name__" -> Seq("_bucket", "_count", "_sum")), Seq("le"),
-                    Map("exporter" -> "_ns", "job" -> "_ns")))
+  val options = DatasetOptions(Seq("__name__", "_ns"),
+                    "__name__", false, Map("__name__" -> Seq("_bucket", "_count", "_sum")), Seq("le"),
+                    Map("exporter" -> "_ns", "job" -> "_ns"))
+  val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:ts", "value:double"), options)
 
   /**
    * Extracts a java ArrayList of labels from the TimeSeries

@@ -22,10 +22,10 @@ class PartKeyIndexBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   val dataset = FormatConversion.dataset
-  val partKeyIndex = new PartKeyLuceneIndex(dataset, 0, TestData.storeConf)
+  val partKeyIndex = new PartKeyLuceneIndex(dataset.ref, dataset.schema.partition, 0, TestData.storeConf)
   val numSeries = 1000000
   val partKeyData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
-  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema)
+  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   partKeyData.foreach(_.addToBuilder(partKeyBuilder))
 
   var partId = 1

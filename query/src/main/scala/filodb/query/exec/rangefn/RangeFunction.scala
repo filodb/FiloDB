@@ -231,10 +231,10 @@ object RangeFunction {
   def downsampleColsFromRangeFunction(dataset: Dataset, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
       case None                   => Seq("avg")
-      case Some(Rate)             => Seq(dataset.options.valueColumn)
-      case Some(Irate)            => Seq(dataset.options.valueColumn)
-      case Some(Increase)         => Seq(dataset.options.valueColumn)
-      case Some(Resets)           => Seq(dataset.options.valueColumn)
+      case Some(Rate)             => Seq(dataset.schema.data.valueColName)
+      case Some(Irate)            => Seq(dataset.schema.data.valueColName)
+      case Some(Increase)         => Seq(dataset.schema.data.valueColName)
+      case Some(Resets)           => Seq(dataset.schema.data.valueColName)
       case Some(CountOverTime)    => Seq("count")
       case Some(Changes)          => Seq("avg")
       case Some(Delta)            => Seq("avg")
@@ -296,7 +296,7 @@ object RangeFunction {
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
       case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
-                                           val cntCol = dataset.dataColId("count")
+                                           val cntCol = dataset.colIDs("count").get.head
                                            new AvgWithSumAndCountOverTimeFuncL(cntCol)
                                          }
                                          else new AvgOverTimeChunkedFunctionL
@@ -325,7 +325,7 @@ object RangeFunction {
                                          else new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
       case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
-                                            val cntCol = dataset.dataColId("count")
+                                            val cntCol = dataset.colIDs("count").get.head
                                             new AvgWithSumAndCountOverTimeFuncD(cntCol)
                                          }
                                          else new AvgOverTimeChunkedFunctionD

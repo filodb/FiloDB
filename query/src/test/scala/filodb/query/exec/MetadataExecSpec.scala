@@ -15,6 +15,7 @@ import filodb.core.{query, TestData}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -50,13 +51,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
   partTagsUTF8s.map( partTagsUTF8 => tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }
-    .foreach(builder.addFromReader))
+    .foreach(builder.addFromReader(_, timeseriesSchema)))
   val container = builder.allContainers.head
 
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }

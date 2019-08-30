@@ -36,9 +36,7 @@ trait RawChunkSource {
   /**
    * Reads and returns raw chunk data according to the method. ChunkSources implementing this method can use
    * any degree of parallelism/async under the covers to get the job done efficiently.
-   * @param dataset the Dataset to read from
-   * @param columnIDs the set of column IDs to read back.  Not used for the memstore, but affects what columns are
-   *                  read back from persistent store.
+   * @param ref the DatasetRef to read chunks from
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
    * @return an Observable of RawPartDatas
@@ -46,8 +44,7 @@ trait RawChunkSource {
   /**
    * Implemented by lower-level persistent ChunkSources to return "raw" partition data
    */
-  def readRawPartitions(dataset: Dataset,
-                        columnIDs: Seq[Types.ColumnId],
+  def readRawPartitions(ref: DatasetRef,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData]
 }
@@ -144,7 +141,7 @@ trait DefaultChunkSource extends ChunkSource {
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    readRawPartitions(dataset, columnIDs, partMethod, chunkMethod)
+    readRawPartitions(dataset.ref, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
       .mapAsync { rawPart =>

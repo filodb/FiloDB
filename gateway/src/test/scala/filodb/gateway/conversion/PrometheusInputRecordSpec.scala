@@ -28,7 +28,7 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
 
   it("should parse from TimeSeries proto and write to RecordBuilder") {
     val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("_ns" -> "filodb"))
-    val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+    val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
     val records = PrometheusInputRecord(proto1, dataset)
     records should have length (1)

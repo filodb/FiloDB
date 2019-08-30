@@ -8,12 +8,10 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.MetricsTestData.{builder, timeseriesDataset}
+import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
-import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Column.ColumnType.{BinaryRecordColumn, StringColumn}
-import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, SeqMapConsumer}
+import filodb.core.metadata.Schemas
+import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 
@@ -42,11 +40,11 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
   }
 
   // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader(_, timeseriesSchema))
   val container = builder.allContainers.head
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }
@@ -56,16 +54,10 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, now, now - 5000, 10)
-    val schema = new RecordSchema(Seq(ColumnInfo("brc", ColumnType.BinaryRecordColumn)))
     val seqMapConsumer = new SeqMapConsumer()
-    val record = metadata.next()
-    val result = (schema.columnTypes.map(columnType => columnType match {
-      case StringColumn => record.toString
-      case BinaryRecordColumn => schema.consumeMapItems(record.partKeyBase, record.partKeyOffset, 0, seqMapConsumer)
-        seqMapConsumer.pairs
-      case _ => ???
-    }))
-    result.head shouldEqual jobQueryResult2
+    val tsPart = metadata.next()
+    timeseriesDataset.partKeySchema.consumeMapItems(tsPart.partKeyBase, tsPart.partKeyOffset, 0, seqMapConsumer)
+    seqMapConsumer.pairs shouldEqual jobQueryResult2
   }
 
   it ("should read the metadata label values for instance") {

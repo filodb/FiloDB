@@ -26,7 +26,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
   def convertToRecords(rawText: Seq[String]): Seq[Option[InfluxRecord]] = {
     rawText.map { line =>
       buffer.writeBytes(line.getBytes())
-      InfluxProtocolParser.parse(buffer, dataset.options)
+      InfluxProtocolParser.parse(buffer, dataset.schema)
     }
   }
 
@@ -72,7 +72,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
 
     it("should create a full ingestion BinaryRecordV2 with addToBuilder") {
       val recordOpts = convertToRecords(rawInfluxLPs take 1)
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       // println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
       builder.allContainers.head.foreach { case (base, offset) =>
@@ -93,7 +93,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
   describe("InfluxPromHistogramRecord") {
     it("should create multiple BinaryRecordV2s with addToBuilder, one for each bucket") {
       val recordOpts = convertToRecords(rawInfluxLPs drop 5)
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
       builder.allContainers.head.countRecords shouldEqual 17

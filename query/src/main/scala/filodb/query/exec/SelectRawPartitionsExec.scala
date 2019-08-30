@@ -40,7 +40,7 @@ final case class SelectRawPartitionsExec(id: String,
   import SelectRawPartitionsExec._
 
   protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+    require(!colIds.contains(0),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
     val selectedColIds = selectColIds(dataset)
@@ -58,18 +58,18 @@ final case class SelectRawPartitionsExec(id: String,
   }
 
   private def selectColIds(dataset: Dataset) = {
-    dataset.rowKeyIDs ++ {
+    Dataset.rowKeyIDs ++ {
       if (colIds.nonEmpty) {
         // query is selecting specific columns
         colIds
       } else if (!dataset.options.hasDownsampledData) {
         // needs to select raw data
-        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
+        colIds ++ dataset.colIDs(dataset.schema.data.valueColName).get
       } else {
         // need to select column based on range function
         val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
           RangeFunction.downsampleColsFromRangeFunction(dataset, p.asInstanceOf[PeriodicSamplesMapper].functionId)
-        }.getOrElse(Seq(dataset.options.valueColumn))
+        }.getOrElse(Seq(dataset.schema.data.valueColName))
         colIds ++ dataset.colIDs(colNames: _*).get
       }
     }
@@ -80,7 +80,7 @@ final case class SelectRawPartitionsExec(id: String,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
-    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
+    require(!colIds.contains(0),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)

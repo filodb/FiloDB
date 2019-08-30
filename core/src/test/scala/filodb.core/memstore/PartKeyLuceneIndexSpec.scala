@@ -18,8 +18,8 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6, 0, TestData.storeConf)
-  val partBuilder = new RecordBuilder(TestData.nativeMem, dataset6.partKeySchema)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, TestData.storeConf)
+  val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(dataset: Dataset,
                    base: Any,
@@ -247,7 +247,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartKeyLuceneIndex(dataset1, 0, TestData.storeConf)
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, TestData.storeConf)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }

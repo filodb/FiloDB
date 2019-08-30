@@ -1,4 +1,5 @@
 language: scala
+dist: trusty
 env:
   global:
    _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=256m"

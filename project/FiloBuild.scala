@@ -194,6 +194,7 @@ object FiloBuild extends Build {
     "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     logbackDep % Test,
     scalaTest  % Test,
+    "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
     scalaCheck % "test"
   )
 
@@ -235,10 +236,10 @@ object FiloBuild extends Build {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
-    "com.tdunning"         % "t-digest"           % "3.1",
-    "com.softwaremill.sttp" %% "circe"                   % sttpVersion ,
-    "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion,
-    "com.softwaremill.sttp" %% "core"                    % sttpVersion,
+    "com.tdunning"          % "t-digest"                              % "3.1",
+    "com.softwaremill.sttp" %% "circe"                                % sttpVersion ,
+    "com.softwaremill.sttp" %% "async-http-client-backend-future"     % sttpVersion,
+    "com.softwaremill.sttp" %% "core"                                 % sttpVersion,
     circeGeneric,
     scalaxyDep
   )

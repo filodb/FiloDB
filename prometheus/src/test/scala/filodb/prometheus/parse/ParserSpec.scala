@@ -2,6 +2,7 @@ package filodb.prometheus.parse
 
 import org.scalatest.{FunSpec, Matchers}
 import filodb.prometheus.ast.TimeStepParams
+import filodb.query.{BinaryJoin, LogicalPlan}
 
 //noinspection ScalaStyle
 // scalastyle:off
@@ -242,54 +243,6 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
-      "primary:instance-001:no.ofrequests{job=\"my-job\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(my-job)), ColumnFilter(__name__,Equals(primary:instance-001:no.ofrequests))),List()),1524855988000,1000000,1524855988000)",
-      "absent(nonexistent{job=\"myjob\"})" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000000,1524855988000),Absent,List())",
-      "rate(http_requests_total[5m] offset 1w)" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Rate,List())",
-      "http_requests_total{job=\"prometheus\",group=\"canary\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000)",
-      "http_requests_total{job=\"prometheus\",__col__=\"min\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(min)),1524855988000,1000000,1524855988000)",
-      // Internal FiloDB debug function
-      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\"})" ->
-        "RawChunkMeta(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),)",
-      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\",__col__=\"avg\"})" ->
-        "RawChunkMeta(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),avg)",
-
-      "sum(http_requests_total) by (application, group)" ->
-        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(application, group),List())",
-      "sum(http_requests_total) without (instance)" ->
-        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List(instance))",
-      "count_values(\"version\", build_version)" ->
-        "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(build_version))),List()),1524855988000,1000000,1524855988000),List(Some(\"version\")),List(),List())",
-      "label_replace(up{job=\"api-server\",service=\"a:c\"}, \"foo\", \"$1\", \"service\", \"(.*):.*\")" ->
-        "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(service,Equals(a:c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelReplace,List(foo, $1, service, (.*):.*))",
-      "sum(http_requests_total)" ->
-        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
-      "label_join(up{job=\"api-server\",src1=\"a\",src2=\"b\",src3=\"c\"}, \"foo\", \",\", \"src1\", \"src2\", \"src3\")" ->
-        "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(src1,Equals(a)), ColumnFilter(src2,Equals(b)), ColumnFilter(src3,Equals(c)), ColumnFilter(__name__,Equals(up))),List()),1524855988000,1000000,1524855988000),LabelJoin,List(foo, ,, src1, src2, src3))",
-      "histogram_quantile(0.9, sum(rate(http_request_duration_seconds_bucket[10m])) by (le))" ->
-        "ApplyInstantFunction(Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855388000,1524855988000),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988000,1000000,1524855988000,600000,Rate,List()),List(),List(le),List()),HistogramQuantile,List(0.9))",
-      "delta(cpu_temp_celsius{host=\"zeus\"}[2h])" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524848788000,1524855988000),List(ColumnFilter(host,Equals(zeus)), ColumnFilter(__name__,Equals(cpu_temp_celsius))),List()),1524855988000,1000000,1524855988000,7200000,Delta,List())",
-      "method_code:http_errors:rate5m{code=\"500\"} / method:http_requests:rate5m" ->
-        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(code,Equals(500)), ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988000,1000000,1524855988000),DIV,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
-      "method_code:http_errors:rate5m{code=\"500\"} / ignoring(code) method:http_requests:rate5m" ->
-        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(code,Equals(500)), ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988000,1000000,1524855988000),DIV,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988000,1000000,1524855988000),List(),List(code),List())",
-      "method_code:http_errors:rate5m{code=\"500\"} / on(method) method:http_requests:rate5m" ->
-        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(code,Equals(500)), ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988000,1000000,1524855988000),DIV,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988000,1000000,1524855988000),List(method),List(),List())",
-      "histogram_quantile(0.9, rate(http_request_duration_seconds_bucket[10m]))" ->
-        "ApplyInstantFunction(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855388000,1524855988000),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988000,1000000,1524855988000,600000,Rate,List()),HistogramQuantile,List(0.9))",
-      "histogram_quantile(0.9, sum(rate(http_request_duration_seconds_bucket[10m])) by (job, le))" ->
-        "ApplyInstantFunction(Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855388000,1524855988000),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988000,1000000,1524855988000,600000,Rate,List()),List(),List(job, le),List()),HistogramQuantile,List(0.9))",
-      "http_requests_total" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000)",
-      "http_requests_total ^ 5" ->
-        "ScalarVectorBinaryOperation(POW,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false)",
-
-      //FIXME Operator precedence is not implemented
       "10 + http_requests_total * 5" ->
         "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
       "10 + (http_requests_total * 5)" ->
@@ -340,15 +293,69 @@ class ParserSpec extends FunSpec with Matchers {
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo)), ColumnFilter(job,Equals(myjob))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "sum(http_requests_total)       \n \n / \n\n    sum(http_requests_total)" ->
         "BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),DIV,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+
       "changes(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List())"
+
+
+     // Binary Expressions should generate Logical Plan according to precedence
+     // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets which are according to precedence
+      "(10 % http_requests_total) + 5" ->
+        "ScalarVectorBinaryOperation(ADD,5.0,ScalarVectorBinaryOperation(MOD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+      "10 % http_requests_total + 5" ->
+        "ScalarVectorBinaryOperation(ADD,5.0,ScalarVectorBinaryOperation(MOD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+
+      "(http_requests_total % http_requests_total) + http_requests_total" ->
+        "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),MOD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+      "http_requests_total % http_requests_total + http_requests_total" ->
+        "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),MOD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+
+      // "unless" and "and" have same priority but are not right associative so "and" should be evaluated first
+      "((foo and bar) unless baz) or qux" ->
+        "BinaryJoin(BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LUnless,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+      "foo and bar unless baz or qux" ->
+      "BinaryJoin(BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),LAND,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LUnless,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(qux))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+
+      // Pow is right associative so (bar ^ baz) should be evaluated first
+      "(foo ^ (bar ^ baz))" ->
+        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+      "foo ^ bar ^ baz" ->
+        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),POW,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(baz))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+
+      "(foo + bar) or (bla and blub)" ->
+        "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,ManyToMany,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),LAND,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+      "foo + bar or bla and blub" ->
+        "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),LOR,ManyToMany,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),LAND,ManyToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
+
+      "bar + on(foo) (bla / on(baz, buz) group_right(test) blub)" -> "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(baz, buz),List(),List(test)),List(foo),List(),List())",
+      "bar + on(foo) bla / on(baz, buz) group_right(test) blub" -> "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(baz, buz),List(),List(test)),List(foo),List(),List())"
     )
 
     val qts: Long = 1524855988L
     queryToLpString.foreach { case (q, e) =>
       info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts)
+      if (lp.isInstanceOf[BinaryJoin])
+       printBinaryJoin(lp)
       lp.toString shouldEqual (e)
+    }
+  }
+
+  private def printBinaryJoin( lp: LogicalPlan, level: Int = 0) : scala.Unit =  {
+    if (!lp.isInstanceOf[BinaryJoin]) {
+      info(s"${"  "*level}" + lp.toString)
+    }
+    else {
+      val binaryJoin = lp.asInstanceOf[BinaryJoin]
+      info(s"${"  "*level}" + "lhs:" )
+      printBinaryJoin(binaryJoin.lhs, level + 1)
+      info(s"${"  "*level}" + "Cardinality: " + binaryJoin.cardinality)
+      info(s"${"  "*level}" + "Operator: " + binaryJoin.operator)
+      info(s"${"  "*level}" + "On labels: " + binaryJoin.on )
+      info(s"${"  "*level}" + "Include labels: " + binaryJoin.include)
+      info(s"${"  "*level}" + "Ignoring labels: " + binaryJoin.ignoring)
+      info(s"${"  "*level}" + "rhs: ")
+      printBinaryJoin(binaryJoin.rhs, level + 1)
     }
   }
 

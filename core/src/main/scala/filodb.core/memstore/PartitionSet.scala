@@ -23,7 +23,7 @@ import scala.{specialized => sp}
 
 import spire.syntax.all._
 
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{PartitionSchema, Schema}
 import filodb.core.store.FiloPartition
 import filodb.memory.BinaryRegionLarge
 
@@ -162,9 +162,9 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * @param ingestOffset the offset/address of the ingestion BinaryRecord
    * @param addFunc a no-arg function to create the FiloPartition if it cannot be found
    */
-  final def getOrAddWithIngestBR(ingestBase: Any, ingestOffset: Long, ds: Dataset,
+  final def getOrAddWithIngestBR(ingestBase: Any, ingestOffset: Long, s: Schema,
                                  addFunc: => FiloPartition): FiloPartition = {
-    getWithIngestBR(ingestBase, ingestOffset, ds) match {
+    getWithIngestBR(ingestBase, ingestOffset, s) match {
       case null =>
         val newItem = addFunc
         if (newItem != null) add(newItem)
@@ -176,20 +176,20 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   /**
    * Returns the partition that matches the partition key in an ingest record, or NULL if it doesn't exist
    */
-  final def getWithIngestBR(ingestBase: Any, ingestOffset: Long, ds: Dataset): FiloPartition = {
+  final def getWithIngestBR(ingestBase: Any, ingestOffset: Long, s: Schema): FiloPartition = {
     @inline @tailrec def loop(i: Int, perturbation: Int): FiloPartition = {
       val j = i & mask
       val status = buckets(j)
       if (status == 0) {
         null
       } else if (status == 3 &&
-                 ds.comparator.partitionMatch(ingestBase, ingestOffset, null, items(j).partKeyOffset)) {
+                 s.comparator.partitionMatch(ingestBase, ingestOffset, null, items(j).partKeyOffset)) {
         items(j)
       } else {
         loop((i << 2) + i + perturbation + 1, perturbation >> 5)
       }
     }
-    val i = ds.ingestionSchema.partitionHash(ingestBase, ingestOffset) & 0x7fffffff
+    val i = s.ingestionSchema.partitionHash(ingestBase, ingestOffset) & 0x7fffffff
     loop(i, i)
   }
 
@@ -197,7 +197,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    * Searches for and returns Some(tsPartition) if a partition exists with a key matching the passed in
    * partition key BinaryRecord.  Otherwise, None is returned.
    */
-  final def getWithPartKeyBR(partBase: Any, partOffset: Long, ds: Dataset): Option[FiloPartition] = {
+  final def getWithPartKeyBR(partBase: Any, partOffset: Long, p: PartitionSchema): Option[FiloPartition] = {
     @inline @tailrec def loop(i: Int, perturbation: Int): Option[FiloPartition] = {
       val j = i & mask
       val status = buckets(j)
@@ -210,7 +210,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
         loop((i << 2) + i + perturbation + 1, perturbation >> 5)
       }
     }
-    val i = ds.comparator.partitionKeySchema.partitionHash(partBase, partOffset) & 0x7fffffff
+    val i = p.binSchema.partitionHash(partBase, partOffset) & 0x7fffffff
     loop(i, i)
   }
 
