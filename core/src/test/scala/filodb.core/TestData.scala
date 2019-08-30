@@ -438,6 +438,7 @@ object MetricsTestData {
                                   Seq.empty,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
+  val timeseriesSchemas = Schemas(timeseriesSchema)
 
   val downsampleDataset = Dataset.make("tsdbdata",
     Seq("tags:map"),

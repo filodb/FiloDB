@@ -285,10 +285,16 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def reclaimEventsForPtr(ptr: BinaryRegion.NativePointer): Seq[ReclaimEvent] =
     reclaimLog.filter { ev => ptr >= ev.block.address && ptr < (ev.block.address + ev.block.capacity) }
 
-  def timeBlocksForPtr(ptr: BinaryRegion.NativePointer): Seq[Block] =
-    usedBlocksTimeOrdered.entrySet.iterator.asScala.flatMap { entry =>
-      BlockDetective.containsPtr(ptr, entry.getValue)
-    }.toSeq
+  def timeBlocksForPtr(ptr: BinaryRegion.NativePointer): Seq[Block] = {
+    lock.lock()
+    try {
+      usedBlocksTimeOrdered.entrySet.iterator.asScala.flatMap { entry =>
+        BlockDetective.containsPtr(ptr, entry.getValue)
+      }.toBuffer
+    } finally {
+      lock.unlock()
+    }
+  }
 
   def releaseBlocks(): Unit = {
     lock.lock()
