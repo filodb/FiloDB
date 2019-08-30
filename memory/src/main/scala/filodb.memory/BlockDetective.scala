@@ -33,9 +33,9 @@ object BlockDetective {
       f"  Block 0x${blk.address}%016x at ${(new DateTime(reclaimTime)).toString()}%s with $remaining%d bytes left" +
       oldOwner.map { bmf => s"\tfrom ${bmf.debugString}" }.getOrElse("")
     }.mkString("\n") +
-    "Time bucketed blocks:\n" +
+    "\nTime bucketed blocks:\n" +
     timeBucketBlocks.map(_.debugString).mkString("\n") +
-    "Flush block lists:\n" +
+    "\nFlush block lists:\n" +
     flushBlocks.map(_.debugString).mkString("\n")
   }
 }
