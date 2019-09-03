@@ -189,8 +189,6 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
       sum = 0d
     }
     sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
-    println("sum in addTimeDoubleChunks:" + sum)
-    //sum
   }
 }
 
@@ -609,9 +607,7 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
     if (changes.isNaN) {
       changes = 0d
     }
-    //doubleReader.count()
     changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
-    //changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
   }
 }
 

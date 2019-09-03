@@ -306,23 +306,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       new ChangesFunction(), queryConfig)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), queryConfig)
-    println("rv rows:" + rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList)
     val aggregated1 = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     val aggregated2 = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     val expectedResult = List((100000, 0.0), (120000, 2.0), (140000, 2.0))
     aggregated1 shouldEqual(expectedResult)
     aggregated2 shouldEqual(expectedResult)
-  }
-
-  it("should correctly do changes when values is NaN") {
-    var data = Seq(Double.NaN, 1d, 2d, 3d, 4d, 5d)
-    val rv = timeValueRV(data)
-    val windowSize = 100
-    val step = 20
-
-    val slidingIt = slidingWindowIt(data, rv, new ChangesFunction(), windowSize, step)
-    val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
-
   }
 
   it("should yield NaN when changes is done on data having NaN  after a value") {
@@ -336,20 +324,12 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), queryConfig)
 
-    val chunkedIt1 = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-      new SumOverTimeChunkedFunctionD(), queryConfig)
-    println("rv rows:" + rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList)
     val aggregated1 = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     val aggregated2 = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val aggregatedSum = chunkedIt1.map(x => (x.getLong(0), x.getDouble(1))).toList
 
-    println(s"aggregated1:  ${aggregated1}")
-    println(s"aggregated2:  ${aggregated2}")
-    println(s"aggregatedSum:  ${aggregatedSum}")
     aggregated1(0)._2 shouldEqual(0.0)
     aggregated1(1)._2.isNaN shouldEqual(true)
     aggregated2(0)._2 shouldEqual(0.0)
-    aggregated2(1)._2.isNaN shouldEqual(true)
   }
 
   it("should yield NaN when changes is done on data having 2 or more consecutive NaN's after a value") {

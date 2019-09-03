@@ -172,7 +172,6 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
     val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
-    println(s"startTime: ${startTime} endTime: ${endTime} startRowNum: ${startRowNum}  endRowNum: ${endRowNum} ")
     // At least one sample is present
     if (startRowNum <= endRowNum)
       addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)

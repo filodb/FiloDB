@@ -213,7 +213,6 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
 
   // end is inclusive
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
-    println("In DoubleVector sum")
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
@@ -231,12 +230,10 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
         addr += 8
       }
     }
-    println ("sum:" + sum)
     sum
   }
 
   final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
-    println("in count in DoubleVector")
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
@@ -247,7 +244,6 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
       if (!java.lang.Double.isNaN(nextDbl)) count += 1
       addr += 8
     }
-    println("count:" + count)
     count
   }
 
@@ -259,7 +255,6 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     var changes = 0d
     while (addr < untilAddr) {
       val nextDbl = UnsafeUtils.getDouble(addr)
-      println("nextDbl:" + nextDbl)
       // There are many possible values of NaN.  Use a function to ignore them reliably.
       if (!java.lang.Double.isNaN(nextDbl) && prev != nextDbl && !java.lang.Double.isNaN(prev)) changes += 1
       addr += 8

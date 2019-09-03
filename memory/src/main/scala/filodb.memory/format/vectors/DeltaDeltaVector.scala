@@ -260,16 +260,14 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
 
   def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    println(s"In Changes. start: ${start} end: ${end} " )
     var prev = Double.NaN
     var changes = 0
     var i = start
     while (i <= end) {
       val current = iterate(vector, i).next
-      println("current:" + current)
       if (!java.lang.Double.isNaN(current) && prev != current && !java.lang.Double.isNaN(prev) ) changes += 1
-      i+=1
       prev = current
+      i+=1
     }
     changes
   }
