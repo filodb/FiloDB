@@ -55,9 +55,10 @@ class KafkaIngestionStream(config: Config,
   override def get: Observable[SomeData] =
     consumer.map { record =>
       val rc = record.value.asInstanceOf[RecordContainer]
+
       // We want to maintain the illusion that ingestion time never moves backwards. Because
       // the record containers come from different sources, they might have clocks which are
-      // slightly skewed. Also choose the highest one, for simplicity and consistency.
+      // slightly skewed. Always choose the highest one, for simplicity and consistency.
       highestTimestamp = rc.monotonicTimestamp(highestTimestamp)
 
       // Note that if the lag is negative, report it as such. This makes it possible to observe
