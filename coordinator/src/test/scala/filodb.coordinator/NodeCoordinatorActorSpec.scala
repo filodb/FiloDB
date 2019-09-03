@@ -145,7 +145,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, multiSeriesData().take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       // Query existing partition: Series 1
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")), qOpt)
@@ -191,7 +191,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -232,7 +232,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       val numQueries = 6
 
@@ -262,7 +262,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
@@ -291,7 +291,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n")
@@ -317,7 +317,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
@@ -331,7 +331,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.commitIndexForTesting(dataset1.ref)
+      memStore.refreshIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
@@ -362,7 +362,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, StatusActor.GetCurrentEvents)
     probe.expectMsg(Map(ref -> Seq(IngestionStarted(ref, 0, coordinatorActor))))
 
-    memStore.commitIndexForTesting(dataset6.ref)
+    memStore.refreshIndexForTesting(dataset6.ref)
     // Also the original aggregator is sum(sum_over_time(....)) which is not quite represented by below plan
     // Below plan is really sum each time bucket
     val q2 = LogicalPlan2Query(ref,
