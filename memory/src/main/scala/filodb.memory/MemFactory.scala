@@ -1,7 +1,6 @@
 package filodb.memory
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicReference
 
 import scala.collection.mutable.ListBuffer
 
@@ -213,12 +212,10 @@ class BlockMemFactory(blockStore: BlockManager,
   val fullBlocks = ListBuffer[Block]()
 
   // tracks block currently being populated
-  val currentBlock = new AtomicReference[Block]()
+  var currentBlock = blockStore.requestBlock(bucketTime, optionSelf).get
 
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
-
-  currentBlock.set(blockStore.requestBlock(bucketTime, optionSelf).get)
 
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
@@ -226,7 +223,7 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def startMetaSpan(): Unit = {
     metadataSpan.clear()
-    metadataSpan += (currentBlock.get())
+    metadataSpan += currentBlock
   }
 
   /**
@@ -252,16 +249,17 @@ class BlockMemFactory(blockStore: BlockManager,
   }
 
   protected def ensureCapacity(forSize: Long): Block = {
-    if (!currentBlock.get().hasCapacity(forSize)) {
-      if (markFullBlocksAsReclaimable) {
-        currentBlock.get().markReclaimable()
-      }
-      fullBlocks += currentBlock.get()
+    if (!currentBlock.hasCapacity(forSize)) {
       val newBlock = blockStore.requestBlock(bucketTime, optionSelf).get
-      currentBlock.set(newBlock)
+      if (markFullBlocksAsReclaimable) {
+        currentBlock.markReclaimable()
+      } else {
+        fullBlocks += currentBlock
+      }
+      currentBlock = newBlock
       metadataSpan += newBlock
     }
-    currentBlock.get()
+    currentBlock
   }
 
   /**
@@ -294,7 +292,7 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * @return The capacity of any allocated block
     */
-  def blockAllocationSize(): Long = currentBlock.get().capacity
+  def blockAllocationSize(): Long = currentBlock.capacity
 
   // We don't free memory, because many BlockHolders will share a single BlockManager, and we rely on
   // the BlockManager's own shutdown mechanism
