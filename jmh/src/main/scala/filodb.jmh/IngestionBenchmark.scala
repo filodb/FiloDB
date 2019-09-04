@@ -9,6 +9,7 @@ import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator}
 import filodb.core.memstore._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
 
@@ -60,7 +61,7 @@ class IngestionBenchmark {
   val policy = new FixedMaxPartitionsEvictionPolicy(100)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)
-  memStore.setup(dataset1, 0, ingestConf)
+  memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, ingestConf)
 
   val shard = memStore.getShardE(dataset1.ref, 0)
 

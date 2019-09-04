@@ -3,7 +3,7 @@ package filodb.core.store
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
-import filodb.core.metadata.Dataset
+import filodb.core.DatasetRef
 import filodb.core.query._
 import filodb.memory.BinaryRegionLarge
 
@@ -64,6 +64,5 @@ trait ColumnStore extends ChunkSink with RawChunkSource with StrictLogging {
    */
   def shutdown(): Unit
 
-  def getPartKeyTimeBucket(dataset: Dataset, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment]
-
+  def getPartKeyTimeBucket(ref: DatasetRef, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment]
 }

@@ -10,9 +10,10 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
-import filodb.core.Types
+import filodb.core.{DatasetRef, Types}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.MemFactory
@@ -22,7 +23,8 @@ import filodb.memory.format.UnsafeUtils
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
  * a raw chunk source which implements RawChunkSource.readRawPartitions API.
  */
-class OnDemandPagingShard(dataset: Dataset,
+class OnDemandPagingShard(ref: DatasetRef,
+                          schemas: Schemas,
                           storeConfig: StoreConfig,
                           shardNum: Int,
                           bufferMemoryManager: MemFactory,
@@ -32,18 +34,18 @@ class OnDemandPagingShard(dataset: Dataset,
                           downsampleConfig: DownsampleConfig,
                           downsamplePublisher: DownsamplePublisher)
                          (implicit ec: ExecutionContext) extends
-TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
+TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawStore, metastore, evictionPolicy,
                 downsampleConfig, downsamplePublisher)(ec) {
   import TimeSeriesShard._
   import FiloSchedulers._
 
   private val singleThreadPool =
-    Scheduler.singleThread(s"${FiloSchedulers.PopulateChunksSched}-${dataset.ref}-$shardNum")
+    Scheduler.singleThread(s"${FiloSchedulers.PopulateChunksSched}-$ref-$shardNum")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
   private def startODPSpan(): Span = Kamon.buildSpan(s"odp-cassandra-latency")
-    .withTag("dataset", dataset.name)
+    .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
     .start()
   // NOTE: the current implementation is as follows
@@ -56,13 +58,12 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
   override def scanPartitions(columnIDs: Seq[Types.ColumnId],
                               partMethod: PartitionScanMethod,
                               chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    logger.debug(s"scanPartitions dataset=${dataset.ref} shard=$shardNum " +
+    logger.debug(s"scanPartitions dataset=$ref shard=$shardNum " +
       s"partMethod=$partMethod chunkMethod=$chunkMethod")
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed
     // 3. We don't have a safe way to prevent JVM crashes if someone reads a column that wasn't paged in
-    val allDataCols = dataset.dataColumns.map(_.id)
 
     // 1. Fetch partitions from memstore
     val iterResult = iteratePartitions(partMethod, chunkMethod)
@@ -84,11 +85,11 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       } else {
         // in the very rare case that partition literally *just* got evicted
         // we do not want to thrash by paging this partition back in.
-        logger.warn(s"Skipped ODP of partId=$pId in dataset=${dataset.ref} " +
+        logger.warn(s"Skipped ODP of partId=$pId in dataset=$ref " +
           s"shard=$shardNum since we are very likely thrashing")
       }
     }
-    logger.debug(s"Query on dataset=${dataset.ref} shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
+    logger.debug(s"Query on dataset=$ref shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
       s"and full ODP of partIds ${iterResult.partIdsNotInMemory}")
 
     // partitions that do not need ODP are those that are not in the inMemOdp collection
@@ -103,7 +104,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
-            rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(pagingMethods))
+            rawStore.readRawPartitions(ref, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
@@ -118,7 +119,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
-                rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
+                rawStore.readRawPartitions(ref, SinglePartitionScan(partBytes, shardNum), method)
                   .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
@@ -168,12 +169,14 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
       // for each partID: look up in partitions
       partitions.get(id) match {
         case TimeSeriesShard.OutOfMemPartition =>
-          logger.debug(s"Creating TSPartition for ODP from part ID $id in dataset=${dataset.ref} shard=$shardNum")
+          logger.debug(s"Creating TSPartition for ODP from part ID $id in dataset=$ref shard=$shardNum")
           // If not there, then look up in Lucene and get the details
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
-                group = partKeyGroup(dataset.partKeySchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
-                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, 4)) } yield {
+                group = partKeyGroup(schemas.part.binSchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
+                sch   = schemas(RecordSchema.schemaID(partKeyBytesRef.bytes, unsafeKeyOffset))
+                part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, id, sch, 4))
+                          if sch != Schemas.UnknownSchema } yield {
             val stamp = partSetLock.writeLock()
             try {
               part.ingesting = false
@@ -253,12 +256,12 @@ TimeSeriesShard(dataset, storeConfig, shardNum, bufferMemoryManager, rawStore, m
         val startTimes = if (partIdsToPage.nonEmpty) {
           val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
           logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
-            s"startTime lookup for query in dataset=${dataset.ref} shard=$shardNum " +
+            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
             s"resulted in startTimes=$st")
           st
         }
         else {
-          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=${dataset.ref} " +
+          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
             s"shard=$shardNum are in memory")
           debox.Map.empty[Int, Long]
         }

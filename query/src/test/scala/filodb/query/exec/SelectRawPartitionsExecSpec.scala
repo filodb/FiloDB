@@ -11,6 +11,7 @@ import filodb.core.{TestData, Types}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, HistogramColumn, TimestampColumn}
 import filodb.core.query._
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, TimeRangeChunkScan}
@@ -68,13 +69,13 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
-    memStore.setup(MMD.dataset1, 0, TestData.storeConf)
+    memStore.setup(MMD.dataset1.ref, Schemas(MMD.schema1), 0, TestData.storeConf)
     memStore.ingest(MMD.dataset1.ref, 0, mmdSomeData)
-    memStore.setup(MMD.histDataset, 0, TestData.storeConf)
+    memStore.setup(MMD.histDataset.ref, Schemas(MMD.histDataset.schema), 0, TestData.storeConf)
     memStore.ingest(MMD.histDataset.ref, 0, MMD.records(MMD.histDataset, histData))
-    memStore.setup(MMD.histMaxDS, 0, TestData.storeConf)
+    memStore.setup(MMD.histMaxDS.ref, Schemas(MMD.histMaxDS.schema), 0, TestData.storeConf)
     memStore.ingest(MMD.histMaxDS.ref, 0, MMD.records(MMD.histMaxDS, histMaxData))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
     memStore.refreshIndexForTesting(MMD.dataset1.ref)
@@ -149,7 +150,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
     result.result.size shouldEqual 1
     val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
-    val orig = histData.filter(_(4).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
+    val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8).map(r => (r(0), r(3))).take(5)
     resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
   }
 
@@ -221,7 +222,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn)
     result.result.size shouldEqual 1
     val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getHistogram(1)))
-    val orig = histData.filter(_(4).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+    val orig = histData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
@@ -248,7 +249,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
-    val orig = histMaxData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+    val orig = histMaxData.filter(_(6).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>
@@ -288,7 +289,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     // For now, just validate that we can read "reasonable" results, ie max should be >= value at head of window
     // Rely on AggrOverTimeFunctionsSpec to actually validate aggregation results
-    val orig = histMaxData.filter(_(5).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
+    val orig = histMaxData.filter(_(6).asInstanceOf[Types.UTF8Map]("dc".utf8) == "0".utf8)
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(4), r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) =>

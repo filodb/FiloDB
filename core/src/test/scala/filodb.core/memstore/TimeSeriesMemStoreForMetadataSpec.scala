@@ -10,6 +10,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -43,7 +44,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
   val container = builder.allContainers.head
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }

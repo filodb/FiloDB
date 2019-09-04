@@ -56,7 +56,7 @@ object TestConsumer extends App {
       }
     }.getOrElse((-1, ""))
 
-  val stream = streamFactory.create(sourceConf, dataset, shard, offsetOpt)
+  val stream = streamFactory.create(sourceConf, settings.schemas, shard, offsetOpt)
   val fut = stream.get//.take(10)
                   .foreach { case SomeData(container, offset) =>
                     println(s"\n----- Offset $offset -----")

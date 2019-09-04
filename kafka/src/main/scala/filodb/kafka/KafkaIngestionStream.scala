@@ -11,18 +11,18 @@ import org.apache.kafka.common.TopicPartition
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.SomeData
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas
 
 /**
   * KafkaIngestionStream creates an IngestionStream of RecordContainers by consuming from a single partition
   * in Apache Kafka.  Each message in Kafka is expected to be a RecordContainer's bytes.
   *
   * @param config  the Typesafe source config to use, see sourceconfig in `docs/ingestion.md`
-  * @param dataset the dataset
+  * @param schemas the Schemas to support reading from
   * @param shard   the shard / partition
   */
 class KafkaIngestionStream(config: Config,
-                           dataset: Dataset,
+                           schemas: Schemas,
                            shard: Int,
                            offset: Option[Long]) extends IngestionStream with StrictLogging {
 
@@ -66,7 +66,7 @@ class KafkaIngestionStreamFactory extends IngestionStreamFactory {
     * Returns an IngestionStream that can be subscribed to for a given shard,
     * or in this case, a single partition (1 shard => 1 Kafka partition) of a given Kafka topic.
     */
-  override def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream = {
-    new KafkaIngestionStream(config, dataset, shard, offset)
+  override def create(config: Config, schemas: Schemas, shard: Int, offset: Option[Long]): IngestionStream = {
+    new KafkaIngestionStream(config, schemas, shard, offset)
   }
 }

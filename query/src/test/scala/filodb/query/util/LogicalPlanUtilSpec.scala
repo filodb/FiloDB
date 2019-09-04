@@ -56,4 +56,21 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
     val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name")
     res.isEmpty shouldEqual(true)
   }
+
+  it("should concatenate results from lhs and rhs for BinaryJoin LogicalPlan") {
+
+    val rawSeriesLhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName1")),
+      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"))
+    val lhs = PeriodicSeries(rawSeriesLhs, 1000, 500, 50000)
+
+    val rawSeriesRhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("job", Equals("MetricName2")),
+      ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"))
+    val rhs = PeriodicSeries(rawSeriesRhs, 1000, 500, 50000)
+
+    val binaryJoin = BinaryJoin(lhs, DIV, OneToOne, rhs)
+
+    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(binaryJoin, "instance")
+    res.get.shouldEqual(Set("Inst-1", "Inst-0"))
+  }
+
 }

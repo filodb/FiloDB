@@ -11,7 +11,7 @@ import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, MemFactory}
-import filodb.memory.format.{RowReader, TypedIterator, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -46,19 +46,11 @@ final case class Dataset(name: String, schema: Schema) {
   val comparator      = schema.comparator
   val partKeySchema   = schema.partKeySchema
 
-  // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
-  val dataReaders     = schema.data.readers
-  val numDataColumns  = schema.data.columns.length
-
   // Used for ChunkSetReader.binarySearchKeyChunks
   val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
 
   val timestampColumn = rowKeyColumns.head
   val timestampColID  = timestampColumn.id
-
-  // The number of bytes of chunkset metadata including vector pointers in memory
-  val chunkSetInfoSize = schema.data.chunkSetInfoSize
-  val blockMetaSize    = schema.data.blockMetaSize
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, Dataset.DefaultContainerSize)
 
@@ -72,27 +64,6 @@ final case class Dataset(name: String, schema: Schema) {
     bytes
   }
 
-  import Column.ColumnType._
-
-  /**
-   * Creates a TypedIterator for querying a constant partition key column.
-   */
-  def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
-    val partColPos = columnID - Dataset.PartColStartIndex
-    require(Dataset.isPartitionID(columnID) && partColPos < partitionColumns.length)
-    partitionColumns(partColPos).columnType match {
-      case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
-      case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
-      case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
-      case other: Column.ColumnType => ???
-    }
-  }
-
-  /**
-   * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
-   */
-  final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
-
   import Accumulation._
   import OptionSugar._
   /**
@@ -103,21 +74,6 @@ final case class Dataset(name: String, schema: Schema) {
                           .orElse { partitionColumns.find(_.name == n).map(_.id) }
                           .toOr(One(n)) }
             .combined.badMap(_.toSeq)
-
-  /**
-   * Given a list of column names representing say CSV columns, returns a routing from each data column
-   * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
-   * over the input RowReader to return data columns corresponding to dataset definition.
-   */
-  def dataRouting(colNames: Seq[String]): Array[Int] =
-    dataColumns.map { c => colNames.indexOf(c.name) }.toArray
-
-  /**
-   * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
-   * the input RowReader columns whose names are passed in.
-   */
-  def ingestRouting(colNames: Seq[String]): Array[Int] =
-    dataRouting(colNames) ++ partitionColumns.map { c => colNames.indexOf(c.name) }
 
   /** Returns the Column instance given the ID */
   def columnFromID(columnID: Int): Column =

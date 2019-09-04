@@ -5,8 +5,8 @@ import filodb.query._
 
 object LogicalPlanUtil {
 
-  private def getLabelValueFromFilters(filters: Seq[ColumnFilter], metricColumnName: String): Option[Set[String]] = {
-    val matchingFilters = filters.filter(_.column.equals(metricColumnName))
+  private def getLabelValueFromFilters(filters: Seq[ColumnFilter], labelName: String): Option[Set[String]] = {
+    val matchingFilters = filters.filter(_.column.equals(labelName))
     if (matchingFilters.isEmpty)
       None
     else
@@ -27,6 +27,7 @@ object LogicalPlanUtil {
       None
     } else {
       var res: Set[String] = Set()
+      // Concatenate results
       Some(labelValues.foldLeft(res) { (acc, i) => i.union(acc) })
     }
   }
