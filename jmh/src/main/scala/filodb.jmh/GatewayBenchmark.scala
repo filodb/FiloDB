@@ -41,7 +41,7 @@ class GatewayBenchmark extends StrictLogging {
 
   val singlePromTSBytes = timeseries(tagMap).toByteArray
 
-  val singleInfluxRec = s"${tagMap("__name__")}, ${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
+  val singleInfluxRec = s"${tagMap("__name__")},${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
                         s"counter=$value ${initTimestamp}000000"
   val singleInfluxBuf = ChannelBuffers.buffer(1024)
   singleInfluxBuf.writeBytes(singleInfluxRec.getBytes)
@@ -59,8 +59,8 @@ class GatewayBenchmark extends StrictLogging {
              timeseries(tagMap ++ Map("__name__" -> "heap_usage_count"), histBuckets.size))
   val histPromBytes = histPromSeries.map(_.toByteArray)
 
-  val histInfluxRec = s"${tagMap("__name__")}, ${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
-                      s"${histBuckets.map { case (k, v) => s"$k=$v"}.mkString(",") }, sum=$histSum,count=8 " +
+  val histInfluxRec = s"${tagMap("__name__")},${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
+                      s"${histBuckets.map { case (k, v) => s"$k=$v"}.mkString(",") },sum=$histSum,count=8 " +
                       s"${initTimestamp}000000"
   val histInfluxBuf = ChannelBuffers.buffer(1024)
   histInfluxBuf.writeBytes(histInfluxRec.getBytes)
