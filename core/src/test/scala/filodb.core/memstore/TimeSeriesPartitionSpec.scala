@@ -235,7 +235,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     chunkSets.head.invokeFlushListener()    // update newestFlushedID
     part.unflushedChunksets shouldEqual 1
 
-     val currBlock = blockHolder.currentBlock.get() // hang on to these; we'll later test reclaiming them manually
+     val currBlock = blockHolder.currentBlock // hang on to these; we'll later test reclaiming them manually
      blockHolder.markUsedBlocksReclaimable()
 
      // Now, switch buffers and flush again, ingesting 5 more rows
