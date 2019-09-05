@@ -52,28 +52,16 @@ final case class PartitionSchema(columns: Seq[Column],
                                  predefinedKeys: Seq[String],
                                  options: DatasetOptions) {
   val binSchema = new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)), Some(0), predefinedKeys)
+  val hash = Schemas.genHash(columns)
 }
 
 object DataSchema {
   import Dataset._
-  import java.nio.charset.StandardCharsets.UTF_8
 
   def validateValueColumn(dataColumns: Seq[Column], valueColName: String): ColumnId Or BadSchema = {
     val index = dataColumns.indexWhere(_.name == valueColName)
     if (index < 0) Bad(BadColumnName(valueColName, s"$valueColName not a valid data column"))
     else           Good(index)
-  }
-
-  /**
-   * Generates a unique 16-bit hash from the column names and types.  Sensitive to order.
-   */
-  def genHash(columns: Seq[Column]): Int = {
-    var hash = 7
-    for { col <- columns } {
-      // Use XXHash to get high quality hash for column name.  String.hashCode is _horrible_
-      hash = 31 * hash + (BinaryRegion.hash32(col.name.getBytes(UTF_8)) * col.columnType.hashCode)
-    }
-    hash & 0x0ffff
   }
 
   /**
@@ -93,7 +81,7 @@ object DataSchema {
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, genHash(dataColumns), valueColID, downsampleSchema)
+      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns), valueColID, downsampleSchema)
     }
   }
 
@@ -174,6 +162,9 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val dataReaders     = data.readers
   val numDataColumns  = data.columns.length
 
+  // A unique hash of the partition and data schemas together. Use for BinaryRecords etc.
+  val schemaHash      = (partition.hash + 31 * data.hash) & 0x0ffff
+
   def name: String = data.name
 
   import Column.ColumnType._
@@ -219,7 +210,7 @@ final case class Schemas(part: PartitionSchema,
   // for super fast lookup.  Schemas object should really be a singleton anyways.
   private val _schemas = Array.fill(64*1024)(Schemas.UnknownSchema)
 
-  schemas.values.foreach { s => _schemas(s.data.hash) = s }
+  schemas.values.foreach { s => _schemas(s.schemaHash) = s }
 
   /**
    * Returns the Schema for a given schemaID, or UnknownSchema if not found
@@ -245,11 +236,24 @@ final case class Schemas(part: PartitionSchema,
 object Schemas {
   import Dataset._
   import Accumulation._
+  import java.nio.charset.StandardCharsets.UTF_8
 
   val UnknownSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
 
   // Easy way to create Schemas from a single Schema, mostly useful for testing
   def apply(sch: Schema): Schemas = Schemas(sch.partition, Map(sch.data.name -> sch))
+
+  /**
+   * Generates a unique 16-bit hash from the column names, types, params.  Sensitive to order.
+   */
+  def genHash(columns: Seq[Column]): Int = {
+    var hash = 7
+    for { col <- columns } {
+      // Use XXHash to get high quality hash for column name.  String.hashCode is _horrible_
+      hash = 31 * hash + (BinaryRegion.hash32(col.name.getBytes(UTF_8)) * col.columnType.hashCode + col.params.hashCode)
+    }
+    hash & 0x0ffff
+  }
 
   // Validates all the data schemas from config, including checking hash conflicts, and returns all errors found
   // and that any downsample-schemas are valid
