@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, Dataset, PartitionSchema, Schema}
+import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -650,13 +650,13 @@ object RecordBuilder {
     * In order to ingest all these multiple time series of a single metric to the
     * same shard, we have to trim the suffixes while calculating shardKeyHash.
     *
-    * @param dataSet    - Current DataSet
+    * @param schema - affected schema
     * @param shardKeyColName  - ShardKey label name as String
     * @param shardKeyColValue - ShardKey label value as String
     * @return - Label value after removing the suffix
     */
-  final def trimShardColumn(dataSet: Dataset, shardKeyColName: String, shardKeyColValue: String): String = {
-    dataSet.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
+  final def trimShardColumn(schema: Schema, shardKeyColName: String, shardKeyColValue: String): String = {
+    schema.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
       case Some(trimMetricSuffixColumn) => trimMetricSuffixColumn.find(shardKeyColValue.endsWith) match {
                                             case Some(s)  => shardKeyColValue.dropRight(s.length)
                                             case _        => shardKeyColValue

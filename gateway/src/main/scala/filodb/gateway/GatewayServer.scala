@@ -103,7 +103,7 @@ object GatewayServer extends StrictLogging {
       val initIndex = buf.readerIndex
       val len = buf.readableBytes
       numInfluxMessages.increment
-      InfluxProtocolParser.parse(buf, dataset.schema) map { record =>
+      InfluxProtocolParser.parse(buf) map { record =>
         logger.trace(s"Enqueuing: $record")
         val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(record)) {

@@ -8,6 +8,7 @@ import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
+import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.memory.BinaryRegion
 import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
@@ -306,4 +307,11 @@ object Schemas {
       Schemas(partSchema, schemas.toMap)
     }
   }
+
+  /**
+   * Global/universal schemas used for supporting the basic Prometheus / metric types.
+   * They are put here so they can be used in Query Engine, testing, etc.
+   */
+  val global = fromConfig(GlobalConfig.defaultFiloConfig).get
+  val promCounter = global.schemas("prometheus")
 }
