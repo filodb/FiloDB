@@ -118,7 +118,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
         (1 to maxNumRecords).map(_.toDouble)
       records.foreach { case (b, o) =>
         schema1.ingestionSchema.partitionHash(b, o) should not be (0)
-        RecordSchema.schemaID(b, o) shouldEqual schema1.data.hash
+        RecordSchema.schemaID(b, o) shouldEqual schema1.schemaHash
       }
       val container1Bytes = builder.allContainers.head.numBytes
 
@@ -158,7 +158,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       addrs.map(recSchema1.getDouble(_, 1)) shouldEqual Buffer.fromIterable((1 to maxNumRecords).map(_.toDouble))
       addrs.foreach { a =>
         recSchema1.partitionHash(a) should not be (0)
-        RecordSchema.schemaID(a) shouldEqual schema1.data.hash
+        RecordSchema.schemaID(a) shouldEqual schema1.schemaHash
       }
       val container1Bytes = builder.allContainers.head.numBytes
 
@@ -304,7 +304,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       recSchema1.getDouble(recordAddr, 3) shouldEqual 10.1
       recSchema1.getLong(recordAddr, 4) shouldEqual 123456L
       recSchema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
-      RecordSchema.schemaID(recordAddr) shouldEqual schema1.data.hash
+      RecordSchema.schemaID(recordAddr) shouldEqual schema1.schemaHash
     }
 
     it("should hash correctly with different ways of adding UTF8 fields") {
@@ -460,7 +460,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   // just to let us test partitionMatch() independently of buildPartKeyFromIngest()
   private def dataset2AddPartKeys(builder: RecordBuilder, data: Stream[Seq[Any]]) = {
     data.foreach { values =>
-      builder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.data.hash)
+      builder.startNewRecord(dataset3.schema.partKeySchema, dataset3.schema.schemaHash)
       builder.addString(values(5).asInstanceOf[String])  // series (partition key)
       if (values.length > 6) {
         builder.startMap()
@@ -617,13 +617,13 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   }
 
   it("should trim metric name for _bucket _sum _count") {
-    val metricName = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_bucket")
+    val metricName = RecordBuilder.trimShardColumn(schema1, "__name__", "heap_usage_bucket")
     metricName shouldEqual "heap_usage"
 
-    val metricName2 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_sum")
+    val metricName2 = RecordBuilder.trimShardColumn(schema1, "__name__", "heap_usage_sum")
     metricName2 shouldEqual "heap_usage"
 
-    val metricName3 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_count")
+    val metricName3 = RecordBuilder.trimShardColumn(schema1, "__name__", "heap_usage_count")
     metricName3 shouldEqual "heap_usage"
 
     val timeseriesDataset = Dataset.make("timeseries",
@@ -631,10 +631,10 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       Seq("timestamp:ts", "value:double"),
       Seq.empty,
       DatasetOptions(Seq("__name__", "job"), "__name__", false, Map("dummy" -> Seq("_bucket")))).get
-    val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset, "__name__", "heap_usage_bucket")
+    val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset.schema, "__name__", "heap_usage_bucket")
     metricName4 shouldEqual "heap_usage_bucket"
 
-    val metricName5 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_sum_count")
+    val metricName5 = RecordBuilder.trimShardColumn(schema1, "__name__", "heap_usage_sum_count")
     metricName5 shouldEqual "heap_usage_sum"
   }
 

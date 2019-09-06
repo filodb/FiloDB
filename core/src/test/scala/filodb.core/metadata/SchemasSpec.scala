@@ -249,29 +249,31 @@ class SchemasSpec extends FunSpec with Matchers {
       errors.map(_._1) shouldEqual Seq("prom")
     }
 
-    it("should return Schemas instance with every schema parsed") {
-      val conf2 = ConfigFactory.parseString(s"""
-                    {
-                      partition-schema $partSchemaStr
-                      schemas {
-                        prom {
-                          columns = ["timestamp:ts", "value:double"]
-                          value-column = "value"
-                          downsamplers = ["tTime(0)", "dMin(1)"]
-                          downsample-schema = "prom-ds-gauge"
-                        }
-                        prom-ds-gauge {
-                          columns = ["timestamp:ts", "min:double"]
-                          value-column = "timestamp"
-                          downsamplers = []
-                        }
-                        hist {
-                          columns = ["timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"]
-                          value-column = "h"
-                          downsamplers = []
-                        }
+    def schemasFromString(partConf: String) = ConfigFactory.parseString(s"""
+                  {
+                    partition-schema $partConf
+                    schemas {
+                      prom {
+                        columns = ["timestamp:ts", "value:double"]
+                        value-column = "value"
+                        downsamplers = ["tTime(0)", "dMin(1)"]
+                        downsample-schema = "prom-ds-gauge"
                       }
-                    }""")
+                      prom-ds-gauge {
+                        columns = ["timestamp:ts", "min:double"]
+                        value-column = "timestamp"
+                        downsamplers = []
+                      }
+                      hist {
+                        columns = ["timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"]
+                        value-column = "h"
+                        downsamplers = []
+                      }
+                    }
+                  }""")
+
+    it("should return Schemas instance with every schema parsed") {
+      val conf2 = schemasFromString(partSchemaStr)
       val schemas = Schemas.fromConfig(conf2).get
 
       schemas.part.columns.map(_.columnType) shouldEqual Seq(MapColumn)
@@ -286,6 +288,56 @@ class SchemasSpec extends FunSpec with Matchers {
       schemas.schemas("hist").data.columns.map(_.columnType) shouldEqual
         Seq(TimestampColumn, LongColumn, LongColumn, HistogramColumn)
       schemas.schemas("prom").downsample.get shouldEqual schemas.schemas("prom-ds-gauge")
+    }
+
+    val partSchemaStr2 = """{
+                        columns = ["metric:string", "tags:map"]
+                        predefined-keys = ["_ns", "app", "__name__", "instance", "dc"]
+                        options {
+                          copyTags = {}
+                          ignoreShardKeyColumnSuffixes = {}
+                          ignoreTagsOnPartitionKeyHash = ["le"]
+                          metricColumn = "metric"
+                          shardKeyColumns = ["metric", "_ns"]
+                        }
+                      }"""
+
+    it("should return unique schema hashes when partition keys different") {
+      val conf1 = schemasFromString(partSchemaStr)
+      val conf2 = schemasFromString(partSchemaStr2)
+      val schemas1 = Schemas.fromConfig(conf1).get
+      val schemas2 = Schemas.fromConfig(conf2).get
+
+      schemas1.schemas("prom").schemaHash should not equal (schemas2.schemas("prom").schemaHash)
+      schemas1.schemas("hist").schemaHash should not equal (schemas2.schemas("hist").schemaHash)
+    }
+
+    it("should allow column type params to differentiate hash") {
+        val conf3 = ConfigFactory.parseString(s"""
+                      {
+                        partition-schema $partSchemaStr
+                        schemas {
+                          prom {
+                            columns = ["timestamp:ts", "value:double"]
+                            value-column = "value"
+                            downsamplers = ["tTime(0)", "dMin(1)"]
+                            downsample-schema = "prom2"
+                          }
+                          # Everything exactly the same except for column params, which are different
+                          prom2 {
+                            columns = ["timestamp:ts", "value:double:detectDrops=true"]
+                            value-column = "timestamp"
+                            downsamplers = []
+                          }
+                        }
+                      }""")
+        val schemas = Schemas.fromConfig(conf3).get
+
+        schemas.schemas.keySet shouldEqual Set("prom", "prom2")
+        schemas.schemas("prom").data.columns.map(_.columnType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+        schemas.schemas("prom").data.columns.map(_.id) shouldEqual Seq(0, 1)
+        schemas.schemas("prom").data.timestampColumn.name shouldEqual "timestamp"
+        schemas.schemas("prom").downsample.get shouldEqual schemas.schemas("prom2")
     }
   }
 }

@@ -57,7 +57,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   val partKeyTags = Map("dc".utf8 -> "dc1".utf8, "instance".utf8 -> "instance1".utf8)
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 4096)
-  partKeyBuilder.startNewRecord(promDataset.partKeySchema, promDataset.schema.data.hash)
+  partKeyBuilder.startNewRecord(promDataset.partKeySchema, promDataset.schema.schemaHash)
   partKeyBuilder.addString("someStringValue")
   partKeyBuilder.addMap(partKeyTags)
   partKeyBuilder.endRecord(true)

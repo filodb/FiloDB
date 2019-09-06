@@ -279,7 +279,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val partKeyArray = partKeyBuilder.allContainers.head.base.asInstanceOf[Array[Byte]]
   private[memstore] val bufferPools = {
     val pools = schemas.schemas.values.map { sch =>
-      sch.data.hash -> new WriteBufferPool(bufferMemoryManager, sch.data, storeConfig)
+      sch.schemaHash -> new WriteBufferPool(bufferMemoryManager, sch.data, storeConfig)
     }
     DMap(pools.toSeq: _*)
   }
@@ -341,7 +341,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private final val shardDownsamplers = {
     val downsamplers = schemas.schemas.values.map { s =>
-      s.data.hash -> new ShardDownsampler(ref.dataset, shardNum,
+      s.schemaHash -> new ShardDownsampler(ref.dataset, shardNum,
         s, s.downsample.getOrElse(s), downsampleConfig.enabled, shardStats)
     }
     DMap(downsamplers.toSeq: _*)
@@ -831,7 +831,7 @@ class TimeSeriesShard(val ref: DatasetRef,
          in writeChunksFuture below */
 
       /* Step 3: Add downsample records for the chunks into the downsample record builders */
-      val ds = shardDownsamplers(p.schema.data.hash)
+      val ds = shardDownsamplers(p.schema.schemaHash)
       ds.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
 
       /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
@@ -1234,7 +1234,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
       val partId = if (usePartId == CREATE_NEW_PARTID) createPartitionID() else usePartId
-      val pool = bufferPools(schema.data.hash)
+      val pool = bufferPools(schema.schemaHash)
       val newPart = if (shouldTrace(partKeyAddr)) {
         logger.debug(s"Adding tracing TSPartition dataset=$ref shard=$shardNum group=$group partId=$partId")
         new TracingTimeSeriesPartition(

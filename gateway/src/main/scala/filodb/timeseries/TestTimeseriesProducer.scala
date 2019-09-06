@@ -132,7 +132,7 @@ object TestTimeseriesProducer extends StrictLogging {
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
 
-      PrometheusInputRecord(tags, "heap_usage", dataset, timestamp, value)
+      PrometheusInputRecord(tags, "heap_usage", timestamp, value)
     }
   }
 
@@ -185,7 +185,7 @@ object TestTimeseriesProducer extends StrictLogging {
                      hostUTF8 -> s"H$host".utf8,
                      instUTF8 -> s"Instance-$instance".utf8)
 
-      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, dataset)
+      new MetricTagInputRecord(Seq(timestamp, sum, count, hist), "http_request_latency", tags, dataset.schema)
     }
   }
 }
