@@ -243,7 +243,7 @@ class BlockMemFactory(blockStore: BlockManager,
   }
 
   /**
-    * Marks all blocks known by this factory as reclaimable, but only of this factory hasn't
+    * Marks all blocks known by this factory as reclaimable, but only if this factory hasn't
     * been used recently.
     */
   def tryMarkReclaimable(): Unit = synchronized {
