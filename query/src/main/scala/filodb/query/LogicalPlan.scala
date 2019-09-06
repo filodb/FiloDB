@@ -157,6 +157,15 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
+/**
+  * Apply Sort Function to a collection of RangeVectors
+  */
+case class ApplySortFunction(vectors: PeriodicSeriesPlan,
+                                      function: SortFunctionId,
+                                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
 object LogicalPlan {
   /**
     * Get leaf Logical Plans

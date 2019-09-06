@@ -43,9 +43,6 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     }
   }
 
-
-
-
   private def labelReplaceImpl(rangeVectorKey: RangeVectorKey, funcParams: Seq[Any]): RangeVectorKey = {
 
     val value: ZeroCopyUTF8String = if (rangeVectorKey.labelValues.contains(ZeroCopyUTF8String(srcLabel))) {
@@ -128,33 +125,7 @@ case class LabelJoinFunction(funcParams: Seq[Any])
   }
 }
 
-case class SortFunction(sortAscending: Boolean = true)
-  extends MiscellaneousFunction {
 
-  def sortByValue (rv1: RangeVector, rv2: RangeVector) : Boolean = {
-    val res = rv1.rows.toList.head.getDouble(1).compareTo(rv2.rows.toList.head.getDouble(1))
-    if (sortAscending) {
-      res < 0
-    } else {
-      res > 0
-    }
-  }
-
-  override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {
-
-      val t = source.toListL.map{ rvs =>
-        //Should sort only for Instant Vectors
-       // if (rvs.forall(_.rows.size==1))
-        if (rvs.forall(_.rows.size==1)) {
-        rvs.sortWith(sortByValue)
-      }
-      else {
-        rvs
-      }
-      }.map(Observable.fromIterable)
-      Observable.fromTask(t).flatten
-    }
-  }
 
 
 

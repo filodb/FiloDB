@@ -11,7 +11,8 @@ trait Functions extends Base with Operators with Vectors {
       InstantFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
-      MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
@@ -26,6 +27,7 @@ trait Functions extends Base with Operators with Vectors {
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
       val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
+      val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
 
       if (instantFunctionIdOpt.isDefined) {
         val instantFunctionId = instantFunctionIdOpt.get
@@ -49,6 +51,11 @@ trait Functions extends Base with Operators with Vectors {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
 
         ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, otherParams)
+      }  else if (sortFunctionIdOpt.isDefined) {
+        val sortFunctionId = sortFunctionIdOpt.get
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+
+        ApplySortFunction(periodicSeriesPlan, sortFunctionId, otherParams)
       }
       else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get

@@ -158,6 +158,10 @@ class QueryEngine(dataset: Dataset,
     match {
       case PlanResult(Seq(justOne), stitch) =>
         if (stitch) justOne.addRangeVectorTransformer(new StitchRvsMapper())
+        logicalPlan match {
+          case lp : ApplySortFunction => justOne.addRangeVectorTransformer(new SortFunctionMapper(lp.function))
+          case _                      =>
+        }
         justOne
       case PlanResult(many, stitch) =>
         val targetActor = pickDispatcher(many)
@@ -167,6 +171,10 @@ class QueryEngine(dataset: Dataset,
           case ep: ExecPlan =>
             val topPlan = DistConcatExec(queryId, targetActor, many)
             if (stitch) topPlan.addRangeVectorTransformer(new StitchRvsMapper())
+            logicalPlan match {
+              case lp : ApplySortFunction => topPlan.addRangeVectorTransformer(new SortFunctionMapper(lp.function))
+              case _                      =>
+            }
             topPlan
         }
     }
@@ -245,6 +253,7 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
+      case lp: ApplySortFunction           =>  walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
     }
   }
 

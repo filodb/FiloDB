@@ -5,9 +5,10 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
-import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace, Sort, SortDesc}
+import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.SortFunctionId.{Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
 
@@ -198,6 +199,26 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
       case LabelJoin    => LabelJoinFunction(funcParams)
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
+    }
+  }
+
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    miscFunction.execute(source)
+  }
+}
+
+final case class SortFunctionMapper(function: SortFunctionId,
+                                    funcParams: Seq[Any] = Nil) extends RangeVectorTransformer  {
+  protected[exec] def args: String =
+    s"function=$function, funcParams=$funcParams"
+
+  val sortFunction: SortFunction = {
+    function match {
       case Sort         => SortFunction()
       case SortDesc     => SortFunction(false)
       case _            => throw new UnsupportedOperationException(s"$function not supported.")
@@ -209,6 +230,6 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    miscFunction.execute(source)
+    sortFunction.execute(source)
   }
 }

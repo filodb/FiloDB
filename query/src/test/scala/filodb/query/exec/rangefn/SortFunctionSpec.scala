@@ -4,12 +4,12 @@ import com.typesafe.config.{Config, ConfigFactory}
 import filodb.core.MetricsTestData
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.{MiscellaneousFunctionId, QueryConfig, exec}
 import filodb.query.exec.TransientRow
+import filodb.query.{QueryConfig, SortFunctionId, exec}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.{FunSpec, Matchers}
 
 class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
@@ -32,24 +32,58 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       override def key: RangeVectorKey = testKey1
 
       override def rows: Iterator[RowReader] = Seq(
-        new TransientRow(1L, 3.3d)).iterator
+        new TransientRow(1L, 1d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
       override def rows: Iterator[RowReader] = Seq(
-        new TransientRow(1L, 100d)).iterator
+        new TransientRow(1L, 5d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 3d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 2d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey2
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 4d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey2
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 6d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 0d)).iterator
     })
 
-it ("should sort instant vectors in ascending order")
-  {
-    val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.SortDesc)
-    val resultObs = miscellaneousFunctionMapper(MetricsTestData.timeseriesDataset,
+  it("should sort instant vectors in ascending order") {
+    val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
+    val resultObs = sortFunctionMapper(MetricsTestData.timeseriesDataset,
       Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
-    //val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
-    val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+  }
 
-    println("resultRows:" + resultRows)
-   //resultLabelValues.sameElements(expectedLabels) shouldEqual true
+  it("should sort instant vectors in descending order") {
+    val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.SortDesc)
+    val resultObs = sortFunctionMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.shouldEqual(List(6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0))
   }
 }

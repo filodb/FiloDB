@@ -171,6 +171,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       case lp: BinaryJoin => getPeriodicSeriesTimeFromLogicalPlan(lp.lhs) // can assume lhs & rhs have same time
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case _ => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -194,6 +195,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
         lookBackTime))
       case lp: ApplyMiscellaneousFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange,
         lookBackTime))
+      case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
       case _ => throw new UnsupportedOperationException("Logical plan not supportred for copy")
     }
   }
@@ -231,6 +233,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       case lp: BinaryJoin => getRawSeriesStartTime(lp.lhs) // can assume lhs & rhs have same time
       case lp: ScalarVectorBinaryOperation => getRawSeriesStartTime(lp.vector)
       case lp: ApplyMiscellaneousFunction => getRawSeriesStartTime(lp.vectors)
+      case lp: ApplySortFunction => getRawSeriesStartTime(lp.vectors)
       case _ => None
     }
   }
