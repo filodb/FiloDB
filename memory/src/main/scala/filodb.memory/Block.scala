@@ -135,7 +135,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
   }
 
   /**
-   * Maerks this block as reclaimable if unowned, or if the owner hasn't used the block in a while.
+   * Marks this block as reclaimable if unowned, or if the owner hasn't used the block in a while.
    */
   def tryMarkReclaimable(): Unit = {
     owner match {
