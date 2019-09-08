@@ -1,9 +1,10 @@
 package filodb.query.exec.rangefn
 
+import monix.reactive.Observable
+
 import filodb.core.query.{RangeVector, RangeVectorKey}
 import filodb.memory.format.RowReader
 import filodb.query.exec.BufferableIterator
-import monix.reactive.Observable
 
 case class SortFunction(sortAscending: Boolean = true) {
 

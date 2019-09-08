@@ -181,7 +181,6 @@ class QueryEngine(dataset: Dataset,
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
       s" $logicalPlan to \n${materialized.printTree()}")
     materialized
-
   }
 
   val shardColumns = dataset.options.shardKeyColumns.sorted
@@ -253,7 +252,8 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplySortFunction           =>  walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+      case lp: ApplySortFunction           =>  walkLogicalPlanTree(lp.vectors, queryId, submitTime, options,
+                                              spreadProvider)
     }
   }
 

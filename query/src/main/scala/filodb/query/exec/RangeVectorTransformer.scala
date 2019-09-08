@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
