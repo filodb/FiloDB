@@ -237,10 +237,10 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     var changes = 0
     var addr = startAddr
     while (addr < untilAddr) {
-      val curr = UnsafeUtils.getLong(addr)
-      if (addr == startAddr) prev = curr
-      if (prev != curr) changes += 1
-      prev = curr
+      val cur = UnsafeUtils.getLong(addr)
+      if (addr == startAddr) prev = cur
+      if (prev != cur) changes += 1
+      prev = cur
       addr += 8
     }
     changes
