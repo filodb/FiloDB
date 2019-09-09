@@ -13,18 +13,17 @@ import monix.reactive.Observable
 
 import filodb.coordinator.ShardMapper
 import filodb.core.GlobalConfig
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.{InputRecord, MetricTagInputRecord, PrometheusInputRecord}
 import filodb.memory.format.{vectors => bv, ZeroCopyUTF8String => ZCUTF8}
-import filodb.prometheus.FormatConversion
 
 /**
   * Utilities to produce time series data into local Kafka for development testing.
   * Please see GatewayServer for the app to run, or README for docs.
   */
 object TestTimeseriesProducer extends StrictLogging {
-  val dataset = FormatConversion.dataset
+  val dataset = Dataset("prometheus", Schemas.promCounter)
 
   val oneBitMask = 0x1
   val twoBitMask = 0x3
