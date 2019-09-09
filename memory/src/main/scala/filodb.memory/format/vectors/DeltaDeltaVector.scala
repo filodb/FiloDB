@@ -188,7 +188,6 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
 
   final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     val inner = vector + InnerVectorOffset
-   // DeltaDeltaConstDataReader.iterate(vector, start).
     DeltaDeltaConstDataReader.slopeSum(initValue(vector), slope(vector), start, end) +
       IntBinaryVector.simple(inner).sum(inner, start, end)
   }
@@ -208,8 +207,19 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = DeltaDeltaConstDataReader.changes(vector,
-    start, end)
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+    if (slope(vector) == 0)
+      return 0
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    var changes = 0
+    var i = start
+    while (i <= end) {
+      val current = iterate(vector, i).next
+      changes += 1
+      i = i + 1
+    }
+    changes
+  }
 }
 
 /**
@@ -258,19 +268,7 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     }
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    var prev = Double.NaN
-    var changes = 0
-    var i = start
-    while (i <= end) {
-      val current = iterate(vector, i).next
-      if (!java.lang.Double.isNaN(current) && prev != current && !java.lang.Double.isNaN(prev) ) changes += 1
-      prev = current
-      i+=1
-    }
-    changes
-  }
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = 0
 }
 
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.

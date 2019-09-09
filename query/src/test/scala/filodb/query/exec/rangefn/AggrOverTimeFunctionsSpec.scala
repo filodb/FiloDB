@@ -301,48 +301,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val windowSize = 100
     val step = 20
 
-    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 20000, 150000, 30000,
-      new ChangesFunction(), queryConfig)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
       new ChangesChunkedFunctionD(), queryConfig)
-    val aggregated1 = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val aggregated2 = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val expectedResult = List((100000, 0.0), (120000, 2.0), (140000, 2.0))
-    aggregated1 shouldEqual(expectedResult)
-    aggregated2 shouldEqual(expectedResult)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
 
-  it("should yield NaN when changes is done on data having NaN  after a value") {
-    var data = Seq(0, 5, Double.NaN)
-    val rv = timeValueRV(data)
-    val windowSize = 100
-    val step = 20
-
-    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 20000, 150000, 30000,
-      new ChangesFunction(), queryConfig)
-    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-      new ChangesChunkedFunctionD(), queryConfig)
-
-    val aggregated1 = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val aggregated2 = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-
-    aggregated1(0)._2 shouldEqual(0.0)
-    aggregated1(1)._2.isNaN shouldEqual(true)
-    aggregated2(0)._2 shouldEqual(0.0)
-  }
-
-  it("should yield NaN when changes is done on data having 2 or more consecutive NaN's after a value") {
-    var data = Seq(0, 5, 6, Double.NaN, Double.NaN, Double.NaN, Double.NaN)
-    val rv = timeValueRV(data)
-    val windowSize = 100
-    val step = 20
-
-    val slidingIt = new SlidingWindowIterator(rv.rows, 100000, 10000, 160000, 20000, new ChangesFunction(), queryConfig)
-    val aggregated = slidingIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    aggregated(6)._2.isNaN shouldEqual(true)
-    aggregated(5)._2.isNaN shouldEqual(true)
-    aggregated(4)._2.isNaN shouldEqual(true)
-    aggregated(3)._2.isNaN shouldEqual(true)
-  }
 
 }
