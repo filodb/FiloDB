@@ -203,6 +203,26 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
    * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
    */
   final def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(0)
+
+  import Accumulation._
+  import OptionSugar._
+  /**
+   * Returns the column IDs for the named columns or the missing column names
+   */
+  def colIDs(colNames: String*): Seq[Int] Or Seq[String] =
+    colNames.map { n => data.columns.find(_.name == n).map(_.id)
+                          .orElse { partition.columns.find(_.name == n).map(_.id) }
+                          .toOr(One(n)) }
+            .combined.badMap(_.toSeq)
+
+  /** Returns the Column instance given the ID */
+  def columnFromID(columnID: Int): Column =
+    if (Dataset.isPartitionID(columnID)) { partition.columns(columnID - Dataset.PartColStartIndex) }
+    else                                 { data.columns(columnID) }
+
+  /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
+  def infosFromIDs(ids: Seq[ColumnId]): Seq[ColumnInfo] =
+    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
 }
 
 final case class Schemas(part: PartitionSchema,
@@ -238,6 +258,8 @@ object Schemas {
   import Dataset._
   import Accumulation._
   import java.nio.charset.StandardCharsets.UTF_8
+
+  val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
 
   val UnknownSchema = UnsafeUtils.ZeroPointer.asInstanceOf[Schema]
 

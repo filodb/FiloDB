@@ -12,7 +12,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.MemFactory
@@ -210,14 +210,14 @@ extends MemStore with StrictLogging {
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
-  def scanPartitions(dataset: Dataset,
+  def scanPartitions(ref: DatasetRef,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    val shard = datasets(dataset.ref).get(partMethod.shard)
+    val shard = datasets(ref).get(partMethod.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
-      throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset ${dataset.ref} is not assigned to " +
+      throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
     shard.scanPartitions(columnIDs, partMethod, chunkMethod)
@@ -238,8 +238,8 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
-  def groupsInDataset(dataset: Dataset): Int =
-    datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+  def groupsInDataset(ref: DatasetRef): Int =
+    datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     getShard(ref, cve.shard).get.analyzeAndLogCorruptPtr(cve)
