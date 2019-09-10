@@ -247,7 +247,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     count
   }
 
-  final def  changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var prev = Double.NaN
     var addr = vector + OffsetData + start * 8
