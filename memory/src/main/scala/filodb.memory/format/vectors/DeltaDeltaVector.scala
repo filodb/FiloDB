@@ -208,21 +208,23 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   }
 
   def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
-    if (slope(vector) == 0)
-      return 0
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    val itr = iterate(vector, start)
-    var prev: Long = 0
-    var changes = 0
-    for {i <- start until end} {
-      val cur = itr.next
-      if (i == start) //Initialize prev
+    if (slope(vector) == 0) {
+      0
+    } else {
+      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+      val itr = iterate(vector, start)
+      var prev: Long = 0
+      var changes = 0
+      for {i <- start until end optimized} {
+        val cur = itr.next
+        if (i == start) //Initialize prev
+          prev = cur
+        if (prev != cur)
+          changes += 1
         prev = cur
-      if (prev != cur)
-        changes += 1
-      prev = cur
+      }
+      changes
     }
-    changes
   }
 }
 
@@ -272,11 +274,13 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     }
   }
 
- def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
-    if (slope(vector) == 0)
-      return 0
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    length(vector) - 1
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+    if (slope(vector) == 0) {
+      0
+    } else {
+      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+      length(vector) - 1
+    }
   }
 }
 
