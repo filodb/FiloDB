@@ -551,3 +551,37 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
     sampleToEmit.setValues(endTimestamp, stdVar)
   }
 }
+
+abstract class ChangesChunkedFunction(var changes: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { changes = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, changes)
+  }
+}
+
+class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
+  ChunkedDoubleRangeFunction {
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    if (changes.isNaN) {
+      changes = 0d
+    }
+    changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+  }
+}
+
+// scalastyle:off
+class ChangesChunkedFunctionL extends ChangesChunkedFunction with
+  ChunkedLongRangeFunction{
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    if (changes.isNaN) {
+      changes = 0d
+    }
+    changes += longReader.changes(longVect, startRowNum, endRowNum)
+  }
+}

@@ -303,6 +303,7 @@ object RangeFunction {
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
       case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionL
+      case Some(Changes)        => () => new ChangesChunkedFunctionL
       case _                    => iteratingFunction(func, funcParams)
     }
   }
@@ -331,6 +332,7 @@ object RangeFunction {
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
       case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
+      case Some(Changes)        => () => new ChangesChunkedFunctionD()
       case _                    => iteratingFunction(func, funcParams)
     }
   }
