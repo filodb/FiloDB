@@ -211,12 +211,16 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     if (slope(vector) == 0)
       return 0
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    val itr = iterate(vector, start)
+    var prev: Long = 0
     var changes = 0
-    var i = start
-    while (i <= end) {
-      val current = iterate(vector, i).next
-      changes += 1
-      i = i + 1
+    for {i <- start until end} {
+      val cur = itr.next
+      if (i == start) //Initialize prev
+        prev = cur
+      if (prev != cur)
+        changes += 1
+      prev = cur
     }
     changes
   }
@@ -268,7 +272,12 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     }
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = 0
+ def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+    if (slope(vector) == 0)
+      return 0
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    length(vector) - 1
+  }
 }
 
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.

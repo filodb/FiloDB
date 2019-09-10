@@ -294,7 +294,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
   }
 
   it("should correctly do changes") {
-    var data = Seq(1, 2, 3, 4, 5).map(_.toDouble)
+    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
     val rv = timeValueRV(data)
     val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
 
@@ -306,6 +306,4 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
-
-
 }
