@@ -99,6 +99,9 @@ object UnsafeUtils {
   def copy(source: Long, dest: Long, numBytes: Int): Unit =
     unsafe.copyMemory(ZeroPointer, source, ZeroPointer, dest, numBytes)
 
+  def copy(src: Any, srcOffset: Long, dest: Any, destOffset: Long, numBytes: Long): Unit =
+    unsafe.copyMemory(src, srcOffset, dest, destOffset, numBytes)
+
   /**
    * Matches two memory buffers of length numBytes, returns true if they are byte for byte equal
    * Compares long words for speed

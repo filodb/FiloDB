@@ -3,6 +3,7 @@ package filodb.cassandra.columnstore
 import java.net.InetSocketAddress
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
 import com.typesafe.config.Config
@@ -13,7 +14,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
-import filodb.cassandra.Util
 import filodb.core._
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -145,6 +145,28 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val info = chunkset.info
       val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
       indexTable.writeIndices(partition, infos, sinkStats, diskTimeToLive)
+    }
+  }
+
+  def getChunksByIngestionTimeRange(dataset: DatasetRef,
+                                    splits: Iterator[ScanSplit],
+                                    ingestionTimeStart: Long,
+                                    ingestionTimeEnd: Long,
+                                    userTimeStart: Long,
+                                    userTimeEnd: Long): Observable[RawPartData] = {
+    val partKeys = Observable.fromIterator(splits).flatMap {
+      case split: CassandraTokenRangeSplit =>
+        val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
+        logger.debug(s"Querying cassandra for partKeys for split=$split")
+        indexTable.scanPartKeysByIngestionTime(split.tokens, ingestionTimeStart, ingestionTimeEnd)
+      case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
+    }
+
+    val chunksTable = getOrCreateChunkTable(dataset)
+    // TODO place hard-coded values in next line into config
+    partKeys.bufferTimedAndCounted(1.second, 10000).flatMap { parts =>
+      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions")
+      chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd)
     }
   }
 

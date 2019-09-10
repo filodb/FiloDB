@@ -166,7 +166,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
       UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
       metaAddr + 2
     } else {
-      0
+      throw new IllegalStateException(s"Could not allocate metadata of size $metaSize. Remaining=${remaining()}")
     }
 
   protected def reclaimWithMetadata(): Unit = {

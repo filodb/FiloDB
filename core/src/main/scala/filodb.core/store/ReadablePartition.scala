@@ -3,6 +3,7 @@ package filodb.core.store
 import filodb.core.Types.{ChunkID, ColumnId}
 import filodb.core.metadata.Schema
 import filodb.core.query.PartitionTimeRangeReader
+import filodb.memory.BinaryRegion
 import filodb.memory.format.{BinaryVector, RowReader, UnsafeUtils, VectorDataReader}
 
 
@@ -41,6 +42,8 @@ trait ReadablePartition extends FiloPartition {
 
   // Returns string representation of partition key
   def stringPartition: String = schema.partKeySchema.stringify(partKeyBase, partKeyOffset)
+
+  def partitionKey: BinaryRegion.NativePointer
 
   // Returns binary partition key as a new, copied byte array
   def partKeyBytes: Array[Byte] = schema.partKeySchema.asByteArray(partKeyBase, partKeyOffset)

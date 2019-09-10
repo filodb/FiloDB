@@ -104,18 +104,23 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
 
   def readRawPartitionRange(partitions: Seq[Array[Byte]],
                             startTime: Long, endTimeExclusive: Long): Observable[RawPartData] = {
-    val query = readChunkRangeCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
-                                        .setLong(1, chunkID(startTime, 0))
-                                        .setLong(2, chunkID(endTimeExclusive, 0))
+    readRawPartitionRangeBB(partitions.map(toBuffer), startTime, endTimeExclusive)
+  }
+
+  def readRawPartitionRangeBB(partitions: Seq[ByteBuffer],
+                            startTime: Long, endTimeExclusive: Long): Observable[RawPartData] = {
+    val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
+      .setLong(1, chunkID(startTime, 0))
+      .setLong(2, chunkID(endTimeExclusive, 0))
     val futRawParts = session.executeAsync(query)
-                             .toIterator.handleErrors
-                             .map { rowIt =>
-                               rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
-                                 .sortedGroupBy(_._1)
-                                 .map { case (partKeyBuffer, chunkSetIt) =>
-                                   RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
-                                 }
-                             }
+      .toIterator.handleErrors
+      .map { rowIt =>
+        rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
+          .sortedGroupBy(_._1)
+          .map { case (partKeyBuffer, chunkSetIt) =>
+            RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+          }
+      }
     Observable.fromFuture(futRawParts).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) }
   }
 

@@ -57,7 +57,7 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  */
 class TimeSeriesPartition(val partID: Int,
                           val schema: Schema,
-                          partitionKey: BinaryRegion.NativePointer,
+                          override val partitionKey: BinaryRegion.NativePointer,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
@@ -66,7 +66,9 @@ class TimeSeriesPartition(val partID: Int,
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
-  require(bufferPool.schema == schema.data)  // Really important that buffer pool schema matches
+  // Really important that buffer pool schema matches
+  require(bufferPool.schema == schema.data,
+    s"BufferPool schema was ${bufferPool.schema} but partition schema was ${schema.data}")
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey

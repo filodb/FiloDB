@@ -89,6 +89,14 @@ object FiloBuild extends Build {
       coordinator % "compile->compile; test->test")
     .configs(IntegrationTest, MultiJvm)
 
+  lazy val downsampler = project
+    .in(file("downsampler"))
+    .settings(commonSettings: _*)
+    .settings(name := "filodb-downsampler")
+    .settings(scalacOptions += "-language:postfixOps")
+    .settings(libraryDependencies ++= downsamplerDeps)
+    .dependsOn(cassandra, core % "compile->compile; test->test")
+
   lazy val bootstrapper = project
     .in(file("akka-bootstrapper"))
     .settings(commonSettings: _*)
@@ -111,8 +119,9 @@ object FiloBuild extends Build {
     .settings(assemblySettings: _*)
     .settings(libraryDependencies ++= standaloneDeps)
     .dependsOn(core, prometheus % "test->test", coordinator % "compile->compile; test->test",
-      cassandra, kafka, http, bootstrapper, gateway % Test)
+      cassandra, kafka, http, bootstrapper, downsampler, gateway % Test)
     .configs(MultiJvm)
+  // standalone does not depend on downsampler, but the idea is to simplify packaging and versioning
 
 //  lazy val spark = project
 //    .in(file("spark"))
@@ -172,7 +181,7 @@ object FiloBuild extends Build {
   val ficusVersion      = "1.1.2"
   val kamonVersion      = "1.1.6"
   val monixKafkaVersion = "0.15"
-  val sparkVersion      = "2.0.0"
+  val sparkVersion      = "2.4.0"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
@@ -225,6 +234,12 @@ object FiloBuild extends Build {
     "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
     "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
     "com.github.alexandrnikitin" %% "bloom-filter" % "0.11.0",
+    scalaxyDep
+  )
+
+  lazy val downsamplerDeps = commonDeps ++ Seq(
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % "provided",
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % "provided",
     scalaxyDep
   )
 
