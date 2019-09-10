@@ -294,6 +294,10 @@ class ParserSpec extends FunSpec with Matchers {
       "sum(http_requests_total)       \n \n / \n\n    sum(http_requests_total)" ->
         "BinaryJoin(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),DIV,OneToOne,Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),List(),List(),List())",
 
+      "changes(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List())",
+
+
      // Binary Expressions should generate Logical Plan according to precedence
      // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets which are according to precedence
       "(10 % http_requests_total) + 5" ->
