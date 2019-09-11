@@ -14,6 +14,17 @@ object PagedReadablePartition extends StrictLogging {
   val _log = logger
 }
 
+/**
+  * Pages raw partition data read from Cassandra into off-heap memory.
+  * This can now be used for various operations like downsampling, cross-DC repair,
+  * or even be evolved (with more changes) into an ODP solution.
+  *
+  * Note that `mem` is the native memory manager used to allocate off-heap memory
+  * to store the paged chunks.
+  *
+  * IMPORTANT: This partition needs to be freed by calling `free()` after the chunks
+  * are read.
+  */
 class PagedReadablePartition(override val schema: Schema,
                              override val shard: Int,
                              override val partID: Int,

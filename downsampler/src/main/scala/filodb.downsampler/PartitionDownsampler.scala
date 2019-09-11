@@ -14,31 +14,45 @@ import filodb.memory.format.SeqRowReader
 
 object PartitionDownsampler extends StrictLogging {
 
+  /**
+    * Creates new donwsample partitions per per the resolutions
+    * * specified by `bufferPools`.
+    * Downsamples all chunks in `partToDownsample` per the resolutions and stoes
+    * downsampled data into the newly created partition.
+    *
+    * @param nativeMemManager downsampled chunks are stored into offheap memory
+    *                         allocated by this memory manager
+    * @param bufferPool buffers for the downsampled partitions are procured from this pool
+    *
+    * @return a TimeSeriesPartition for each resolution to be downsampled.
+    *         NOTE THAT THE PARITIONS NEED TO BE FREED/SHUT DOWN ONCE CHUNKS ARE EXTRACTED FROM THEM
+    */
   // scalastyle:off method.length parameter.number
   def downsample(shardStats: TimeSeriesShardStats,
+                 resolutions: Seq[FiniteDuration],
                  downsampleSchema: Schema,
                  downsamplers: Seq[ChunkDownsampler],
                  partToDownsample: ReadablePartition,
                  blockHolder: BlockMemFactory,
-                 bufferPools: Map[FiniteDuration, WriteBufferPool],
+                 bufferPool: WriteBufferPool,
                  nativeMemManager: MemFactory,
                  downsampleIngestionTime: Long,
                  userStartTime: Long,
                  userEndTime: Long): Map[FiniteDuration, TimeSeriesPartition] = {
 
-    val resToPartition = bufferPools.map { case (res, bufPool) =>
+    val resToPartition = resolutions.map { res =>
       val part = new TimeSeriesPartition(
         0,
         downsampleSchema,
         partToDownsample.partitionKey,
         0,
-        bufPool,
+        bufferPool,
         shardStats,
         nativeMemManager,
         1)
       logger.trace(s"Creating new part=${part.hashCode}")
       res -> part
-    }
+    }.toMap
 
     val chunksets = partToDownsample.infos(AllChunkScan)
     val timestampCol = 0

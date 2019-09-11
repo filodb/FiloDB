@@ -153,7 +153,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                     ingestionTimeStart: Long,
                                     ingestionTimeEnd: Long,
                                     userTimeStart: Long,
-                                    userTimeEnd: Long): Observable[RawPartData] = {
+                                    userTimeEnd: Long,
+                                    batchSize: Int): Observable[Seq[RawPartData]] = {
     val partKeys = Observable.fromIterator(splits).flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
@@ -162,11 +163,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
 
+    import filodb.core.Iterators._
+
     val chunksTable = getOrCreateChunkTable(dataset)
-    // TODO place hard-coded values in next line into config
-    partKeys.bufferTimedAndCounted(1.second, 10000).flatMap { parts =>
+    partKeys.bufferTimedAndCounted(1.second, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions")
-      chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd)
+      chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd).toIterator().toSeq
     }
   }
 
