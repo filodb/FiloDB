@@ -22,7 +22,7 @@ object DownsamplerSettings {
   val downsampleResolutions = downsamplerConfig.as[Array[FiniteDuration]]("resolutions")
 
   val downsampleTtls = downsamplerConfig.as[Array[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
-  require(downsampleResolutions.size == downsampleTtls.size)
+  require(downsampleResolutions.length == downsampleTtls.length)
 
   val downsampleStoreConfig = StoreConfig(downsamplerConfig.getConfig("downsample-store-config"))
 

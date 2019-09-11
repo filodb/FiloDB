@@ -25,17 +25,17 @@ object DownsamplerMain extends App with StrictLogging {
   import PerSparkExecutorState._
 
   private val rdd = filoCassRelation.buildScan(rawDataset.ref,
-                                                ingestionTimeStart, ingestionTimeEnd,
-                                                userTimeStart, userTimeEnd, batchSize)
+                                               ingestionTimeStart, ingestionTimeEnd,
+                                               userTimeStart, userTimeEnd, batchSize)
 
   rdd.foreach { rawPartsBatch =>
 
     logger.debug(s"Starting downsampling job for rawDataset=$rawDatasetName for " +
-      s"ingestionTimeStart=$ingestionTimeStart" +
-      s"ingestionTimeEnd=$ingestionTimeEnd " +
-      s"userTimeStart=$userTimeStart " +
-      s"userTimeEnd=$userTimeEnd" +
-      s"for ${rawPartsBatch.size} partitions")
+                  s"ingestionTimeStart=$ingestionTimeStart" +
+                  s"ingestionTimeEnd=$ingestionTimeEnd " +
+                  s"userTimeStart=$userTimeStart " +
+                  s"userTimeEnd=$userTimeEnd" +
+                  s"for ${rawPartsBatch.size} partitions")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     downsampleResolutions.foreach { res =>
@@ -81,14 +81,13 @@ object DownsamplerMain extends App with StrictLogging {
     downsampledPartsPartsToFree.foreach(_.shutdown())
     downsampledPartsPartsToFree.clear()
 
-    logger.info(s"Finished iterating through and downsampling  ${rawPartsBatch.size} partitions in current executor")
+    logger.info(s"Finished iterating through and downsampling ${rawPartsBatch.size} partitions in current executor")
   }
 
   cassandraColStore.shutdown()
   spark.sparkContext.stop()
 
   // TODO migrate index entries
-
 
   /**
     * Persist chunks in `downsampledChunksToPersist`
@@ -106,7 +105,5 @@ object DownsamplerMain extends App with StrictLogging {
       if (response.isInstanceOf[ErrorResponse])
         throw new IllegalStateException(s"Got response $response when writing to Cassandra")
     }
-
   }
-
 }

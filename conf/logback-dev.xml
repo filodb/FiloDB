@@ -8,7 +8,6 @@
         </encoder>
     </appender>
 
-    <logger name="filodb.downsampler" level="DEBUG" />
     <logger name="filodb.coordinator" level="DEBUG" />
     <logger name="filodb.core" level="DEBUG" />
     <logger name="filodb.memory" level="DEBUG" />
