@@ -16,26 +16,35 @@ import filodb.memory.format.UnsafeUtils
 
 object DownsamplerMain extends App with StrictLogging {
 
+  import DownsamplerSettings._
+  import PerSparkExecutorState._
+
   private val spark = SparkSession.builder()
     .appName("FiloDBDownsampler")
     .getOrCreate()
   private val filoCassRelation = new FiloCassRelation(spark.sqlContext)
 
-  import DownsamplerSettings._
-  import PerSparkExecutorState._
-
-  private val rdd = filoCassRelation.buildScan(rawDataset.ref,
+  private val timeSeriesRdd = filoCassRelation.buildScan(rawDataset.ref,
                                                ingestionTimeStart, ingestionTimeEnd,
                                                userTimeStart, userTimeEnd, batchSize)
 
-  rdd.foreach { rawPartsBatch =>
+  timeSeriesRdd.foreach { rawPartsBatch =>
+    downsampleBatch(rawPartsBatch)
+  }
+  cassandraColStore.shutdown()
+  spark.sparkContext.stop()
+
+  // TODO migrate index entries
+
+
+  /**
+    * Downsample batch of raw partitions, and store downsampled chunks to cassandra
+    */
+  private[downsampler] def downsampleBatch(rawPartsBatch: Seq[PartDataRow]) = {
 
     logger.debug(s"Starting downsampling job for rawDataset=$rawDatasetName for " +
-                  s"ingestionTimeStart=$ingestionTimeStart" +
-                  s"ingestionTimeEnd=$ingestionTimeEnd " +
-                  s"userTimeStart=$userTimeStart " +
-                  s"userTimeEnd=$userTimeEnd" +
-                  s"for ${rawPartsBatch.size} partitions")
+      s"ingestionTimeStart=$ingestionTimeStart ingestionTimeEnd=$ingestionTimeEnd " +
+      s"userTimeStart=$userTimeStart userTimeEnd=$userTimeEnd for ${rawPartsBatch.size} partitions")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     downsampleResolutions.foreach { res =>
@@ -52,17 +61,12 @@ object DownsamplerMain extends App with StrictLogging {
       logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partData.partitionKey)} ")
 
       val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
-                                                       rawPart.partData, memoryManager)
+        rawPart.partData, memoryManager)
       val downsampledParts = PartitionDownsampler.downsample(shardStats,
-                                            downsampleResolutions,
-                                            downsampleSchema,
-                                            chunkDownsamplersByRawSchemaId(rawSchemaId),
-                                            rawReadablePart,
-                                            blockFactory,
-                                            bufferPoolByRawSchemaId(rawSchemaId),
-                                            memoryManager,
-                                            userTimeStart, // use userTime as ingestionTime for downsampled data
-                                            userTimeStart, userTimeEnd)
+        downsampleResolutions, downsampleSchema, chunkDownsamplersByRawSchemaId(rawSchemaId),
+        rawReadablePart, blockFactory, bufferPoolByRawSchemaId(rawSchemaId),
+        memoryManager, userTimeStart, // use userTime as ingestionTime for downsampled data
+        userTimeStart, userTimeEnd)
       rawPartsToFree += rawReadablePart
       downsampledPartsPartsToFree ++= downsampledParts.values
 
@@ -84,15 +88,10 @@ object DownsamplerMain extends App with StrictLogging {
     logger.info(s"Finished iterating through and downsampling ${rawPartsBatch.size} partitions in current executor")
   }
 
-  cassandraColStore.shutdown()
-  spark.sparkContext.stop()
-
-  // TODO migrate index entries
-
   /**
     * Persist chunks in `downsampledChunksToPersist`
     */
-  def persistDownsampledChunks(downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Unit = {
+  private def persistDownsampledChunks(downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Unit = {
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
       PerSparkExecutorState.cassandraColStore.write(downsampleDatasets(res).ref,

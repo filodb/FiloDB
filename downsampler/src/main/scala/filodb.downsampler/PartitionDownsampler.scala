@@ -25,7 +25,7 @@ object PartitionDownsampler extends StrictLogging {
     * @param bufferPool buffers for the downsampled partitions are procured from this pool
     *
     * @return a TimeSeriesPartition for each resolution to be downsampled.
-    *         NOTE THAT THE PARITIONS NEED TO BE FREED/SHUT DOWN ONCE CHUNKS ARE EXTRACTED FROM THEM
+    *         NOTE THAT THE PARTITIONS NEED TO BE FREED/SHUT DOWN ONCE CHUNKS ARE EXTRACTED FROM THEM
     */
   // scalastyle:off method.length parameter.number
   def downsample(shardStats: TimeSeriesShardStats,
