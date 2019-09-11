@@ -2,14 +2,14 @@ package filodb.downsampler
 
 import scala.concurrent.duration._
 
-import com.typesafe.config.ConfigFactory
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.GlobalConfig
 import filodb.core.store.StoreConfig
 
 object DownsamplerSettings {
 
-  val filodbConfig = ConfigFactory.load().getConfig("filodb")
+  val filodbConfig = GlobalConfig.systemConfig.getConfig("filodb")
 
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
 

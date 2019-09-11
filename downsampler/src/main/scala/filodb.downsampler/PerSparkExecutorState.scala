@@ -32,7 +32,7 @@ object PerSparkExecutorState extends StrictLogging {
   /**
     * Chunk Downsamplers by Raw Schema Id
     */
-  val chunkDownsamplersByRawSchemaId = rawSchemas.map { s => s.data.hash -> s.data.downsamplers }.toMap
+  val chunkDownsamplersByRawSchemaId = rawSchemas.map { s => s.schemaHash -> s.data.downsamplers }.toMap
 
   /**
     * Raw dataset from which we downsample data
@@ -65,7 +65,7 @@ object PerSparkExecutorState extends StrictLogging {
     */
   val bufferPoolByRawSchemaId = rawSchemas.map { s =>
     val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, downsampleStoreConfig)
-    s.data.hash -> pool
+    s.schemaHash -> pool
   }.toMap
 
   val shardStats = new TimeSeriesShardStats(rawDataset.ref, -1) // TODO fix
