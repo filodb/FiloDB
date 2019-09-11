@@ -12,7 +12,6 @@ import monix.reactive.Observable
 import filodb.core.DatasetRef
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
@@ -82,9 +81,9 @@ trait ExecPlan extends QueryCommand {
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  final def schema(dataset: Dataset): ResultSchema = {
-    val source = schemaOfDoExecute(dataset)
-    rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(dataset, acc) }
+  final def schema(): ResultSchema = {
+    val source = schemaOfDoExecute()
+    rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(acc) }
   }
 
   /**
@@ -101,22 +100,19 @@ trait ExecPlan extends QueryCommand {
     *
     */
   // scalastyle:off method.length
-  def execute(source: ChunkSource,
-                    dataset: Dataset,
-                    queryConfig: QueryConfig)
-                   (implicit sched: Scheduler,
-                    timeout: FiniteDuration): Task[QueryResponse] = {
+  def execute(source: ChunkSource, queryConfig: QueryConfig)
+             (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
     Task {
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      val res = doExecute(source, dataset, queryConfig)
-      val schema = schemaOfDoExecute(dataset)
-      val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
+      val res = doExecute(source, queryConfig)
+      val resSchema = schemaOfDoExecute()
+      val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        (transf.apply(dataset, acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
+        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
       }
       val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
       val builder = SerializableRangeVector.newBuilder()
@@ -176,7 +172,6 @@ trait ExecPlan extends QueryCommand {
     * node
     */
   protected def doExecute(source: ChunkSource,
-                          dataset: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector]
@@ -185,7 +180,7 @@ trait ExecPlan extends QueryCommand {
     * Sub classes should implement this with schema of RangeVectors returned
     * from doExecute() abstract method.
     */
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
+  protected def schemaOfDoExecute(): ResultSchema
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -258,7 +253,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * result
     */
   final protected def doExecute(source: ChunkSource,
-                                dataset: Dataset,
                                 queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
@@ -272,15 +266,15 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }.map((_, i))
       }
     }
-    compose(dataset, childTasks, queryConfig)
+    compose(childTasks, queryConfig)
   }
 
-  final protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = schemaOfCompose(dataset)
+  final protected def schemaOfDoExecute(): ResultSchema = schemaOfCompose()
 
   /**
     * Schema of the RangeVectors returned by compose() method
     */
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema
+  protected def schemaOfCompose(): ResultSchema
 
   /**
     * Sub-class non-leaf nodes should provide their own implementation of how
@@ -290,8 +284,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     *                       a child ExecPlan, the second element is the index of the child plan.
     *                       There is one response per child plan.
     */
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector]
 
 }

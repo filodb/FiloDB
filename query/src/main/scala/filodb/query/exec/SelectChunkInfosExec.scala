@@ -7,7 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.TimeSeriesShard
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Schema}
 import filodb.core.query._
 import filodb.core.store._
 import filodb.query.QueryConfig
@@ -38,30 +38,30 @@ final case class SelectChunkInfosExec(id: String,
                                       dispatcher: PlanDispatcher,
                                       dataset: DatasetRef,
                                       shard: Int,
+                                      dataSchema: Schema,
                                       filters: Seq[ColumnFilter],
                                       chunkMethod: ChunkScanMethod,
                                       column: Types.ColumnId) extends LeafExecPlan {
   import SelectChunkInfosExec._
 
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ChunkInfosSchema
+  protected def schemaOfDoExecute(): ResultSchema = ChunkInfosSchema
 
   protected def doExecute(source: ChunkSource,
-                          dataset: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
-    val dataColumn = dataset.dataColumns(column)
+    val dataColumn = dataSchema.data.columns(column)
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
+    val partCols = dataSchema.dataInfos
     val numGroups = source.groupsInDataset(dataset)
     source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
-            val subgroup = TimeSeriesShard.partKeyGroup(dataset.partKeySchema, partition.partKeyBase,
+            val subgroup = TimeSeriesShard.partKeyGroup(dataSchema.partKeySchema, partition.partKeyBase,
                                                         partition.partKeyOffset, numGroups)
             val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
-                                                  dataset.partKeySchema, partCols, shard, subgroup, partition.partID)
+                                                  dataSchema.partKeySchema, partCols, shard, subgroup, partition.partID)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
           }
   }

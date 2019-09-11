@@ -3,7 +3,6 @@ package filodb.query.exec
 import monix.reactive.Observable
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
@@ -26,8 +25,7 @@ import filodb.query.exec.rangefn._
   * compute intensive and not I/O intensive.
   */
 trait RangeVectorTransformer extends java.io.Serializable {
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector]
@@ -35,7 +33,7 @@ trait RangeVectorTransformer extends java.io.Serializable {
   /**
     * Default implementation retains source schema
     */
-  def schema(dataset: Dataset, source: ResultSchema): ResultSchema = source
+  def schema(source: ResultSchema): ResultSchema = source
 
   /**
     * Args to use for the RangeVectorTransformer for printTree purposes only.
@@ -61,8 +59,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -84,7 +81,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
           val mapper = HistogramQuantileMapper(funcParams)
-          mapper.apply(dataset, source, queryConfig, limit, sourceSchema)
+          mapper.apply(source, queryConfig, limit, sourceSchema)
         } else {
           val instantFunction = InstantFunction.double(function, funcParams)
           source.map { rv =>
@@ -96,7 +93,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     }
   }
 
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+  override def schema(source: ResultSchema): ResultSchema = {
     // if source is histogram, determine what output column type is
     // otherwise pass along the source
     RangeVectorTransformer.valueColumnType(source) match {
@@ -160,8 +157,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -203,8 +199,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
     }
   }
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {

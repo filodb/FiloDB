@@ -1,7 +1,8 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
+import filodb.core.query.ResultSchema
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
@@ -227,13 +228,13 @@ object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
 
-  def downsampleColsFromRangeFunction(dataset: Dataset, f: Option[RangeFunctionId]): Seq[String] = {
+  def downsampleColsFromRangeFunction(schema: Schema, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
       case None                   => Seq("avg")
-      case Some(Rate)             => Seq(dataset.schema.data.valueColName)
-      case Some(Irate)            => Seq(dataset.schema.data.valueColName)
-      case Some(Increase)         => Seq(dataset.schema.data.valueColName)
-      case Some(Resets)           => Seq(dataset.schema.data.valueColName)
+      case Some(Rate)             => Seq(schema.data.valueColName)
+      case Some(Irate)            => Seq(schema.data.valueColName)
+      case Some(Increase)         => Seq(schema.data.valueColName)
+      case Some(Resets)           => Seq(schema.data.valueColName)
       case Some(CountOverTime)    => Seq("count")
       case Some(Changes)          => Seq("avg")
       case Some(Delta)            => Seq("avg")
@@ -253,19 +254,19 @@ object RangeFunction {
   /**
    * Returns a (probably new) instance of RangeFunction given the func ID and column type
    */
-  def apply(dataset: Dataset,
+  def apply(schema: ResultSchema,
             func: Option[RangeFunctionId],
             columnType: ColumnType,
             config: QueryConfig,
             funcParams: Seq[Any] = Nil,
             maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(dataset, func, columnType, config, funcParams, maxCol, useChunked)()
+    generatorFor(schema, func, columnType, config, funcParams, maxCol, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
    */
-  def generatorFor(dataset: Dataset,
+  def generatorFor(schema: ResultSchema,
                    func: Option[RangeFunctionId],
                    columnType: ColumnType,
                    config: QueryConfig,
@@ -273,9 +274,9 @@ object RangeFunction {
                    maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator = {
     if (useChunked) columnType match {
-      case ColumnType.DoubleColumn => doubleChunkedFunction(dataset, func, config, funcParams)
-      case ColumnType.LongColumn => longChunkedFunction(dataset, func, funcParams)
-      case ColumnType.TimestampColumn => longChunkedFunction(dataset, func, funcParams)
+      case ColumnType.DoubleColumn => doubleChunkedFunction(schema, func, config, funcParams)
+      case ColumnType.LongColumn => longChunkedFunction(schema, func, funcParams)
+      case ColumnType.TimestampColumn => longChunkedFunction(schema, func, funcParams)
       case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
       case other: ColumnType => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
@@ -286,17 +287,18 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Long columns
    */
-  def longChunkedFunction(dataset: Dataset,
+  def longChunkedFunction(schema: ResultSchema,
                           func: Option[RangeFunctionId],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+    val isDownsampleGauge = (schema.columns == Schemas.dsGauge.dataInfos)
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
-      case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionL
+      case Some(CountOverTime)  => () => if (isDownsampleGauge) new SumOverTimeChunkedFunctionL
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
-      case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
-                                           val cntCol = dataset.colIDs("count").get.head
-                                           new AvgWithSumAndCountOverTimeFuncL(cntCol)
+      case Some(AvgOverTime)    => () => if (isDownsampleGauge) {
+                                           require(schema.columns(2).name == "count")
+                                           new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
                                          }
                                          else new AvgOverTimeChunkedFunctionL
       case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionL
@@ -311,21 +313,22 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
-  def doubleChunkedFunction(dataset: Dataset,
+  def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[RangeFunctionId],
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+    val isDownsampleGauge = (schema.columns == Schemas.dsGauge.dataInfos)
     func match {
       case None                 => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
-      case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionD
+      case Some(CountOverTime)  => () => if (isDownsampleGauge) new SumOverTimeChunkedFunctionD
                                          else new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
-      case Some(AvgOverTime)    => () => if (dataset.options.hasDownsampledData) {
-                                            val cntCol = dataset.colIDs("count").get.head
-                                            new AvgWithSumAndCountOverTimeFuncD(cntCol)
+      case Some(AvgOverTime)    => () => if (isDownsampleGauge) {
+                                           require(schema.columns(2).name == "count")
+                                           new AvgWithSumAndCountOverTimeFuncD(schema.colIDs(2))
                                          }
                                          else new AvgOverTimeChunkedFunctionD
       case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionD

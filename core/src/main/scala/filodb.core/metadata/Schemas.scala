@@ -162,6 +162,8 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
 
   val dataReaders     = data.readers
   val numDataColumns  = data.columns.length
+  val partitionInfos  = partition.columns.map(ColumnInfo.apply)
+  val dataInfos       = data.columns.map(ColumnInfo.apply)
 
   // A unique hash of the partition and data schemas together. Use for BinaryRecords etc.
   val schemaHash      = (partition.hash + 31 * data.hash) & 0x0ffff
@@ -337,4 +339,5 @@ object Schemas {
   val global = fromConfig(GlobalConfig.defaultFiloConfig).get
   val gauge = global.schemas("gauge")
   val promCounter = global.schemas("prom-counter")
+  val dsGauge = global.schemas("ds-gauge")
 }

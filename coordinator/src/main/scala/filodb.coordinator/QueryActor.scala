@@ -96,7 +96,7 @@ final class QueryActor(memStore: MemStore,
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
       .withTag("query-id", q.id)
       .start()
-    q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
+    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res

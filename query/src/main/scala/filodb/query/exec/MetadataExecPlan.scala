@@ -9,7 +9,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schema
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
@@ -29,7 +29,7 @@ final case class PartKeysDistConcatExec(id: String,
   /**
     * Schema of the RangeVectors returned by compose() method
     */
-  override protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
+  override protected def schemaOfCompose(): ResultSchema = children.head.schema()
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -40,8 +40,7 @@ final case class PartKeysDistConcatExec(id: String,
   /**
     * Compose the sub-query/leaf results here.
     */
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
@@ -66,7 +65,7 @@ final case class LabelValuesDistConcatExec(id: String,
   /**
     * Schema of the RangeVectors returned by compose() method
     */
-  override protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
+  override protected def schemaOfCompose(): ResultSchema = children.head.schema()
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -77,8 +76,7 @@ final case class LabelValuesDistConcatExec(id: String,
   /**
     * Compose the sub-query/leaf results here.
     */
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
@@ -112,6 +110,7 @@ final case class PartKeysExec(id: String,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
                               shard: Int,
+                              dataSchema: Schema,
                               filters: Seq[ColumnFilter],
                               start: Long,
                               end: Long) extends LeafExecPlan {
@@ -119,7 +118,6 @@ final case class PartKeysExec(id: String,
   override def enforceLimit: Boolean = false
 
   protected def doExecute(source: ChunkSource,
-                          dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
@@ -139,9 +137,9 @@ final case class PartKeysExec(id: String,
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
+  def schemaOfDoExecute(): ResultSchema = {
     new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
-                     Map(0 -> dataset.partKeySchema))
+                     Map(0 -> dataSchema.partKeySchema))
   }
 }
 
@@ -158,7 +156,6 @@ final case class  LabelValuesExec(id: String,
   override def enforceLimit: Boolean = false
 
   protected def doExecute(source: ChunkSource,
-                          dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
@@ -189,6 +186,6 @@ final case class  LabelValuesExec(id: String,
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  def schemaOfDoExecute(dataset: Dataset): ResultSchema =
+  def schemaOfDoExecute(): ResultSchema =
     new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
 }
