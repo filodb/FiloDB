@@ -188,7 +188,7 @@ class QueryEngine(dataset: Dataset,
         // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
         filters.find(f => f.column == shardCol) match {
           case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
-            shardCol -> RecordBuilder.trimShardColumn(dataset, shardCol, filtVal)
+            shardCol -> RecordBuilder.trimShardColumn(dataset.schema, shardCol, filtVal)
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")

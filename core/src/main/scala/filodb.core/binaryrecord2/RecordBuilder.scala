@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, Dataset, PartitionSchema, Schema}
+import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -108,7 +108,7 @@ final class RecordBuilder(memFactory: MemFactory,
 
   // startNewRecord for an ingestion schema.  Use this if creating an ingestion record, ensures right ID is used.
   final def startNewRecord(schema: Schema): Unit =
-    startNewRecord(schema.ingestionSchema, schema.data.hash)
+    startNewRecord(schema.ingestionSchema, schema.schemaHash)
 
   final def startNewRecord(partSchema: PartitionSchema, schemaID: Int): Unit =
     startNewRecord(partSchema.binSchema, schemaID)
@@ -268,11 +268,11 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   final def addFromReader(row: RowReader, schema: Schema): Long =
-    addFromReader(row, schema.ingestionSchema, schema.data.hash)
+    addFromReader(row, schema.ingestionSchema, schema.schemaHash)
 
   // Really only for testing. Very slow.  Only for partition keys
   def partKeyFromObjects(schema: Schema, parts: Any*): Long =
-    addFromReader(SeqRowReader(parts.toSeq), schema.partKeySchema, schema.data.hash)
+    addFromReader(SeqRowReader(parts.toSeq), schema.partKeySchema, schema.schemaHash)
 
   /**
    * Sorts and adds keys and values from a map.  The easiest way to add a map to a BinaryRecord.
@@ -650,13 +650,13 @@ object RecordBuilder {
     * In order to ingest all these multiple time series of a single metric to the
     * same shard, we have to trim the suffixes while calculating shardKeyHash.
     *
-    * @param dataSet    - Current DataSet
+    * @param schema - affected schema
     * @param shardKeyColName  - ShardKey label name as String
     * @param shardKeyColValue - ShardKey label value as String
     * @return - Label value after removing the suffix
     */
-  final def trimShardColumn(dataSet: Dataset, shardKeyColName: String, shardKeyColValue: String): String = {
-    dataSet.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
+  final def trimShardColumn(schema: Schema, shardKeyColName: String, shardKeyColValue: String): String = {
+    schema.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
       case Some(trimMetricSuffixColumn) => trimMetricSuffixColumn.find(shardKeyColValue.endsWith) match {
                                             case Some(s)  => shardKeyColValue.dropRight(s.length)
                                             case _        => shardKeyColValue

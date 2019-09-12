@@ -11,7 +11,6 @@ import remote.RemoteStorage.{LabelPair, Sample, TimeSeries}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.gateway.conversion.{InfluxProtocolParser, PrometheusInputRecord}
 import filodb.memory.MemFactory
-import filodb.prometheus.FormatConversion
 
 /**
  * Measures the shard calculation, deserialization, and ingestion record creation logic used in the Gateway
@@ -30,8 +29,6 @@ class GatewayBenchmark extends StrictLogging {
   )
   val influxTags = tagMap.filterKeys(_ != "__name__").toSeq.sortBy(_._1)
 
-  private val dataset = FormatConversion.dataset
-
   val initTimestamp = System.currentTimeMillis
   val value: Double = 2.5
 
@@ -44,7 +41,7 @@ class GatewayBenchmark extends StrictLogging {
 
   val singlePromTSBytes = timeseries(tagMap).toByteArray
 
-  val singleInfluxRec = s"${tagMap("__name__")}, ${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
+  val singleInfluxRec = s"${tagMap("__name__")},${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
                         s"counter=$value ${initTimestamp}000000"
   val singleInfluxBuf = ChannelBuffers.buffer(1024)
   singleInfluxBuf.writeBytes(singleInfluxRec.getBytes)
@@ -62,8 +59,8 @@ class GatewayBenchmark extends StrictLogging {
              timeseries(tagMap ++ Map("__name__" -> "heap_usage_count"), histBuckets.size))
   val histPromBytes = histPromSeries.map(_.toByteArray)
 
-  val histInfluxRec = s"${tagMap("__name__")}, ${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
-                      s"${histBuckets.map { case (k, v) => s"$k=$v"}.mkString(",") }, sum=$histSum,count=8 " +
+  val histInfluxRec = s"${tagMap("__name__")},${influxTags.map{case (k, v) => s"$k=$v"}.mkString(",")} " +
+                      s"${histBuckets.map { case (k, v) => s"$k=$v"}.mkString(",") },sum=$histSum,count=8 " +
                       s"${initTimestamp}000000"
   val histInfluxBuf = ChannelBuffers.buffer(1024)
   histInfluxBuf.writeBytes(histInfluxRec.getBytes)
@@ -74,7 +71,7 @@ class GatewayBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def promCounterProtoConversion(): Int = {
-    val record = PrometheusInputRecord(TimeSeries.parseFrom(singlePromTSBytes), dataset).head
+    val record = PrometheusInputRecord(TimeSeries.parseFrom(singlePromTSBytes)).head
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric
@@ -89,7 +86,7 @@ class GatewayBenchmark extends StrictLogging {
   def influxCounterConversion(): Int = {
     // reset the ChannelBuffer so it can be read every timeseries
     singleInfluxBuf.resetReaderIndex()
-    val record = InfluxProtocolParser.parse(singleInfluxBuf, dataset.schema).get
+    val record = InfluxProtocolParser.parse(singleInfluxBuf).get
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric
@@ -104,7 +101,7 @@ class GatewayBenchmark extends StrictLogging {
   def promHistogramProtoConversion(): Int = {
     var overallHash = 7
     histPromBytes.foreach { tsBytes =>
-      val record = PrometheusInputRecord(TimeSeries.parseFrom(tsBytes), dataset).head
+      val record = PrometheusInputRecord(TimeSeries.parseFrom(tsBytes)).head
       val partHash = record.partitionKeyHash
       val shardHash = record.shardKeyHash
       record.getMetric
@@ -121,7 +118,7 @@ class GatewayBenchmark extends StrictLogging {
   def influxHistogramConversion(): Int = {
     // reset the ChannelBuffer so it can be read every timeseries
     histInfluxBuf.resetReaderIndex()
-    val record = InfluxProtocolParser.parse(histInfluxBuf, dataset.schema).get
+    val record = InfluxProtocolParser.parse(histInfluxBuf).get
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric

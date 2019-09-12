@@ -349,10 +349,10 @@ that part of the cluster could be with the old config and the rest could have ne
 
 ### Prometheus FiloDB Schema for Operational Metrics
 
-* Partition key = `tags:map`
+* Partition key = `metric:string,tags:map`
 * Columns: `timestamp:ts,value:double:detectDrops=true`
 
-The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
+The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name, which in Prometheus data is a label/tag with the key `__name__`, is separated out to an explicit metric column.
 
 Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
 
