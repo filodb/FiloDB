@@ -157,7 +157,7 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
    * Allocates metaSize bytes for metadata storage.
    * @param metaSize the number of bytes to use for metadata storage.
    * @return the Long address of the metadata space.  The metaSize is written to the location 2 bytes before this.
-   *         If there is no capacity then 0OutOfOffheapMemoryException is thrown.
+   *         If there is no capacity then OutOfOffheapMemoryException is thrown.
    */
   def allocMetadata(metaSize: Short): Long = {
     val rem = remaining()
