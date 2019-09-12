@@ -1,7 +1,8 @@
 package filodb.query.exec.rangefn
 
-import scalaxy.loops._
+import java.time.{Instant, LocalDateTime, ZoneId}
 
+import scalaxy.loops._
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -96,6 +97,8 @@ object InstantFunction {
       case Log2               => Log2Impl(funcParams)
       case Round              => RoundImpl(funcParams)
       case Sqrt               => SqrtImpl(funcParams)
+      case Month              => MonthImpl(funcParams)
+    //  case
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
@@ -255,6 +258,14 @@ case class RoundImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
   */
 case class SqrtImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   override def apply(value: Double): Double = scala.math.sqrt(value)
+}
+
+case class MonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    val instant = Instant.ofEpochSecond(value.toLong)
+    val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+    ldt.getMonthValue
+  }
 }
 
 /**

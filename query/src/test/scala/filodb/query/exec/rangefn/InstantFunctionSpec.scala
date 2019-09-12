@@ -296,6 +296,22 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
                                  InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
   }
 
+  it("should test date funtions") {
+    //val expected = samples.map(_.rows.map(v => scala.math.abs(v.getDouble(1))))
+
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 1456790399),
+          new TransientRow(2L, 1456790400)).iterator
+      }
+    )
+    applyFunctionAndAssertResult(samples, Array(List(2.0, 3.0).toIterator), InstantFunctionId.Month)
+
+  }
+
   private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
                                 instantFunctionId: InstantFunctionId, funcParams: Seq[Any] = Nil,
                                 schema: ResultSchema = resultSchema): Unit = {
