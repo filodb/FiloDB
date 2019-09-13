@@ -158,10 +158,6 @@ class QueryEngine(dataset: Dataset,
     match {
       case PlanResult(Seq(justOne), stitch) =>
         if (stitch) justOne.addRangeVectorTransformer(new StitchRvsMapper())
-        logicalPlan match {
-          case lp : ApplySortFunction => justOne.addRangeVectorTransformer(new SortFunctionMapper(lp.function))
-          case _                      =>
-        }
         justOne
       case PlanResult(many, stitch) =>
         val targetActor = pickDispatcher(many)
@@ -171,16 +167,13 @@ class QueryEngine(dataset: Dataset,
           case ep: ExecPlan =>
             val topPlan = DistConcatExec(queryId, targetActor, many)
             if (stitch) topPlan.addRangeVectorTransformer(new StitchRvsMapper())
-            logicalPlan match {
-              case lp : ApplySortFunction => topPlan.addRangeVectorTransformer(new SortFunctionMapper(lp.function))
-              case _                      =>
-            }
             topPlan
         }
     }
     logger.debug(s"Materialized logical plan for dataset=${dataset.ref}:" +
       s" $logicalPlan to \n${materialized.printTree()}")
     materialized
+
   }
 
   val shardColumns = dataset.options.shardKeyColumns.sorted
@@ -252,7 +245,7 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplySortFunction           =>  walkLogicalPlanTree(lp.vectors, queryId, submitTime, options,
+      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
     }
   }
@@ -452,6 +445,23 @@ class QueryEngine(dataset: Dataset,
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
     vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
     vectors
+  }
+
+  private def materializeApplySortFunction(queryId: String,
+                                           submitTime: Long,
+                                           options: QueryOptions,
+                                           lp: ApplySortFunction,
+                                           spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    if(vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer((SortFunctionMapper(lp.function)))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(SortFunctionMapper(lp.function)))
+      vectors
+    }
   }
 
   /**

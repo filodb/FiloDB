@@ -213,24 +213,34 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   }
 }
 
-final case class SortFunctionMapper(function: SortFunctionId,
-                                    funcParams: Seq[Any] = Nil) extends RangeVectorTransformer  {
+final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer  {
   protected[exec] def args: String =
-    s"function=$function, funcParams=$funcParams"
-
-  val sortFunction: SortFunction = {
-    function match {
-      case Sort         => SortFunction()
-      case SortDesc     => SortFunction(false)
-      case _            => throw new UnsupportedOperationException(s"$function not supported.")
-    }
-  }
+    s"function=$function"
 
   def apply(dataset: Dataset,
             source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    sortFunction.execute(source)
+
+    val ordering: Ordering[Double] = function match {
+      case Sort         => (Ordering[Double])
+      case SortDesc     => (Ordering[Double]).reverse
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
+    }
+
+    val resultRv = source.toListL.map { rvs =>
+      rvs.map { rv =>
+        new RangeVector {
+          override def key: RangeVectorKey = rv.key
+
+          override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
+        }
+      }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
+      }(ordering)
+
+    }.map(Observable.fromIterable)
+
+    Observable.fromTask(resultRv).flatten
   }
 }
