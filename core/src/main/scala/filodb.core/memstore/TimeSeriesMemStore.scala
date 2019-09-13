@@ -26,7 +26,6 @@ class TimeSeriesMemStore(config: Config,
                         (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
-  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -123,17 +122,12 @@ extends MemStore with StrictLogging {
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
-                    case d: SomeData =>       shard.ingest(d)
+                    case d: SomeData =>       shard.ingest(d.records, d.offset, Some(flushSched))
                                               None
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
-                    case FlushCommand(group) => assertThreadName(IngestSchedName)
-                                                shard.switchGroupBuffers(group)
-                                                // step below purges partitions and needs to run on ingestion thread
-                                                val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
-                                                Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
-                                                                flushTimeBucket))
+                    case FlushCommand(group) => Some(shard.prepareFlushGroup(group))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
@@ -169,7 +163,7 @@ extends MemStore with StrictLogging {
           }
           startOffsetValidated = true
         }
-        shard.ingest(r)
+        shard.ingest(r.records, r.offset)
       }.collect {
         case offset: Long if offset >= endOffset => // last offset reached
           offset
