@@ -31,7 +31,8 @@ object DownsamplerSettings {
   val batchSize = downsamplerConfig.getInt("num-partitions-per-cass-write")
   val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
   val nativeMemManagerSize = downsamplerConfig.getMemorySize("off-heap-native-memory-size").toBytes
-  val cassWriteTimeout = 10.minutes
+
+  val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
 
   val now = downsamplerConfig.as[Option[Long]]("downsampler-execution-time").getOrElse(System.currentTimeMillis())
   val chunkDuration = downsampleStoreConfig.flushInterval.toMillis

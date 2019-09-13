@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.ArrayBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.Types.ChunkID
@@ -32,14 +30,14 @@ class PagedReadablePartition(override val schema: Schema,
                              mem: NativeMemoryManager) extends ReadablePartition {
 
   import PagedReadablePartition._
-  val chunkInfos = ArrayBuffer[ChunkSetInfo]()
+  val chunkInfos = debox.Buffer[BinaryRegion.NativePointer]()
 
   var partitionKey: BinaryRegion.NativePointer = _
 
   loadToOffHeap()
 
   private def loadToOffHeap() = {
-    val (_, pk, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, mem)
+    val (_, pk, _) = BinaryRegionLarge.allocateAndCopy(pd.partitionKey, UnsafeUtils.arayOffset, mem)
     partitionKey = pk
 
     pd.chunkSets.foreach { rawChunkSet =>
@@ -51,14 +49,14 @@ class PagedReadablePartition(override val schema: Schema,
         vec
       }
       val chunkInfoAddr = mem.allocateOffheap(schema.data.blockMetaSize)
-      TimeSeriesShard.writeMetaWithoutPartId(chunkInfoAddr , rawChunkSet.infoBytes, vectors)
+      TimeSeriesShard.writeMetaWithoutPartId(chunkInfoAddr, rawChunkSet.infoBytes, vectors)
       val info = ChunkSetInfo(chunkInfoAddr)
-      chunkInfos += info
+      chunkInfos += info.infoAddr
     }
-    _log.debug(s"Loaded ${chunkInfos.size} chunksets into partition with key ${stringPartition}")
+    _log.debug(s"Loaded ${chunkInfos.length} chunksets into partition with key ${stringPartition}")
   }
 
-  override def numChunks: Int = chunkInfos.size
+  override def numChunks: Int = chunkInfos.length
 
   override def appendingChunkLen: Int = 0
 
@@ -73,27 +71,28 @@ class PagedReadablePartition(override val schema: Schema,
     method == AllChunkScan && chunkInfos.isEmpty
   }
 
-  override def hasChunksAt(id: ChunkID): Boolean = chunkInfos.exists(_.id == id)
+  override def hasChunksAt(id: ChunkID): Boolean = chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(_) == id)
 
   override def earliestTime: Long = ???
 
-  override def partKeyBase: Array[Byte] = pd.partitionKey
+  def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
 
-  override def partKeyOffset: Long = UnsafeUtils.arayOffset
+  def partKeyOffset: Long = partitionKey
 
   private def chunkInfoIteratorImpl = {
     new ChunkInfoIterator {
       private val iter = chunkInfos.iterator
       override def close(): Unit = {}
       override def hasNext: Boolean = iter.hasNext
-      override def nextInfo: ChunkSetInfo = iter.next()
+      override def nextInfo: ChunkSetInfo = ChunkSetInfo(iter.next())
       override def lock(): Unit = {}
       override def unlock(): Unit = {}
     }
   }
 
   def free(): Unit = {
-    chunkInfos.foreach { ci =>
+    chunkInfos.foreach { ptr =>
+      val ci = ChunkSetInfo(ptr)
       for { col <- schema.data.columns.indices } mem.freeMemory(ci.vectorPtr(col))
       mem.freeMemory(ci.infoAddr)
     }

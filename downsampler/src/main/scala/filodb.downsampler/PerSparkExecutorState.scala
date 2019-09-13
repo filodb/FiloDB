@@ -4,8 +4,10 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 
 import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.DatasetRef
+import filodb.core.downsample.ChunkDownsampler
 import filodb.core.memstore.{TimeSeriesShardStats, WriteBufferPool}
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.Schemas
 import filodb.memory._
 
 object PerSparkExecutorState extends StrictLogging {
@@ -32,21 +34,21 @@ object PerSparkExecutorState extends StrictLogging {
   /**
     * Chunk Downsamplers by Raw Schema Id
     */
-  val chunkDownsamplersByRawSchemaId = rawSchemas.map { s => s.schemaHash -> s.data.downsamplers }.toMap
+  val chunkDownsamplersByRawSchemaId = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+  rawSchemas.foreach { s => chunkDownsamplersByRawSchemaId += s.schemaHash -> s.data.downsamplers }
 
   /**
     * Raw dataset from which we downsample data
     */
-  val rawDataset = Dataset(rawDatasetName, rawSchemas.head)
+  val rawDatasetRef = DatasetRef(rawDatasetName)
 
   val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  val downsampleDatasets = downsampleResolutions.map { res =>
-    // TODO downsample dataset should have more than one schema
-    res -> Dataset(s"${rawDataset.ref}_ds_${res.toMinutes}", rawDataset.schema.downsample.get)
+  val downsampleDatasetRefs = downsampleResolutions.map { res =>
+    res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }.toMap
 
   val blockStore = new PageAlignedBlockManager(blockMemorySize,
@@ -63,11 +65,12 @@ object PerSparkExecutorState extends StrictLogging {
   /**
     * Buffer Pool keyed by Raw schema Id
     */
-  val bufferPoolByRawSchemaId = rawSchemas.map { s =>
+  val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
+  rawSchemas.foreach { s =>
     val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, downsampleStoreConfig)
-    s.schemaHash -> pool
-  }.toMap
+    bufferPoolByRawSchemaId += s.schemaHash -> pool
+  }
 
-  val shardStats = new TimeSeriesShardStats(rawDataset.ref, -1) // TODO fix
+  val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
 }
