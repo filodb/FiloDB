@@ -35,7 +35,7 @@ NOTE: for the latest and most up to date, see [timeseries-dev-source.conf](../co
 dataset = "example"
 
 # Name of schema used for this dataset stream.  See filodb.schemas in filodb-defaults or any other server conf
-schema = "prometheus"
+schema = "prom-counter"
 
 # e.g. one shard per kafka partition
 num-shards = 100
