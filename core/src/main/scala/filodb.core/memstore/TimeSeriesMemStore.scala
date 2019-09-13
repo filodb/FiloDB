@@ -105,10 +105,9 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
+    ingestStream(dataset, shard, ingestCommands, flushSched, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -121,7 +120,6 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int,
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
@@ -135,7 +133,7 @@ extends MemStore with StrictLogging {
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
-                                                                diskTimeToLiveSeconds, flushTimeBucket))
+                                                                flushTimeBucket))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }

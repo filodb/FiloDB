@@ -953,7 +953,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.indexTimeBucketBytesWritten.increment(blobToPersist.map(_.length).sum)
       // we pad to C* ttl to ensure that data lives for longer than time bucket roll over time
       colStore.writePartKeyTimeBucket(ref, shardNum, cmd.timeBucket, blobToPersist,
-        flushGroup.diskTimeToLiveSeconds + indexTimeBucketTtlPaddingSeconds).flatMap {
+        storeConfig.diskTTLSeconds + indexTimeBucketTtlPaddingSeconds).flatMap {
         case Success => /* Persist the highest time bucket id in meta store */
           writeHighestTimebucket(shardNum, cmd.timeBucket)
         case er: ErrorResponse =>
@@ -986,7 +986,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in " +
       s"dataset=$ref shard=$shardNum")
 
-    colStore.write(ref, chunkSetStream, flushGroup.diskTimeToLiveSeconds).recover { case e =>
+    colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds).recover { case e =>
       logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=$ref " +
         s"shard=$shardNum", e)
       shardStats.flushesFailedChunkWrite.increment

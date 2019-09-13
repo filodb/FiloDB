@@ -110,7 +110,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
                       // Just do a single flush at the end for all groups
                       val combinedStream: Observable[DataOrCommand] = shardStream ++ FlushStream.allGroups(4)
                       Task.fromFuture(memStore.ingestStream
-                        (dataset.ref, shard, combinedStream, global, 3 * 86400, Task {}))
+                        (dataset.ref, shard, combinedStream, global, Task {}))
                     }.countL.runAsync
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000
