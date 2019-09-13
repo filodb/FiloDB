@@ -413,7 +413,7 @@ class QueryEngine(dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        dataset.schema, renamedFilters, lp.start, lp.end)
+        dataset.schema.partition, renamedFilters, lp.start, lp.end)
     }
     PlanResult(metaExec, false)
   }

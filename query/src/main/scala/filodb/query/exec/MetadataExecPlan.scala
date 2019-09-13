@@ -9,7 +9,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{MemStore, PartKeyRowReader}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Schema
+import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
@@ -110,7 +110,7 @@ final case class PartKeysExec(id: String,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
                               shard: Int,
-                              dataSchema: Schema,
+                              partSchema: PartitionSchema,
                               filters: Seq[ColumnFilter],
                               start: Long,
                               end: Long) extends LeafExecPlan {
@@ -139,7 +139,7 @@ final case class PartKeysExec(id: String,
     */
   def schemaOfDoExecute(): ResultSchema = {
     new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
-                     Map(0 -> dataSchema.partKeySchema))
+                     Map(0 -> partSchema.binSchema))
   }
 }
 

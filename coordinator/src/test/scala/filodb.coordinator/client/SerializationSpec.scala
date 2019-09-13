@@ -146,7 +146,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       srv
     }
 
-    val schema = ResultSchema(dataset1.infosFromIDs(0 to 0), 1)
+    val schema = ResultSchema(dataset1.schema.infosFromIDs(0 to 0), 1)
 
     val result = QueryResult2("someId", schema, srvs)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
@@ -277,7 +277,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
     val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
-    val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
+    val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
 
     val result = QueryResult2("someId", schema, Seq(ser))
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]

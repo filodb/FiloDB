@@ -52,7 +52,7 @@ final case class SelectChunkInfosExec(id: String,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     val dataColumn = dataSchema.data.columns(column)
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    val partCols = dataSchema.dataInfos
+    val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
     source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
           .filter(_.hasChunks(chunkMethod))
