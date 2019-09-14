@@ -15,7 +15,7 @@ import filodb.memory.format.SeqRowReader
 object PartitionDownsampler extends StrictLogging {
 
   /**
-    * Creates new donwsample partitions per per the resolutions
+    * Creates new downsample partitions per per the resolutions
     * * specified by `bufferPools`.
     * Downsamples all chunks in `partToDownsample` per the resolutions and stoes
     * downsampled data into the newly created partition.
@@ -70,7 +70,11 @@ object PartitionDownsampler extends StrictLogging {
       // for each downsample resolution
       resToPartition.foreach { case (resolution, part) =>
         val resMillis = resolution.toMillis
-        var pStart = ((startTime - 1) / resMillis) * resMillis + 1 // inclusive startTime for downsample period
+        // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
+        // Hence subtract - 1 below from chunk startTime to find the first downsample period.
+        // + 1 is needed since the startTime is inclusive. We don't want pStart to be 4:55:00:000;
+        // instead we want 4:55:00:001
+        var pStart = ((startTime - 1) / resMillis) * resMillis + 1
         var pEnd = pStart + resMillis // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
