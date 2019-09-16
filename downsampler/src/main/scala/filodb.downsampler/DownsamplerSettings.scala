@@ -2,14 +2,21 @@ package filodb.downsampler
 
 import scala.concurrent.duration._
 
+import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.GlobalConfig
 import filodb.core.store.StoreConfig
 
+/**
+  * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
+  * from the spark application driver.
+  */
 object DownsamplerSettings {
+  val downsamplerSettings = new DownsamplerSettings(GlobalConfig.systemConfig.getConfig("filodb"))
+}
 
-  val filodbConfig = GlobalConfig.systemConfig.getConfig("filodb")
+class DownsamplerSettings(val filodbConfig: Config) {
 
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
 
@@ -34,6 +41,8 @@ object DownsamplerSettings {
 
   val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
 
+  val widenIngestionTimeRangeBy = downsamplerConfig.as[FiniteDuration]("widen-ingestion-time-range-by")
+
   val chunkDuration = downsampleStoreConfig.flushInterval.toMillis
   val userTimeStart = downsamplerConfig.as[Option[Long]]("user-time-override") match {
     case None =>
@@ -44,7 +53,7 @@ object DownsamplerSettings {
   }
 
   val userTimeEnd = userTimeStart + chunkDuration
-  val ingestionTimeStart = userTimeStart - 2.hours.toMillis
-  val ingestionTimeEnd = userTimeEnd + 2.hours.toMillis
+  val ingestionTimeStart = userTimeStart - widenIngestionTimeRangeBy.toMillis
+  val ingestionTimeEnd = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
 }

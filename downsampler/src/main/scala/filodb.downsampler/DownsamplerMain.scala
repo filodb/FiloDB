@@ -31,28 +31,28 @@ import org.apache.spark.sql.SparkSession
 object DownsamplerMain extends App with StrictLogging {
 
   import DownsamplerSettings._
+  import BatchDownsampler._
 
   private val spark = SparkSession.builder()
     .appName("FiloDBDownsampler")
     .getOrCreate()
 
-  val splits = BatchDownsampler.cassandraColStore.getScanSplits(BatchDownsampler.rawDatasetRef)
+  val splits = downsampler.cassandraColStore.getScanSplits(downsampler.rawDatasetRef)
 
   spark.sparkContext
     .makeRDD(splits)
     .mapPartitions { splitIter =>
       import filodb.core.Iterators._
-      val rawDataSource = BatchDownsampler.cassandraColStore
-      rawDataSource.getChunksByIngestionTimeRange(BatchDownsampler.rawDatasetRef, splitIter,
-                                                  ingestionTimeStart, ingestionTimeEnd,
-                                                  userTimeStart, userTimeEnd, batchSize).toIterator()
+      val rawDataSource = downsampler.cassandraColStore
+      rawDataSource.getChunksByIngestionTimeRange(downsampler.rawDatasetRef, splitIter,
+        downsamplerSettings.ingestionTimeStart, downsamplerSettings.ingestionTimeEnd,
+        downsamplerSettings.userTimeStart, downsamplerSettings.userTimeEnd, downsamplerSettings.batchSize).toIterator()
     }
     .foreach { rawPartsBatch =>
-      BatchDownsampler.downsampleBatch(rawPartsBatch)
+      downsampler.downsampleBatch(rawPartsBatch)
     }
-  BatchDownsampler.cassandraColStore.shutdown()
   spark.sparkContext.stop()
+  downsampler.cassandraColStore.shutdown()
 
   // TODO migrate index entries
-
 }

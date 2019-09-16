@@ -20,6 +20,14 @@ import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 /**
+  * BatchDownsampler is always used in the context of an object so that it need not be serialized to a spark executor
+  * from the spark application driver.
+  */
+object BatchDownsampler {
+  val downsampler = new BatchDownsampler(DownsamplerSettings.downsamplerSettings)
+}
+
+/**
   * This class maintains state during the processing of a batch of TSPartitions to downsample. Namely
   * a. The memory manager used for the paged partitions
   * b. The buffer pool used to ingest and chunk the downsampled data
@@ -30,83 +38,82 @@ import filodb.memory.format.{SeqRowReader, UnsafeUtils}
   * It performs the operation of downsampling all partitions in the batch and writes downsampled data
   * into cassandra.
   *
-  * This is an object instead of class so that it need not be serialized to a spark executor
-  * from the driver. All of the necessary params for the behavior are loaded from DownsampleSettings.
+  * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-object BatchDownsampler extends StrictLogging {
+class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
 
-  import DownsamplerSettings._
+  private val readSched = Scheduler.io("cass-read-sched")
+  private val writeSched = Scheduler.io("cass-write-sched")
+  private[downsampler] val cassandraColStore =
+    new CassandraColumnStore(settings.filodbConfig, readSched, None)(writeSched)
 
-  val readSched = Scheduler.io("cass-read-sched")
-  val writeSched = Scheduler.io("cass-write-sched")
-  val cassandraColStore = new CassandraColumnStore(filodbConfig, readSched, None)(writeSched)
-
-  val kamonTags = Map( "rawDataset" -> rawDatasetName,
+  private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                        "run" -> "Downsampler",
-                       "userTimeStart" -> userTimeStart.toString,
-                       "userTimeEnd" -> userTimeEnd.toString)
+                       "userTimeStart" -> settings.userTimeStart.toString,
+                       "userTimeEnd" -> settings.userTimeEnd.toString)
 
-  val schemas = Schemas.fromConfig(filodbConfig).get
+  private val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
-  val rawSchemas = rawSchemaNames.map { s => schemas.schemas(s)}
+  private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
   /**
     * Downsample Schemas
     */
-  val dsSchemas = rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
+  private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
 
   /**
     * Chunk Downsamplers by Raw Schema Id
     */
-  val chunkDownsamplersByRawSchemaId = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+  private val chunkDownsamplersByRawSchemaId = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
   rawSchemas.foreach { s => chunkDownsamplersByRawSchemaId += s.schemaHash -> s.data.downsamplers }
 
   /**
     * Raw dataset from which we downsample data
     */
-  val rawDatasetRef = DatasetRef(rawDatasetName)
+  private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
-  val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max
+  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  val downsampleDatasetRefs = downsampleResolutions.map { res =>
+  private val downsampleDatasetRefs = settings.downsampleResolutions.map { res =>
     res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }.toMap
 
-  val blockStore = new PageAlignedBlockManager(blockMemorySize,
+  private val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
     stats = new MemoryStats(kamonTags),
     reclaimer = new ReclaimListener {
       override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
     },
     numPagesPerBlock = 50)
-  val blockFactory = new BlockMemFactory(blockStore, None, maxMetaSize,
+  private val blockFactory = new BlockMemFactory(blockStore, None, maxMetaSize,
     kamonTags, false)
 
-  val memoryManager = new NativeMemoryManager(nativeMemManagerSize, kamonTags)
+  private val memoryManager = new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
 
   /**
     * Buffer Pool keyed by Raw schema Id
     */
-  val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
+  private val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
   rawSchemas.foreach { s =>
-    val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, downsampleStoreConfig)
+    val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, settings.downsampleStoreConfig)
     bufferPoolByRawSchemaId += s.schemaHash -> pool
   }
 
-  val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
+  private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   private[downsampler] def downsampleBatch(rawPartsBatch: Seq[RawPartData]) = {
 
-    logger.debug(s"Starting downsampling batch of ${rawPartsBatch.size} partitions rawDataset=$rawDatasetName for " +
-      s"ingestionTimeStart=$ingestionTimeStart ingestionTimeEnd=$ingestionTimeEnd " +
-      s"userTimeStart=$userTimeStart userTimeEnd=$userTimeEnd")
+    logger.debug(s"Starting downsampling batch of ${rawPartsBatch.size} partitions " +
+      s"rawDataset=${settings.rawDatasetName} for " +
+      s"ingestionTimeStart=${settings.ingestionTimeStart} ingestionTimeEnd=${settings.ingestionTimeEnd} " +
+      s"userTimeStart=${settings.userTimeStart} userTimeEnd=${settings.userTimeEnd}")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
-    downsampleResolutions.foreach { res =>
+    settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
     }
     val rawPartsToFree = ArrayBuffer[PagedReadablePartition]()
@@ -155,13 +162,13 @@ object BatchDownsampler extends StrictLogging {
         val bufferPool = bufferPoolByRawSchemaId(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
 
-        val downsampledParts = downsampleResolutions.map { res =>
+        val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
                                             0, bufferPool, shardStats, memoryManager, 1)
           res -> part
         }.toMap
 
-        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, userTimeStart)
+        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, settings.userTimeStart)
 
         rawPartsToFree += rawReadablePart
         downsampledPartsPartsToFree ++= downsampledParts.values
@@ -181,7 +188,7 @@ object BatchDownsampler extends StrictLogging {
     *
     * @param rawPartToDownsample raw partition to downsample
     * @param downsamplers chunk downsamplers to use to downsample
-    * @param downsampledParts the downsample parts to ingest downsampled data
+    * @param downsampledParts the downsample parts in which to ingest downsampled data
     * @param downsampleIngestionTime ingestionTime to use for downsampled data
     */
   // scalastyle:off method.length
@@ -214,7 +221,7 @@ object BatchDownsampler extends StrictLogging {
         var pEnd = pStart + resMillis // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
-          if (pEnd >= userTimeStart && pEnd <= userTimeEnd) {
+          if (pEnd >= settings.userTimeStart && pEnd <= settings.userTimeEnd) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
             val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
             val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
@@ -250,11 +257,11 @@ object BatchDownsampler extends StrictLogging {
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
       cassandraColStore.write(downsampleDatasetRefs(res),
-        Observable.fromIterator(chunks), ttlByResolution(res))
+        Observable.fromIterator(chunks), settings.ttlByResolution(res))
     }
 
     writeFut.foreach { fut =>
-      val response = Await.result(fut, cassWriteTimeout)
+      val response = Await.result(fut, settings.cassWriteTimeout)
       logger.debug(s"Got message $response for cassandra write call")
       if (response.isInstanceOf[ErrorResponse])
         throw new IllegalStateException(s"Got response $response when writing to Cassandra")
