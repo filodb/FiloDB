@@ -32,7 +32,7 @@ class PagedReadablePartition(override val schema: Schema,
   import PagedReadablePartition._
   private val chunkInfos = debox.Buffer[BinaryRegion.NativePointer]()
 
-  private var partitionKey: BinaryRegion.NativePointer = _
+  var partitionKey: BinaryRegion.NativePointer = _
 
   loadToOffHeap()
 
