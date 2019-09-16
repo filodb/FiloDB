@@ -124,5 +124,3 @@ case class LabelJoinFunction(funcParams: Seq[Any])
 
   }
 }
-
-

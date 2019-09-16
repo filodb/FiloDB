@@ -135,4 +135,28 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   */
 case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
                                 function: MiscellaneousFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
+                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+/**
+  * Apply Sort Function to a collection of RangeVectors
+  */
+case class ApplySortFunction(vectors: PeriodicSeriesPlan,
+                                      function: SortFunctionId,
+                                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+object LogicalPlan {
+  /**
+    * Get leaf Logical Plans
+    */
+  def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
+   logicalPlan match {
+     // Find leaf logical plans for all children and concatenate results
+     case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans(_))
+     case _                      => Seq(logicalPlan)
+   }
+  }
+}

@@ -245,6 +245,8 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
+      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
+                                              spreadProvider)
     }
   }
 
@@ -443,6 +445,23 @@ class QueryEngine(dataset: Dataset,
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
     vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
     vectors
+  }
+
+  private def materializeApplySortFunction(queryId: String,
+                                           submitTime: Long,
+                                           options: QueryOptions,
+                                           lp: ApplySortFunction,
+                                           spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    if(vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer((SortFunctionMapper(lp.function)))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(SortFunctionMapper(lp.function)))
+      vectors
+    }
   }
 
   /**

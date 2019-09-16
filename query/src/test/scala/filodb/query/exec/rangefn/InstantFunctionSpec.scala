@@ -157,15 +157,6 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
     applyFunctionAndAssertResult(samples, expected10, InstantFunctionId.Round, Seq(10))
   }
 
-  it ("should handle unknown functions") {
-    // sort_desc
-    the[UnsupportedOperationException] thrownBy {
-      val miscellaneousVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.SortDesc)
-      miscellaneousVectorFnMapper(MetricsTestData.timeseriesDataset,
-        Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-    } should have message "SortDesc not supported."
-  }
-
   it ("should validate invalid function params") {
     // clamp_max
     the[IllegalArgumentException] thrownBy {
