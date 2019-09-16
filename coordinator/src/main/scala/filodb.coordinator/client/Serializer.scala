@@ -31,7 +31,7 @@ import filodb.query.QueryOptions
  *   to reinstantiate things like GrowableVector, wrappers, and appendable types
  */
 class KryoInit {
-  val settings = new FilodbSettings()
+  val settings = FilodbSettings.global().get
   val schemas = settings.schemas
 
   def customize(kryo: Kryo): Unit = {
