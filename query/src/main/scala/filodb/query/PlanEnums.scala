@@ -40,7 +40,7 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object DaysInMonth extends InstantFunctionId("days_in_month")
 
-  case object DaysOfMonth extends InstantFunctionId("day_of_month")
+  case object DayOfMonth extends InstantFunctionId("day_of_month")
 
   case object DayOfWeek extends InstantFunctionId("day_of_week")
 

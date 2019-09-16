@@ -1,8 +1,9 @@
 package filodb.query.exec.rangefn
 
-import java.time.{Instant, LocalDateTime, ZoneId}
+import java.time.{Instant, LocalDateTime, YearMonth, ZoneId}
 
 import scalaxy.loops._
+
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -98,7 +99,12 @@ object InstantFunction {
       case Round              => RoundImpl(funcParams)
       case Sqrt               => SqrtImpl(funcParams)
       case Month              => MonthImpl(funcParams)
-    //  case
+      case Year               => YearImpl(funcParams)
+      case Hour               => HourImpl(funcParams)
+      case Minute             => MinuteImpl(funcParams)
+      case DayOfWeek          => DayOfWeekImpl(funcParams)
+      case DaysInMonth        => DaysInMonthImpl(funcParams)
+      case DayOfMonth         => DayOfMonthImpl(funcParams)
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
@@ -262,9 +268,85 @@ case class SqrtImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
 
 case class MonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
   override def apply(value: Double): Double = {
-    val instant = Instant.ofEpochSecond(value.toLong)
-    val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-    ldt.getMonthValue
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getMonthValue
+    }
+  }
+}
+
+case class YearImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getYear
+    }
+  }
+}
+
+case class HourImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getHour
+    }
+  }
+}
+
+case class MinuteImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getMinute
+    }
+  }
+}
+
+case class DayOfWeekImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getDayOfWeek.getValue
+    }
+  }
+}
+
+case class DayOfMonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      ldt.getDayOfMonth
+    }
+  }
+}
+
+case class DaysInMonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
+  override def apply(value: Double): Double = {
+    if (value.isNaN || value.isInfinite) {
+      value
+    } else {
+      val instant = Instant.ofEpochSecond(value.toLong)
+      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      YearMonth.from(ldt).lengthOfMonth()
+    }
   }
 }
 

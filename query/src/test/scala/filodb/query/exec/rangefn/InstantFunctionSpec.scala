@@ -296,20 +296,44 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
                                  InstantFunctionId.HistogramBucket, Seq(9.0), histSchema)
   }
 
-  it("should test date funtions") {
-    //val expected = samples.map(_.rows.map(v => scala.math.abs(v.getDouble(1))))
-
+  it("should test date time functions") {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
-
         override def rows: Iterator[RowReader] = Seq(
-          new TransientRow(1L, 1456790399),
-          new TransientRow(2L, 1456790400)).iterator
+          new TransientRow(1L, 1456790399), // 2016-02-29 23:59:59 February 29th
+          new TransientRow(2L, 1456790400), // 2016-03-01 00:00:00 March 1st
+          new TransientRow(3L, 1230768000), // 2009-01-01 00:00:00 just after leap second
+          new TransientRow(4L, 1230767999)  // 2008-12-31 23:59:59 just before leap second.
+        ).iterator
       }
     )
     applyFunctionAndAssertResult(samples, Array(List(2.0, 3.0).toIterator), InstantFunctionId.Month)
+    applyFunctionAndAssertResult(samples, Array(List(2016.0, 2016.0, 2009.0, 2008.0).toIterator), InstantFunctionId.Year)
+    applyFunctionAndAssertResult(samples, Array(List(59.0, 0.0, 0.0, 59.0).toIterator), InstantFunctionId.Minute)
+    applyFunctionAndAssertResult(samples, Array(List(23.0, 0.0, 0.0, 23.0).toIterator), InstantFunctionId.Hour)
+    applyFunctionAndAssertResult(samples, Array(List(29.0, 31.0, 31.0, 31.0).toIterator), InstantFunctionId.DaysInMonth)
+    applyFunctionAndAssertResult(samples, Array(List(29.0, 1.0, 1.0, 31.0).toIterator), InstantFunctionId.DayOfMonth)
+    applyFunctionAndAssertResult(samples, Array(List(1.0, 2.0, 4.0, 3.0).toIterator), InstantFunctionId.DayOfWeek)
+  }
 
+  it("should handle NaN for date time functions") {
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, Double.NaN),
+          new TransientRow(2L, Double.NaN)
+        ).iterator
+      }
+    )
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Month)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Year)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Minute)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.Hour)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DaysInMonth)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DayOfMonth)
+    applyFunctionAndAssertResult(samples, Array(List(Double.NaN, Double.NaN).toIterator), InstantFunctionId.DayOfWeek)
   }
 
   private def applyFunctionAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
