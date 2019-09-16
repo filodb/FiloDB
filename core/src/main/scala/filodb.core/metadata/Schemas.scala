@@ -313,5 +313,6 @@ object Schemas {
    * They are put here so they can be used in Query Engine, testing, etc.
    */
   val global = fromConfig(GlobalConfig.defaultFiloConfig).get
-  val promCounter = global.schemas("prometheus")
+  val gauge = global.schemas("gauge")
+  val promCounter = global.schemas("prom-counter")
 }
