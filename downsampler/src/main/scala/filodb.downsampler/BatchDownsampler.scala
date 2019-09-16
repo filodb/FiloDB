@@ -14,23 +14,24 @@ import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{ChunkDownsampler, DoubleChunkDownsampler, HistChunkDownsampler, TimeChunkDownsampler}
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats, WriteBufferPool}
-import filodb.core.metadata.{Schema, Schemas}
+import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
 import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 /**
-  * This is an object instead of class so that it need not be serialized to a spark executor
-  * from the driver.
-  *
-  * All of the necessary params for the behavior are loaded from DownsampleSettings.
-  *
   * This class maintains state during the processing of a batch of TSPartitions to downsample. Namely
   * a. The memory manager used for the paged partitions
   * b. The buffer pool used to ingest and chunk the downsampled data
   * c. Block store for overflow chunks that go beyond write buffers
   * d. Statistics
   * e. The Cassandra Store API from which to read raw data as well as write downsampled data
+  *
+  * It performs the operation of downsampling all partitions in the batch and writes downsampled data
+  * into cassandra.
+  *
+  * This is an object instead of class so that it need not be serialized to a spark executor
+  * from the driver. All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
 object BatchDownsampler extends StrictLogging {
 
@@ -127,6 +128,18 @@ object BatchDownsampler extends StrictLogging {
       s"partitions in current executor")
   }
 
+  /**
+    * Creates new downsample partitions per per the resolutions
+    * * specified by `bufferPools`.
+    * Downsamples all chunks in `partToDownsample` per the resolutions and stores
+    * downsampled data into the newly created partition.
+    *
+    * NOTE THAT THE DOWNSAMPLE PARTITIONS NEED TO BE FREED/SHUT DOWN BY THE CALLER ONCE CHUNKS ARE PERSISTED
+    *
+    * @param rawPartsToFree raw partitions that need to be freed are added to this mutable list
+    * @param downsampledPartsPartsToFree downsample partitions to be freed are added to this mutable list
+    * @param downsampledChunksToPersist downsample chunks to persist are added to this mutable map
+    */
   private[downsampler] def downsamplePart(rawPart: RawPartData,
                                           rawPartsToFree: ArrayBuffer[PagedReadablePartition],
                                           downsampledPartsPartsToFree: ArrayBuffer[TimeSeriesPartition],
@@ -139,7 +152,17 @@ object BatchDownsampler extends StrictLogging {
 
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
           rawPart, memoryManager)
-        val downsampledParts = downsample(rawSchemaId, downsampleSchema, rawReadablePart)
+        val bufferPool = bufferPoolByRawSchemaId(rawSchemaId)
+        val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
+
+        val downsampledParts = downsampleResolutions.map { res =>
+          val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
+                                            0, bufferPool, shardStats, memoryManager, 1)
+          res -> part
+        }.toMap
+
+        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, userTimeStart)
+
         rawPartsToFree += rawReadablePart
         downsampledPartsPartsToFree ++= downsampledParts.values
 
@@ -154,52 +177,34 @@ object BatchDownsampler extends StrictLogging {
   }
 
   /**
-    * Creates new downsample partitions per per the resolutions
-    * * specified by `bufferPools`.
-    * Downsamples all chunks in `partToDownsample` per the resolutions and stores
-    * downsampled data into the newly created partition.
+    * Downsample chunks in a partition, ingest the downsampled data into downsampled partitions
     *
-    * @return a TimeSeriesPartition for each resolution to be downsampled.
-    *         NOTE THAT THE PARTITIONS NEED TO BE FREED/SHUT DOWN ONCE CHUNKS ARE EXTRACTED FROM THEM
+    * @param rawPartToDownsample raw partition to downsample
+    * @param downsamplers chunk downsamplers to use to downsample
+    * @param downsampledParts the downsample parts to ingest downsampled data
+    * @param downsampleIngestionTime ingestionTime to use for downsampled data
     */
-  // scalastyle:off method.length parameter.number
-  def downsample(rawSchemaId: Int,
-                 downsampleSchema: Schema,
-                 partToDownsample: ReadablePartition): Map[FiniteDuration, TimeSeriesPartition] = {
-
-    val bufferPool = bufferPoolByRawSchemaId(rawSchemaId)
-    val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
-    val downsampleIngestionTime = userTimeStart  // use userTime as ingestionTime for downsampled data
-
-    val resToPartition = downsampleResolutions.map { res =>
-      val part = new TimeSeriesPartition(
-        0,
-        downsampleSchema,
-        partToDownsample.partitionKey,
-        0,
-        bufferPool,
-        shardStats,
-        memoryManager,
-        1)
-      logger.trace(s"Creating new part=${part.hashCode}")
-      res -> part
-    }.toMap
-
-    val chunksets = partToDownsample.infos(AllChunkScan)
+  // scalastyle:off method.length
+  private def downsampleChunks(rawPartToDownsample: ReadablePartition,
+                               downsamplers: Seq[ChunkDownsampler],
+                               downsampledParts: Map[FiniteDuration, TimeSeriesPartition],
+                               downsampleIngestionTime: Long) = {
     val timestampCol = 0
+    val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
+
     // TODO create a rowReader that will not box the vals below
     val downsampleRow = new Array[Any](downsamplers.size)
     val downsampleRowReader = SeqRowReader(downsampleRow)
 
-    while (chunksets.hasNext) {
-      val chunkset = chunksets.nextInfo
+    while (rawChunksets.hasNext) {
+      val chunkset = rawChunksets.nextInfo
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
       val vecPtr = chunkset.vectorPtr(timestampCol)
-      val tsReader = partToDownsample.chunkReader(timestampCol, vecPtr).asLongReader
+      val tsReader = rawPartToDownsample.chunkReader(timestampCol, vecPtr).asLongReader
 
       // for each downsample resolution
-      resToPartition.foreach { case (resolution, part) =>
+      downsampledParts.foreach { case (resolution, part) =>
         val resMillis = resolution.toMillis
         // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
         // Hence subtract - 1 below from chunk startTime to find the first downsample period.
@@ -219,11 +224,11 @@ object BatchDownsampler extends StrictLogging {
               val downsampler = downsamplers(col)
               downsampler match {
                 case d: TimeChunkDownsampler =>
-                  downsampleRow(col) = d.downsampleChunk(partToDownsample, chunkset, startRowNum, endRowNum)
+                  downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
                 case d: DoubleChunkDownsampler =>
-                  downsampleRow(col) = d.downsampleChunk(partToDownsample, chunkset, startRowNum, endRowNum)
+                  downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
                 case h: HistChunkDownsampler =>
-                  downsampleRow(col) = h.downsampleChunk(partToDownsample, chunkset, startRowNum, endRowNum)
+                  downsampleRow(col) = h.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
                     .serialize()
               }
             }
@@ -235,12 +240,10 @@ object BatchDownsampler extends StrictLogging {
         }
       }
     }
-    resToPartition
-
   }
 
   /**
-    * Persist chunks in `downsampledChunksToPersist`
+    * Persist chunks in `downsampledChunksToPersist` to Cassandra.
     */
   private[downsampler] def persistDownsampledChunks(
                                     downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Unit = {
