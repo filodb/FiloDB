@@ -148,6 +148,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
+  /**
+    * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
+    * ** User/Ingestion End times are exclusive **
+    */
   def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
                                     splits: Iterator[ScanSplit],
                                     ingestionTimeStart: Long,

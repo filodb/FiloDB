@@ -34,11 +34,16 @@ object DownsamplerSettings {
 
   val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
 
-  val now = downsamplerConfig.as[Option[Long]]("downsampler-execution-time").getOrElse(System.currentTimeMillis())
   val chunkDuration = downsampleStoreConfig.flushInterval.toMillis
-  val userTimeEnd = (now / chunkDuration) * chunkDuration
+  val userTimeStart = downsamplerConfig.as[Option[Long]]("user-time-override") match {
+    case None =>
+      val timeInPeriod = System.currentTimeMillis() - chunkDuration // assume time in the previous downsample period
+      (timeInPeriod / chunkDuration) * chunkDuration
+    case Some(timeInPeriod) =>
+      (timeInPeriod / chunkDuration) * chunkDuration
+  }
 
-  val userTimeStart = userTimeEnd - chunkDuration
+  val userTimeEnd = userTimeStart + chunkDuration
   val ingestionTimeStart = userTimeStart - 2.hours.toMillis
   val ingestionTimeEnd = userTimeEnd + 2.hours.toMillis
 
