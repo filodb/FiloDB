@@ -4,12 +4,14 @@ import java.io.{PrintWriter, StringWriter}
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
+
 import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.{ExceptionHandler, Route}
+import akka.http.scaladsl.server.ExceptionHandler
+import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
 import com.typesafe.scalalogging.StrictLogging
 
