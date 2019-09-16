@@ -89,12 +89,12 @@ object FiloBuild extends Build {
       coordinator % "compile->compile; test->test")
     .configs(IntegrationTest, MultiJvm)
 
-  lazy val downsampler = project
-    .in(file("downsampler"))
+  lazy val sparkJobs = project
+    .in(file("spark-jobs"))
     .settings(commonSettings: _*)
-    .settings(name := "filodb-downsampler")
+    .settings(name := "spark-jobs")
     .settings(scalacOptions += "-language:postfixOps")
-    .settings(libraryDependencies ++= downsamplerDeps)
+    .settings(libraryDependencies ++= sparkJobsDeps)
     .dependsOn(cassandra, core % "compile->compile; test->test")
 
   lazy val bootstrapper = project
@@ -119,9 +119,9 @@ object FiloBuild extends Build {
     .settings(assemblySettings: _*)
     .settings(libraryDependencies ++= standaloneDeps)
     .dependsOn(core, prometheus % "test->test", coordinator % "compile->compile; test->test",
-      cassandra, kafka, http, bootstrapper, downsampler, gateway % Test)
+      cassandra, kafka, http, bootstrapper, sparkJobs, gateway % Test)
     .configs(MultiJvm)
-  // standalone does not depend on downsampler, but the idea is to simplify packaging and versioning
+  // standalone does not depend on spark-jobs, but the idea is to simplify packaging and versioning
 
 //  lazy val spark = project
 //    .in(file("spark"))
@@ -237,7 +237,7 @@ object FiloBuild extends Build {
     scalaxyDep
   )
 
-  lazy val downsamplerDeps = commonDeps ++ Seq(
+  lazy val sparkJobsDeps = commonDeps ++ Seq(
     "org.apache.spark"       %%      "spark-core" % sparkVersion % "provided",
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % "provided",
     scalaxyDep
