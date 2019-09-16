@@ -57,7 +57,7 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  */
 class TimeSeriesPartition(val partID: Int,
                           val schema: Schema,
-                          override val partitionKey: BinaryRegion.NativePointer,
+                          val partitionKey: BinaryRegion.NativePointer,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
                           val shardStats: TimeSeriesShardStats,
