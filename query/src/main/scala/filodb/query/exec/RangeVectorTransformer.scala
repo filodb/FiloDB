@@ -3,6 +3,7 @@ package filodb.query.exec
 import monix.reactive.Observable
 
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
@@ -213,7 +214,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   }
 }
 
-final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer  {
+final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function"
 
@@ -222,25 +223,29 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
+    if (sourceSchema.columns(1).colType == DoubleColumn) {
 
-    val ordering: Ordering[Double] = function match {
-      case Sort         => (Ordering[Double])
-      case SortDesc     => (Ordering[Double]).reverse
-      case _            => throw new UnsupportedOperationException(s"$function not supported.")
+      val ordering: Ordering[Double] = function match {
+        case Sort => (Ordering[Double])
+        case SortDesc => (Ordering[Double]).reverse
+        case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      }
+
+      val resultRv = source.toListL.map { rvs =>
+        rvs.map { rv =>
+          new RangeVector {
+            override def key: RangeVectorKey = rv.key
+
+            override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
+          }
+        }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
+        }(ordering)
+
+      }.map(Observable.fromIterable)
+
+      Observable.fromTask(resultRv).flatten
+    } else {
+      source
     }
-
-    val resultRv = source.toListL.map { rvs =>
-      rvs.map { rv =>
-        new RangeVector {
-          override def key: RangeVectorKey = rv.key
-
-          override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
-        }
-      }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
-      }(ordering)
-
-    }.map(Observable.fromIterable)
-
-    Observable.fromTask(resultRv).flatten
   }
 }
