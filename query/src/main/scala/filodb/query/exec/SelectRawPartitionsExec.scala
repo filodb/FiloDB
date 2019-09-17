@@ -92,6 +92,7 @@ final case class SelectRawPartitionsExec(id: String,
     source.rangeVectors(datasetRef, dataSchema, selectCols, partMethod, chunkMethod)
   }
 
-  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"
+  protected def args: String = s"dataset=$dataset, shard=$shard, schema=${dataSchema.name}, " +
+                               s"chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"
 }
 
