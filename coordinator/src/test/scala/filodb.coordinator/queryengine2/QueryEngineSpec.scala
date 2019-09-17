@@ -164,7 +164,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
     filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
 
-    val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", filodbSpreadMap, 1)
+    val spreadFunc = QueryOptions.simpleMapSpreadFunc(Seq("job"), filodbSpreadMap, 1)
 
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
