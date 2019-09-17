@@ -48,9 +48,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
     new CassandraColumnStore(settings.filodbConfig, readSched, None)(writeSched)
 
   private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
-                       "run" -> "Downsampler",
-                       "userTimeStart" -> settings.userTimeStart.toString,
-                       "userTimeEnd" -> settings.userTimeEnd.toString)
+                               "owner" -> "BatchDownsampler")
 
   private val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
@@ -105,12 +103,13 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
-  private[downsampler] def downsampleBatch(rawPartsBatch: Seq[RawPartData]) = {
+  private[downsampler] def downsampleBatch(rawPartsBatch: Seq[RawPartData],
+                                           userTimeStart: Long,
+                                           userTimeEnd: Long) = {
 
-    logger.debug(s"Starting downsampling batch of ${rawPartsBatch.size} partitions " +
+    logger.debug(s"Starting to downsample batch of ${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"ingestionTimeStart=${settings.ingestionTimeStart} ingestionTimeEnd=${settings.ingestionTimeEnd} " +
-      s"userTimeStart=${settings.userTimeStart} userTimeEnd=${settings.userTimeEnd}")
+      s"userTimeStart=$userTimeStart userTimeEnd=$userTimeEnd")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>
@@ -119,7 +118,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
     val rawPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsPartsToFree = ArrayBuffer[TimeSeriesPartition]()
     rawPartsBatch.foreach { rawPart =>
-      downsamplePart(rawPart, rawPartsToFree, downsampledPartsPartsToFree, downsampledChunksToPersist)
+      downsamplePart(rawPart, rawPartsToFree, downsampledPartsPartsToFree,
+                     downsampledChunksToPersist, userTimeStart, userTimeEnd)
     }
     persistDownsampledChunks(downsampledChunksToPersist)
 
@@ -150,7 +150,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
   private[downsampler] def downsamplePart(rawPart: RawPartData,
                                           rawPartsToFree: ArrayBuffer[PagedReadablePartition],
                                           downsampledPartsPartsToFree: ArrayBuffer[TimeSeriesPartition],
-                                          downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]) = {
+                                          downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
+                                          userTimeStart: Long,
+                                          userTimeEnd: Long) = {
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
     rawPartSchema.downsample match {
@@ -168,7 +170,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
           res -> part
         }.toMap
 
-        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, settings.userTimeStart)
+        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, userTimeStart, userTimeEnd)
 
         rawPartsToFree += rawReadablePart
         downsampledPartsPartsToFree ++= downsampledParts.values
@@ -189,13 +191,13 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
     * @param rawPartToDownsample raw partition to downsample
     * @param downsamplers chunk downsamplers to use to downsample
     * @param downsampledParts the downsample parts in which to ingest downsampled data
-    * @param downsampleIngestionTime ingestionTime to use for downsampled data
     */
   // scalastyle:off method.length
   private def downsampleChunks(rawPartToDownsample: ReadablePartition,
                                downsamplers: Seq[ChunkDownsampler],
                                downsampledParts: Map[FiniteDuration, TimeSeriesPartition],
-                               downsampleIngestionTime: Long) = {
+                               userTimeStart: Long,
+                               userTimeEnd: Long) = {
     val timestampCol = 0
     val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
 
@@ -221,7 +223,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
         var pEnd = pStart + resMillis // end is inclusive
         // for each downsample period
         while (pStart <= endTime) {
-          if (pEnd >= settings.userTimeStart && pEnd <= settings.userTimeEnd) {
+          if (pEnd >= userTimeStart && pEnd <= userTimeEnd) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
             val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
             val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
@@ -240,7 +242,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
               }
             }
             logger.trace(s"Ingesting into part=${part.hashCode}: $downsampleRow")
-            part.ingest(downsampleIngestionTime, downsampleRowReader, blockFactory)
+            part.ingest(userTimeStart, downsampleRowReader, blockFactory) // use the userTimeStart as ingestionTime
           }
           pStart += resMillis
           pEnd += resMillis
