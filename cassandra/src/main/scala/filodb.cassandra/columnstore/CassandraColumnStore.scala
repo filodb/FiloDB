@@ -162,7 +162,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val partKeys = Observable.fromIterator(splits).flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
-        logger.debug(s"Querying cassandra for partKeys for split=$split")
+        logger.debug(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
+          s"ingestionTimeEnd=$ingestionTimeEnd")
         indexTable.scanPartKeysByIngestionTime(split.tokens, ingestionTimeStart, ingestionTimeEnd)
       case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
     }
@@ -171,7 +172,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.bufferTimedAndCounted(1.second, batchSize).map { parts =>
-      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions")
+      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
+        s"userTimeEnd=$userTimeEnd")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable
       // based on how much faster downsampling should run, and how much additional read load cassandra can take.
       chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd).toIterator().toSeq

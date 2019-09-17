@@ -48,3 +48,4 @@ class DownsamplerSettings(val filodbConfig: Config) {
   val chunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
 }
+
