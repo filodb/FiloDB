@@ -254,7 +254,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val keys = usedBlocksTimeOrdered.headMap(upTo).keySet.asScala
       logger.info(s"timeBlockReclaim: Marking lists $keys as reclaimable")
       usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
-        list.asScala.foreach(_.markReclaimable)
+        list.asScala.foreach(_.tryMarkReclaimable)
       }
     } finally {
       lock.unlock()
