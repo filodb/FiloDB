@@ -73,21 +73,28 @@ extends RawToPartitionMaker with StrictLogging {
       tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
       // One chunkset at a time, load them into offheap and populate the partition
       rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
-        val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
-        val chunkID = ChunkSetInfo.getChunkID(infoBytes)
+        // If the chunk is empty, skip it. If no call to allocateOffheap is made, then no check
+        // is made to ensure that the block has room even for metadata. The call to endMetaSpan
+        // might end up returning 0, because the last block doesn't have any room. It's
+        // possible to guard against this by forcing an allocation, but it doesn't make sense
+        // to allocate a block just for storing an unnecessary metadata entry.
+        if (!rawVectors.isEmpty) {
+          val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
+          val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
-        memFactory.startMetaSpan()
-        val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
-        val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                                              tsPart.schema.data.blockMetaSize.toShort)
-        require(metaAddr != 0)
-        val infoAddr = metaAddr + 4   // Important: don't point at partID
-        val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
+          memFactory.startMetaSpan()
+          val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
+          val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                                                tsPart.schema.data.blockMetaSize.toShort)
+          require(metaAddr != 0)
+          val infoAddr = metaAddr + 4   // Important: don't point at partID
+          val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
-        if (!inserted) {
-          logger.info(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
-            s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
-            s"${ChunkSetInfo.getEndTime(infoBytes)}) partition earliestTime=${tsPart.earliestTime}")
+          if (!inserted) {
+            logger.info(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
+              s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
+              s"${ChunkSetInfo.getEndTime(infoBytes)}) partition earliestTime=${tsPart.earliestTime}")
+          }
         }
       }
       tsPart
