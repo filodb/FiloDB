@@ -5,12 +5,12 @@ import monix.reactive.Observable
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.SortFunctionId.{Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
-
 
 
 /**
@@ -194,8 +194,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   val miscFunction: MiscellaneousFunction = {
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
-      case LabelJoin => LabelJoinFunction(funcParams)
-      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      case LabelJoin    => LabelJoinFunction(funcParams)
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
 
@@ -204,5 +204,40 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     miscFunction.execute(source)
+  }
+}
+
+final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"function=$function"
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    if (sourceSchema.columns(1).colType == ColumnType.DoubleColumn) {
+
+      val ordering: Ordering[Double] = function match {
+        case Sort => (Ordering[Double])
+        case SortDesc => (Ordering[Double]).reverse
+        case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      }
+
+      val resultRv = source.toListL.map { rvs =>
+        rvs.map { rv =>
+          new RangeVector {
+            override def key: RangeVectorKey = rv.key
+
+            override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
+          }
+        }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
+        }(ordering)
+
+      }.map(Observable.fromIterable)
+
+      Observable.fromTask(resultRv).flatten
+    } else {
+      source
+    }
   }
 }

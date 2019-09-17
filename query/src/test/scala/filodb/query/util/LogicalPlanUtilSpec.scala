@@ -72,4 +72,5 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
     val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(binaryJoin, "instance")
     res.get.shouldEqual(Set("Inst-1", "Inst-0"))
   }
+
 }

@@ -223,14 +223,19 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object Month extends MiscellaneousFunctionId("month")
 
-  case object Sort extends MiscellaneousFunctionId("sort")
-
-  case object SortDesc extends MiscellaneousFunctionId("sort_desc")
-
   case object Timestamp extends MiscellaneousFunctionId("timestamp")
 
   case object Year extends MiscellaneousFunctionId("year")
 
+}
+
+sealed abstract class SortFunctionId(override val entryName: String) extends EnumEntry
+
+object SortFunctionId extends Enum[SortFunctionId] {
+  val values = findValues
+  case object Sort extends SortFunctionId("sort")
+
+  case object SortDesc extends SortFunctionId("sort_desc")
 }
 
 

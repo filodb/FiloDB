@@ -27,7 +27,7 @@ final case class IndexData(timeBucket: Int, segment: Int, records: RecordContain
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
 final case class FlushIndexTimeBuckets(timeBucket: Int)
 
-final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLiveSeconds: Int,
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
                             flushTimeBuckets: Option[FlushIndexTimeBuckets])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
@@ -101,7 +101,6 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
