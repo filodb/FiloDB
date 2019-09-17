@@ -66,7 +66,7 @@ object TestTimeseriesProducer extends StrictLogging {
     logger.info(s"Finished producing $numSamples records for ${samplesDuration / 1000} seconds")
     val startQuery = startTime / 1000
     val endQuery = startQuery + 300
-    val periodicPromQL = """heap_usage{dc="DC0",_ns="App-0"}"""
+    val periodicPromQL = """heap_usage{dc="DC0",_ns_="App-0",_ws_="demo"}"""
     val query =
       s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus """ +
       s"""--promql '$periodicPromQL' --start $startQuery --end $endQuery --limit 15"""
@@ -77,12 +77,12 @@ object TestTimeseriesProducer extends StrictLogging {
       s"query=$periodicSamplesQ&start=$startQuery&end=$endQuery&step=15"
     logger.info(s"Periodic Samples query URL: \n$periodicSamplesUrl")
 
-    val rawSamplesQ = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0"}[2m]""",
+    val rawSamplesQ = URLEncoder.encode("""heap_usage{dc="DC0",_ws_="demo",_ns_="App-0"}[2m]""",
       StandardCharsets.UTF_8.toString)
     val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
     logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
 
-    val downsampledQ = URLEncoder.encode("""heap_usage{dc="DC0",_ns="App-0",__col__="sum"}[2m]""",
+    val downsampledQ = URLEncoder.encode("""heap_usage{dc="DC0",_ws_="demo",_ns_="App-0",__col__="sum"}[2m]""",
       StandardCharsets.UTF_8.toString)
     val downsampledSamplesUrl = s"http://localhost:8080/promql/prometheus_ds_1m/api/v1/query?" +
       s"query=$downsampledQ&time=$endQuery"
@@ -129,7 +129,8 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"       -> s"DC$dc",
-                     "_ns"      -> s"App-$app",
+                     "_ws_"      -> "demo",
+                     "_ns_"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
@@ -142,7 +143,8 @@ object TestTimeseriesProducer extends StrictLogging {
   import Column.ColumnType._
 
   val dcUTF8 = "dc".utf8
-  val nsUTF8 = "_ns".utf8
+  val wsUTF8 = "_ws_".utf8
+  val nsUTF8 = "_ns_".utf8
   val partUTF8 = "partition".utf8
   val hostUTF8 = "host".utf8
   val instUTF8 = "instance".utf8
@@ -182,6 +184,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val sum = buckets.sum
 
       val tags = Map(dcUTF8   -> s"DC$dc".utf8,
+                     wsUTF8   -> "demo".utf8,
                      nsUTF8   -> s"App-$app".utf8,
                      partUTF8 -> s"partition-$partition".utf8,
                      hostUTF8 -> s"H$host".utf8,
