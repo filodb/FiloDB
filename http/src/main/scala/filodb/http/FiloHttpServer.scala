@@ -1,7 +1,5 @@
 package filodb.http
 
-import java.io.{PrintWriter, StringWriter}
-
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
 
@@ -29,10 +27,10 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
     ExceptionHandler {
       case ex: Exception =>
         extractUri { uri =>
-          logger.error(s"Request to $uri could not be handled normally", ex)
-          val sw = new StringWriter()
-          ex.printStackTrace(new PrintWriter(sw))
-          complete(HttpResponse(InternalServerError, entity = sw.toString))
+          logger.error(s"Request to uri=$uri failed", ex)
+          val errorString = s"Request to uri=$uri failed with ${ex.getClass.getName} ${ex.getMessage}\n" +
+            ex.getStackTrace.map(_.toString).mkString("\n")
+          complete(HttpResponse(InternalServerError, entity = errorString))
         }
     }
 
