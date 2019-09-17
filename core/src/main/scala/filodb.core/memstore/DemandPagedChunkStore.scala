@@ -73,6 +73,11 @@ extends RawToPartitionMaker with StrictLogging {
       tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
       // One chunkset at a time, load them into offheap and populate the partition
       rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
+        // If the chunk is empty, skip it. If no call to allocateOffheap is made, then no check
+        // is made to ensure that the block has room even for metadata. The call to endMetaSpan
+        // might end up returning 0, because the last block doesn't have any room. It's
+        // possible to guard against this by forcing an allocation, but it doesn't make sense
+        // to allocate a block just for storing an unnecessary metadata entry.
         if (!rawVectors.isEmpty) {
           val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
