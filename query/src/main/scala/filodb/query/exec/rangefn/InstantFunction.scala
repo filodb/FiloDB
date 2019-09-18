@@ -3,6 +3,7 @@ package filodb.query.exec.rangefn
 import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
 
 import scalaxy.loops._
+
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
