@@ -247,9 +247,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
       val partID = UnsafeUtils.getInt(metaAddr)
       val partition = partitions.get(partID)
-      assert(numBytes == partition.schema.data.blockMetaSize)
-      val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       if (partition != UnsafeUtils.ZeroPointer) {
+        assert(numBytes == partition.schema.data.blockMetaSize)
+        val chunkID = UnsafeUtils.getLong(metaAddr + 4)
         partition.removeChunksAt(chunkID)
       }
     }
