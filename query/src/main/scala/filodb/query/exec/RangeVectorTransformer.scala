@@ -1,16 +1,16 @@
 package filodb.query.exec
 
-import monix.reactive.Observable
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.ScalarFunctionId.{Scalar, Time}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
+import filodb.query._
+import monix.reactive.Observable
 
 
 
@@ -209,5 +209,72 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     miscFunction.execute(source)
+  }
+}
+
+final case class ScalarFunctionMapper(function: ScalarFunctionId,
+                                      funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"function=$function, funcParams=$funcParams"
+
+//  val scalarFunction: ScalarFunction = {
+//    function match {
+//      case LabelReplace => LabelReplaceFunction(funcParams)
+//      case LabelJoin => LabelJoinFunction(funcParams)
+//      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+//    }
+//  }
+
+  def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
+    val resultRv = source.toListL.map { rvs =>
+      rvs.map { rv =>
+        new RangeVector {
+          override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+          override def rows: Iterator[RowReader] = if (rv.rows.size == 1) rv.rows
+          else
+            rv.rows.map(x => new TransientRow(x.getLong(0), Double.NaN))
+
+          override def ValueType: String = "scalar"
+        }
+      }
+
+    }.map(Observable.fromIterable)
+
+    Observable.fromTask(resultRv).flatten
+  }
+
+  def timeImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
+    val resultRv = source.toListL.map { rvs =>
+      rvs.map { rv =>
+        new RangeVector {
+          override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+          override def rows: Iterator[RowReader] =
+            rv.rows.map(x => new TransientRow(x.getLong(0), x.getLong(0)))
+
+          override def ValueType: String = "scalar"
+        }
+      }
+
+    }.map(Observable.fromIterable)
+
+    Observable.fromTask(resultRv).flatten
+  }
+
+  def apply(dataset: Dataset,
+            source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+      function match {
+        case Scalar => scalarImpl(source)
+        case Time => timeImpl()
+        case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      }
+    }
+    val resultRv =  else {
+    source
+  }
   }
 }

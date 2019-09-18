@@ -84,6 +84,12 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
+
+//trait BaseVector {
+//  def rows: Iterator[RowReader]
+//  def numRows: Option[Int] = None
+//  def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
+//}
 /**
   * Represents a single result of any FiloDB Query.
   */
@@ -92,6 +98,7 @@ trait RangeVector {
   def rows: Iterator[RowReader]
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
+  def ValueType : String = "matrix"
 }
 
 // First column of columnIDs should be the timestamp column

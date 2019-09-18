@@ -157,6 +157,18 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
+case class ScalarPlan(vectors: PeriodicSeriesPlan,
+                               function: ScalarFunctionId,
+                               functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+case class VectorOfScalarFunctionPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(scalars)
+}
+
+case class VectorOfScalarPlan(scalars: Any) extends PeriodicSeriesPlan
+
 object LogicalPlan {
 
   /**

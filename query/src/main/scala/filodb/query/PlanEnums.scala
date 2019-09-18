@@ -231,6 +231,29 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object Year extends MiscellaneousFunctionId("year")
 
+ //case object Vector extends MiscellaneousFunctionId("vector")
+
+  //case object Scalar extends MiscellaneousFunctionId("scalar")
+
+}
+
+sealed abstract class ScalarFunctionId(override val entryName: String) extends EnumEntry
+
+object ScalarFunctionId extends Enum[ScalarFunctionId] {
+  val values = findValues
+
+  case object Scalar extends ScalarFunctionId("scalar")
+  case object Time extends ScalarFunctionId("time")
+
+}
+
+sealed abstract class VectorFunctionId(override val entryName: String) extends EnumEntry
+
+object VectorFunctionId extends Enum[VectorFunctionId] {
+  val values = findValues
+
+  case object Vector extends VectorFunctionId("vector")
+
 }
 
 
