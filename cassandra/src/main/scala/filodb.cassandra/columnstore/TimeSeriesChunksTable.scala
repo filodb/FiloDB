@@ -103,8 +103,15 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                               .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readRawPartitionRange(partitions: Seq[Array[Byte]],
-                            startTime: Long, endTimeExclusive: Long): Observable[RawPartData] = {
-    val query = readChunkRangeCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
+                            startTime: Long,
+                            endTimeExclusive: Long): Observable[RawPartData] = {
+    readRawPartitionRangeBB(partitions.map(toBuffer), startTime, endTimeExclusive)
+  }
+
+  def readRawPartitionRangeBB(partitions: Seq[ByteBuffer],
+                              startTime: Long,
+                              endTimeExclusive: Long): Observable[RawPartData] = {
+    val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
                                         .setLong(1, chunkID(startTime, 0))
                                         .setLong(2, chunkID(endTimeExclusive, 0))
     val futRawParts = session.executeAsync(query)

@@ -119,6 +119,16 @@ object TimeSeriesShard {
     }
   }
 
+  /**
+    * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
+    */
+  def writeMetaWithoutPartId(addr: Long, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+    ChunkSetInfo.copy(bytes, addr)
+    for { i <- 0 until vectors.size optimized } {
+      ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
+    }
+  }
+
   val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
     ColumnInfo("endTime", ColumnType.LongColumn),
     ColumnInfo("partKey", ColumnType.StringColumn)))
