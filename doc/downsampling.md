@@ -47,10 +47,27 @@ emit timestamp value. One could later have downsamplers that emit histogram or l
 
 Downsampling for prometheus counters will come soon.
 
-Downsampling is configured at the time of dataset creation. For example:
+Downsampling is configured from the Schema.
+
+For example, a schema will contain downsampler config as follows:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns_,_ws_ --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+  schemas {
+    gauge {
+      # Each column def is of name:type format.  Type may be ts,long,double,string,int
+      # The first column must be ts or long
+      columns = ["timestamp:ts", "value:double:detectDrops=false"]
+
+      # Default column to query using PromQL
+      value-column = "value"
+
+      # Downsampling configuration.  See doc/downsampling.md
+      downsamplers = [ "tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)" ]
+
+      # If downsamplers are defined, then the downsample schema must also be defined
+      downsample-schema = "ds-gauge"
+    }
+  }
 ```
 
 In the above example, the data column `value` with index 1 is configured with the dMin, dMax, sSum, dCount and dAvg downsamplers.
