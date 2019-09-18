@@ -43,11 +43,13 @@ The **spread** determines how many shards a given shard key is mapped to.  The n
 ```
 spread-assignment = [
     {
-      _ns = App-0,
+      _ws_ = demo,
+      _ns_ = App-0,
       _spread_ = 2
     },
     {
-      _ns = App-5,
+      _ws_ = demo,
+      _ns_ = App-5,
       _spread_ = 0
     }
   ]

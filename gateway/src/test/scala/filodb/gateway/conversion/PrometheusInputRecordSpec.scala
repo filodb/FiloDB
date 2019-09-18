@@ -9,7 +9,7 @@ import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
 
 object TimeSeriesFixture {
-  //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ns=filodb counter=0 1536790212000000000",
+  //  "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
   def timeseries(no: Int, tags: Map[String, String]): TimeSeries = {
     val builder = TimeSeries.newBuilder
                     .addSamples(Sample.newBuilder.setTimestampMs(1000000L + no).setValue(1.1 + no).build)
@@ -27,17 +27,17 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
   val tagsWithMetric = baseTags + ("__name__" -> "num_partitions")
 
   it("should parse from TimeSeries proto and write to RecordBuilder") {
-    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("_ns" -> "filodb"))
+    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithMetric + ("_ns_" -> "filodb", "_ws_" -> "demo"))
     val builder = new RecordBuilder(MemFactory.onHeapFactory)
 
     val records = PrometheusInputRecord(proto1)
     records should have length (1)
     val record1 = records.head
-    record1.tags shouldEqual (baseTags + ("_ns" -> "filodb"))
+    record1.tags shouldEqual (baseTags + ("_ns_" -> "filodb", "_ws_" -> "demo"))
     record1.getMetric shouldEqual "num_partitions"
-    record1.nonMetricShardValues shouldEqual Seq("filodb")
+    record1.nonMetricShardValues shouldEqual Seq("filodb", "demo")
 
-    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb"), "num_partitions")
+    record1.shardKeyHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb", "demo"), "num_partitions")
 
     record1.addToBuilder(builder)
     builder.allContainers.head.foreach { case (base, offset) =>
@@ -48,7 +48,7 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
 
       val consumer = new StringifyMapItemConsumer()
       schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
-      consumer.stringPairs.toMap shouldEqual (baseTags + ("_ns" -> "filodb"))
+      consumer.stringPairs.toMap shouldEqual (baseTags + ("_ns_" -> "filodb", "_ws_" -> "demo"))
     }
   }
 
@@ -60,14 +60,14 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
 
   it("should copy tags from another key if copyTags defined and original key missing") {
     // add exporter and see if it gets renamed
-    val tagsWithExporter = tagsWithMetric + ("exporter" -> "gateway")
+    val tagsWithExporter = tagsWithMetric + ("exporter" -> "gateway", "_ws_" -> "demo")
     val proto1 = TimeSeriesFixture.timeseries(0, tagsWithExporter)
     val records = PrometheusInputRecord(proto1)
     records should have length (1)
     val record1 = records.head
-    record1.tags shouldEqual (tagsWithExporter - "__name__" + ("_ns" -> "gateway"))
+    record1.tags shouldEqual (tagsWithExporter - "__name__" + ("_ns_" -> "gateway"))
     record1.getMetric shouldEqual "num_partitions"
-    record1.nonMetricShardValues shouldEqual Seq("gateway")
+    record1.nonMetricShardValues shouldEqual Seq("gateway", "demo")
 
     // no exporter.  Nothing added
     val proto2 = TimeSeriesFixture.timeseries(0, tagsWithMetric)
