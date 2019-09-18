@@ -239,6 +239,14 @@ final case class Schemas(part: PartitionSchema,
    * Returns the Schema for a given schemaID, or UnknownSchema if not found
    */
   final def apply(id: Int): Schema = _schemas(id)
+
+  /**
+   * Returns the schema name for given schemaID, or "<unknown>"
+   */
+  final def schemaName(id: Int): String = {
+    val sch = apply(id)
+    if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
+  }
 }
 
 /**

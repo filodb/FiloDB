@@ -401,6 +401,9 @@ object RecordSchema {
 
   final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
 
+  final def schemaID(bytes: Array[Byte]): Int =
+    if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
+
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
     new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4)
