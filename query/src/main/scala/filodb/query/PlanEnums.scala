@@ -225,10 +225,6 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
 
-  case object Sort extends MiscellaneousFunctionId("sort")
-
-  case object SortDesc extends MiscellaneousFunctionId("sort_desc")
-
   case object Timestamp extends MiscellaneousFunctionId("timestamp")
 
 

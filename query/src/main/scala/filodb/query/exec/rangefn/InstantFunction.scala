@@ -1,9 +1,8 @@
 package filodb.query.exec.rangefn
 
-import java.time.{Instant, LocalDateTime, YearMonth, ZoneId}
+import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
 
 import scalaxy.loops._
-
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -283,9 +282,7 @@ case class YearImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-      ldt.getYear
+      LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC).getYear()
     }
   }
 }
@@ -295,9 +292,7 @@ case class HourImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-      ldt.getHour
+      LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC).getHour()
     }
   }
 }
@@ -307,9 +302,7 @@ case class MinuteImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunction {
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-      ldt.getMinute
+      LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC).getMinute()
     }
   }
 }
@@ -319,9 +312,14 @@ case class DayOfWeekImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunctio
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-      ldt.getDayOfWeek.getValue
+      val dayOfWeek = LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC).getDayOfWeek.getValue
+      // Prometheus range is 0 to 6 where 0 is Sunday
+      if (dayOfWeek == 7) {
+        0
+      }
+      else {
+        dayOfWeek
+      }
     }
   }
 }
@@ -331,9 +329,7 @@ case class DayOfMonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFuncti
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
-      ldt.getDayOfMonth
+      LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC).getDayOfMonth
     }
   }
 }
@@ -343,8 +339,7 @@ case class DaysInMonthImpl(funcParams: Seq[Any]) extends EmptyParamsInstantFunct
     if (value.isNaN || value.isInfinite) {
       value
     } else {
-      val instant = Instant.ofEpochSecond(value.toLong)
-      val ldt = LocalDateTime.ofInstant(instant, ZoneId.of("UTC"))
+      val ldt = LocalDateTime.ofEpochSecond(value.toLong, 0, ZoneOffset.UTC)
       YearMonth.from(ldt).lengthOfMonth()
     }
   }
