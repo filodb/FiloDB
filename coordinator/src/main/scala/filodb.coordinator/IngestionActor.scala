@@ -176,7 +176,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
       if (checkpoints.isEmpty) {
         logger.info(s"No checkpoints were found for dataset=$ref shard=${shard} -- skipping kafka recovery")
         // Start normal ingestion with no recovery checkpoint and flush group 0 first
-        normalIngestion(shard, None, 0, storeConfig.diskTTLSeconds)
+        normalIngestion(shard, None, 0)
       } else {
         // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
         // offsets come back from the MemStore for us to report progress.
@@ -193,7 +193,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         yield {
           // Start reading past last offset for normal records; start flushes one group past last group
           normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
-                          (lastFlushedGroup + 1) % numGroups, storeConfig.diskTTLSeconds)
+                          (lastFlushedGroup + 1) % numGroups)
         }
       }
     }
@@ -223,8 +223,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
    */
   private def normalIngestion(shard: Int,
                               offset: Option[Long],
-                              startingGroupNo: Int,
-                              diskTimeToLiveSeconds: Int): Unit = {
+                              startingGroupNo: Int): Unit = {
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
       logger.info(s"Starting normal/active ingestion for dataset=$ref shard=$shard at offset $offset")
@@ -243,7 +242,6 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         stream,
         flushSched,
         flushStream(startingGroupNo),
-        diskTimeToLiveSeconds,
         onCancel)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data

@@ -20,7 +20,7 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
     inline-dataset-configs = [
       {
         dataset = "prometheus"
-        schema = "prometheus"
+        schema = "gauge"
         num-shards = 4
         min-num-nodes = 1
         sourcefactory = "${classOf[NoOpStreamFactory].getName}"
