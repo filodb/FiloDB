@@ -176,7 +176,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")),
-      ColumnFilter("_ns", Filter.Equals("everybody")))
+      ColumnFilter("_ns_", Filter.Equals("everybody")),
+      ColumnFilter("_ws_", Filter.Equals("work1")))
 
     val to = System.currentTimeMillis()
     val from = to - 50000
@@ -189,7 +190,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
                  ColumnFilter("job", Filter.Equals("myService")),
-                 ColumnFilter("_ns", Filter.Equals("everybody")))
+                 ColumnFilter("_ns_", Filter.Equals("everybody")),
+                 ColumnFilter("_ws_", Filter.Equals("work1")))
     val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("count"))
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
@@ -198,6 +200,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       100), UnavailablePromQlQueryParams)
     roundTrip(execPlan) shouldEqual execPlan
   }
+
+  val shardKeyStr = "_ns_=\"boo\",_ws_=\"work1\""
 
   it ("should serialize and deserialize ExecPlan2 involving complicated queries") {
     val node0 = TestProbe().ref
@@ -210,7 +214,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
-      "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\",_ns=\"boo\"}[20s])) by (handler)",
+      s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
       100), UnavailablePromQlQueryParams)
@@ -218,7 +222,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     // scalastyle:off
     val logicalPlan2 = Parser.queryRangeToLogicalPlan(
-      "sum(rate(http_request_duration_microseconds_sum{job=\"prometheus\",_ns=\"boo\"}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job=\"prometheus\",_ns=\"boo\"}[5m])) by (handler)",
+      s"""sum(rate(http_request_duration_microseconds_sum{job="prometheus",$shardKeyStr}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job="prometheus",$shardKeyStr}[5m])) by (handler)""",
       qParams)
     // scalastyle:on
     val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100),
@@ -241,7 +245,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
-      "http_request_duration_seconds_bucket{job=\"prometheus\",_ns=\"boo\"}",
+      s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(
       new StaticSpreadProvider(SpreadChange(0, 0))), 100), UnavailablePromQlQueryParams)

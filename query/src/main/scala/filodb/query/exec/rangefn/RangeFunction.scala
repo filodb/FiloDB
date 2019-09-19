@@ -1,7 +1,7 @@
 package filodb.query.exec.rangefn
 
-import filodb.core.metadata.{Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Schema
 import filodb.core.query.ResultSchema
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
@@ -227,14 +227,9 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
-
   def downsampleColsFromRangeFunction(schema: Schema, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
       case None                   => Seq("avg")
-      case Some(Rate)             => Seq(schema.data.valueColName)
-      case Some(Irate)            => Seq(schema.data.valueColName)
-      case Some(Increase)         => Seq(schema.data.valueColName)
-      case Some(Resets)           => Seq(schema.data.valueColName)
       case Some(CountOverTime)    => Seq("count")
       case Some(Changes)          => Seq("avg")
       case Some(Delta)            => Seq("avg")
@@ -244,13 +239,24 @@ object RangeFunction {
       case Some(PredictLinear)    => Seq("avg")
       case Some(SumOverTime)      => Seq("sum")
       case Some(AvgOverTime)      => Seq("sum", "count")
+      case Some(AvgWithSumAndCountOverTime) => Seq("sum", "count")
       case Some(StdDevOverTime)   => Seq("avg")
       case Some(StdVarOverTime)   => Seq("avg")
       case Some(QuantileOverTime) => Seq("avg")
       case Some(MinOverTime)      => Seq("min")
       case Some(MaxOverTime)      => Seq("max")
+      case other                  => Seq(schema.data.valueColName)
     }
   }
+
+  // Convert range function for downsample schema
+  def downsampleRangeFunction(f: Option[RangeFunctionId]): Option[RangeFunctionId] =
+    f match {
+      case Some(CountOverTime)    => Some(SumOverTime)
+      case Some(AvgOverTime)      => Some(AvgWithSumAndCountOverTime)
+      case other                  => other
+    }
+
   /**
    * Returns a (probably new) instance of RangeFunction given the func ID and column type
    */
@@ -290,17 +296,13 @@ object RangeFunction {
   def longChunkedFunction(schema: ResultSchema,
                           func: Option[RangeFunctionId],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
-    val isDownsampleGauge = (schema.columns == Schemas.dsGauge.dataInfos)
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
-      case Some(CountOverTime)  => () => if (isDownsampleGauge) new SumOverTimeChunkedFunctionL
-                                         else new CountOverTimeChunkedFunction()
+      case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
-      case Some(AvgOverTime)    => () => if (isDownsampleGauge) {
-                                           require(schema.columns(2).name == "count")
-                                           new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
-                                         }
-                                         else new AvgOverTimeChunkedFunctionL
+      case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")
+                                   () => new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
+      case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionL
       case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionL
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
@@ -317,20 +319,16 @@ object RangeFunction {
                             func: Option[RangeFunctionId],
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
-    val isDownsampleGauge = (schema.columns == Schemas.dsGauge.dataInfos)
     func match {
       case None                 => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
-      case Some(CountOverTime)  => () => if (isDownsampleGauge) new SumOverTimeChunkedFunctionD
-                                         else new CountOverTimeChunkedFunctionD()
+      case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
-      case Some(AvgOverTime)    => () => if (isDownsampleGauge) {
-                                           require(schema.columns(2).name == "count")
-                                           new AvgWithSumAndCountOverTimeFuncD(schema.colIDs(2))
-                                         }
-                                         else new AvgOverTimeChunkedFunctionD
+      case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")
+                                   () => new AvgWithSumAndCountOverTimeFuncD(schema.colIDs(2))
+      case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
       case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionD
       case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
       case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD

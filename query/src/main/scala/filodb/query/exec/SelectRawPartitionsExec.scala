@@ -9,10 +9,11 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.{Query, QueryConfig}
+import filodb.query.{Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.RangeFunction
+import filodb.query.Query.qLogger
 
-object SelectRawPartitionsExec {
+object SelectRawPartitionsExec extends  {
   import Column.ColumnType._
 
   // Returns Some(colID) the ID of a "max" column if one of given colIDs is a histogram.
@@ -21,6 +22,29 @@ object SelectRawPartitionsExec {
           .flatMap { histColID =>
             schema.data.columns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
           }
+  }
+
+  def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[RangeFunctionId] =
+    transformers.collect { case p: PeriodicSamplesMapper => p.functionId }.headOption.flatten
+
+  def replaceRangeFunction(transformers: Seq[RangeVectorTransformer],
+                           oldFunc: Option[RangeFunctionId],
+                           newFunc: Option[RangeFunctionId]): Seq[RangeVectorTransformer] =
+    transformers.map {
+      case p: PeriodicSamplesMapper if p.functionId == oldFunc => p.copy(functionId = newFunc)
+      case other: RangeVectorTransformer => other
+    }
+
+  // Optimize transformers, replacing range functions for downsampled gauge queries if needed
+  def optimizeForDownsample(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+    if (schema == Schemas.dsGauge) {
+      val origFunc = findFirstRangeFunction(transformers)
+      val newFunc = RangeFunction.downsampleRangeFunction(origFunc)
+      qLogger.debug(s"Replacing range function $origFunc with $newFunc...")
+      replaceRangeFunction(transformers, origFunc, newFunc)
+    } else {
+      transformers.toBuffer   // Produce an immutable copy, so the original one is not mutated by accident
+    }
   }
 }
 
@@ -84,6 +108,9 @@ final case class SelectRawPartitionsExec(id: String,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     require(!colIds.contains(0),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
+
+    // Optimize/adjust transformers for downsampling queries.
+    replaceTransformers(optimizeForDownsample(dataSchema, rangeVectorTransformers))
 
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val selectCols = selectColIds()

@@ -452,8 +452,9 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       450000 -> 6.916666666666667,
       750000 -> 4.2592592592592595
     )
+    val rangeFunc = RangeFunction.downsampleRangeFunction(Some(RangeFunctionId.AvgOverTime))
     val chunkedItAvg = new ChunkedWindowIteratorD(rvAvg, 50000L, 100000, 750000L, 100000,
-      RangeFunction(dsResSchema, Some(RangeFunctionId.AvgOverTime),
+      RangeFunction(dsResSchema, rangeFunc,
         ColumnType.DoubleColumn, queryConfig,
         useChunked = true).asChunkedD, queryConfig)
     chunkedItAvg.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual avgWindowResults
@@ -467,8 +468,9 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       450000 -> 12.0,
       750000 -> 27.0
     )
+    val cntFunc = RangeFunction.downsampleRangeFunction(Some(RangeFunctionId.CountOverTime))
     val chunkedItCnt = new ChunkedWindowIteratorD(rvCnt, 50000L, 100000, 750000L, 100000,
-      RangeFunction(dsResSchema, Some(RangeFunctionId.CountOverTime),
+      RangeFunction(dsResSchema, cntFunc,
         ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
     chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual countWindowResults
   }

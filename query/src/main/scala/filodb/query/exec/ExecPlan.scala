@@ -78,6 +78,12 @@ trait ExecPlan extends QueryCommand {
     rangeVectorTransformers += mapper
   }
 
+  final def replaceTransformers(newTransformers: Seq[RangeVectorTransformer]): Unit = {
+    qLogger.debug(s"Replacing $rangeVectorTransformers with $newTransformers")
+    rangeVectorTransformers.clear()
+    rangeVectorTransformers ++= newTransformers
+  }
+
   /**
     * Schema of QueryResponse returned by running execute()
     */

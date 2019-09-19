@@ -62,6 +62,9 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
   case object AvgOverTime extends RangeFunctionId("avg_over_time")
 
+  // Used only for ds-gauge schema
+  case object AvgWithSumAndCountOverTime extends RangeFunctionId("avg_with_sum_count_over_time")
+
   case object Changes extends RangeFunctionId("changes")
 
   case object CountOverTime extends RangeFunctionId("count_over_time")
