@@ -171,6 +171,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       case lp: BinaryJoin => getPeriodicSeriesTimeFromLogicalPlan(lp.lhs) // can assume lhs & rhs have same time
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case _ => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -194,7 +195,8 @@ object QueryRoutingPlanner extends RoutingPlanner {
         lookBackTime))
       case lp: ApplyMiscellaneousFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange,
         lookBackTime))
-      case _ => throw new UnsupportedOperationException("Logical plan not supportred for copy")
+      case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+      case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
     }
   }
 
@@ -203,7 +205,6 @@ object QueryRoutingPlanner extends RoutingPlanner {
     */
   def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: RawSeriesPlan, timeRange: TimeRange, lookBackTime: Long):
   RawSeries = {
-
     rawSeriesPlan match {
       case rs: RawSeries => rs.rangeSelector match {
         case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,
@@ -219,19 +220,12 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * NOTE: Plan should be PeriodicSeriesPlan
     */
   def getRawSeriesStartTime(logicalPlan: LogicalPlan): Option[Long] = {
-    logicalPlan match {
+     LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
       case lp: RawSeries => lp.rangeSelector match {
         case rs: IntervalSelector => Some(rs.from)
         case _ => None
       }
-      case lp: PeriodicSeries => getRawSeriesStartTime(lp.rawSeries)
-      case lp: PeriodicSeriesWithWindowing => getRawSeriesStartTime(lp.rawSeries)
-      case lp: ApplyInstantFunction => getRawSeriesStartTime(lp.vectors)
-      case lp: Aggregate => getRawSeriesStartTime(lp.vectors)
-      case lp: BinaryJoin => getRawSeriesStartTime(lp.lhs) // can assume lhs & rhs have same time
-      case lp: ScalarVectorBinaryOperation => getRawSeriesStartTime(lp.vector)
-      case lp: ApplyMiscellaneousFunction => getRawSeriesStartTime(lp.vectors)
-      case _ => None
+      case _                      => throw new BadQueryException("Invalid logical plan")
     }
   }
 }

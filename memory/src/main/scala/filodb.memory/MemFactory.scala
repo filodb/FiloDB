@@ -1,9 +1,9 @@
 package filodb.memory
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicReference
 
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration._
 
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
@@ -188,6 +188,12 @@ class ArrayBackedMemFactory extends MemFactory {
   def shutdown(): Unit = {}
 }
 
+object BlockMemFactory {
+  // Simple constant to avoid premature reclamation, under the assumption that appending
+  // metadata to the block is quick. In practice, a few microseconds. Not an ideal solution,
+  // but it's easier than retrofitting this class to support safe memory ownership.
+  val USED_THRESHOLD_NANOS = 1.minute.toNanos
+}
 
 /**
   * A MemFactory that allocates memory from Blocks obtained from the BlockManager. It
@@ -213,12 +219,43 @@ class BlockMemFactory(blockStore: BlockManager,
   val fullBlocks = ListBuffer[Block]()
 
   // tracks block currently being populated
-  val currentBlock = new AtomicReference[Block]()
+  var currentBlock = requestBlock()
+
+  private def requestBlock() = blockStore.requestBlock(bucketTime, optionSelf).get
 
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
 
-  currentBlock.set(blockStore.requestBlock(bucketTime, optionSelf).get)
+  // Last time this factory was used for allocation.
+  private var lastUsedNanos = now
+
+  private def now: Long = System.nanoTime()
+
+  // This should be called to obtain a non-null current block reference.
+  // Caller should be synchronized.
+  //scalastyle:off null
+  private def accessCurrentBlock() = synchronized {
+    lastUsedNanos = now
+    if (currentBlock == null) {
+      currentBlock = requestBlock
+    }
+    currentBlock
+  }
+
+  /**
+    * Marks all blocks known by this factory as reclaimable, but only if this factory hasn't
+    * been used recently.
+    */
+  def tryMarkReclaimable(): Unit = synchronized {
+    if (now - lastUsedNanos > BlockMemFactory.USED_THRESHOLD_NANOS) {
+      markUsedBlocksReclaimable()
+      if (currentBlock != null) {
+        currentBlock.markReclaimable()
+        currentBlock = null
+      }
+    }
+  }
+  //scalastyle:on null
 
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
@@ -226,7 +263,7 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def startMetaSpan(): Unit = {
     metadataSpan.clear()
-    metadataSpan += (currentBlock.get())
+    metadataSpan += accessCurrentBlock()
   }
 
   /**
@@ -246,22 +283,25 @@ class BlockMemFactory(blockStore: BlockManager,
     metaAddr
   }
 
-  def markUsedBlocksReclaimable(): Unit = {
+  def markUsedBlocksReclaimable(): Unit = synchronized {
     fullBlocks.foreach(_.markReclaimable())
     fullBlocks.clear()
   }
 
-  protected def ensureCapacity(forSize: Long): Block = {
-    if (!currentBlock.get().hasCapacity(forSize)) {
+  protected def ensureCapacity(forSize: Long): Block = synchronized {
+    var block = accessCurrentBlock()
+    if (!block.hasCapacity(forSize)) {
+      val newBlock = requestBlock()
       if (markFullBlocksAsReclaimable) {
-        currentBlock.get().markReclaimable()
+        block.markReclaimable()
+      } else {
+        fullBlocks += block
       }
-      fullBlocks += currentBlock.get()
-      val newBlock = blockStore.requestBlock(bucketTime, optionSelf).get
-      currentBlock.set(newBlock)
-      metadataSpan += newBlock
+      block = newBlock
+      currentBlock = block
+      metadataSpan += block
     }
-    currentBlock.get()
+    block
   }
 
   /**
@@ -294,7 +334,9 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * @return The capacity of any allocated block
     */
-  def blockAllocationSize(): Long = currentBlock.get().capacity
+  def blockAllocationSize(): Long = synchronized {
+    accessCurrentBlock().capacity
+  }
 
   // We don't free memory, because many BlockHolders will share a single BlockManager, and we rely on
   // the BlockManager's own shutdown mechanism
