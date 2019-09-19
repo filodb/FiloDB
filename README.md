@@ -133,10 +133,19 @@ kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partit
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
-Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
+Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
 
 ```
 bin/cassandra
+```
+You should install Cassandra using a tool which you're the most familiar with. For instance, one easy way to install it is via `brew`
+```
+brew install cassandra
+```
+
+Start Cassandra
+```
+brew services start cassandra
 ```
 
 Build the required projects
@@ -151,7 +160,7 @@ First initialize the keyspaces and tables in Cassandra.
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
 
 ```
 ./filodb-dev-start.sh
