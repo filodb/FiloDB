@@ -135,6 +135,16 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
   }
 
   /**
+   * Marks this block as reclaimable if unowned, or if the owner hasn't used the block in a while.
+   */
+  def tryMarkReclaimable(): Unit = {
+    owner match {
+      case None => markReclaimable
+      case Some(bmf) => bmf.tryMarkReclaimable
+    }
+  }
+
+  /**
     * Marks this memory as free. Also zeroes all the bytes from the beginning address until capacity
     */
   override protected def free(): Unit = {
@@ -157,17 +167,19 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
    * Allocates metaSize bytes for metadata storage.
    * @param metaSize the number of bytes to use for metadata storage.
    * @return the Long address of the metadata space.  The metaSize is written to the location 2 bytes before this.
-   *         If there is no capacity then 0 (null) is returned.
+   *         If there is no capacity then OutOfOffheapMemoryException is thrown.
    */
-  def allocMetadata(metaSize: Short): Long =
-    if (metaSize > 0 && metaSize <= (remaining() - 2)) {
+  def allocMetadata(metaSize: Short): Long = {
+    val rem = remaining()
+    if (metaSize > 0 && metaSize <= (rem - 2)) {
       _metaPosition -= (metaSize + 2)
       val metaAddr = address + _metaPosition
       UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
       metaAddr + 2
     } else {
-      0
+      throw new OutOfOffheapMemoryException(metaSize, rem)
     }
+  }
 
   protected def reclaimWithMetadata(): Unit = {
     var metaPointer = address + _metaPosition

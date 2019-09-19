@@ -124,7 +124,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     cluster.shutdown()
   }
 
-  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -135,7 +135,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     }
   }
 
-  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
