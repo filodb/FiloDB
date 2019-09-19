@@ -8,7 +8,7 @@ import pl.project13.scala.sbt.JmhPlugin
 import sbtassembly.AssemblyPlugin.autoImport._
 
 /* Settings */
-object FiloSettings extends Build {
+object FiloSettings {
   import ScalastylePlugin._
 
   val buildSettings = Seq(
@@ -59,11 +59,11 @@ object FiloSettings extends Build {
 
   lazy val styleSettings = Seq(
     scalastyleFailOnError := true,
-    testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
+    testScalastyle := scalastyle.in(Test).toTask("").value,
     // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
     // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
     // (test in Test) <<= (test in Test) dependsOn testScalastyle,
-    compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
+    compileScalastyle := scalastyle.in(Compile).toTask("").value,
     // Is running this on compile too much?
     (compile in Test) := ((compile in Test) dependsOn compileScalastyle).value)
 
@@ -147,7 +147,7 @@ object FiloSettings extends Build {
       val testResults = (executeTests in Test).value
       val multiNodeResults = (executeTests in MultiJvm).value
       val overall =
-        if (testResults.overall.id < multiNodeResults.overall.id)
+        if (testResults.overall.compare(multiNodeResults.overall) == -1)
           multiNodeResults.overall
         else
           testResults.overall
