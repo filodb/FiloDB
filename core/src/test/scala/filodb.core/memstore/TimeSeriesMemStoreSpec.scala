@@ -16,7 +16,7 @@ import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize, PartKey}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
+import filodb.core.store._
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.{ArrayStringRowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.MutableHistogram
@@ -287,6 +287,25 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
     tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
+  }
+
+  it("should lookupPartitions and return correct PartLookupResult") {
+    memStore.setup(dataset2.ref, schemas2h, 0, TestData.storeConf)
+    val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
+    memStore.ingest(dataset2.ref, 0, data)
+
+    memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset2.ref)
+    val split = memStore.getScanSplits(dataset2.ref, 1).head
+    val filter = ColumnFilter("n", Filter.Equals("2".utf8))
+
+    val range = TimeRangeChunkScan(105000L, 2000000L)
+    val res = memStore.lookupPartitions(dataset2.ref, FilteredPartitionScan(split, Seq(filter)), range)
+    res.firstSchemaId shouldEqual Some(schema2.schemaHash)
+    res.partsInMemoryIter.length shouldEqual 2   // two partitions should match
+    res.shard shouldEqual 0
+    res.chunkMethod shouldEqual range
+    res.partIdsMemTimeGap shouldEqual debox.Map(7 -> 107000L)
+    res.partIdsNotInMemory.isEmpty shouldEqual true
   }
 
   /**
