@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
@@ -126,11 +127,6 @@ object TimeSeriesShard {
   // TODO make configurable if necessary
   val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
   val indexTimeBucketSegmentSize = 1024 * 1024 // 1MB
-
-  // Flush groups when ingestion time is observed to cross an hourly boundary. This simplifies
-  // disaster recovery -- chunks can be copied without concern that they may overlap in time.
-  // TODO make configurable if necessary
-  val flushBoundaryMillis = 1.hour.toMillis
 
   // Initial size of partitionSet and partition map structures.  Make large enough to avoid too many resizes.
   val InitialNumPartitions = 128 * 1024
@@ -345,6 +341,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Highest ingestion timestamp observed for a group.
     */
   private final val groupTimestamps = Array.fill(numGroups)(Long.MinValue)
+
+  // Flush groups when ingestion time is observed to cross an hourly boundary. This simplifies
+  // disaster recovery -- chunks can be copied without concern that they may overlap in time.
+  private val flushBoundaryMillis = storeConfig.flushInterval.toUnit(TimeUnit.MILLISECONDS).toLong
 
   /**
     * Helper for downsampling ingested data for long term retention.
