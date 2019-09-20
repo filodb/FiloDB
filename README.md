@@ -138,7 +138,10 @@ Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above 
 ```
 bin/cassandra
 ```
-You should install Cassandra using a tool which you're the most familiar with. For instance, one easy way to install it is via `brew`
+
+You should install Cassandra using a tool which you're the most familiar with.
+
+For instance, one easy way to install it is via `brew`
 ```
 brew install cassandra
 ```
@@ -157,7 +160,8 @@ First initialize the keyspaces and tables in Cassandra.
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
+Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
 The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
