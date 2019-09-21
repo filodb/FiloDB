@@ -10,8 +10,8 @@ import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Schemas
-import filodb.memory.format.{ArrayStringRowReader, RoutingRowReader}
 import filodb.memory.MemFactory
+import filodb.memory.format.{ArrayStringRowReader, RoutingRowReader}
 
 object CsvStream extends StrictLogging {
   // Number of lines to read and send at a time

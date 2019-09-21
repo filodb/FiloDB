@@ -10,8 +10,8 @@ import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
-import filodb.query.exec.rangefn.RangeFunction
 import filodb.query.Query.qLogger
+import filodb.query.exec.rangefn.RangeFunction
 
 object SelectRawPartitionsExec extends  {
   import Column.ColumnType._
