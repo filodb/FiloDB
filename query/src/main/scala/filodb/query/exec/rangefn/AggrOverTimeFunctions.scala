@@ -585,3 +585,80 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
     changes += longReader.changes(longVect, startRowNum, endRowNum)
   }
 }
+
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any], var result: Double = Double.NaN
+                                              )
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { result = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, result)
+  }
+}
+
+class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOverTimeChunkedFunction(funcParams)
+  with ChunkedDoubleRangeFunction {
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    var counter = 0
+    result = if (q < 0) Double.NegativeInfinity
+    else if (q > 1) Double.PositiveInfinity
+    else {
+      var rowNum = startRowNum
+      val it = doubleReader.iterate(doubleVect, startRowNum)
+      var values = new scala.collection.mutable.ArrayBuffer[Double]
+      while (rowNum <= endRowNum) {
+        var nextvalue = it.next
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!JLDouble.isNaN(nextvalue)) {
+          values += nextvalue
+          counter += 1
+        }
+        rowNum += 1
+      }
+      val sortedValues = values.sorted
+      val rank = q*(counter - 1)
+      val lowerIndex = Math.max(0, Math.floor(rank))
+      val upperIndex = Math.min(counter - 1, lowerIndex + 1)
+      val weight = rank - math.floor(rank)
+      sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+    }
+  }
+}
+
+class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
+  extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    var counter = 0
+    require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    result = if (q < 0) Double.NegativeInfinity
+    else if (q > 1) Double.PositiveInfinity
+    else {
+      var rowNum = startRowNum
+      val it = longReader.iterate(longVect, startRowNum)
+      var values = new scala.collection.mutable.ArrayBuffer[Double]
+      while (rowNum <= endRowNum) {
+        var nextvalue = it.next
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!JLDouble.isNaN(nextvalue)) {
+          values += nextvalue
+          counter += 1
+        }
+        rowNum += 1
+      }
+      val sortedValues = values.sorted
+      val rank = q*(counter - 1)
+      val lowerIndex = Math.max(0, Math.floor(rank))
+      val upperIndex = Math.min(counter - 1, lowerIndex + 1)
+      val weight = rank - math.floor(rank)
+      sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+    }
+  }
+}
