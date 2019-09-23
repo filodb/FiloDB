@@ -3,6 +3,7 @@ package filodb.downsampler
 import scala.concurrent.duration._
 
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.GlobalConfig
@@ -16,9 +17,10 @@ object DownsamplerSettings {
   val downsamplerSettings = new DownsamplerSettings(GlobalConfig.systemConfig.getConfig("filodb"))
 }
 
-class DownsamplerSettings(val filodbConfig: Config) {
+class DownsamplerSettings(val filodbConfig: Config) extends StrictLogging {
 
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
+  logger.info(s"Loaded following downsampler config: ${downsamplerConfig.root().render()}" )
 
   val cassandraConfig = filodbConfig.getConfig("cassandra")
 
