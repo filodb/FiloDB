@@ -93,6 +93,7 @@ object FiloBuild extends Build {
     .in(file("spark-jobs"))
     .settings(commonSettings: _*)
     .settings(name := "spark-jobs")
+    .settings(assemblySettings: _*)
     .settings(scalacOptions += "-language:postfixOps")
     .settings(libraryDependencies ++= sparkJobsDeps)
     .dependsOn(cassandra, core % "compile->compile; test->test")
@@ -119,9 +120,8 @@ object FiloBuild extends Build {
     .settings(assemblySettings: _*)
     .settings(libraryDependencies ++= standaloneDeps)
     .dependsOn(core, prometheus % "test->test", coordinator % "compile->compile; test->test",
-      cassandra, kafka, http, bootstrapper, sparkJobs, gateway % Test)
+      cassandra, kafka, http, bootstrapper, gateway % Test)
     .configs(MultiJvm)
-  // standalone does not depend on spark-jobs, but the idea is to simplify packaging and versioning
 
 //  lazy val spark = project
 //    .in(file("spark"))
