@@ -57,48 +57,53 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
 sealed abstract class RangeFunctionId(override val entryName: String) extends EnumEntry
 
+// Used for internal representations of RangeFunctions
+sealed trait InternalRangeFunction
+
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
-  case object AvgOverTime extends RangeFunctionId("avg_over_time")
+  case object AvgOverTime extends RangeFunctionId("avg_over_time") with InternalRangeFunction
 
+  case object Changes extends RangeFunctionId("changes") with InternalRangeFunction
+
+  case object CountOverTime extends RangeFunctionId("count_over_time") with InternalRangeFunction
+
+  case object Delta extends RangeFunctionId("delta") with InternalRangeFunction
+
+  case object Deriv extends RangeFunctionId("deriv") with InternalRangeFunction
+
+  case object HoltWinters extends RangeFunctionId("holt_winters") with InternalRangeFunction
+
+  case object Idelta extends RangeFunctionId("idelta") with InternalRangeFunction
+
+  case object Increase extends RangeFunctionId("increase") with InternalRangeFunction
+
+  case object Irate extends RangeFunctionId("irate") with InternalRangeFunction
+
+  case object MaxOverTime extends RangeFunctionId("max_over_time") with InternalRangeFunction
+
+  case object MinOverTime extends RangeFunctionId("min_over_time") with InternalRangeFunction
+
+  case object PredictLinear extends RangeFunctionId("predict_linear") with InternalRangeFunction
+
+  case object QuantileOverTime extends RangeFunctionId("quantile_over_time") with InternalRangeFunction
+
+  case object Rate extends RangeFunctionId("rate") with InternalRangeFunction
+
+  case object Resets extends RangeFunctionId("resets") with InternalRangeFunction
+
+  case object StdDevOverTime extends RangeFunctionId("stddev_over_time") with InternalRangeFunction
+
+  case object StdVarOverTime extends RangeFunctionId("stdvar_over_time") with InternalRangeFunction
+
+  case object SumOverTime extends RangeFunctionId("sum_over_time") with InternalRangeFunction
+
+}
+
+object InternalRangeFunction {
   // Used only for ds-gauge schema
-  case object AvgWithSumAndCountOverTime extends RangeFunctionId("avg_with_sum_count_over_time")
-
-  case object Changes extends RangeFunctionId("changes")
-
-  case object CountOverTime extends RangeFunctionId("count_over_time")
-
-  case object Delta extends RangeFunctionId("delta")
-
-  case object Deriv extends RangeFunctionId("deriv")
-
-  case object HoltWinters extends RangeFunctionId("holt_winters")
-
-  case object Idelta extends RangeFunctionId("idelta")
-
-  case object Increase extends RangeFunctionId("increase")
-
-  case object Irate extends RangeFunctionId("irate")
-
-  case object MaxOverTime extends RangeFunctionId("max_over_time")
-
-  case object MinOverTime extends RangeFunctionId("min_over_time")
-
-  case object PredictLinear extends RangeFunctionId("predict_linear")
-
-  case object QuantileOverTime extends RangeFunctionId("quantile_over_time")
-
-  case object Rate extends RangeFunctionId("rate")
-
-  case object Resets extends RangeFunctionId("resets")
-
-  case object StdDevOverTime extends RangeFunctionId("stddev_over_time")
-
-  case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
-
-  case object SumOverTime extends RangeFunctionId("sum_over_time")
-
+  case object AvgWithSumAndCountOverTime extends InternalRangeFunction
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry

@@ -339,7 +339,7 @@ class QueryEngine(dataset: Dataset,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))
+      lp.end, Some(lp.window), Some(lp.function.asInstanceOf[InternalRangeFunction]), lp.functionArgs)))
     rawSeries
   }
 

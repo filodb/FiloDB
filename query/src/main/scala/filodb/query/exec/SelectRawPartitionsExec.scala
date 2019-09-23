@@ -9,7 +9,7 @@ import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.{Query, QueryConfig, RangeFunctionId}
+import filodb.query.{InternalRangeFunction, Query, QueryConfig}
 import filodb.query.exec.rangefn.RangeFunction
 import filodb.query.Query.qLogger
 
@@ -24,12 +24,12 @@ object SelectRawPartitionsExec extends  {
           }
   }
 
-  def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[RangeFunctionId] =
+  def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
     transformers.collect { case p: PeriodicSamplesMapper => p.functionId }.headOption.flatten
 
   def replaceRangeFunction(transformers: Seq[RangeVectorTransformer],
-                           oldFunc: Option[RangeFunctionId],
-                           newFunc: Option[RangeFunctionId]): Seq[RangeVectorTransformer] =
+                           oldFunc: Option[InternalRangeFunction],
+                           newFunc: Option[InternalRangeFunction]): Seq[RangeVectorTransformer] =
     transformers.map {
       case p: PeriodicSamplesMapper if p.functionId == oldFunc => p.copy(functionId = newFunc)
       case other: RangeVectorTransformer => other

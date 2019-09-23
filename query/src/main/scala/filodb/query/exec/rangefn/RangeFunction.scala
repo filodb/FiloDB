@@ -6,7 +6,8 @@ import filodb.core.query.ResultSchema
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.query.{QueryConfig, RangeFunctionId}
+import filodb.query.{InternalRangeFunction, QueryConfig}
+import filodb.query.InternalRangeFunction._
 import filodb.query.RangeFunctionId._
 import filodb.query.exec._
 
@@ -227,7 +228,7 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
-  def downsampleColsFromRangeFunction(schema: Schema, f: Option[RangeFunctionId]): Seq[String] = {
+  def downsampleColsFromRangeFunction(schema: Schema, f: Option[InternalRangeFunction]): Seq[String] = {
     f match {
       case None                   => Seq("avg")
       case Some(CountOverTime)    => Seq("count")
@@ -250,7 +251,7 @@ object RangeFunction {
   }
 
   // Convert range function for downsample schema
-  def downsampleRangeFunction(f: Option[RangeFunctionId]): Option[RangeFunctionId] =
+  def downsampleRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
     f match {
       case Some(CountOverTime)    => Some(SumOverTime)
       case Some(AvgOverTime)      => Some(AvgWithSumAndCountOverTime)
@@ -261,7 +262,7 @@ object RangeFunction {
    * Returns a (probably new) instance of RangeFunction given the func ID and column type
    */
   def apply(schema: ResultSchema,
-            func: Option[RangeFunctionId],
+            func: Option[InternalRangeFunction],
             columnType: ColumnType,
             config: QueryConfig,
             funcParams: Seq[Any] = Nil,
@@ -273,7 +274,7 @@ object RangeFunction {
    * Given a function type and column type, returns a RangeFunctionGenerator
    */
   def generatorFor(schema: ResultSchema,
-                   func: Option[RangeFunctionId],
+                   func: Option[InternalRangeFunction],
                    columnType: ColumnType,
                    config: QueryConfig,
                    funcParams: Seq[Any] = Nil,
@@ -294,7 +295,7 @@ object RangeFunction {
    * Returns a function to generate a ChunkedRangeFunction for Long columns
    */
   def longChunkedFunction(schema: ResultSchema,
-                          func: Option[RangeFunctionId],
+                          func: Option[InternalRangeFunction],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
@@ -316,7 +317,7 @@ object RangeFunction {
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
   def doubleChunkedFunction(schema: ResultSchema,
-                            func: Option[RangeFunctionId],
+                            func: Option[InternalRangeFunction],
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
@@ -338,7 +339,7 @@ object RangeFunction {
     }
   }
 
-  def histChunkedFunction(func: Option[RangeFunctionId],
+  def histChunkedFunction(func: Option[InternalRangeFunction],
                           funcParams: Seq[Any] = Nil,
                           maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
     case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
@@ -354,7 +355,7 @@ object RangeFunction {
    * Returns a function to generate the RangeFunction for SlidingWindowIterator.
    * Note that these functions are Double-based, so a converting iterator eg LongToDoubleIterator may be needed.
    */
-  def iteratingFunction(func: Option[RangeFunctionId],
+  def iteratingFunction(func: Option[InternalRangeFunction],
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
     case None                   => () => LastSampleFunction

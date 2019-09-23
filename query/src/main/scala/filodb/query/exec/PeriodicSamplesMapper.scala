@@ -24,7 +24,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        step: Long,
                                        end: Long,
                                        window: Option[Long],
-                                       functionId: Option[RangeFunctionId],
+                                       functionId: Option[InternalRangeFunction],
                                        funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
