@@ -306,4 +306,36 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
+
+  it("should correctly calculate quantileovertime") {
+    val twoSampleData = Seq(0.0, 1.0)
+    val threeSampleData = Seq(1.0, 0.0, 2.0)
+    val unevenSampleData = Seq(0.0, 1.0, 4.0)
+
+    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2)
+    val twoSampleDataResponses = Seq(0, 0.5, 0.75, 0.8, 1, Double.NegativeInfinity, Double.PositiveInfinity)
+    val threeSampleDataResponses = Seq(0, 1, 1.5, 1.6, 2, Double.NegativeInfinity, Double.PositiveInfinity)
+    val unevenSampleDataResponses = Seq(0, 1, 2.5, 2.8, 4, Double.NegativeInfinity, Double.PositiveInfinity)
+
+    val n = quantiles.length
+    for(i <- 0 until n) {
+      var rv = timeValueRV(twoSampleData)
+      val chunkedItTwoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregated2 = chunkedItTwoSample.map(_.getDouble(1)).toBuffer
+      aggregated2(0) shouldEqual twoSampleDataResponses(i) +- 0.0000000001
+
+      rv = timeValueRV(threeSampleData)
+      val chunkedItThreeSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 50000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregated3 = chunkedItThreeSample.map(_.getDouble(1)).toBuffer
+      aggregated3(0) shouldEqual threeSampleDataResponses(i) +- 0.0000000001
+
+      rv = timeValueRV(unevenSampleData)
+      val chunkedItUnevenSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 30000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregatedUneven = chunkedItUnevenSample.map(_.getDouble(1)).toBuffer
+      aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
+    }
+  }
 }
