@@ -6,9 +6,7 @@ import filodb.core.query.ResultSchema
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.query.{InternalRangeFunction, QueryConfig}
-import filodb.query.InternalRangeFunction._
-import filodb.query.RangeFunctionId._
+import filodb.query.QueryConfig
 import filodb.query.exec._
 
 /**
@@ -227,6 +225,8 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
+
+  import InternalRangeFunction._
 
   def downsampleColsFromRangeFunction(schema: Schema, f: Option[InternalRangeFunction]): Seq[String] = {
     f match {
