@@ -78,19 +78,21 @@ trait ExecPlan extends QueryCommand {
     rangeVectorTransformers += mapper
   }
 
-  final def replaceTransformers(newTransformers: Seq[RangeVectorTransformer]): Unit = {
-    qLogger.debug(s"Replacing $rangeVectorTransformers with $newTransformers")
-    rangeVectorTransformers.clear()
-    rangeVectorTransformers ++= newTransformers
-  }
-
   /**
     * Schema of QueryResponse returned by running execute()
     */
   final def schema(): ResultSchema = {
-    val source = schemaOfDoExecute()
-    rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(acc) }
+    val source = finalPlan.schemaOfDoExecute()
+    finalPlan.rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(acc) }
   }
+
+  /**
+   * Finalizes and optimizes a plan as needed, for example to account for local schemas.
+   * By default just returns itself
+   */
+  def finalizePlan(source: ChunkSource): ExecPlan = this
+
+  var finalPlan: ExecPlan = this
 
   /**
     * Facade for the execution orchestration of the plan sub-tree
@@ -114,9 +116,11 @@ trait ExecPlan extends QueryCommand {
     Task {
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      val res = doExecute(source, queryConfig)
-      val resSchema = schemaOfDoExecute()
-      val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
+      finalPlan = finalizePlan(source)
+
+      val res = finalPlan.doExecute(source, queryConfig)
+      val resSchema = finalPlan.schemaOfDoExecute()
+      val finalRes = finalPlan.rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
       }
@@ -201,11 +205,14 @@ trait ExecPlan extends QueryCommand {
     * @param useNewline pass false if the result string needs to be in one line
     */
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
-    val transf = printRangeVectorTransformersForLevel(level)
-    val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
-    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
-    ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
+    if (finalPlan != this) finalPlan.printTree(useNewline, level)
+    else {
+      val transf = printRangeVectorTransformersForLevel(level)
+      val nextLevel = rangeVectorTransformers.size + level
+      val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+      val childr = children.map(_.printTree(useNewline, nextLevel + 1))
+      ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
+    }
   }
 
   final def getPlan(level: Int = 0): Seq[String] = {
