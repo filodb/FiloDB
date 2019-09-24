@@ -10,7 +10,7 @@ import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store._
-import filodb.query.{InternalRangeFunction, Query, QueryConfig}
+import filodb.query.{Query, QueryConfig}
 import filodb.query.exec.rangefn.RangeFunction
 import filodb.query.Query.qLogger
 

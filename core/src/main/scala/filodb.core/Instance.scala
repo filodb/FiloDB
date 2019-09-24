@@ -1,4 +1,4 @@
-package filodb.coordinator
+package filodb.core
 
 import scala.reflect.ClassTag
 import scala.util.Try
