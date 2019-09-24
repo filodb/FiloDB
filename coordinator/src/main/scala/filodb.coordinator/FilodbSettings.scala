@@ -5,6 +5,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.{ActorPath, Address, RootActorPath}
 import com.typesafe.config.{Config, ConfigFactory}
+import monix.execution.atomic.AtomicAny
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
@@ -71,6 +72,18 @@ final class FilodbSettings(val conf: Config) {
   def datasetFromStream(streamConf: Config): Dataset =
     Dataset(streamConf.getString("dataset"),
             schemas.schemas(streamConf.getString("schema")))
+}
+
+object FilodbSettings {
+  // Initialization of a global FilodbSettings, important for SchemaSerializer and tests
+  val global = AtomicAny[Option[FilodbSettings]](None)
+
+  def initialize(overrides: Config): FilodbSettings = {
+    global.compareAndSet(None, Some(new FilodbSettings(overrides)))
+    global().get
+  }
+
+  def reset(): Unit = global := None
 }
 
 /** Consistent naming: allows other actors to accurately filter

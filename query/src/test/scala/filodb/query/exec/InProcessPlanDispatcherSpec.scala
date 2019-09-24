@@ -91,14 +91,14 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher(dataset)
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
     val execPlan1 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan, Nil)
+      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
     val execPlan2 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan, Nil)
+      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
@@ -117,6 +117,6 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfi
   override def dispatch(plan: ExecPlan)
                        (implicit sched: Scheduler,
                         timeout: FiniteDuration): Task[QueryResponse] = {
-    plan.execute(memStore, timeseriesDataset, queryConfig)
+    plan.execute(memStore, queryConfig)
   }
 }

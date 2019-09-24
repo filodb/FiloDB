@@ -20,7 +20,6 @@ object ActorSpecConfig {
 }
 
 trait ActorSpecConfig {
-
   val defaultConfig = """
                       |akka.debug.receive = on
                       |akka.log-dead-letters = 0
@@ -36,7 +35,10 @@ trait ActorSpecConfig {
     .withFallback(ConfigFactory.parseResources("application_test.conf"))
     .withFallback(ConfigFactory.load("filodb-defaults.conf"))
 
-  def getNewSystem = ActorSpecConfig.getNewSystem("test", config)
+  def getNewSystem = {
+    FilodbSettings.initialize(config)
+    ActorSpecConfig.getNewSystem("test", config)
+  }
 }
 
 trait SeedNodeConfig {

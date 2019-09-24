@@ -80,7 +80,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -99,9 +99,9 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     resp match {
       case QueryResult(_, _, results) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
@@ -113,9 +113,9 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
@@ -133,9 +133,9 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     //Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec("someQueryId", now, limit - 1, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1

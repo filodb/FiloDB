@@ -5,9 +5,10 @@ import com.esotericsoftware.kryo.Kryo
 import com.esotericsoftware.kryo.io._
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
 
+import filodb.coordinator.FilodbSettings
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, PartitionSchema, Schema, Schemas}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
 import filodb.query.QueryOptions
@@ -30,6 +31,9 @@ import filodb.query.QueryOptions
  *   to reinstantiate things like GrowableVector, wrappers, and appendable types
  */
 class KryoInit {
+  val settings = FilodbSettings.global().get
+  val schemas = settings.schemas
+
   def customize(kryo: Kryo): Unit = {
     // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
     // even if it gets filtered out by the logging framework.
@@ -41,6 +45,8 @@ class KryoInit {
 
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
     kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
+    kryo.register(classOf[Schema], new SchemaSerializer(schemas))
+    kryo.register(classOf[PartitionSchema], new PartSchemaSerializer(schemas))
 
     initOtherFiloClasses(kryo)
     initQueryEngine2Classes(kryo)
@@ -115,5 +121,31 @@ class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema2): Unit = {
     kryo.writeClassAndObject(output, schema.toSerializableTuple)
+  }
+}
+
+/**
+ * A Schema serializer which cheats by assuming that both source and destination will have the same schemas
+ * configuration, so we only send the schemaID.  This saves a huge amount of serialization cost.
+ */
+class SchemaSerializer(schemas: Schemas) extends KryoSerializer[Schema] {
+  override def read(kryo: Kryo, input: Input, typ: Class[Schema]): Schema = {
+    val schemaID = input.readInt
+    val schema = schemas(schemaID)
+    if (schema == Schemas.UnknownSchema)
+      throw new IllegalArgumentException(s"Unknown schema ID $schemaID.  Schema configuration mismatch.")
+    schema
+  }
+
+  override def write(kryo: Kryo, output: Output, schema: Schema): Unit = {
+    output.writeInt(schema.schemaHash)
+  }
+}
+
+class PartSchemaSerializer(schemas: Schemas) extends KryoSerializer[PartitionSchema] {
+  override def read(kryo: Kryo, input: Input, typ: Class[PartitionSchema]): PartitionSchema = schemas.part
+
+  override def write(kryo: Kryo, output: Output, schema: PartitionSchema): Unit = {
+    require(schema == schemas.part)
   }
 }
