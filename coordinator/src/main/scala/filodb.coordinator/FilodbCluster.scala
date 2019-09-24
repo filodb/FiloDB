@@ -44,7 +44,7 @@ final class FilodbCluster(val system: ExtendedActorSystem, overrideConfig: Confi
   import NodeProtocol._
   import akka.pattern.ask
 
-  val settings = new FilodbSettings(ConfigFactory.load(overrideConfig).withFallback(system.settings.config))
+  val settings = FilodbSettings.initialize(ConfigFactory.load(overrideConfig).withFallback(system.settings.config))
   import settings._
 
   implicit lazy val timeout: Timeout = DefaultTaskTimeout

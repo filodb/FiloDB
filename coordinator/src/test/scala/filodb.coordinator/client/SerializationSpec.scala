@@ -7,15 +7,16 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
-import filodb.core.{query, MachineMetricsData, MetricsTestData, NamesTestData, SpreadChange}
+import filodb.core.{query, MachineMetricsData, SpreadChange}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
+import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.IngestionConfig
 import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
-import filodb.query.exec.{PartKeysDistConcatExec, PartKeysExec}
+import filodb.query.exec.{PartKeysDistConcatExec}
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -31,7 +32,6 @@ object SerializationSpecConfig extends ActorSpecConfig {
  * You probably want to play around with config in filodb-defaults.conf
  */
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
-  import NamesTestData._
   import QueryCommands._
 
   val serialization = SerializationExtension(system)
@@ -146,7 +146,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       srv
     }
 
-    val schema = ResultSchema(dataset1.infosFromIDs(0 to 0), 1)
+    val schema = ResultSchema(dataset1.schema.infosFromIDs(0 to 0), 1)
 
     val result = QueryResult2("someId", schema, srvs)
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
@@ -165,29 +165,34 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     }
   }
 
+  val dataset = Dataset("test", Schemas.promCounter)
+
   it ("should serialize and deserialize ExecPlan2") {
     val node0 = TestProbe().ref
     val mapper = new ShardMapper(1)
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
-    val dataset = MetricsTestData.timeseriesDataset
     val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
-      ColumnFilter("le", Filter.Equals("0.3")))
+      ColumnFilter("le", Filter.Equals("0.3")),
+      ColumnFilter("_ns_", Filter.Equals("everybody")),
+      ColumnFilter("_ws_", Filter.Equals("work1")))
 
     val to = System.currentTimeMillis()
     val from = to - 50000
 
     val intervalSelector = IntervalSelector(from, to)
 
-    val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
+    val raw1 = RawSeries(rangeSelector=intervalSelector, filters=f1, columns = Seq("count"))
     val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
 
     val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
-      ColumnFilter("job", Filter.Equals("myService")))
-    val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
+                 ColumnFilter("job", Filter.Equals("myService")),
+                 ColumnFilter("_ns_", Filter.Equals("everybody")),
+                 ColumnFilter("_ws_", Filter.Equals("work1")))
+    val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("count"))
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
@@ -195,6 +200,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       100), UnavailablePromQlQueryParams)
     roundTrip(execPlan) shouldEqual execPlan
   }
+
+  val shardKeyStr = "_ns_=\"boo\",_ws_=\"work1\""
 
   it ("should serialize and deserialize ExecPlan2 involving complicated queries") {
     val node0 = TestProbe().ref
@@ -204,11 +211,10 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val dataset = MetricsTestData.timeseriesDataset
     val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
-      "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\"}[20s])) by (handler)",
+      s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
       100), UnavailablePromQlQueryParams)
@@ -216,7 +222,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     // scalastyle:off
     val logicalPlan2 = Parser.queryRangeToLogicalPlan(
-      "sum(rate(http_request_duration_microseconds_sum{job=\"prometheus\"}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job=\"prometheus\"}[5m])) by (handler)",
+      s"""sum(rate(http_request_duration_microseconds_sum{job="prometheus",$shardKeyStr}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job="prometheus",$shardKeyStr}[5m])) by (handler)""",
       qParams)
     // scalastyle:on
     val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100),
@@ -235,16 +241,15 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val dataset = MetricsTestData.timeseriesDataset
     val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
-      "http_request_duration_seconds_bucket{job=\"prometheus\"}",
+      s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
       qParams)
     val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(
       new StaticSpreadProvider(SpreadChange(0, 0))), 100), UnavailablePromQlQueryParams)
-    val partKeysExec = execPlan1.asInstanceOf[PartKeysExec] // will be dispatched to single shard
+    val partKeysExec = execPlan1.asInstanceOf[PartKeysDistConcatExec]
     roundTrip(partKeysExec) shouldEqual partKeysExec
 
     // without shardcolumns in filters
@@ -277,7 +282,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
     val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
-    val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
+    val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
 
     val result = QueryResult2("someId", schema, Seq(ser))
     val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]

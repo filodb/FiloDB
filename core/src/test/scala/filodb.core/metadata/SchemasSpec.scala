@@ -4,6 +4,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core._
+import filodb.core.query.ColumnInfo
 
 class SchemasSpec extends FunSpec with Matchers {
   import Column.ColumnType._
@@ -167,6 +168,28 @@ class SchemasSpec extends FunSpec with Matchers {
 
       schema.columns.map(_.columnType) shouldEqual Seq(MapColumn)
       schema.predefinedKeys shouldEqual Seq("_ns", "app", "__name__", "instance", "dc")
+    }
+  }
+
+  describe("Schema") {
+    it("should return IDs for column names or seq of missing names") {
+      val sch = largeDataset.schema
+      sch.colIDs("first", "age").get shouldEqual Seq(1, 0)
+
+      sch.colIDs("league").get shouldEqual Seq(Dataset.PartColStartIndex)
+
+      val resp1 = sch.colIDs("last", "unknown")
+      resp1.isBad shouldEqual true
+      resp1.swap.get shouldEqual Seq("unknown")
+    }
+
+    it("should return ColumnInfos for colIDs") {
+      val sch = largeDataset.schema
+      val infos = sch.infosFromIDs(Seq(1, 0))
+      infos shouldEqual Seq(ColumnInfo("first", StringColumn), ColumnInfo("age", LongColumn))
+
+      val infos2 = sch.infosFromIDs(Seq(PartColStartIndex, 2))
+      infos2 shouldEqual Seq(ColumnInfo("league", StringColumn), ColumnInfo("last", StringColumn))
     }
   }
 

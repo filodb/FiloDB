@@ -9,7 +9,6 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
-import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
@@ -63,26 +62,6 @@ final case class Dataset(name: String, schema: Schema) {
     partKeyBuilder.reset()
     bytes
   }
-
-  import Accumulation._
-  import OptionSugar._
-  /**
-   * Returns the column IDs for the named columns or the missing column names
-   */
-  def colIDs(colNames: String*): Seq[Int] Or Seq[String] =
-    colNames.map { n => dataColumns.find(_.name == n).map(_.id)
-                          .orElse { partitionColumns.find(_.name == n).map(_.id) }
-                          .toOr(One(n)) }
-            .combined.badMap(_.toSeq)
-
-  /** Returns the Column instance given the ID */
-  def columnFromID(columnID: Int): Column =
-    if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }
-    else                                 { dataColumns(columnID) }
-
-  /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
-  def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
-    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
 }
 
 /**

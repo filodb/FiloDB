@@ -13,7 +13,7 @@ import org.scalatest.{FunSpec, Matchers}
 
 class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
+  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
@@ -73,16 +73,14 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should sort instant vectors in ascending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
-    val resultObs = sortFunctionMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
   }
 
   it("should sort instant vectors in descending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.SortDesc)
-    val resultObs = sortFunctionMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0))
   }
