@@ -4,6 +4,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 
+import filodb.core.Instance
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 import filodb.core.store._
 

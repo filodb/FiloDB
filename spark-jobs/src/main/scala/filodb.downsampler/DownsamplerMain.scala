@@ -30,8 +30,9 @@ import org.apache.spark.sql.SparkSession
   */
 object DownsamplerMain extends App with StrictLogging with Serializable {
 
-  import filodb.downsampler.BatchDownsampler.downsampler._
-  import filodb.downsampler.DownsamplerSettings.downsamplerSettings._
+  import BatchDownsampler._
+  import DownsamplerSettings._
+  import Utils._
 
   mainFunction()
 
@@ -59,9 +60,10 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
     logger.info(s"This is the Downsampling driver. Starting downsampling job " +
-      s"rawDataset=$rawDatasetName for userTimeInPeriod=$userTimeInPeriod " +
-      s"ingestionTimeStart=$ingestionTimeStart ingestionTimeEnd=$ingestionTimeEnd " +
-      s"userTimeStart=$userTimeStart userTimeEnd=$userTimeEnd")
+      s"rawDataset=$rawDatasetName for userTimeInPeriod=${millisToString(userTimeInPeriod)} " +
+      s"ingestionTimeStart=${millisToString(ingestionTimeStart)} " +
+      s"ingestionTimeEnd=${millisToString(ingestionTimeEnd)} " +
+      s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
 
     spark.sparkContext
       .makeRDD(splits)

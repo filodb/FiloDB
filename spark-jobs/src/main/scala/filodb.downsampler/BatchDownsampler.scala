@@ -4,13 +4,15 @@ import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import scalaxy.loops._
 
+import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{ChunkDownsampler, DoubleChunkDownsampler, HistChunkDownsampler, TimeChunkDownsampler}
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats, WriteBufferPool}
@@ -20,15 +22,7 @@ import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 /**
-  * BatchDownsampler is always used in the context of an object so that it need not be serialized to a spark executor
-  * from the spark application driver.
-  */
-object BatchDownsampler {
-  val downsampler = new BatchDownsampler(DownsamplerSettings.downsamplerSettings)
-}
-
-/**
-  * This class maintains state during the processing of a batch of TSPartitions to downsample. Namely
+  * This object maintains state during the processing of a batch of TSPartitions to downsample. Namely
   * a. The memory manager used for the paged partitions
   * b. The buffer pool used to ingest and chunk the downsampled data
   * c. Block store for overflow chunks that go beyond write buffers
@@ -40,12 +34,24 @@ object BatchDownsampler {
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
+object BatchDownsampler extends StrictLogging with Instance {
+
+  import Utils._
+
+  val settings = DownsamplerSettings
 
   private val readSched = Scheduler.io("cass-read-sched")
   private val writeSched = Scheduler.io("cass-write-sched")
+
+  private val sessionProvider =
+    settings.sessionProvider.map { p =>
+      val clazz = createClass(p).get
+      val args = Seq((classOf[Config] -> settings.cassandraConfig))
+      createInstance[FiloSessionProvider](clazz, args).get
+    }
+
   private[downsampler] val cassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, None)(writeSched)
+    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider)(writeSched)
 
   private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
@@ -53,6 +59,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
   private val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
   private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
+
   /**
     * Downsample Schemas
     */
@@ -109,7 +116,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging {
 
     logger.debug(s"Starting to downsample batch of ${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=$userTimeStart userTimeEnd=$userTimeEnd")
+      s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>

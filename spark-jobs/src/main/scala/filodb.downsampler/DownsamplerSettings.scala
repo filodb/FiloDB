@@ -2,25 +2,27 @@ package filodb.downsampler
 
 import scala.concurrent.duration._
 
-import com.typesafe.config.Config
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.GlobalConfig
+import filodb.coordinator.{FilodbSettings}
 import filodb.core.store.StoreConfig
 
 /**
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
   * from the spark application driver.
   */
-object DownsamplerSettings {
-  val downsamplerSettings = new DownsamplerSettings(GlobalConfig.systemConfig.getConfig("filodb"))
-}
+object DownsamplerSettings extends StrictLogging {
 
-class DownsamplerSettings(val filodbConfig: Config) extends StrictLogging {
+  val filodbSettings = new FilodbSettings(ConfigFactory.empty)
+
+  val filodbConfig = filodbSettings.allConfig.getConfig("filodb")
 
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
   logger.info(s"Loaded following downsampler config: ${downsamplerConfig.root().render()}" )
+
+  val sessionProvider = downsamplerConfig.as[Option[String]]("cass-session-provider-fqcn")
 
   val cassandraConfig = filodbConfig.getConfig("cassandra")
 
