@@ -76,7 +76,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Map[String, String] = Map.empty) {
+                          copyTags: Seq[(String, String)] = Seq.empty) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
@@ -117,21 +117,14 @@ object DatasetOptions {
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
   def fromConfig(config: Config): DatasetOptions = {
-    val configCopyTags = config.getConfig("copyTags")
-    val copyTags = new collection.mutable.ArrayBuffer[(String, String)]()
-    import scala.collection.JavaConversions._
-    for (entry <- configCopyTags.entrySet) {
-      configCopyTags.getStringList(entry.getKey).foreach(value =>
-        copyTags += value -> entry.getKey
-      )
-    }
+    val copyTagsValue = config.as[Map[String, Seq[String]]]("copyTags").toSeq.flatMap{case (key, value) => value.map (_ -> key)}
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = copyTags.toMap)
+                   copyTags = copyTagsValue)
   }
 }
 
