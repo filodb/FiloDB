@@ -42,6 +42,11 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   // Dataset will be created and ingestion started
   override def createActorSystem(): ActorSystem = PrometheusApiRouteSpec.getNewSystem
 
+  override def afterAll(): Unit = {
+    FilodbSettings.reset()
+    super.afterAll()
+  }
+
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
   implicit val timeout = RouteTestTimeout(20.minute)

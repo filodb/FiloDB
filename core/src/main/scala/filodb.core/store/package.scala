@@ -130,7 +130,7 @@ package object store {
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[RowReader] =
-      source.scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
+      source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))
   }
