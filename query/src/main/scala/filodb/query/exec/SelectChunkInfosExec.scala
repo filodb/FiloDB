@@ -2,8 +2,8 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.TimeSeriesShard
@@ -44,17 +44,15 @@ final case class SelectChunkInfosExec(id: String,
                                       column: Types.ColumnId) extends LeafExecPlan {
   import SelectChunkInfosExec._
 
-  protected def schemaOfDoExecute(): ResultSchema = ChunkInfosSchema
-
-  protected def doExecute(source: ChunkSource,
+  def doExecute(source: ChunkSource,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
+                          timeout: FiniteDuration): ExecResult = {
     val dataColumn = dataSchema.data.columns(column)
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
-    source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
+    val rvs = source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
@@ -64,6 +62,7 @@ final case class SelectChunkInfosExec(id: String,
                                                   dataSchema.partKeySchema, partCols, shard, subgroup, partition.partID)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
           }
+    ExecResult(rvs, Task.eval(ChunkInfosSchema))
   }
 
   protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, col=$column"

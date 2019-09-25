@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
@@ -27,11 +28,6 @@ final case class PartKeysDistConcatExec(id: String,
   override def enforceLimit: Boolean = false
 
   /**
-    * Schema of the RangeVectors returned by compose() method
-    */
-  override protected def schemaOfCompose(): ResultSchema = children.head.schema()
-
-  /**
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
@@ -41,6 +37,7 @@ final case class PartKeysDistConcatExec(id: String,
     * Compose the sub-query/leaf results here.
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
@@ -63,11 +60,6 @@ final case class LabelValuesDistConcatExec(id: String,
   override def enforceLimit: Boolean = false
 
   /**
-    * Schema of the RangeVectors returned by compose() method
-    */
-  override protected def schemaOfCompose(): ResultSchema = children.head.schema()
-
-  /**
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
@@ -77,6 +69,7 @@ final case class LabelValuesDistConcatExec(id: String,
     * Compose the sub-query/leaf results here.
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
@@ -117,30 +110,24 @@ final case class PartKeysExec(id: String,
 
   override def enforceLimit: Boolean = false
 
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
-
-
-    if (source.isInstanceOf[MemStore]) {
-      val memStore = source.asInstanceOf[MemStore]
-      val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
-      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new PartKeyRowReader(response)))
-    } else {
-      Observable.empty
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
+    val rvs = source match {
+      case memStore: MemStore =>
+        val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
+        Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new PartKeyRowReader(response)))
+      case other =>
+        Observable.empty
     }
+
+    val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
+                               Map(0 -> partSchema.binSchema))
+    ExecResult(rvs, Task.eval(sch))
   }
 
   def args: String = s"shard=$shard, filters=$filters, limit=$limit"
-
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  def schemaOfDoExecute(): ResultSchema = {
-    new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
-                     Map(0 -> partSchema.binSchema))
-  }
 }
 
 final case class  LabelValuesExec(id: String,
@@ -155,12 +142,11 @@ final case class  LabelValuesExec(id: String,
 
   override def enforceLimit: Boolean = false
 
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
-
-    if (source.isInstanceOf[MemStore]) {
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
+    val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val curr = System.currentTimeMillis()
       val end = curr - curr % 1000 // round to the floor second
@@ -179,13 +165,9 @@ final case class  LabelValuesExec(id: String,
     } else {
       Observable.empty
     }
+    val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
+    ExecResult(rvs, Task.eval(sch))
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=$limit, lookBackInMillis=$lookBackInMillis"
-
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  def schemaOfDoExecute(): ResultSchema =
-    new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
 }

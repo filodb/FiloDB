@@ -8,6 +8,7 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import monix.reactive.observables.ConnectableObservable
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.FiloSchedulers
@@ -17,6 +18,11 @@ import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
+
+/**
+ * The observable of vectors and the schema that is returned by ExecPlan doExecute
+ */
+final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSchema])
 
 /**
   * This is the Execution Plan tree node interface.
@@ -78,21 +84,7 @@ trait ExecPlan extends QueryCommand {
     rangeVectorTransformers += mapper
   }
 
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  final def schema(): ResultSchema = {
-    val source = finalPlan.schemaOfDoExecute()
-    finalPlan.rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(acc) }
-  }
-
-  /**
-   * Finalizes and optimizes a plan as needed, for example to account for local schemas.
-   * By default just returns itself
-   */
-  def finalizePlan(source: ChunkSource): ExecPlan = this
-
-  var finalPlan: ExecPlan = this
+  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
   /**
     * Facade for the execution orchestration of the plan sub-tree
@@ -113,14 +105,16 @@ trait ExecPlan extends QueryCommand {
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
-    Task {
+    // Step 1: initiate doExecute, get schema
+    lazy val step1 = Task {
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      finalPlan = finalizePlan(source)
+      doExecute(source, queryConfig)
+    }
 
-      val res = finalPlan.doExecute(source, queryConfig)
-      val resSchema = finalPlan.schemaOfDoExecute()
-      val finalRes = finalPlan.rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
+    // Step 2: Set up transformers and loop over all rangevectors, creating the result
+    def step2(res: ExecResult) = res.schema.map { resSchema =>
+      val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
       }
@@ -174,23 +168,28 @@ trait ExecPlan extends QueryCommand {
         qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       QueryError(id, ex)
     }
+
+    for { res <- step1
+          qResult <- step2(res) }
+    yield {
+      this match {
+        case p: NonLeafExecPlan => p.startMulticast()
+      }
+      qResult
+    }
   }
 
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
-    * node
+    * node.  It will transform or produce an Observable of RangeVectors, as well as output a ResultSchema
+    * that has the schema of the produced RangeVectors.
+    * Note that this should not include any operations done in the transformers.
     */
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector]
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  protected def schemaOfDoExecute(): ResultSchema
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -205,14 +204,11 @@ trait ExecPlan extends QueryCommand {
     * @param useNewline pass false if the result string needs to be in one line
     */
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
-    if (finalPlan != this) finalPlan.printTree(useNewline, level)
-    else {
-      val transf = printRangeVectorTransformersForLevel(level)
-      val nextLevel = rangeVectorTransformers.size + level
-      val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
-      val childr = children.map(_.printTree(useNewline, nextLevel + 1))
-      ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
-    }
+    val transf = printRangeVectorTransformersForLevel(level)
+    val nextLevel = rangeVectorTransformers.size + level
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val childr = children.map(_.printTree(useNewline, nextLevel + 1))
+    ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
 
   final def getPlan(level: Int = 0): Seq[String] = {
@@ -259,16 +255,18 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def limit: Int = children.head.limit
 
+  private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
+
   /**
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
     * using the abstract method 'compose' to arrive at the higher level
     * result
     */
-  final protected def doExecute(source: ChunkSource,
-                                queryConfig: QueryConfig)
-                               (implicit sched: Scheduler,
-                                timeout: FiniteDuration): Observable[RangeVector] = {
+  final def doExecute(source: ChunkSource,
+                      queryConfig: QueryConfig)
+                     (implicit sched: Scheduler,
+                      timeout: FiniteDuration): ExecResult = {
     val spanFromHelper = Kamon.currentSpan()
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
@@ -279,15 +277,39 @@ abstract class NonLeafExecPlan extends ExecPlan {
         }.map((_, i))
       }
     }
-    compose(childTasks, queryConfig)
+
+    // publish allows multiple subscribers to one source observable.
+    // One stream is used to compose results, the other one to compute the final schema
+    multicast = childTasks.publish
+    val firstSchema = multicast.firstL.map(_.asInstanceOf[QueryResult].resultSchema)
+    val outputRvs = compose(multicast, firstSchema, queryConfig)
+    val outputSchema = multicast.foldLeftL(ResultSchema.empty) { case (rs, (resp, i)) =>
+      reduceSchemas(rs, resp, i)
+    }
+    ExecResult(outputRvs, outputSchema)
   }
 
-  final protected def schemaOfDoExecute(): ResultSchema = schemaOfCompose()
+  def startMulticast(): Unit = {
+    multicast.connect()
+  }
 
   /**
-    * Schema of the RangeVectors returned by compose() method
-    */
-  protected def schemaOfCompose(): ResultSchema
+   * Reduces the different ResultSchemas coming from each child to a single one.
+   * The default one here takes the first schema response, and checks that subsequent ones match the first one.
+   * Can be overridden if needed.
+   * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
+   */
+  def reduceSchemas(rs: ResultSchema, resp: QueryResponse, i: Int): ResultSchema = {
+    resp match {
+      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+        schema     /// First schema, take as is
+      case QueryResult(_, schema, _) =>
+        if (rs != schema) throw new IllegalArgumentException(s"Schema mismatch: $rs != $schema")
+        else rs
+      case e: QueryError =>
+        rs         /// Just return original one, ignore errors
+    }
+  }
 
   /**
     * Sub-class non-leaf nodes should provide their own implementation of how
@@ -296,8 +318,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * @param childResponses observable of a pair. First element of pair is the QueryResponse for
     *                       a child ExecPlan, the second element is the index of the child plan.
     *                       There is one response per child plan.
+    * @param firstSchema Task for the first schema coming in from the first child
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector]
 
 }

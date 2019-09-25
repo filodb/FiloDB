@@ -51,6 +51,10 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
 }
 
+object ResultSchema {
+  val empty = ResultSchema(Nil, 1)
+}
+
 /**
  * There are three types of final query results.
  * - a list of raw (or via function, transformed) time series samples, with an optional key range

@@ -2,13 +2,13 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
-import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
+import filodb.core.query.{ColumnFilter, ResultSchema}
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
 import filodb.query.exec.rangefn.RangeFunction
@@ -88,7 +88,7 @@ final case class SelectRawPartitionsExec(id: String,
 
   def dataset: DatasetRef = datasetRef
 
-  protected[filodb] def schemaOfDoExecute(): ResultSchema = {
+  private def schemaOfDoExecute(): ResultSchema = {
     require(!colIds.contains(0),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
@@ -105,16 +105,17 @@ final case class SelectRawPartitionsExec(id: String,
     }
   }
 
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
     require(!colIds.contains(0),
       "User selected columns should not include timestamp (row-key); it will be auto-prepended")
 
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")}" +
       s"schema=${dataSchema.name} is configured to use columnIDs=$colIds")
-    source.rangeVectors(datasetRef, lookupRes.get, colIds, dataSchema, filterSchemas)
+    val rvs = source.rangeVectors(datasetRef, lookupRes.get, colIds, dataSchema, filterSchemas)
+    ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 
   protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +
@@ -128,21 +129,23 @@ final case class SelectRawPartitionsExec(id: String,
   * creates an inner SelectRawPartitionsExec with the right column IDs and other details depending on schema.
   * @param schema an optional schema to filter partitions using
   */
-abstract class MultiSchemaPartitionsExec(id: String,
-                                         submitTime: Long,
-                                         limit: Int,
-                                         dispatcher: PlanDispatcher,
-                                         dataset: DatasetRef,
-                                         shard: Int,
-                                         filters: Seq[ColumnFilter],
-                                         chunkMethod: ChunkScanMethod,
-                                         schema: Option[String],
-                                         colName: Option[String]) extends LeafExecPlan {
+final case class MultiSchemaPartitionsExec(id: String,
+                                           submitTime: Long,
+                                           limit: Int,
+                                           dispatcher: PlanDispatcher,
+                                           dataset: DatasetRef,
+                                           shard: Int,
+                                           filters: Seq[ColumnFilter],
+                                           chunkMethod: ChunkScanMethod,
+                                           schema: Option[String],
+                                           colName: Option[String]) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
-  // Fake the returned schema because it is static :(   based on what the expected return type is
+  override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
 
-  override def finalizePlan(source: ChunkSource): ExecPlan = {
+  var finalPlan: ExecPlan = _
+
+  private def finalizePlan(source: ChunkSource): ExecPlan = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
 
@@ -161,10 +164,13 @@ abstract class MultiSchemaPartitionsExec(id: String,
     newPlan
   }
 
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = ???
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
+     finalPlan = finalizePlan(source)
+     finalPlan.doExecute(source, queryConfig)(sched, timeout)
+   }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +
                                s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName"
