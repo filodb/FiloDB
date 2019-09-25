@@ -1,12 +1,9 @@
 package filodb.query.exec.rangefn
 
-import scala.collection.mutable.ArrayBuffer
-<<<<<<< HEAD
-
-=======
->>>>>>> b9100d850bf74fb83c3cbecaeb0892abc3f26cbd
 import java.lang.{Double => JLDouble}
 import java.util
+
+import scala.collection.mutable.ArrayBuffer
 
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
