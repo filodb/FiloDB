@@ -72,6 +72,11 @@ trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with Sca
     val probe = TestProbe()(system)
     probe.awaitCond(cluster.isTerminated, cluster.settings.GracefulStopTimeout)
   }
+
+  override def afterAll(): Unit = {
+    FilodbSettings.reset()
+    super.afterAll()
+  }
 }
 
 class ClusterNodeDriverSpec extends FilodbClusterNodeSpec {

@@ -131,7 +131,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumOfRate.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumOfRate.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 
@@ -142,7 +142,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumSumOverTime.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumSumOverTime.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 

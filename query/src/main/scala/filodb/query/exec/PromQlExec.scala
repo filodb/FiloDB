@@ -12,7 +12,6 @@ import scala.sys.ShutdownHookThread
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
@@ -40,17 +39,16 @@ case class PromQlExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override protected def doExecute(source: ChunkSource, dataset: Dataset, queryConfig: QueryConfig)
+  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)
                                   (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
 
   /**
     * Sub classes should implement this with schema of RangeVectors returned
     * from doExecute() abstract method.
     */
-  override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ???
+  override protected def schemaOfDoExecute(): ResultSchema = ???
 
   override def execute(source: ChunkSource,
-                       dataset: Dataset,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
