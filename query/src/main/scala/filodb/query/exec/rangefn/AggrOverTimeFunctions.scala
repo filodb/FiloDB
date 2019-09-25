@@ -1,6 +1,7 @@
 package filodb.query.exec.rangefn
 
 import scala.collection.mutable.ArrayBuffer
+
 import java.lang.{Double => JLDouble}
 import java.util
 
@@ -625,7 +626,11 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
       val lowerIndex = Math.max(0, Math.floor(rank))
       val upperIndex = Math.min(counter - 1, lowerIndex + 1)
       val weight = rank - math.floor(rank)
-      sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+      if (counter > 0) {
+        sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+      } else {
+        quantileResult
+      }
     }
   }
 }
@@ -659,7 +664,11 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
       val lowerIndex = Math.max(0, Math.floor(rank))
       val upperIndex = Math.min(counter - 1, lowerIndex + 1)
       val weight = rank - math.floor(rank)
-      sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+      if (counter > 0) {
+        sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+      } else {
+        quantileResult
+      }
     }
   }
 }
