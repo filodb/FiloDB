@@ -339,9 +339,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
     val emptyData = Seq()
     var rv = timeValueRV(emptyData)
-    val chunkedItTwoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
+    val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
       new QuantileOverTimeChunkedFunctionD(Seq(0.5)), queryConfig)
-    val aggregated2 = chunkedItTwoSample.map(_.getDouble(1)).toBuffer
-    aggregated2(0)  isNaN
+    val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
+    aggregatedEmpty(0) isNaN
   }
 }
