@@ -1,5 +1,6 @@
 package filodb.query.exec.rangefn
 
+import scala.collection.mutable.ArrayBuffer
 import java.lang.{Double => JLDouble}
 import java.util
 
@@ -7,7 +8,6 @@ import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.query.QueryConfig
 import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
-import scala.collection.mutable.ArrayBuffer
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -644,7 +644,7 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
     else {
       var rowNum = startRowNum
       val it = longReader.iterate(longVect, startRowNum)
-      var values = new scala.collection.mutable.ArrayBuffer[Double]
+      var values = new ArrayBuffer[Double]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
