@@ -117,7 +117,9 @@ object DatasetOptions {
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
   def fromConfig(config: Config): DatasetOptions = {
-    val copyTagsValue = config.as[Map[String, Seq[String]]]("copyTags").toSeq.flatMap{case (key, value) => value.map (_ -> key)}
+    val copyTagsValue = config.as[Map[String, Seq[String]]]("copyTags")
+                         .toSeq
+                         .flatMap { case (key, value) => value.map (_ -> key) }
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),

@@ -120,7 +120,8 @@ object PrometheusInputRecord {
    * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
    * with the value from the source tag.
    */
-  def transformTags(tags: collection.mutable.HashMap[String, String], options: DatasetOptions): collection.mutable.Map[String, String] = {
+  def transformTags(tags: collection.mutable.HashMap[String, String],
+                    options: DatasetOptions): collection.mutable.Map[String, String] = {
     for ((k, v) <- options.copyTags) {
       if (!tags.contains(v) && tags.contains(k)) {
         tags += v -> tags(k)
