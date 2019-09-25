@@ -337,7 +337,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val aggregatedUneven = chunkedItUnevenSample.map(_.getDouble(1)).toBuffer
       aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
     }
-
     val emptyData = Seq()
     var rv = timeValueRV(emptyData)
     val chunkedItTwoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
