@@ -116,14 +116,23 @@ object DatasetOptions {
   def fromString(s: String): DatasetOptions =
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
-  def fromConfig(config: Config): DatasetOptions =
+  def fromConfig(config: Config): DatasetOptions = {
+    val configCopyTags = config.getConfig("copyTags")
+    val copyTags = new collection.mutable.ArrayBuffer[(String, String)]()
+    import scala.collection.JavaConversions._
+    for (entry <- configCopyTags.entrySet) {
+      configCopyTags.getStringList(entry.getKey).foreach(value =>
+        copyTags += value -> entry.getKey
+      )
+    }
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = config.as[Map[String, String]]("copyTags"))
+                   copyTags = copyTags.toMap)
+  }
 }
 
 /**

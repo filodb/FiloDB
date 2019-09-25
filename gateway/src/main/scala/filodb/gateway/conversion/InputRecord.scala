@@ -47,7 +47,7 @@ trait InputRecord {
  * the partition key hash.
  * The tags should NOT include the metric name.
  */
-case class PrometheusInputRecord(tags: Map[String, String],
+case class PrometheusInputRecord(tags: collection.mutable.Map[String, String],
                                  metric: String,
                                  timestamp: Long,
                                  value: Double) extends InputRecord {
@@ -96,9 +96,10 @@ object PrometheusInputRecord {
 
   // Create PrometheusInputRecords from a TimeSeries protobuf object
   def apply(tsProto: TimeSeries): Seq[PrometheusInputRecord] = {
-    val tags = (0 until tsProto.getLabelsCount).map { i =>
+    val tags = collection.mutable.HashMap[String, String]()
+    for ( i <- 0 until tsProto.getLabelsCount) {
       val labelPair = tsProto.getLabels(i)
-      (labelPair.getName, labelPair.getValue)
+      tags += labelPair.getName -> labelPair.getValue
     }
     val metricTags = tags.filter { case (k, v) => k == "__name__" || k == metricCol }
     if (metricTags.isEmpty) {
@@ -106,7 +107,7 @@ object PrometheusInputRecord {
     } else {
       val metric = metricTags.head._2
       val metricKey = metricTags.head._1
-      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options).toMap
+      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options)
       (0 until tsProto.getSamplesCount).map { i =>
         val sample = tsProto.getSamples(i)
         PrometheusInputRecord(transformedTags, metric, sample.getTimestampMs, sample.getValue)
@@ -119,17 +120,13 @@ object PrometheusInputRecord {
    * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
    * with the value from the source tag.
    */
-  def transformTags(tags: Seq[(String, String)], options: DatasetOptions): Seq[(String, String)] = {
-    val keys = tags.map(_._1).toSet
-    val extraTags = new collection.mutable.ArrayBuffer[(String, String)]()
-    tags.foreach { case (k, v) =>
-      if (options.copyTags contains k) {
-        val renamedKey = options.copyTags(k)
-        if (!(keys contains renamedKey))
-          extraTags += renamedKey -> v
+  def transformTags(tags: collection.mutable.HashMap[String, String], options: DatasetOptions): collection.mutable.Map[String, String] = {
+    for ((k, v) <- options.copyTags) {
+      if (!tags.contains(v) && tags.contains(k)) {
+        tags += v -> tags(k)
       }
     }
-    tags ++ extraTags
+    tags
   }
 }
 

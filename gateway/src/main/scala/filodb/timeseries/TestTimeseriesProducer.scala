@@ -128,7 +128,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
-      val tags = Map("dc"       -> s"DC$dc",
+      val tags = collection.mutable.Map("dc"       -> s"DC$dc",
                      "_ws_"      -> "demo",
                      "_ns_"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
