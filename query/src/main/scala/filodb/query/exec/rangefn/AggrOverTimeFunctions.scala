@@ -7,6 +7,7 @@ import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.query.QueryConfig
 import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
+import scala.collection.mutable.ArrayBuffer
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -586,12 +587,12 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
   }
 }
 
-abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any], var result: Double = Double.NaN
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any], var quantileResult: Double = Double.NaN
                                               )
   extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { result = Double.NaN }
+  override final def reset(): Unit = { quantileResult = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, result)
+    sampleToEmit.setValues(endTimestamp, quantileResult)
   }
 }
 
@@ -604,12 +605,12 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
     require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[Number].doubleValue()
     var counter = 0
-    result = if (q < 0) Double.NegativeInfinity
+    quantileResult = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else {
       var rowNum = startRowNum
       val it = doubleReader.iterate(doubleVect, startRowNum)
-      var values = new scala.collection.mutable.ArrayBuffer[Double]
+      var values = new ArrayBuffer[Double]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
@@ -638,7 +639,7 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
     var counter = 0
     require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[Number].doubleValue()
-    result = if (q < 0) Double.NegativeInfinity
+    quantileResult = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else {
       var rowNum = startRowNum
