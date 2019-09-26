@@ -166,7 +166,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Map[String, String] = Map.empty) {
+                          copyTags: Seq[(String, String)] = Seq.empty) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
@@ -180,7 +180,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
-      "copyTags" -> copyTags.asJava)
+      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava)
 
 
     ConfigFactory.parseMap(map.asJava)
@@ -209,7 +209,10 @@ object DatasetOptions {
   def fromString(s: String): DatasetOptions =
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
-  def fromConfig(config: Config): DatasetOptions =
+  def fromConfig(config: Config): DatasetOptions = {
+    val copyTagsValue = config.as[Map[String, Seq[String]]]("copyTags")
+                         .toSeq
+                         .flatMap { case (key, value) => value.map (_ -> key) }
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    valueColumn = config.getString("valueColumn"),
@@ -217,7 +220,8 @@ object DatasetOptions {
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = config.as[Map[String, String]]("copyTags"))
+                   copyTags = copyTagsValue)
+  }
 }
 
 /**
