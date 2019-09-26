@@ -32,6 +32,8 @@ case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Long, to: Long) extends RangeSelector
 
+
+final case class TimeStepParams(start: Long, step: Long, end: Long) //to do consolidate is in ast also
 /**
   * Concrete logical plan to query for raw data in a given range
   * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
@@ -158,9 +160,14 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
 }
 
 case class ScalarPlan(vectors: PeriodicSeriesPlan,
-                               function: ScalarFunctionId,
-                               functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                      function: ScalarFunctionId,
+                      timeStepParams: TimeStepParams,
+                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+case class FunctionWithoutMetricPlan(function: ScalarFunctionId,
+                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan  {
 }
 
 case class VectorOfScalarFunctionPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {

@@ -243,10 +243,10 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
-      "vector(3)" -> "VectorOfScalarPlan(3.0)",
-      "scalar(http_requests_total)" -> "ScalarPlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,List())",
-      "vector(scalar(http_requests_total))" -> "VectorOfScalarFunctionPlan(ScalarPlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,List()))"
-      //      "scalar(http_requests_total)" -> "",
+      "time()" -> ""
+//      "vector(3)" -> "VectorOfScalarPlan(3.0)",
+//      "scalar(http_requests_total)" -> "ScalarPlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,List())",
+//      "vector(scalar(http_requests_total))" -> "VectorOfScalarFunctionPlan(ScalarPlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,List()))",
 //      "10 + http_requests_total * 5" ->
 //        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
 //      "10 + (http_requests_total * 5)" ->

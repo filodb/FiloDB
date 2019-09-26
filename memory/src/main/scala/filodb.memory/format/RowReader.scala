@@ -76,6 +76,60 @@ trait RowReader {
   def as[T: ClassTag](columnNo: Int): T = getAny(columnNo).asInstanceOf[T]
 }
 
+trait MutableRowReader extends RowReader {
+  def setLong(columnNo: Int, value: Long): Unit
+  def setDouble(columnNo: Int, value: Double): Unit
+  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
+}
+
+/**
+  * Represents intermediate sample which will be part of a transformed RangeVector.
+  * IMPORTANT: It is mutable for memory efficiency purposes. Consumers from
+  * iterators should be aware of the semantics of ability to save the next() value.
+  */
+//final class TransientRow(var timestamp: Long, var value: Double) extends MutableRowReader {
+//  def this() = this(0L, 0d)
+//
+//  def setValues(ts: Long, valu: Double): Unit = {
+//    timestamp = ts
+//    value = valu
+//  }
+//
+//  def setLong(columnNo: Int, valu: Long): Unit =
+//    if (columnNo == 0) timestamp = valu
+//    else throw new IllegalArgumentException()
+//
+//  def setDouble(columnNo: Int, valu: Double): Unit =
+//    if (columnNo == 1) value = valu
+//    else throw new IllegalArgumentException()
+//
+//  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
+//
+//  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
+//
+//  def copyFrom(r: RowReader): Unit = {
+//    timestamp = r.getLong(0)
+//    value = r.getDouble(1)
+//  }
+//
+//  def notNull(columnNo: Int): Boolean = columnNo < 2
+//  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+//  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+//  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
+//  def getDouble(columnNo: Int): Double = if (columnNo == 1) value
+//  else throw new IllegalArgumentException(s"Invalid col $columnNo")
+//  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
+//  def getString(columnNo: Int): String = throw new IllegalArgumentException()
+//  def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
+//
+//  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+//  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+//  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+//
+//  override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
+//}
+
 import filodb.memory.format.RowReader._
 
 // A RowReader that knows how to hashcode and compare its individual elements.  Extractors must

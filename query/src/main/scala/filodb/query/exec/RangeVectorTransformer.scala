@@ -6,7 +6,8 @@ import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
-import filodb.query.ScalarFunctionId.{Scalar, Time}
+import filodb.query.ScalarFunctionId.{Scalar}
+//import filodb.query.ScalarFunctionId.{Scalar, Time}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
 import filodb.query._
@@ -49,6 +50,7 @@ object RangeVectorTransformer {
     require(schema.isTimeSeries, s"Schema $schema is not time series based, cannot continue query")
     require(schema.columns.size >= 2, s"Schema $schema has less than 2 columns, cannot continue query")
     schema.columns(1).colType
+
   }
 }
 
@@ -213,6 +215,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
 }
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,
+                                      timeStepParams: TimeStepParams,
                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
@@ -220,7 +223,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
 //  val scalarFunction: ScalarFunction = {
 //    function match {
 //      case LabelReplace => LabelReplaceFunction(funcParams)
-//      case LabelJoin => LabelJoinFunction(funcParams)
+//      case LabelJoin =>  LabelJoinFunction(funcParams)
 //      case _ => throw new UnsupportedOperationException(s"$function not supported.")
 //    }
 //  }
@@ -228,39 +231,33 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
     val resultRv = source.toListL.map { rvs =>
       rvs.map { rv =>
-        new RangeVector {
-          override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+        val value = if (rv.rows.size == 1) rv.rows.next().getDouble(1)
+        else
+        Double.NaN
 
-          override def rows: Iterator[RowReader] = if (rv.rows.size == 1) rv.rows
-          else
-            rv.rows.map(x => new TransientRow(x.getLong(0), Double.NaN))
-
-          override def ValueType: String = "scalar"
-        }
-      }
+        new DoubleScalar(0,0,0,value)
 
     }.map(Observable.fromIterable)
 
     Observable.fromTask(resultRv).flatten
   }
 
-  def timeImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
-    val resultRv = source.toListL.map { rvs =>
-      rvs.map { rv =>
-        new RangeVector {
-          override def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
-
-          override def rows: Iterator[RowReader] =
-            rv.rows.map(x => new TransientRow(x.getLong(0), x.getLong(0)))
-
-          override def ValueType: String = "scalar"
-        }
-      }
-
-    }.map(Observable.fromIterable)
-
-    Observable.fromTask(resultRv).flatten
-  }
+//  def timeImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
+//    val resultRv = source.toListL.map { rvs =>
+//      rvs.map { rv =>
+//        new ScalarSample {
+//
+//          override def rows: Iterator[RowReader] =
+//            rv.rows.map(x => new TransientRow(x.getLong(0), x.getLong(0)))
+//
+//         // override def ValueType: String = "scalar"
+//        }
+//      }
+//
+//    }.map(Observable.fromIterable)
+//
+//    Observable.fromTask(resultRv).flatten
+ /// }
 
   def apply(dataset: Dataset,
             source: Observable[RangeVector],
@@ -269,12 +266,9 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
       function match {
         case Scalar => scalarImpl(source)
-        case Time => timeImpl()
+        //case Time => timeImpl(source)
         case _ => throw new UnsupportedOperationException(s"$function not supported.")
       }
     }
-    val resultRv =  else {
-    source
+
   }
-  }
-}

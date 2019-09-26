@@ -2,6 +2,7 @@ package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
+import filodb.core.query.{TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr

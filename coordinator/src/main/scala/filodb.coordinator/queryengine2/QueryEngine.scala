@@ -216,7 +216,7 @@ class QueryEngine(dataset: Dataset,
     ActorPlanDispatcher(targetActor)
   }
 
-  def materializeScalarPlan(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarPlan, spreadProvider: SpreadProvider): PlanResult = ???
+  //ef materializeScalarPlan(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarPlan, spreadProvider: SpreadProvider): PlanResult = ???
 
   /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
@@ -247,8 +247,9 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-
       case lp: ScalarPlan                  => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case _                              => throw new BadQueryException("Invalid logical plan")
+
     }
   }
 
@@ -452,10 +453,10 @@ class QueryEngine(dataset: Dataset,
   private def materializeScalarPlan(queryId: String,
                                                     submitTime: Long,
                                                     options: QueryOptions,
-                                                    lp: ApplyMiscellaneousFunction,
+                                                    lp: ScalarPlan,
                                                     spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.functionArgs, lp.timeStepParams)))
     vectors
   }
   /**

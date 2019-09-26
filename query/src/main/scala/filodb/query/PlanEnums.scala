@@ -230,6 +230,7 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
   case object Timestamp extends MiscellaneousFunctionId("timestamp")
 
   case object Year extends MiscellaneousFunctionId("year")
+  case object Time extends ScalarFunctionId("time")
 
  //case object Vector extends MiscellaneousFunctionId("vector")
 
@@ -243,7 +244,7 @@ object ScalarFunctionId extends Enum[ScalarFunctionId] {
   val values = findValues
 
   case object Scalar extends ScalarFunctionId("scalar")
-  case object Time extends ScalarFunctionId("time")
+ // case object Time extends ScalarFunctionId("time")
 
 }
 

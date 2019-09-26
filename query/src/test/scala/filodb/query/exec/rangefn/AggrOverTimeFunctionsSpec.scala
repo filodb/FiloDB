@@ -1,43 +1,45 @@
 package filodb.query.exec.rangefn
 
-import scala.util.Random
-
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
-import filodb.core.{MachineMetricsData => MMD, MetricsTestData, TestData}
+import filodb.core.{MetricsTestData, TestData, MachineMetricsData => MMD}
 import filodb.memory._
-import filodb.memory.format.{vectors => bv, TupleRowReader}
+import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.query.QueryConfig
 import filodb.query.exec._
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
+
+import scala.util.Random
 
 /**
- * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
- */
+  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
+  */
 trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll {
+
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), null, 16)
+    new MemoryStats(Map("test" -> "test")), null, 16)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesSchema.data.blockMetaSize,
-                                      MMD.dummyContext, true)
+    MMD.dummyContext, true)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
 
   protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleSchema.data.blockMetaSize,
-                                      MMD.dummyContext, true)
+    MMD.dummyContext, true)
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
   }
 
-  def sumSquares(nn: Seq[Double]): Double = nn.map(n => n*n).sum.toDouble
+  def sumSquares(nn: Seq[Double]): Double = nn.map(n => n * n).sum.toDouble
+
   def avg(nn: Seq[Double]): Double = nn.sum.toDouble / nn.length
-  def stdVar(nn: Seq[Double]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
+
+  def stdVar(nn: Seq[Double]): Double = sumSquares(nn) / nn.length - avg(nn) * avg(nn)
 
   val defaultStartTS = 100000L
   val pubFreq = 10000L
@@ -107,17 +109,17 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   }
 
   def chunkedWindowItHist[R <: TransientHistRow](data: Seq[Seq[Any]],
-                          rv: RawDataRangeVector,
-                          func: ChunkedRangeFunction[R],
-                          windowSize: Int,
-                          step: Int,
-                          row: R): ChunkedWindowIteratorH = {
+                                                 rv: RawDataRangeVector,
+                                                 func: ChunkedRangeFunction[R],
+                                                 windowSize: Int,
+                                                 step: Int,
+                                                 row: R): ChunkedWindowIteratorH = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
     new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
-                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
+      func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
   }
 
   def chunkedWindowItHist(data: Seq[Seq[Any]],
@@ -175,8 +177,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowItHist(data, rv, new SumOverTimeChunkedFunctionH(), windowSize, step)
       chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.MutableHistogram])
-                                      .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        val sumRawHist = rawDataWindow.map(_ (3).asInstanceOf[bv.MutableHistogram])
+          .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
       }
     }
@@ -195,12 +197,12 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.MutableHistogram])
-                                      .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
+        val sumRawHist = rawDataWindow.map(_ (4).asInstanceOf[bv.MutableHistogram])
+          .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
 
-        val maxMax = rawDataWindow.map(_(3).asInstanceOf[Double])
-                                  .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
+        val maxMax = rawDataWindow.map(_ (3).asInstanceOf[Double])
+          .foldLeft(0.0) { case (agg, m) => Math.max(agg, m) }
         aggRow.getDouble(2) shouldEqual maxMax
       }
     }
@@ -306,4 +308,32 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
+
+  it("should correctly do changes with NaN") {
+    var data = Seq(Double.NaN, 1.0, 1.5, 2.5, 3.5, 4.5, 5.5)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+    println("list:" + list)
+    val windowSize = 100
+    val step = 20
+
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 10000, 150000, 30000,
+      new ChangesChunkedFunctionD(), queryConfig)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
+
+//  it("should correctly do changes with Long") {
+//    var data = Seq(1, 2, 3, 4, 5).map(_.toDouble)
+//    val rv = timeValueRV(data)
+//    //val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+//
+//    val windowSize = 100
+//    val step = 20
+//
+//    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
+//      new ChangesChunkedFunctionL(), queryConfig)
+//    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+//    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+//  }
 }

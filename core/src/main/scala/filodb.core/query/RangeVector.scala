@@ -1,9 +1,11 @@
 package filodb.core.query
 
+
+import java.time.{LocalTime, ZoneId}
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
-
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -11,6 +13,8 @@ import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+
+import scala.collection.mutable.ListBuffer
 
 /**
   * Identifier for a single RangeVector.
@@ -90,10 +94,14 @@ object CustomRangeVectorKey {
 //  def numRows: Option[Int] = None
 //  def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 //}
-/**
+
+ //trait ResultSample
+
+
+/*
   * Represents a single result of any FiloDB Query.
   */
-trait RangeVector {
+ trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
   def numRows: Option[Int] = None
@@ -101,6 +109,46 @@ trait RangeVector {
   def ValueType : String = "matrix"
 }
 
+//   trait ScalarSample extends RangeVector {
+//     def key:RangeVectorKey = CustomRangeVectorKey(Map.empty)
+//   }
+//
+//   case class TimeScalar (rows: Iterator[RowReader],  sourceShards: Seq[Int] = Nil) extends ScalarSample
+//
+//   case class FixedDouble (rows: Iterator[RowReader]) extends ScalarSample
+//
+//case class ScalarVector(key: RangeVectorKey = CustomRangeVectorKey(Map.empty) , rows: Iterator[RowReader]) extends RangeVector
+
+trait ScalarVector extends RangeVector {
+  def start: Long
+  def end: Long
+  def step: Long
+
+  def key:RangeVectorKey = CustomRangeVectorKey(Map.empty)
+
+  override def rows: Iterator[RowReader] =  {
+    val rowList =  new ListBuffer[TransientRow] ()
+ for (i-> start to end by step){
+
+ }
+    rowList += new TransientRow(0, 1.0)
+//    Stream.from(start to end by step).map { n=>
+//      new TransientRow(n.toLong, n.toDouble)
+//    }.
+    rowList.iterator
+
+  }
+}
+
+
+case class DoubleScalar(start: Long, end: Long, step: Long, value: Double) extends ScalarVector
+case class TimeScalar(start: Long, end: Long, step:Long) extends ScalarVector
+case class HourScalar(start: Long, end: Long, step:Long) extends ScalarVector
+{
+  def value: Double ={
+    LocalTime.now(ZoneId.of("GMT")).getHour
+  }
+}
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     val partition: ReadablePartition,

@@ -4,7 +4,7 @@ import java.lang.{Double => JLDouble}
 import java.util
 
 import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.{BinaryVector, TransientRow, VectorDataReader, vectors => bv}
 import filodb.query.QueryConfig
 import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
 
