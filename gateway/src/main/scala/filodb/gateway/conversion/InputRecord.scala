@@ -106,9 +106,7 @@ object PrometheusInputRecord {
     } else {
       val metric = metricTags.head._2
       val metricKey = metricTags.head._1
-      println(tags)
       val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options)
-      println(transformedTags)
       (0 until tsProto.getSamplesCount).map { i =>
         val sample = tsProto.getSamples(i)
         PrometheusInputRecord(transformedTags, metric, sample.getTimestampMs, sample.getValue)
