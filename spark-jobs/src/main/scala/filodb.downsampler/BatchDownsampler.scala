@@ -85,24 +85,37 @@ object BatchDownsampler extends StrictLogging with Instance {
     res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }.toMap
 
-  private val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
-    stats = new MemoryStats(kamonTags),
-    reclaimer = new ReclaimListener {
-      override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
-    },
-    numPagesPerBlock = 50)
-  private val blockFactory = new BlockMemFactory(blockStore, None, maxMetaSize,
-    kamonTags, false)
+  private val blockMemFactoryTL = new ThreadLocal[BlockMemFactory]() {
+    override def initialValue(): BlockMemFactory = {
+      val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
+        stats = new MemoryStats(kamonTags),
+        reclaimer = new ReclaimListener {
+          override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
+        },
+        numPagesPerBlock = 50)
+      new BlockMemFactory(blockStore, None, maxMetaSize,
+        kamonTags, false)
+    }
+  }
 
-  private val memoryManager = new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
+  private val memoryManagerTL = new ThreadLocal[NativeMemoryManager]() {
+    override def initialValue(): NativeMemoryManager = {
+      new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
+    }
+  }
 
   /**
     * Buffer Pool keyed by Raw schema Id
     */
-  private val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
-  rawSchemas.foreach { s =>
-    val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, settings.downsampleStoreConfig)
-    bufferPoolByRawSchemaId += s.schemaHash -> pool
+  private val bufferPoolsTL = new ThreadLocal[debox.Map[Int, WriteBufferPool]]() {
+    override def initialValue(): debox.Map[Int, WriteBufferPool] = {
+      val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
+      rawSchemas.foreach { s =>
+        val pool = new WriteBufferPool(memoryManagerTL.get(), s.downsample.get.data, settings.downsampleStoreConfig)
+        bufferPoolByRawSchemaId += s.schemaHash -> pool
+      }
+      bufferPoolByRawSchemaId
+    }
   }
 
   private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
@@ -131,7 +144,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     persistDownsampledChunks(downsampledChunksToPersist)
 
     // reclaim all blocks
-    blockFactory.markUsedBlocksReclaimable()
+    blockMemFactoryTL.get().markUsedBlocksReclaimable()
     // free partitions
     rawPartsToFree.foreach(_.free())
     rawPartsToFree.clear()
@@ -167,13 +180,13 @@ object BatchDownsampler extends StrictLogging with Instance {
         logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
 
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
-          rawPart, memoryManager)
-        val bufferPool = bufferPoolByRawSchemaId(rawSchemaId)
+          rawPart, memoryManagerTL.get())
+        val bufferPool = bufferPoolsTL.get()(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
-                                            0, bufferPool, shardStats, memoryManager, 1)
+                                            0, bufferPool, shardStats, memoryManagerTL.get(), 1)
           res -> part
         }.toMap
 
@@ -183,8 +196,8 @@ object BatchDownsampler extends StrictLogging with Instance {
         downsampledPartsPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
-          dsPartition.switchBuffers(blockFactory, true)
-          downsampledChunksToPersist(res) ++= dsPartition.makeFlushChunks(blockFactory)
+          dsPartition.switchBuffers(blockMemFactoryTL.get(), true)
+          downsampledChunksToPersist(res) ++= dsPartition.makeFlushChunks(blockMemFactoryTL.get())
         }
       case None =>
         logger.warn(s"Encountered partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)}" +
@@ -249,7 +262,8 @@ object BatchDownsampler extends StrictLogging with Instance {
               }
             }
             logger.trace(s"Ingesting into part=${part.hashCode}: $downsampleRow")
-            part.ingest(userTimeStart, downsampleRowReader, blockFactory) // use the userTimeStart as ingestionTime
+            //use the userTimeStart as ingestionTime
+            part.ingest(userTimeStart, downsampleRowReader, blockMemFactoryTL.get())
           }
           pStart += resMillis
           pEnd += resMillis
