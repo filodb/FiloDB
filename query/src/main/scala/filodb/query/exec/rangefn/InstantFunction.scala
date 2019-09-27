@@ -1,7 +1,7 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.query.DoubleScalar
 import scalaxy.loops._
-
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -144,7 +144,7 @@ case class ClampMaxImpl(funcParams: Seq[Any]) extends DoubleInstantFunction {
     "Cannot use ClampMax without providing a upper limit of max as a Number.")
 
   override def apply(value: Double): Double =
-    scala.math.min(value, funcParams.head.asInstanceOf[Number].doubleValue())
+    scala.math.min(value, funcParams.head.asInstanceOf[DoubleScalar].value)
 }
 
 /**

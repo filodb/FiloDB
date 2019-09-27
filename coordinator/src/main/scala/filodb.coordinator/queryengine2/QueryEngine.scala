@@ -4,20 +4,18 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{SpreadProvider, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, DoubleScalar, Filter}
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
@@ -331,7 +329,8 @@ class QueryEngine(dataset: Dataset,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction, spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
+    val scalarArgs = lp.functionArgs.map(_.asInstanceOf[Number].doubleValue()).map(DoubleScalar(0,0,0,_))
+    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, scalarArgs)))
     vectors
   }
 

@@ -109,7 +109,7 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
   case object Stddev extends AggregationOperator("stddev")
 
-  case object Stdvar extends AggregationOperator("stdvar")
+  case object Stdvar extends AggregationOperator(" ")
 
   case object TopK extends AggregationOperator("topk")
 
