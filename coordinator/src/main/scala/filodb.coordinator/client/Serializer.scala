@@ -3,6 +3,7 @@ package filodb.coordinator.client
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.Kryo
 import com.esotericsoftware.kryo.io._
+import com.esotericsoftware.minlog.Log
 import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
 
 import filodb.coordinator.FilodbSettings
@@ -31,26 +32,24 @@ import filodb.query.QueryOptions
  *   to reinstantiate things like GrowableVector, wrappers, and appendable types
  */
 class KryoInit {
-  val settings = FilodbSettings.global().get
-  val schemas = settings.schemas
-
   def customize(kryo: Kryo): Unit = {
-    // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
-    // even if it gets filtered out by the logging framework.
-    com.esotericsoftware.minlog.Log.WARN()
-
     kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
 
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
     kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
-    kryo.register(classOf[Schema], new SchemaSerializer(schemas))
-    kryo.register(classOf[PartitionSchema], new PartSchemaSerializer(schemas))
+    kryo.register(classOf[Schema], new SchemaSerializer)
+    kryo.register(classOf[PartitionSchema], new PartSchemaSerializer)
 
     initOtherFiloClasses(kryo)
     initQueryEngine2Classes(kryo)
     kryo.setReferences(true)   // save space by referring to same objects with ordinals
+    Log.info("Finished initializing custom Kryo serializers")
+
+    // Default level used by Kryo is 'trace', which is expensive. It always builds the message,
+    // even if it gets filtered out by the logging framework.
+    Log.WARN()
   }
 
   def initQueryEngine2Classes(kryo: Kryo): Unit = {
@@ -128,8 +127,14 @@ class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
  * A Schema serializer which cheats by assuming that both source and destination will have the same schemas
  * configuration, so we only send the schemaID.  This saves a huge amount of serialization cost.
  */
-class SchemaSerializer(schemas: Schemas) extends KryoSerializer[Schema] {
+class SchemaSerializer extends KryoSerializer[Schema] {
   override def read(kryo: Kryo, input: Input, typ: Class[Schema]): Schema = {
+    // We have to dynamically obtain the global schemas as we don't know when they will be initialized
+    // but for sure when the serialization needs to happen, Akka is up already
+    // val schemas = FilodbSettings.global().get.schemas
+    val global = FilodbSettings.global()
+    val schemas = FilodbSettings.global().get.schemas
+
     val schemaID = input.readInt
     val schema = schemas(schemaID)
     if (schema == Schemas.UnknownSchema)
@@ -142,10 +147,17 @@ class SchemaSerializer(schemas: Schemas) extends KryoSerializer[Schema] {
   }
 }
 
-class PartSchemaSerializer(schemas: Schemas) extends KryoSerializer[PartitionSchema] {
-  override def read(kryo: Kryo, input: Input, typ: Class[PartitionSchema]): PartitionSchema = schemas.part
+class PartSchemaSerializer extends KryoSerializer[PartitionSchema] {
+  override def read(kryo: Kryo, input: Input, typ: Class[PartitionSchema]): PartitionSchema = {
+    // We have to dynamically obtain the global schemas as we don't know when they will be initialized
+    // but for sure when the serialization needs to happen, Akka is up already
+    val schemas = FilodbSettings.global().get.schemas
+
+    schemas.part
+  }
 
   override def write(kryo: Kryo, output: Output, schema: PartitionSchema): Unit = {
+    val schemas = FilodbSettings.global().get.schemas
     require(schema == schemas.part)
   }
 }
