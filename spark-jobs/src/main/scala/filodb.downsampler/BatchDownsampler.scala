@@ -75,7 +75,9 @@ object BatchDownsampler extends StrictLogging with Instance {
     */
   private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
-  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max
+  // FIXME * 2 exists to workaround an issue where we see underallocation for metaspan due to
+  // possible mis-calculation of max block meta size.
+  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 2
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
