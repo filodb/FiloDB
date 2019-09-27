@@ -15,10 +15,9 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{ChunkDownsampler, DoubleChunkDownsampler, HistChunkDownsampler, TimeChunkDownsampler}
-import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats, WriteBufferPool}
+import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
-import filodb.memory._
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 /**
@@ -76,7 +75,9 @@ object BatchDownsampler extends StrictLogging with Instance {
     */
   private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
-  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max
+  // FIXME * 2 exists to workaround an issue where we see underallocation for metaspan due to
+  // possible mis-calculation of max block meta size.
+  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 2
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
@@ -85,24 +86,8 @@ object BatchDownsampler extends StrictLogging with Instance {
     res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }.toMap
 
-  private val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
-    stats = new MemoryStats(kamonTags),
-    reclaimer = new ReclaimListener {
-      override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
-    },
-    numPagesPerBlock = 50)
-  private val blockFactory = new BlockMemFactory(blockStore, None, maxMetaSize,
-    kamonTags, false)
-
-  private val memoryManager = new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
-
-  /**
-    * Buffer Pool keyed by Raw schema Id
-    */
-  private val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
-  rawSchemas.foreach { s =>
-    val pool = new WriteBufferPool(memoryManager, s.downsample.get.data, settings.downsampleStoreConfig)
-    bufferPoolByRawSchemaId += s.schemaHash -> pool
+  private val offHeapMem = new ThreadLocal[PerThreadOffHeapMemory]() {
+    override def initialValue(): PerThreadOffHeapMemory = new PerThreadOffHeapMemory(rawSchemas, kamonTags, maxMetaSize)
   }
 
   private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
@@ -124,19 +109,21 @@ object BatchDownsampler extends StrictLogging with Instance {
     }
     val rawPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsPartsToFree = ArrayBuffer[TimeSeriesPartition]()
-    rawPartsBatch.foreach { rawPart =>
-      downsamplePart(rawPart, rawPartsToFree, downsampledPartsPartsToFree,
-                     downsampledChunksToPersist, userTimeStart, userTimeEnd)
+    try {
+      rawPartsBatch.foreach { rawPart =>
+        downsamplePart(rawPart, rawPartsToFree, downsampledPartsPartsToFree,
+          downsampledChunksToPersist, userTimeStart, userTimeEnd)
+      }
+      persistDownsampledChunks(downsampledChunksToPersist)
+    } finally {
+      // reclaim all blocks
+      offHeapMem.get().blockMemFactory.markUsedBlocksReclaimable()
+      // free partitions
+      rawPartsToFree.foreach(_.free())
+      rawPartsToFree.clear()
+      downsampledPartsPartsToFree.foreach(_.shutdown())
+      downsampledPartsPartsToFree.clear()
     }
-    persistDownsampledChunks(downsampledChunksToPersist)
-
-    // reclaim all blocks
-    blockFactory.markUsedBlocksReclaimable()
-    // free partitions
-    rawPartsToFree.foreach(_.free())
-    rawPartsToFree.clear()
-    downsampledPartsPartsToFree.foreach(_.shutdown())
-    downsampledPartsPartsToFree.clear()
 
     logger.info(s"Finished iterating through and downsampling batch of ${rawPartsBatch.size} " +
       s"partitions in current executor")
@@ -167,13 +154,13 @@ object BatchDownsampler extends StrictLogging with Instance {
         logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
 
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
-          rawPart, memoryManager)
-        val bufferPool = bufferPoolByRawSchemaId(rawSchemaId)
+          rawPart, offHeapMem.get().nativeMemoryManager)
+        val bufferPool = offHeapMem.get().bufferPools(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
-                                            0, bufferPool, shardStats, memoryManager, 1)
+                                            0, bufferPool, shardStats, offHeapMem.get().nativeMemoryManager, 1)
           res -> part
         }.toMap
 
@@ -183,8 +170,8 @@ object BatchDownsampler extends StrictLogging with Instance {
         downsampledPartsPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
-          dsPartition.switchBuffers(blockFactory, true)
-          downsampledChunksToPersist(res) ++= dsPartition.makeFlushChunks(blockFactory)
+          dsPartition.switchBuffers(offHeapMem.get().blockMemFactory, true)
+          downsampledChunksToPersist(res) ++= dsPartition.makeFlushChunks(offHeapMem.get().blockMemFactory)
         }
       case None =>
         logger.warn(s"Encountered partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)}" +
@@ -249,7 +236,8 @@ object BatchDownsampler extends StrictLogging with Instance {
               }
             }
             logger.trace(s"Ingesting into part=${part.hashCode}: $downsampleRow")
-            part.ingest(userTimeStart, downsampleRowReader, blockFactory) // use the userTimeStart as ingestionTime
+            //use the userTimeStart as ingestionTime
+            part.ingest(userTimeStart, downsampleRowReader, offHeapMem.get().blockMemFactory)
           }
           pStart += resMillis
           pEnd += resMillis
