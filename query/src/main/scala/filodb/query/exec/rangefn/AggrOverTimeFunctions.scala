@@ -3,7 +3,7 @@ package filodb.query.exec.rangefn
 import java.lang.{Double => JLDouble}
 import java.util
 
-import scala.collection.mutable.ArrayBuffer
+import debox.Buffer
 
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
@@ -588,12 +588,19 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
   }
 }
 
-abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any], var quantileResult: Double = Double.NaN
-                                              )
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
+                                               var quantileResult: Double = Double.NaN)
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { quantileResult = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, quantileResult)
+  }
+  def calculateRank(q: Double, counter: Long): (Double, Double, Double) = {
+    val rank = q*(counter - 1)
+    val lowerIndex = Math.max(0, Math.floor(rank))
+    val upperIndex = Math.min(counter - 1, lowerIndex + 1)
+    val weight = rank - math.floor(rank)
+    (weight, upperIndex, lowerIndex)
   }
 }
 
@@ -606,12 +613,13 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
     require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[Number].doubleValue()
     var counter = 0
+
     quantileResult = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else {
       var rowNum = startRowNum
       val it = doubleReader.iterate(doubleVect, startRowNum)
-      var values = new ArrayBuffer[Double]
+      var values = Buffer.empty[Double]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
@@ -621,13 +629,11 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
         }
         rowNum += 1
       }
-      val sortedValues = values.sorted
-      val rank = q*(counter - 1)
-      val lowerIndex = Math.max(0, Math.floor(rank))
-      val upperIndex = Math.min(counter - 1, lowerIndex + 1)
-      val weight = rank - math.floor(rank)
+
+      values.sort(spire.algebra.Order.fromOrdering[Double])
+      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
       if (counter > 0) {
-        sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+        values(lowerIndex.toInt)*(1-weight) + values(upperIndex.toInt)*weight
       } else {
         quantileResult
       }
@@ -641,7 +647,6 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    var counter = 0
     require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[Number].doubleValue()
     quantileResult = if (q < 0) Double.NegativeInfinity
@@ -649,26 +654,21 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
     else {
       var rowNum = startRowNum
       val it = longReader.iterate(longVect, startRowNum)
-      var values = new ArrayBuffer[Double]
+      var values = Buffer.empty[Long]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
-        // There are many possible values of NaN.  Use a function to ignore them reliably.
-        if (!JLDouble.isNaN(nextvalue)) {
-          values += nextvalue
-          counter += 1
-        }
+        values += nextvalue
         rowNum += 1
       }
-      val sortedValues = values.sorted
-      val rank = q*(counter - 1)
-      val lowerIndex = Math.max(0, Math.floor(rank))
-      val upperIndex = Math.min(counter - 1, lowerIndex + 1)
-      val weight = rank - math.floor(rank)
+      val counter = endRowNum - startRowNum + 1
+      values.sort(spire.algebra.Order.fromOrdering[Long])
+      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
       if (counter > 0) {
-        sortedValues(lowerIndex.toInt)*(1-weight) + sortedValues(upperIndex.toInt)*weight
+        values(lowerIndex.toInt)*(1-weight) + values(upperIndex.toInt)*weight
       } else {
         quantileResult
       }
     }
   }
 }
+
