@@ -345,6 +345,7 @@ object RowAggregator {
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
       case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
+      case Stdvar => StdvarRowAggregator
       case _     => ???
     }
   }
@@ -579,6 +580,71 @@ object AvgRowAggregator extends RowAggregator {
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
     // drop last column with count
     reductionSchema.copy(columns = reductionSchema.columns.take(reductionSchema.columns.size-1))
+  }
+}
+
+/**
+  * Map: Every sample is mapped to two values: (a) the stdvar value "0" and (b) the value itself (c) and its count value "1"
+  * ReduceAggregate: Accumulator maintains the (a) current stdvar and (b) current mean and (c) sum of counts.
+  *                  Reduction happens by:
+  *                  (a)recalculating mean as (mean1*count1 + mean2*count1) / (count1+count2)
+  *                  (b)recalculating stdvar as ((stdvar1+mean1^2)*count1+(stdvar2+mean2^2)*count2)
+  *                     / (count1+count2) - (newMean^2)
+  * ReduceMappedRow: Same as ReduceAggregate
+  * Present: The current stdvar is presented. Mean and Count value is dropped from presentation
+  */
+object StdvarRowAggregator extends RowAggregator {
+  class StdvarHolder(var timestamp: Long = 0L,
+                     var stdVar: Double = Double.NaN,
+                     var mean: Double = Double.NaN,
+                     var count: Long = 0) extends AggregateHolder {
+    val row = new StdvarAggTransientRow()
+    def toRowReader: MutableRowReader = {
+      row.setLong(0, timestamp)
+      row.setDouble(1, stdVar)
+      row.setDouble(2, mean)
+      row.setLong(3, count)
+      row
+    }
+    def resetToZero(): Unit = { count = 0; mean = Double.NaN; stdVar = Double.NaN }
+  }
+  type AggHolderType = StdvarHolder
+  def zero: StdvarHolder = new StdvarHolder()
+  //def zero: StdVarHolder = new StdVarHolder()
+  def newRowToMapInto: MutableRowReader = new StdvarAggTransientRow()
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    mapInto.setLong(0, item.getLong(0))
+    mapInto.setDouble(1, 0L)
+    mapInto.setDouble(2, item.getDouble(1))
+    mapInto.setLong(3, if (item.getDouble(1).isNaN) 0L else 1L)
+    mapInto
+  }
+  def reduceAggregate(acc: StdvarHolder, aggRes: RowReader): StdvarHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    if (!aggRes.getDouble(1).isNaN) {
+      if (acc.mean.isNaN) acc.mean = 0d
+      if (acc.stdVar.isNaN) acc.stdVar = 0d
+
+      val newMean = (acc.mean * acc.count + aggRes.getDouble(2) * aggRes.getLong(3)) / (acc.count + aggRes.getLong(3))
+      val accSquareSum = (acc.stdVar + math.pow(acc.mean, 2)) * acc.count
+      val aggResSquareSum = (aggRes.getDouble(1) + math.pow(aggRes.getDouble(2), 2)) * aggRes.getLong(3)
+      val newStdVar = (accSquareSum + aggResSquareSum) / (acc.count + aggRes.getLong(3)) - math.pow(newMean, 2)
+      acc.stdVar = newStdVar
+      acc.mean = newMean
+      acc.count += aggRes.getLong(3)
+    }
+    acc
+  }
+  // ignore last two column. we rely on schema change
+  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def reductionSchema(source: ResultSchema): ResultSchema = {
+    var columns = source.columns :+ ColumnInfo("mean", ColumnType.DoubleColumn)
+    columns = columns :+ ColumnInfo("count", ColumnType.LongColumn)
+    source.copy(columns)
+  }
+  def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
+    // drop last two column with mean and count
+    reductionSchema.copy(columns = reductionSchema.columns.take(reductionSchema.columns.size-2))
   }
 }
 
