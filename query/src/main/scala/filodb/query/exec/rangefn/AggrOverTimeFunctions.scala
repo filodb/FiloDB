@@ -353,6 +353,7 @@ class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends Chun
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     if (count.isNaN) {
+      println("making count 0 as it is NaN")
       count = 0d
     }
     count += doubleReader.count(doubleVect, startRowNum, endRowNum)
@@ -552,7 +553,7 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
   }
 }
 
-abstract class ChangesChunkedFunction(var changes: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
+abstract class ChangesChunkedFunction(var changes: Double = Double.NaN, var prev: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { changes = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, changes)
@@ -565,10 +566,21 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    println("Adding chunk in addTimeDoubleChunks startRowNum: " + startRowNum)
     if (changes.isNaN) {
+      println("making changes 0 as it is NaN")
       changes = 0d
+     // prev = Double.NaN
     }
-    changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+    println("changes before calling doubleReader changes:" + changes)
+    println("prev before calling doubleReader prev:" + prev)
+    val changesResult = doubleReader.changes(doubleVect, startRowNum, endRowNum, prev)
+
+    changes += changesResult._1
+    prev = changesResult._2
+    if (changes > 10)
+      println("changes is greater than 10..In addTimeDoubleChunks.. changes:" + changes)
+
   }
 }
 
@@ -582,6 +594,8 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
     if (changes.isNaN) {
       changes = 0d
     }
-    changes += longReader.changes(longVect, startRowNum, endRowNum)
+    val changesResult = longReader.changes(longVect, startRowNum, endRowNum, prev.toLong )
+    changes += changesResult._1
+    prev = changesResult._2
   }
 }

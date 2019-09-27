@@ -382,7 +382,7 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
     BinaryVector.majorVectorType(ptr) shouldEqual WireFormat.VECTORTYPE_DELTA2
     val readVect = LongBinaryVector(ptr)
     readVect shouldEqual DeltaDeltaConstDataReader
-    readVect.changes(ptr,0, 4) shouldEqual(0)
+    readVect.changes(ptr,0, 4,0) shouldEqual(0)
   }
 
   it("should do changes on DeltaDeltaDataReader") {
@@ -393,6 +393,6 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
     val ptr = builder.optimize(memFactory)
     val readVect = LongBinaryVector(ptr)
     readVect shouldEqual DeltaDeltaDataReader
-    LongBinaryVector(ptr).changes(ptr, 0, 6) shouldEqual(4)
+    LongBinaryVector(ptr).changes(ptr, 0, 6, 0) shouldEqual(4)
   }
 }
