@@ -584,7 +584,8 @@ object AvgRowAggregator extends RowAggregator {
 }
 
 /**
-  * Map: Every sample is mapped to two values: (a) the stdvar value "0" and (b) the value itself (c) and its count value "1"
+  * Map: Every sample is mapped to two values: (a) the stdvar value "0" and (b) the value itself
+  * (c) and its count value "1"
   * ReduceAggregate: Accumulator maintains the (a) current stdvar and (b) current mean and (c) sum of counts.
   *                  Reduction happens by:
   *                  (a)recalculating mean as (mean1*count1 + mean2*count1) / (count1+count2)
@@ -769,6 +770,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   }
 }
 
+//scalastyle:off
 /**
   * We use the t-Digest data structure to map/reduce quantile calculation.
   * See https://github.com/tdunning/t-digest for more details.
