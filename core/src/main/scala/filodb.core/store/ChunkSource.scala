@@ -9,7 +9,7 @@ import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, TimeSeriesShard}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schema
 import filodb.core.query._
 
 
@@ -67,46 +67,48 @@ trait ChunkSource extends RawChunkSource {
    * FiloPartitions contains chunks in offheap memory.
    * This is a higher level method that builds off of RawChunkSource/readRawPartitions, but must handle moving
    * memory to offheap and returning partitions.
-   * @param dataset the Dataset to read from
+   * @param ref the DatasetRef to read from
    * @param columnIDs the set of column IDs to read back.  Not used for the memstore, but affects what columns are
    *                  read back from persistent store.
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
    * @return an Observable over ReadablePartition
    */
-  def scanPartitions(dataset: Dataset,
+  def scanPartitions(ref: DatasetRef,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition]
 
   // internal method to find # of groups in a dataset
-  def groupsInDataset(dataset: Dataset): Int
+  def groupsInDataset(ref: DatasetRef): Int
 
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
-   * @param dataset the Dataset to read from
+   * @param ref the DatasetRef to read from
+   * @param schema the Schema to read data for
    * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
    *                in each row.  These are the IDs from the Column instances.
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
    * @return an Observable of RangeVectors
    */
-  def rangeVectors(dataset: Dataset,
+  def rangeVectors(ref: DatasetRef,
+                   schema: Schema,
                    columnIDs: Seq[Types.ColumnId],
                    partMethod: PartitionScanMethod,
                    chunkMethod: ChunkScanMethod): Observable[RangeVector] = {
     val ids = columnIDs.toArray
-    val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
-    val numGroups = groupsInDataset(dataset)
-    scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
+    val partCols = schema.infosFromIDs(schema.partition.columns.map(_.id))
+    val numGroups = groupsInDataset(ref)
+    scanPartitions(ref, columnIDs, partMethod, chunkMethod)
       .filter(_.hasChunks(chunkMethod))
       .map { partition =>
         stats.incrReadPartitions(1)
-        val subgroup = TimeSeriesShard.partKeyGroup(dataset.partKeySchema, partition.partKeyBase,
+        val subgroup = TimeSeriesShard.partKeyGroup(schema.partKeySchema, partition.partKeyBase,
                                                     partition.partKeyOffset, numGroups)
         val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
-                                              dataset.partKeySchema, partCols, partition.shard,
+                                              schema.partKeySchema, partCols, partition.shard,
                                               subgroup, partition.partID)
         RawDataRangeVector(key, partition, chunkMethod, ids)
       }
@@ -130,22 +132,22 @@ trait DefaultChunkSource extends ChunkSource {
   /**
    * Should return a shard-specific RawToPartitionMaker
    */
-  def partMaker(dataset: Dataset, shard: Int): RawToPartitionMaker
+  def partMaker(ref: DatasetRef, shard: Int): RawToPartitionMaker
 
   val singleThreadPool = Scheduler.singleThread(FiloSchedulers.PopulateChunksSched)
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
   // Default implementation takes every RawPartData and turns it into a regular TSPartition
-  def scanPartitions(dataset: Dataset,
+  def scanPartitions(ref: DatasetRef,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    readRawPartitions(dataset.ref, partMethod, chunkMethod)
+    readRawPartitions(ref, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.
       .mapAsync { rawPart =>
-          partMaker(dataset, partMethod.shard).populateRawChunks(rawPart).executeOn(singleThreadPool)
+          partMaker(ref, partMethod.shard).populateRawChunks(rawPart).executeOn(singleThreadPool)
        }
       .asyncBoundary(strategy)
   }

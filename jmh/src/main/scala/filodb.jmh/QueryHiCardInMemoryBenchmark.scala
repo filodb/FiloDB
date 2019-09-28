@@ -124,25 +124,25 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     cluster.shutdown()
   }
 
-  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumOfRate.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumOfRate.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 
-  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumSumOverTime.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumSumOverTime.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 

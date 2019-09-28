@@ -89,6 +89,15 @@ object FiloBuild extends Build {
       coordinator % "compile->compile; test->test")
     .configs(IntegrationTest, MultiJvm)
 
+  lazy val sparkJobs = project
+    .in(file("spark-jobs"))
+    .settings(commonSettings: _*)
+    .settings(name := "spark-jobs")
+    .settings(assemblySettings: _*)
+    .settings(scalacOptions += "-language:postfixOps")
+    .settings(libraryDependencies ++= sparkJobsDeps)
+    .dependsOn(cassandra, core % "compile->compile; test->test")
+
   lazy val bootstrapper = project
     .in(file("akka-bootstrapper"))
     .settings(commonSettings: _*)
@@ -172,7 +181,7 @@ object FiloBuild extends Build {
   val ficusVersion      = "1.1.2"
   val kamonVersion      = "1.1.6"
   val monixKafkaVersion = "0.15"
-  val sparkVersion      = "2.0.0"
+  val sparkVersion      = "2.4.0"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
@@ -225,6 +234,12 @@ object FiloBuild extends Build {
     "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
     "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
     "com.github.alexandrnikitin" %% "bloom-filter" % "0.11.0",
+    scalaxyDep
+  )
+
+  lazy val sparkJobsDeps = commonDeps ++ Seq(
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % "provided",
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % "provided",
     scalaxyDep
   )
 

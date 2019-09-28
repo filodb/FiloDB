@@ -42,6 +42,11 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   // Dataset will be created and ingestion started
   override def createActorSystem(): ActorSystem = PrometheusApiRouteSpec.getNewSystem
 
+  override def afterAll(): Unit = {
+    FilodbSettings.reset()
+    super.afterAll()
+  }
+
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
   implicit val timeout = RouteTestTimeout(20.minute)
@@ -60,7 +65,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   }
 
   it("should get explainPlan for query") {
-    val query = "heap_usage{_ns=\"App-0\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
@@ -80,7 +85,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   }
 
   it("should take spread override value from config for app") {
-    val query = "heap_usage{_ns=\"App-0\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
@@ -95,7 +100,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   }
 
   it("should get explainPlan for query based on spread as query parameter") {
-    val query = "heap_usage{_ns=\"App-1\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
@@ -110,7 +115,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   }
 
     it("should take default spread value if there is no override") {
-      val query = "heap_usage{_ns=\"App-1\"}"
+      val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
       Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
         s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {

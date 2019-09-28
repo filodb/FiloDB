@@ -13,7 +13,6 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
@@ -31,18 +30,17 @@ final case class ReduceAggregateExec(id: String,
                                      aggrParams: Seq[Any]) extends NonLeafExecPlan {
   def children: Seq[ExecPlan] = childAggregates
 
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = childAggregates.head.schema(dataset)
+  protected def schemaOfCompose(): ResultSchema = childAggregates.head.schema()
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
         case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val aggregator = RowAggregator(aggrOp, aggrParams, schemaOfCompose(dataset))
+    val aggregator = RowAggregator(aggrOp, aggrParams, schemaOfCompose())
     RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
   }
 }
@@ -61,8 +59,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -88,7 +85,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
     }
   }
 
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+  override def schema(source: ResultSchema): ResultSchema = {
     val aggregator = RowAggregator(aggrOp, aggrParams, source)
     // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
     aggregator.reductionSchema(source)
@@ -100,8 +97,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -109,7 +105,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
     RangeVectorAggregator.present(aggregator, source, limit)
   }
 
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+  override def schema(source: ResultSchema): ResultSchema = {
     val aggregator = RowAggregator(aggrOp, aggrParams, source)
     aggregator.presentationSchema(source)
   }

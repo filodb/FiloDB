@@ -61,7 +61,7 @@ object TestData {
     ignoreTagsOnPartitionKeyHash = ["le"]
     metricColumn = "__name__"
     valueColumn = "value"
-    shardKeyColumns = ["__name__", "_ns"]
+    shardKeyColumns = ["__name__", "_ns_", "_ws_"]
   }
   """
 }
@@ -197,12 +197,12 @@ object GdeltTestData {
 
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
   val datasetOptions = DatasetOptions.DefaultOptions.copy(
-    shardKeyColumns = Seq( "__name__","_ns"))
+    shardKeyColumns = Seq( "__name__","_ns_","_ws_"))
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), datasetOptions)
 
   val datasetOptionConfig = """
     options {
-      shardKeyColumns = ["__name__","_ns"]
+      shardKeyColumns = ["__name__","_ns_","_ws_"]
       ignoreShardKeyColumnSuffixes = {}
       valueColumn = "AvgTone"
       metricColumn = "__name__"
@@ -414,7 +414,7 @@ object CustomMetricsData {
                         partitionColumns,
                         columns,
                         Seq.empty,
-                        DatasetOptions(Seq("metric", "_ns"), "metric", true)).get
+                        DatasetOptions(Seq("metric", "_ns_", "_ws_"), "metric", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
