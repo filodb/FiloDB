@@ -356,7 +356,9 @@ class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends Chun
       println("making count 0 as it is NaN")
       count = 0d
     }
+    println("Count before calling doubleReader count: " + count)
     count += doubleReader.count(doubleVect, startRowNum, endRowNum)
+    println("Count after calling doubleReader count: " + count)
   }
 }
 
@@ -554,7 +556,7 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
 }
 
 abstract class ChangesChunkedFunction(var changes: Double = Double.NaN, var prev: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { changes = Double.NaN }
+  override final def reset(): Unit = { changes = Double.NaN; prev =Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, changes)
   }
@@ -566,7 +568,7 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    println("Adding chunk in addTimeDoubleChunks startRowNum: " + startRowNum)
+    println("Adding chunk in addTimeDoubleChunks startRowNum: " + startRowNum +"endRowNum:" + endRowNum )
     if (changes.isNaN) {
       println("making changes 0 as it is NaN")
       changes = 0d

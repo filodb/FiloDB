@@ -146,8 +146,9 @@ extends Iterator[R] with StrictLogging {
     wit.nextWindow()
     var i = 0
     while (wit.hasNext) {
-      if (i>0)
+      if (i>0) {
         println("******Second iteration.. i is :" + i)
+      }
 
       val queryInfo = wit.next
       val nextInfo = ChunkSetInfo(queryInfo.infoPtr)

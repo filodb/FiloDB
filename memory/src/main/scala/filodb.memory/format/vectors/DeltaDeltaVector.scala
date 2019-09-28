@@ -207,24 +207,29 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long): (Long,Long) = {
-    if (slope(vector) == 0) {
-      (0,0)
-    } else {
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+    println("Ind DeltaDeltaVector changes")
+    println("slope vector:" + slope(vector))
+    if (slope(vector) == 0)
+      println("slope is 0")
+//    if (slope(vector) == 0) {
+//      (0,0)
+//    } else {
       require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
       val itr = iterate(vector, start)
       var prevVector: Long = prev
       var changes = 0
-      for {i <- start until end optimized} {
+      for {i <- start until end+1 optimized} {
         val cur = itr.next
-        if (i == start) //Initialize prev
+        if (i == start && ignorePrev) //Initialize prev
           prevVector = cur
-        if (prev != cur)
+        if (prevVector != cur)
           changes += 1
+        println("cur:" + cur +"prevVector:" + prevVector +"changes:" + changes)
         prevVector = cur
       }
       (changes, prevVector)
-    }
+    //}
   }
 }
 
@@ -274,14 +279,37 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     }
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long): (Long, Long) = {
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
     println("In DeltaDeltaConstDataReader changes")
-    if (slope(vector) == 0) {
-      (0,0)
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    if (ignorePrev) {
+      val lastValue = iterate(vector,end).next
+      println("lastvalue returning as prev:" + lastValue)
+      if (slope(vector) == 0) {
+        (0, lastValue)
+      } else {
+        //(length(vector) - 1, 0)
+        (end - start, lastValue)
+      }
     } else {
-      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-      (length(vector) - 1, 0)
+      //      if (iterate())
+      //      (end-start,iterate(vector,end).next)
+
+             val itr = iterate(vector, start)
+            var prevVector: Long = prev
+            var changes = 0
+            for {i <- start until end+1 optimized} {
+              val cur = itr.next
+              //        if (i == start) //Initialize prev
+              //          prevVector = cur
+              if (prevVector != cur)
+                changes += 1
+              println("cur:" + cur +"prevVector:" + prevVector +"changes:" + changes)
+              prevVector = cur
+            }
+            (changes, prevVector)
     }
+
   }
 }
 
