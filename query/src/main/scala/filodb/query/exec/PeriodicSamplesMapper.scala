@@ -142,16 +142,10 @@ extends Iterator[R] with StrictLogging {
     val wit = windowIt
 
     wit.nextWindow()
-    var i = 0
     while (wit.hasNext) {
-      if (i>0) {
-        println("******Second iteration.. i is :" + i)
-      }
-
       val queryInfo = wit.next
       val nextInfo = ChunkSetInfo(queryInfo.infoPtr)
       try {
-        println("\n\n\n*******************Adding chunk for wit.curWindowStart:" + wit.curWindowStart + "wit.curWindowEnd:" + wit.curWindowEnd)
         rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
                                 wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
       } catch {
@@ -163,7 +157,6 @@ extends Iterator[R] with StrictLogging {
                        s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
           throw e
       }
-      i+=1;
     }
     rangeFunction.apply(wit.curWindowStart, wit.curWindowEnd, sampleToEmit)
 

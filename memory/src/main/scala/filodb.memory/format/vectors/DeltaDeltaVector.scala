@@ -208,28 +208,19 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
   }
 
   def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-    println("Ind DeltaDeltaVector changes")
-    println("slope vector:" + slope(vector))
-    if (slope(vector) == 0)
-      println("slope is 0")
-//    if (slope(vector) == 0) {
-//      (0,0)
-//    } else {
       require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
       val itr = iterate(vector, start)
       var prevVector: Long = prev
       var changes = 0
-      for {i <- start until end+1 optimized} {
+      for {i <- start until end + 1 optimized} {
         val cur = itr.next
         if (i == start && ignorePrev) //Initialize prev
           prevVector = cur
         if (prevVector != cur)
           changes += 1
-        println("cur:" + cur +"prevVector:" + prevVector +"changes:" + changes)
         prevVector = cur
       }
       (changes, prevVector)
-    //}
   }
 }
 
@@ -280,36 +271,21 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   }
 
   def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-    println("In DeltaDeltaConstDataReader changes")
+
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    if (ignorePrev) {
-      val lastValue = iterate(vector,end).next
-      println("lastvalue returning as prev:" + lastValue)
-      if (slope(vector) == 0) {
-        (0, lastValue)
-      } else {
-        //(length(vector) - 1, 0)
-        (end - start, lastValue)
-      }
+    val firstValue = iterate(vector, start).next
+    val lastValue = iterate(vector, end).next
+    // compare current element with last element(prev) of previous chunk
+    val changes = if (!ignorePrev && prev != firstValue ) {
+        1
     } else {
-      //      if (iterate())
-      //      (end-start,iterate(vector,end).next)
-
-             val itr = iterate(vector, start)
-            var prevVector: Long = prev
-            var changes = 0
-            for {i <- start until end+1 optimized} {
-              val cur = itr.next
-              //        if (i == start) //Initialize prev
-              //          prevVector = cur
-              if (prevVector != cur)
-                changes += 1
-              println("cur:" + cur +"prevVector:" + prevVector +"changes:" + changes)
-              prevVector = cur
-            }
-            (changes, prevVector)
+        0
     }
-
+    if (slope(vector) == 0) {
+        (0 + changes, lastValue)
+    } else {
+        (end - start + changes, lastValue)
+    }
   }
 }
 

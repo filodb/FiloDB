@@ -135,7 +135,7 @@ object TestTimeseriesProducer extends StrictLogging {
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
 
-      PrometheusInputRecord(tags, "heap_usage", timestamp, value)
+      PrometheusInputRecord(tags, "test_heap_usage", timestamp, value)
     }
   }
 

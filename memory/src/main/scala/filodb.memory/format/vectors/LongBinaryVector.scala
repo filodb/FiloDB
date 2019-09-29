@@ -229,8 +229,8 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     if (element == item) first else first | 0x80000000
   }
 
-  final def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-    println("In LongBinaryVector Changes")
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false):
+  (Long, Long) = {
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
     var prevVector: Long = prev
     val startAddr = vector + OffsetData + start * 8
