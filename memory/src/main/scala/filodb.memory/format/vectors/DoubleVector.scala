@@ -243,9 +243,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     while (addr < untilAddr) {
       val nextDbl = UnsafeUtils.getDouble(addr)
       // There are many possible values of NaN.  Use a function to ignore them reliably.
-      if (!java.lang.Double.isNaN(nextDbl)) {
-        count += 1
-      }
+      if (!java.lang.Double.isNaN(nextDbl)) count += 1
       addr += 8
     }
     count

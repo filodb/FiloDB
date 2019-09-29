@@ -239,7 +239,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should aggregate count_over_time and avg_over_time using both chunked and sliding iterators") {
     val data = (1 to 500).map(_.toDouble)
-    //val chunkSize = 40
+    val chunkSize = 40
     val rv = timeValueRV(data)
 
     (0 until numIterations).foreach { x =>
@@ -267,21 +267,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
       aggregated5.drop(0) shouldEqual data.sliding(windowSize, step).map(_.length - 2).drop(0).toBuffer
-      //var dataDouble = Seq( 1.0, 1.5, 2.5, 3.5, 4.5, 5.5)
-//      var dataDouble : Seq[Double]= Seq[Double]( 1.0, 1.5, 2.5, 3.5, 4.5, 5.5)
-//      val dataRandom :Seq [Double] = scala.util.Random.shuffle(dataDouble )
-//      println("dataRandom:" + dataRandom)
-//      val countChunked1 = chunkedWindowIt(dataRandom, rv, new CountOverTimeChunkedFunctionD(), windowSize, step)
-//      val aggregated5 = countChunked1.map(_.getDouble(1)).toBuffer
-//      val changesChunked = chunkedWindowIt(dataRandom, rv, new ChangesChunkedFunctionD(), windowSize, step)
-//      val aggregated6 = changesChunked.map(_.getDouble(1)).toBuffer
-//
-//      println("count result:" + aggregated5)
-//      println("aggregated6 result:" + aggregated6)
-//
-//      aggregated5 shouldEqual dataRandom.sliding(windowSize, step).map(_.length - 1).toBuffer
-//      aggregated6 shouldEqual dataRandom.sliding(windowSize, step).map(_.length - 2).toBuffer
-
     }
   }
 
@@ -329,23 +314,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
 
-  it("should correctly do changes with NaN") {
-    var data = Seq( 1.0, 1.5, 2.5, 3.5, 4.5, 5.5)
-    val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
-    val windowSize = 100
-    val step = 20
-
-    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-      new ChangesChunkedFunctionD(), queryConfig)
-    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
-  }
-
   it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
     "than one chunks") {
-
-
     val data1= (1 to 240).map(_.toDouble)
     val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
 
