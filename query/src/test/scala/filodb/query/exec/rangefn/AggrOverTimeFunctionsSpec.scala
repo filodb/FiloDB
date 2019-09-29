@@ -161,9 +161,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowIt(data, rv, new SumOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated2 = chunkedIt.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1).sum).toBuffer
-
-      val chunkedIt1 = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
-      val aggregated3 = chunkedIt1.map(_.getDouble(1)).toBuffer
     }
   }
 
@@ -262,7 +259,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
       aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
-
 
       val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
       val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
