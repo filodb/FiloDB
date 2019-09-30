@@ -14,13 +14,14 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.{IngestionStarted, ShardMapper}
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, UnavailablePromQlQueryParams}
+import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryConfig, QueryError => QError, QueryOptions, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -102,7 +103,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset, shardMapper)
+
+  val engine = new QueryEngine(dataset, shardMapper, EmptyFailureProvider)
 
   /**
    * ## ========  Queries ===========
@@ -119,7 +121,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
+    LogicalPlan2Query(dataset.ref, plan, UnavailablePromQlQueryParams, QueryOptions(Some(new StaticSpreadProvider
+    (SpreadChange(0, 1))), 20000))
   }
 
   @TearDown
@@ -148,7 +151,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams2 = TimeStepParams(queryTime/1000, noOverlapStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
   val queryCommands2 = logicalPlans2.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000))
+    LogicalPlan2Query(dataset.ref, plan, UnavailablePromQlQueryParams, QueryOptions(Some(new StaticSpreadProvider
+    (SpreadChange(0, 1))), 10000))
   }
 
   @Benchmark
@@ -171,7 +175,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qOptions = QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 10000)
   val logicalPlan = Parser.queryRangeToLogicalPlan(rawQuery, qParams)
   // Pick the children nodes, not the DistConcatExec.  Thus we can run in a single thread this way
-  val execPlan = engine.materialize(logicalPlan, qOptions).children.head
+  val execPlan = engine.materialize(logicalPlan, qOptions, UnavailablePromQlQueryParams).children.head
   val querySched = Scheduler.singleThread(s"benchmark-query")
   val queryConfig = new QueryConfig(cluster.settings.allConfig.getConfig("filodb.query"))
 
@@ -191,7 +195,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   val minQuery = """min_over_time(heap_usage{_ns="App-2"}[5m])"""
   val minLP = Parser.queryRangeToLogicalPlan(minQuery, qParams)
-  val minEP = engine.materialize(minLP, qOptions).children.head
+  val minEP = engine.materialize(minLP, qOptions, UnavailablePromQlQueryParams).children.head
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
@@ -207,7 +211,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   // sum(rate) query and rate involves counter correction, very important case
   val sumRateLP = Parser.queryRangeToLogicalPlan(sumRateQuery, qParams)
-  val sumRateEP = engine.materialize(sumRateLP, qOptions).children.head
+  val sumRateEP = engine.materialize(sumRateLP, qOptions, UnavailablePromQlQueryParams).children.head
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))

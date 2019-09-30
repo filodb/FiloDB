@@ -1,15 +1,12 @@
 package filodb.query.exec
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.{TestData, Types}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.RecordBuilder
@@ -20,11 +17,12 @@ import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore, Time
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import monix.execution.Scheduler
 
 object SelectRawPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: ExecutionContext,
+                         (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
@@ -93,7 +91,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Nil)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -113,7 +111,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val endTime   = now - (numRawSamples-10) * reportingInterval
 
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, TimeRangeChunkScan(startTime, endTime), Seq(0, 1))
+      filters, TimeRangeChunkScan(startTime, endTime), Nil)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -130,7 +128,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     // read from an interval of 100000ms, resulting in 11 samples
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
-      filters, TimeRangeChunkScan(100000L, 150000L), Seq(0, 4))
+      filters, TimeRangeChunkScan(100000L, 150000L), Seq(4))
 
     val resp = execPlan.execute(memStore, MMD.dataset1, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -144,7 +142,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = SelectRawPartitionsExec("id1", now, numRawSamples, dummyDispatcher, MMD.histDataset.ref, 0,
-      filters, TimeRangeChunkScan(100000L, 150000L), Seq(0, 3))
+      filters, TimeRangeChunkScan(100000L, 150000L), Seq(3))
 
     val resp = execPlan.execute(memStore, MMD.histDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -160,7 +158,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunkScan, Seq(0, 1))
+      filters, AllChunkScan, Nil)
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
@@ -191,7 +189,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, MMD.dataset1.ref, 0,
-      filters, AllChunkScan, Seq(0, 4))
+      filters, AllChunkScan, Seq(4))
 
     // Raw data like 101000, 111000, ....
     val start = 105000L
@@ -211,7 +209,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = SelectRawPartitionsExec("id1", now, numRawSamples, dummyDispatcher, MMD.histDataset.ref, 0,
-      filters, AllChunkScan, Seq(0, 3))
+      filters, AllChunkScan, Seq(3))
 
     val start = 105000L
     val step = 20000L
@@ -233,7 +231,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   it("should sum Histogram records with max correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
-      filters, AllChunkScan, Seq(0, 4))
+      filters, AllChunkScan, Seq(4))
 
     val start = 105000L
     val step = 20000L
@@ -275,7 +273,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   it("should extract Histogram with max using Last/None function correctly") {
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)))
     val execPlan = SelectRawPartitionsExec("hMax", now, numRawSamples, dummyDispatcher, MMD.histMaxDS.ref, 0,
-      filters, AllChunkScan, Seq(0, 4))
+      filters, AllChunkScan, Seq(4))
 
     val start = 105000L
     val step = 20000L
@@ -305,7 +303,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunkScan, Seq(0, 1))
+      filters, AllChunkScan, Nil)
     val resultSchema = execPlan.schema(timeseriesDataset)
     resultSchema.isTimeSeries shouldEqual true
     resultSchema.numRowKeyColumns shouldEqual 1
@@ -317,14 +315,14 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   it("should produce correct schema for histogram RVs with and without max column") {
     // Histogram dataset, no max column
     val noMaxPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
-                      MMD.histDataset.ref, 0, Nil, AllChunkScan, Seq(0, 3))
+                      MMD.histDataset.ref, 0, Nil, AllChunkScan, Seq(3))
     val expected1 = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn),
                                      ColumnInfo("h", HistogramColumn)), 1, colIDs = Seq(0, 3))
     noMaxPlan.schemaOfDoExecute(MMD.histDataset) shouldEqual expected1
 
     // Histogram dataset with max column - should add max to schema automatically
     val maxPlan = SelectRawPartitionsExec("someQueryId", System.currentTimeMillis, 100, dummyDispatcher,
-                      MMD.histMaxDS.ref, 0, Nil, AllChunkScan, Seq(0, 4))
+                      MMD.histMaxDS.ref, 0, Nil, AllChunkScan, Seq(4))
     val expected2 = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn),
                                      ColumnInfo("h", HistogramColumn),
                                      ColumnInfo("max", DoubleColumn)), 1, colIDs = Seq(0, 4, 3))
@@ -364,7 +362,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
     // with ResponseTooLargeException
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples - 1, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan, Seq(0, 1))
+      timeseriesDataset.ref, 0, filters, AllChunkScan, Nil)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]

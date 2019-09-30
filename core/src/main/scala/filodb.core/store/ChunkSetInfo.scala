@@ -337,6 +337,13 @@ final case class ChunkQueryInfo(infoPtr: NativePointer,
   def info: ChunkSetInfo = ChunkSetInfo(infoPtr)
 }
 
+final case class CorruptVectorException(ptr: NativePointer,
+                                        chunkStartTime: Long,
+                                        partKeyString: String,
+                                        shard: Int,
+                                        innerErr: Throwable) extends
+Exception(f"CorruptVector at 0x$ptr%016x startTime=$chunkStartTime shard=$shard partition=$partKeyString", innerErr)
+
 /**
  * A sliding window based iterator over the chunks needed to be read from for each window.
  * Assumes the ChunkInfos are in increasing time order.
@@ -396,10 +403,16 @@ extends Iterator[ChunkQueryInfo] {
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         val tsVector = next.vectorPtr(tsColID)
-        val tsReader = vectors.LongBinaryVector(tsVector)
-        val valueVector = next.vectorPtr(rv.valueColID)
-        val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
-        windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        try {
+          val tsReader = vectors.LongBinaryVector(tsVector)
+          val valueVector = next.vectorPtr(rv.valueColID)
+          val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
+          windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+        } catch {
+          case m: MatchError =>
+            throw CorruptVectorException(tsVector, next.startTime, rv.partition.stringPartition,
+                                         rv.partition.shard, m)
+        }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }

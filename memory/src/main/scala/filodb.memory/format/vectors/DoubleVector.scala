@@ -10,7 +10,6 @@ import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
 
-
 object DoubleVector {
   /**
    * Creates a new MaskedDoubleAppendingVector, allocating a byte array of the right size for the max #
@@ -93,6 +92,8 @@ object DoubleVector {
   }
 }
 
+final case class DoubleCorrection(lastValue: Double, correction: Double = 0.0) extends CorrectionMeta
+
 /**
  * An iterator optimized for speed and type-specific to avoid boxing.
  * It has no hasNext() method - because it is guaranteed to visit every element, and this way
@@ -142,6 +143,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    */
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int
 
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double
+
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
@@ -169,10 +172,12 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   }
 
   // Default implementation for vectors with no correction
-  def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta = {
-    // Return the last value and simply pass on the previous correction value
-    DoubleCorrection(apply(vector, length(vector) - 1), meta.correction)
-  }
+  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta =
+    meta match {
+      // Return the last value and simply pass on the previous correction value
+      case DoubleCorrection(_, corr) => DoubleCorrection(apply(vector, length(vector) - 1), corr)
+      case NoCorrection              => DoubleCorrection(apply(vector, length(vector) - 1), 0.0)
+    }
 
   /**
    * Retrieves the element at position/row n, with counter correction, taking into account a previous
@@ -180,9 +185,10 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * values starting no lower than the initial correction factor in correctionMeta.
    * NOTE: this is a default implementation for vectors having no correction
    */
-  def correctedValue(vector: BinaryVectorPtr, n: Int, correctionMeta: CorrectionMeta): Double = {
+  def correctedValue(vector: BinaryVectorPtr, n: Int, meta: CorrectionMeta): Double = meta match {
     // Since this is a vector that needs no correction, simply add the correction amount to the original value
-    apply(vector, n) + correctionMeta.correction
+    case DoubleCorrection(_, corr) => apply(vector, n) + corr
+    case NoCorrection              => apply(vector, n)
   }
 }
 
@@ -240,6 +246,22 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     }
     count
   }
+
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    var prev = Double.NaN
+    var addr = vector + OffsetData + start * 8
+    val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
+    var changes = 0d
+    while (addr < untilAddr) {
+      val nextDbl = UnsafeUtils.getDouble(addr)
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!java.lang.Double.isNaN(nextDbl) && prev != nextDbl && !java.lang.Double.isNaN(prev)) changes += 1
+      addr += 8
+      prev = nextDbl
+    }
+    changes
+  }
 }
 
 // Corrects and caches ONE underlying chunk.
@@ -253,6 +275,7 @@ extends DoubleVectorDataReader {
   def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     inner.sum(vector, start, end, ignoreNaN)
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = inner.count(vector, start, end)
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = inner.changes(vector, start, end)
 
   var _correction = 0.0
   // Lazily correct - not all queries want corrected data
@@ -274,13 +297,21 @@ extends DoubleVectorDataReader {
 
   override def correctedValue(vector: BinaryVectorPtr, n: Int, correctionMeta: CorrectionMeta): Double = {
     assert(vector == vect)
-    corrected(n) + correctionMeta.correction   // corrected value + any carryover correction
+    correctionMeta match {
+      // corrected value + any carryover correction
+      case DoubleCorrection(_, corr) => corrected(n) + corr
+      case NoCorrection              => corrected(n)
+    }
   }
 
-  override def updateCorrection(vector: BinaryVectorPtr, startElement: Int, meta: CorrectionMeta): CorrectionMeta = {
+  override def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
     assert(vector == vect)
+    val lastValue = apply(vector, length(vector) - 1)
     // Return the last (original) value and all corrections onward
-    DoubleCorrection(apply(vector, length(vector) - 1), meta.correction + _correction)
+    meta match {
+      case DoubleCorrection(_, corr) => DoubleCorrection(lastValue, corr + _correction)
+      case NoCorrection              => DoubleCorrection(lastValue, _correction)
+    }
   }
 }
 
@@ -303,6 +334,9 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
 
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+
+  override def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    DoubleVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end)
 }
 
 class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
@@ -440,4 +474,7 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
+
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    LongBinaryVector(vector).changes(vector, start, end)
 }

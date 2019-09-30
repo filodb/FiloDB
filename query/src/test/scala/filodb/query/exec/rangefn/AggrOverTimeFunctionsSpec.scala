@@ -22,9 +22,14 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 16)
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize,
+                                      MMD.dummyContext, true)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, storeConf)
+
+  protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleDataset.blockMetaSize,
+                                      MMD.dummyContext, true)
+  protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleDataset, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
@@ -52,6 +57,19 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+  }
+
+  def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
+                            colIds: Array[Int]): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, downsampleDataset, bufferPool = tsBufferPool2)
+    val readers = tuples.map { case (ts, d1, d2, d3, d4, d5) =>
+      TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
+    }
+    readers.foreach { row => part.ingest(row, ingestBlockHolder2) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(ingestBlockHolder2, encode = true)
+    // part.encodeAndReleaseBuffers(ingestBlockHolder)
+    RawDataRangeVector(null, part, AllChunkScan, colIds)
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
@@ -275,4 +293,17 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly do changes") {
+    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+    val windowSize = 100
+    val step = 20
+
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
+      new ChangesChunkedFunctionD(), queryConfig)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
 }
