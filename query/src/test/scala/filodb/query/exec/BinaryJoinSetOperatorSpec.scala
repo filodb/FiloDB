@@ -2,19 +2,21 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
+import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
-import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import monix.execution.Scheduler
 
 
 class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures {
@@ -38,6 +40,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
+  val resSchemaTask = Task.now(resultSchema)
 
   val sampleHttpRequests: Array[RangeVector] = Array(
     new RangeVector {
@@ -184,7 +187,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
 
@@ -221,7 +224,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -258,7 +261,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -295,7 +298,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -331,7 +334,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -366,7 +369,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -399,7 +402,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
@@ -421,7 +424,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
@@ -443,7 +446,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     result.size shouldEqual 8
@@ -473,7 +476,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedResult = (canaryPlusOne.toArray ++ sampleInstance1).distinct
@@ -533,7 +536,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
     val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), queryConfig)
+    val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val execPlan2 = SetOperatorExec("someID", dummyDispatcher,
@@ -546,7 +549,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs2 = QueryResult("someId", null, result1.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), queryConfig)
+    val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -604,7 +607,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs1 = QueryResult("someId", null, sampleHttpRequests.map(rv => SerializableRangeVector(rv, schema)))
     val rhs1 = QueryResult("someId", null, sampleVectorMatching.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), queryConfig)
+    val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val execPlan2 = SetOperatorExec("someID", dummyDispatcher,
@@ -617,7 +620,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs2 = QueryResult("someId", null, canaryPlusOne.map(rv => SerializableRangeVector(rv, schema)))
     val rhs2 = QueryResult("someId", null, result1.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), queryConfig)
+    val result2 = execPlan2.compose(Observable.fromIterable(Seq((rhs2, 1), (lhs2, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -672,7 +675,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -706,7 +709,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -737,7 +740,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -772,7 +775,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),
@@ -804,7 +807,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val lhs = QueryResult("someId", null, sampleCanary.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, sampleRhsShuffled.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("http_requests"),

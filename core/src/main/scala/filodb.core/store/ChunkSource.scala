@@ -92,6 +92,11 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   def groupsInDataset(ref: DatasetRef): Int
 
   /**
+   * Returns the schemas registered for a given dataset.
+   */
+  def schemas(ref: DatasetRef): Option[Schemas]
+
+  /**
    * Looks up TSPartitions from filters.
    * Also used to discover the first possible schema ID for schema discovery.
    *

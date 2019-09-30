@@ -89,9 +89,6 @@ final case class SelectRawPartitionsExec(id: String,
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {
-    require(!colIds.contains(0),
-      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
-
     val numRowKeyCols = 1 // hardcoded since a future PR will indeed fix this to 1 timestamp column
 
     // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
@@ -109,9 +106,6 @@ final case class SelectRawPartitionsExec(id: String,
                 queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    require(!colIds.contains(0),
-      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
-
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")}" +
       s"schema=${dataSchema.name} is configured to use columnIDs=$colIds")
     val rvs = source.rangeVectors(datasetRef, lookupRes.get, colIds, dataSchema, filterSchemas)
@@ -137,8 +131,8 @@ final case class MultiSchemaPartitionsExec(id: String,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
-                                           schema: Option[String],
-                                           colName: Option[String]) extends LeafExecPlan {
+                                           schema: Option[String] = None,
+                                           colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
 
   override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
@@ -150,11 +144,12 @@ final case class MultiSchemaPartitionsExec(id: String,
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
 
     // Find the schema if one wasn't supplied
-    val dataSchema = schema.map { s => Schemas.global.schemas(s) }
-                           .getOrElse(Schemas.global(lookupRes.firstSchemaId.get))
+    val schemas = source.schemas(dataset).get
+    val dataSchema = schema.map { s => schemas.schemas(s) }
+                           .getOrElse(schemas(lookupRes.firstSchemaId.get))
 
     val newxformers = optimizeForDownsample(dataSchema, rangeVectorTransformers)
-    val colIDs = getColumnIDs(dataSchema, schema.toSeq, rangeVectorTransformers)
+    val colIDs = getColumnIDs(dataSchema, colName.toSeq, rangeVectorTransformers)
 
     val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
                                           dataSchema, Some(lookupRes),

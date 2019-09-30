@@ -8,6 +8,7 @@ import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.PartLookupResult
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
 
@@ -46,6 +47,8 @@ case class UnsupportedChunkSource() extends ChunkSource {
 
   override def groupsInDataset(dataset: DatasetRef): Int =
     throw new UnsupportedOperationException("This operation is not supported")
+
+  def schemas(ref: DatasetRef): Option[Schemas] = None
 
   override def stats: ChunkSourceStats =
     throw new UnsupportedOperationException("This operation is not supported")

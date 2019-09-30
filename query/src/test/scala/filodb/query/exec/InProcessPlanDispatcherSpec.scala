@@ -95,10 +95,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
-    val execPlan1 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
-    val execPlan2 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
+    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue

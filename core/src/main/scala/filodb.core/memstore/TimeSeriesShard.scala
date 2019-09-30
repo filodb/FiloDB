@@ -214,7 +214,7 @@ object SchemaMismatch {
   * @param downsamplePublisher is shared among all shards of the dataset on the node
   */
 class TimeSeriesShard(val ref: DatasetRef,
-                      schemas: Schemas,
+                      val schemas: Schemas,
                       val storeConfig: StoreConfig,
                       val shardNum: Int,
                       val bufferMemoryManager: MemFactory,

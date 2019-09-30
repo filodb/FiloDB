@@ -141,7 +141,12 @@ trait ExecPlan extends QueryCommand {
             srv
         }
         .take(limit)
-        .toListL
+        .doOnSubscribe { () =>
+          this match {
+            case p: NonLeafExecPlan => p.startMulticast()
+            case other              =>
+          }
+        }.toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
           SerializableRangeVector.queryResultBytes.record(numBytes)
@@ -171,12 +176,7 @@ trait ExecPlan extends QueryCommand {
 
     for { res <- step1
           qResult <- step2(res) }
-    yield {
-      this match {
-        case p: NonLeafExecPlan => p.startMulticast()
-      }
-      qResult
-    }
+    yield { qResult }
   }
 
   /**
@@ -290,6 +290,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
   }
 
   def startMulticast(): Unit = {
+    //scalastyle:off
+    println(s"about to call multicast.connect()....")
     multicast.connect()
   }
 

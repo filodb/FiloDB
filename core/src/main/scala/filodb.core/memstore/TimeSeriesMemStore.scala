@@ -249,6 +249,9 @@ extends MemStore with StrictLogging {
   def groupsInDataset(ref: DatasetRef): Int =
     datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
+  def schemas(ref: DatasetRef): Option[Schemas] =
+    datasets.get(ref).map(_.values.asScala.head.schemas)
+
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     getShard(ref, cve.shard).get.analyzeAndLogCorruptPtr(cve)
 
