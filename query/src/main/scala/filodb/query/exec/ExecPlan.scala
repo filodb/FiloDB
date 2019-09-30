@@ -141,12 +141,7 @@ trait ExecPlan extends QueryCommand {
             srv
         }
         .take(limit)
-        .doOnSubscribe { () =>
-          this match {
-            case p: NonLeafExecPlan => p.startMulticast()
-            case other              =>
-          }
-        }.toListL
+        .toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
           SerializableRangeVector.queryResultBytes.record(numBytes)
@@ -257,42 +252,52 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
 
+  private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
+                                (implicit sched: Scheduler, timeout: FiniteDuration) =
+    Kamon.withSpan(span) {
+      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
+        QueryError(id, ex)
+      }
+    }
+
   /**
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
     * using the abstract method 'compose' to arrive at the higher level
-    * result
+    * result.  Note that the schema is extracted from the first task.
     */
   final def doExecute(source: ChunkSource,
                       queryConfig: QueryConfig)
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
-    val spanFromHelper = Kamon.currentSpan()
-    val childTasks = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
-      Kamon.withSpan(spanFromHelper) {
-        plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-          QueryError(id, ex)
-        }.map((_, i))
+    if (children.isEmpty) {
+      ExecResult(Observable.empty, Task.eval(ResultSchema.empty))
+    } else {
+      // Guaranteed to have at least one child.  Separate out first task for the schema.
+      val spanFromHelper = Kamon.currentSpan()
+      val firstResult = dispatchRemotePlan(children.head, spanFromHelper)
+      val childTasks = Observable.fromIterable(children.tail)
+                                 .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
+                                   dispatchRemotePlan(plan, spanFromHelper)
+                                 }
+
+      // Get schema from first task
+      val outputSchema = firstResult.map {
+        case QueryResult(_, schema, _) => schema
+        case other: Any                => ResultSchema.empty
       }
-    }
 
-    // publish allows multiple subscribers to one source observable.
-    // One stream is used to compose results, the other one to compute the final schema
-    multicast = childTasks.publish
-    val firstSchema = multicast.firstL.map(_.asInstanceOf[QueryResult].resultSchema)
-    val outputRvs = compose(multicast, firstSchema, queryConfig)
-    val outputSchema = multicast.foldLeftL(ResultSchema.empty) { case (rs, (resp, i)) =>
-      reduceSchemas(rs, resp, i)
-    }
-    ExecResult(outputRvs, outputSchema)
-  }
+      // Check schema from all tasks
+      var sch = ResultSchema.empty
+      val processedTasks = (Observable.fromTask(firstResult) ++ childTasks).zipWithIndex.map { case (res, i) =>
+        sch = reduceSchemas(sch, res, i.toInt)
+        (res, i.toInt)
+      }
 
-  def startMulticast(): Unit = {
-    //scalastyle:off
-    println(s"about to call multicast.connect()....")
-    multicast.connect()
+      val outputRvs = compose(processedTasks, outputSchema, queryConfig)
+      ExecResult(outputRvs, outputSchema)
+    }
   }
 
   /**
