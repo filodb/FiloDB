@@ -153,7 +153,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
-
       val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
       val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
       // drop first sample because of exclusive start
@@ -260,6 +259,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
       aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
+      aggregated5.drop(0) shouldEqual data.sliding(windowSize, step).map(_.length - 2).drop(0).toBuffer
     }
   }
 
@@ -305,5 +308,34 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       new ChangesChunkedFunctionD(), queryConfig)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
+
+  it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
+    "than one chunks") {
+    val data1= (1 to 240).map(_.toDouble)
+    val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      // Append double data and shuffle so that it becomes DoubleVectorDataReader
+      val data = scala.util.Random.shuffle(data2 ++ data1)
+
+      val rv = timeValueRV(data)
+      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+      val stepTimeMillis = step.toLong * pubFreq
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
+
+      data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
+        case(val1, val2) => if (val1 == -1 ) {
+                               val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
+                             } else {
+                               val1 shouldEqual (val2)
+                             }
+      }
+    }
   }
 }
