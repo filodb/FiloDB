@@ -143,7 +143,8 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    */
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
+  (Double, Double)
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
@@ -238,6 +239,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var count = 0
+
     while (addr < untilAddr) {
       val nextDbl = UnsafeUtils.getDouble(addr)
       // There are many possible values of NaN.  Use a function to ignore them reliably.
@@ -247,20 +249,23 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     count
   }
 
-  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
+  (Double, Double) = {
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    var prev = Double.NaN
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var changes = 0d
+    var prevVector : Double = prev
     while (addr < untilAddr) {
       val nextDbl = UnsafeUtils.getDouble(addr)
       // There are many possible values of NaN.  Use a function to ignore them reliably.
-      if (!java.lang.Double.isNaN(nextDbl) && prev != nextDbl && !java.lang.Double.isNaN(prev)) changes += 1
+      if (!java.lang.Double.isNaN(nextDbl) && prevVector != nextDbl && !java.lang.Double.isNaN(prevVector)) {
+        changes += 1
+      }
       addr += 8
-      prev = nextDbl
+      prevVector = nextDbl
     }
-    changes
+    (changes, prevVector)
   }
 }
 
@@ -275,7 +280,8 @@ extends DoubleVectorDataReader {
   def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     inner.sum(vector, start, end, ignoreNaN)
   def count(vector: BinaryVectorPtr, start: Int, end: Int): Int = inner.count(vector, start, end)
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double = inner.changes(vector, start, end)
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
+  (Double, Double) = inner.changes(vector, start, end, prev)
 
   var _correction = 0.0
   // Lazily correct - not all queries want corrected data
@@ -335,8 +341,8 @@ object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVect
   override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
 
-  override def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
-    DoubleVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end)
+  override def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
+  (Double, Double) = DoubleVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end, prev)
 }
 
 class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
@@ -475,6 +481,11 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
   final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
 
-  final def changes(vector: BinaryVectorPtr, start: Int, end: Int): Double =
-    LongBinaryVector(vector).changes(vector, start, end)
+  final def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
+  (Double, Double) = {
+    val ignorePrev = if (prev.isNaN) true
+    else false
+    val changes = LongBinaryVector(vector).changes(vector, start, end, prev.toLong, ignorePrev)
+    (changes._1.toDouble, changes._1.toDouble)
+  }
 }

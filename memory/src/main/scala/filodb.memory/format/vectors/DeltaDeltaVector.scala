@@ -207,24 +207,20 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
-    if (slope(vector) == 0) {
-      0
-    } else {
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
       require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
       val itr = iterate(vector, start)
-      var prev: Long = 0
+      var prevVector: Long = prev
       var changes = 0
-      for {i <- start until end optimized} {
+      for {i <- start until end + 1 optimized} {
         val cur = itr.next
-        if (i == start) //Initialize prev
-          prev = cur
-        if (prev != cur)
+        if (i == start && ignorePrev) //Initialize prev
+          prevVector = cur
+        if (prevVector != cur)
           changes += 1
-        prev = cur
+        prevVector = cur
       }
-      changes
-    }
+      (changes, prevVector)
   }
 }
 
@@ -274,13 +270,13 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     }
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int): Int = {
-    if (slope(vector) == 0) {
-      0
-    } else {
-      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-      length(vector) - 1
-    }
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    val firstValue = apply(vector, start)
+    val lastValue = apply(vector, end)
+    // compare current element with last element(prev) of previous chunk
+    val changes = if (!ignorePrev && prev != firstValue) 1 else 0
+    if (slope(vector) == 0) (changes, lastValue) else (end - start + changes, lastValue)
   }
 }
 
