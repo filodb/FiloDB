@@ -298,18 +298,19 @@ object RangeFunction {
                           func: Option[InternalRangeFunction],
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
-      case None                 => () => new LastSampleChunkedFunctionL
-      case Some(CountOverTime)  => () => new CountOverTimeChunkedFunction()
-      case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
+      case None                   => () => new LastSampleChunkedFunctionL
+      case Some(CountOverTime)    => () => new CountOverTimeChunkedFunction()
+      case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionL
       case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")
                                    () => new AvgWithSumAndCountOverTimeFuncL(schema.colIDs(2))
-      case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionL
-      case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionL
-      case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionL
-      case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionL
-      case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionL
-      case Some(Changes)        => () => new ChangesChunkedFunctionL
-      case _                    => iteratingFunction(func, funcParams)
+      case Some(AvgOverTime)      => () => new AvgOverTimeChunkedFunctionL
+      case Some(MinOverTime)      => () => new MinOverTimeChunkedFunctionL
+      case Some(MaxOverTime)      => () => new MaxOverTimeChunkedFunctionL
+      case Some(StdDevOverTime)   => () => new StdDevOverTimeChunkedFunctionL
+      case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionL
+      case Some(Changes)          => () => new ChangesChunkedFunctionL
+      case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
+      case _                      => iteratingFunction(func, funcParams)
     }
   }
 
@@ -321,21 +322,22 @@ object RangeFunction {
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
-      case None                 => () => new LastSampleChunkedFunctionD
+      case None                   => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
-      case Some(CountOverTime)  => () => new CountOverTimeChunkedFunctionD()
-      case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionD
+      case Some(CountOverTime)    => () => new CountOverTimeChunkedFunctionD()
+      case Some(SumOverTime)      => () => new SumOverTimeChunkedFunctionD
       case Some(AvgWithSumAndCountOverTime) => require(schema.columns(2).name == "count")
                                    () => new AvgWithSumAndCountOverTimeFuncD(schema.colIDs(2))
-      case Some(AvgOverTime)    => () => new AvgOverTimeChunkedFunctionD
-      case Some(MinOverTime)    => () => new MinOverTimeChunkedFunctionD
-      case Some(MaxOverTime)    => () => new MaxOverTimeChunkedFunctionD
-      case Some(StdDevOverTime) => () => new StdDevOverTimeChunkedFunctionD
-      case Some(StdVarOverTime) => () => new StdVarOverTimeChunkedFunctionD
-      case Some(Changes)        => () => new ChangesChunkedFunctionD()
-      case _                    => iteratingFunction(func, funcParams)
+      case Some(AvgOverTime)      => () => new AvgOverTimeChunkedFunctionD
+      case Some(MinOverTime)      => () => new MinOverTimeChunkedFunctionD
+      case Some(MaxOverTime)      => () => new MaxOverTimeChunkedFunctionD
+      case Some(StdDevOverTime)   => () => new StdDevOverTimeChunkedFunctionD
+      case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionD
+      case Some(Changes)          => () => new ChangesChunkedFunctionD()
+      case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
+      case _                      => iteratingFunction(func, funcParams)
     }
   }
 
