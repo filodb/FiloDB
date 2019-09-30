@@ -271,21 +271,12 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   }
 
   def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-
     require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    val firstValue = iterate(vector, start).next
-    val lastValue = iterate(vector, end).next
+    val firstValue = apply(vector, start)
+    val lastValue = apply(vector, end)
     // compare current element with last element(prev) of previous chunk
-    val changes = if (!ignorePrev && prev != firstValue ) {
-        1
-    } else {
-        0
-    }
-    if (slope(vector) == 0) {
-        (0 + changes, lastValue)
-    } else {
-        (end - start + changes, lastValue)
-    }
+    val changes = if (!ignorePrev && prev != firstValue) 1 else 0
+    if (slope(vector) == 0) (changes, lastValue) else (end - start + changes, lastValue)
   }
 }
 
