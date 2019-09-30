@@ -552,8 +552,9 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
   }
 }
 
-abstract class ChangesChunkedFunction(var changes: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { changes = Double.NaN }
+abstract class ChangesChunkedFunction(var changes: Double = Double.NaN, var prev: Double = Double.NaN)
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { changes = Double.NaN; prev = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, changes)
   }
@@ -568,7 +569,10 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
     if (changes.isNaN) {
       changes = 0d
     }
-    changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+
+    val changesResult = doubleReader.changes(doubleVect, startRowNum, endRowNum, prev)
+    changes += changesResult._1
+    prev = changesResult._2
   }
 }
 
@@ -582,6 +586,8 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
     if (changes.isNaN) {
       changes = 0d
     }
-    changes += longReader.changes(longVect, startRowNum, endRowNum)
+    val changesResult = longReader.changes(longVect, startRowNum, endRowNum, prev.toLong)
+    changes += changesResult._1
+    prev = changesResult._2
   }
 }
