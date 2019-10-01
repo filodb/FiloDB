@@ -342,9 +342,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private final val groupTimestamps = Array.fill(numGroups)(Long.MinValue)
 
-  // Flush groups when ingestion time is observed to cross an hourly boundary. This simplifies
-  // disaster recovery -- chunks can be copied without concern that they may overlap in time.
+  // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
+  // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
+  // without concern that they may overlap in time.
   private val flushBoundaryMillis = storeConfig.flushInterval.toUnit(TimeUnit.MILLISECONDS).toLong
+
+  // Defines the group-specific flush offset, to distribute the flushes around such they don't
+  // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
+  // scheduled once a minute.
+  private val flushOffsetMillis = flushBoundaryMillis / numGroups
 
   /**
     * Helper for downsampling ingested data for long term retention.
@@ -443,13 +449,15 @@ class TimeSeriesShard(val ref: DatasetRef,
           val oldTimestamp = groupTimestamps(group)
           val newTimestamp = Math.max(oldTimestamp, ingestionTime) // monotonic clock
           groupTimestamps(group) = newTimestamp
-          if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue
-              && (oldTimestamp / flushBoundaryMillis) != (newTimestamp / flushBoundaryMillis)) {
-            flushSched match {
-              case None => // none provided, so don't flush
-              case Some(sched) => {
-                // Flush out the group first such that the record is for a new hour.
-                createFlushTask(prepareFlushGroup(group)).executeOn(sched)
+          if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
+            val tsAdjust = flushOffsetMillis * group
+            if ((oldTimestamp - tsAdjust) / flushBoundaryMillis != (newTimestamp - tsAdjust) / flushBoundaryMillis) {
+              flushSched match {
+                case None => // none provided, so don't flush
+                case Some(sched) => {
+                  // Flush out the group first such that the record is for a new hour.
+                  createFlushTask(prepareFlushGroup(group)).executeOn(sched)
+                }
               }
             }
           }
