@@ -236,7 +236,27 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
-1a) Restart Kafka, this is sometimes necessary.
+
+- Before you remove a topic, update server.properties from configuration(conf) folder and have delete.topic.enable property set to true:
+`delete.topic.enable=true`
+- Run below kafka-topics.sh command with “–delete” option to remove “timeseries-dev” and "timeseries-dev-ds-1m":
+```sh
+ /usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev \
+                --delete  
+
+```
+```
+/usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev-ds-1m \
+                --delete
+```
+- You should see: 
+```
+Topic timeseries-dev is marked for deletion.
+Note: This will have no impact if delete.topic.enable is not set to true.
+```
+
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
 3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
