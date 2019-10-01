@@ -132,11 +132,15 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       scanPartitions(ref, iter)
         .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(iter.chunkMethod) }
     } else {
-      val reqSchemaId = iter.firstSchemaId.get
-      scanPartitions(ref, iter).filter { p =>
-        if (p.schema.schemaHash != reqSchemaId)
-          throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
-        p.hasChunks(iter.chunkMethod)
+      iter.firstSchemaId match {
+        case Some(reqSchemaId) =>
+          scanPartitions(ref, iter).filter { p =>
+            if (p.schema.schemaHash != reqSchemaId)
+              throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
+            p.hasChunks(iter.chunkMethod)
+          }
+        case None =>
+          Observable.empty
       }
     }
 

@@ -146,7 +146,8 @@ final case class MultiSchemaPartitionsExec(id: String,
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
     val dataSchema = schema.map { s => schemas.schemas(s) }
-                           .getOrElse(schemas(lookupRes.firstSchemaId.get))
+                           .getOrElse(schemas(
+                             lookupRes.firstSchemaId.getOrElse(schemas.schemas.values.head.schemaHash)))
 
     val newxformers = optimizeForDownsample(dataSchema, rangeVectorTransformers)
     val colIDs = getColumnIDs(dataSchema, colName.toSeq, rangeVectorTransformers)

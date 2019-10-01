@@ -78,9 +78,9 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
       resp.debugInfo(0).toString should startWith("E~DistConcatExec()")
       resp.debugInfo(1) should startWith("-T~PeriodicSamplesMapper")
-      resp.debugInfo(2) should startWith("--E~SelectRawPartitionsExec")
+      resp.debugInfo(2) should startWith("--E~MultiSchemaPartitionsExec")
       resp.debugInfo(3) should startWith("-T~PeriodicSamplesMapper")
-      resp.debugInfo(4) should startWith("--E~SelectRawPartitionsExec")
+      resp.debugInfo(4) should startWith("--E~MultiSchemaPartitionsExec")
     }
   }
 
@@ -95,7 +95,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
     }
   }
 
@@ -110,7 +110,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
     }
   }
 
@@ -125,7 +125,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
         contentType shouldEqual ContentTypes.`application/json`
         val resp = responseAs[ExplainPlanResponse]
         resp.status shouldEqual "success"
-        resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 2
+        resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 2
       }
     }
 }

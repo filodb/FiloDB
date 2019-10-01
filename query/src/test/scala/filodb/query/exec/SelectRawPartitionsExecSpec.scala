@@ -339,7 +339,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     // TODO: SelectChunkInfos should not require a raw schema
     val execPlan = SelectChunkInfosExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      dsRef, 0, promCounter, filters, AllChunkScan, 0)
+      dsRef, 0, filters, AllChunkScan, colName = Some("timestamp"))
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     info(s"resp = $resp")
     val result = resp.asInstanceOf[QueryResult]

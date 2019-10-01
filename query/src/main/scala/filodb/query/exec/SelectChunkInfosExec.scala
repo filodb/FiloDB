@@ -5,9 +5,9 @@ import scala.concurrent.duration.FiniteDuration
 import monix.eval.Task
 import monix.execution.Scheduler
 
-import filodb.core.{DatasetRef, Types}
+import filodb.core.DatasetRef
 import filodb.core.memstore.TimeSeriesShard
-import filodb.core.metadata.{Column, Schema}
+import filodb.core.metadata.Column
 import filodb.core.query._
 import filodb.core.store._
 import filodb.query.QueryConfig
@@ -38,21 +38,27 @@ final case class SelectChunkInfosExec(id: String,
                                       dispatcher: PlanDispatcher,
                                       dataset: DatasetRef,
                                       shard: Int,
-                                      dataSchema: Schema,
                                       filters: Seq[ColumnFilter],
                                       chunkMethod: ChunkScanMethod,
-                                      column: Types.ColumnId) extends LeafExecPlan {
+                                      schema: Option[String] = None,
+                                      colName: Option[String] = None) extends LeafExecPlan {
   import SelectChunkInfosExec._
 
   def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): ExecResult = {
-    val dataColumn = dataSchema.data.columns(column)
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+
+    val schemas = source.schemas(dataset).get
+    val dataSchema = schema.map { s => schemas.schemas(s) }
+                           .getOrElse(schemas(lookupRes.firstSchemaId.get))
+    val colID = colName.map(n => dataSchema.colIDs(n).get.head).getOrElse(dataSchema.data.valueColumn)
+    val dataColumn = dataSchema.data.columns(colID)
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
-    val rvs = source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
+    val rvs = source.scanPartitions(dataset, lookupRes)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
@@ -65,6 +71,6 @@ final case class SelectChunkInfosExec(id: String,
     ExecResult(rvs, Task.eval(ChunkInfosSchema))
   }
 
-  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, col=$column"
+  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, col=$colName"
 }
 
