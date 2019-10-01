@@ -25,6 +25,11 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
   // Use our own ActorSystem with our test config so we can init cluster properly
   override def createActorSystem(): ActorSystem = ClusterApiRouteSpec.getNewSystem
 
+  override def afterAll(): Unit = {
+    FilodbSettings.reset()
+    super.afterAll()
+  }
+
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
 

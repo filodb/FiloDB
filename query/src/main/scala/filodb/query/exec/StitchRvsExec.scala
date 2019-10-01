@@ -4,7 +4,6 @@ import scala.collection.mutable
 
 import monix.reactive.Observable
 
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query._
@@ -63,10 +62,9 @@ final case class StitchRvsExec(id: String,
 
   protected def args: String = ""
 
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
+  protected def schemaOfCompose(): ResultSchema = children.head.schema()
 
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
@@ -89,8 +87,7 @@ final case class StitchRvsExec(id: String,
   */
 final case class StitchRvsMapper() extends RangeVectorTransformer {
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {

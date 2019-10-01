@@ -158,7 +158,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
       rangeEnd   = rangeStart + 15.minutes.toMillis
 
       // Print the top values in each shard just for debugging
-      topValuesInShards(client1, "_ns", 0 to 3)
+      topValuesInShards(client1, "_ws_", 0 to 3)
+      topValuesInShards(client1, "_ns_", 0 to 3)
       topValuesInShards(client1, "dc", 0 to 3)
 
       query1Response = runCliQuery(client1, queryTimestamp)

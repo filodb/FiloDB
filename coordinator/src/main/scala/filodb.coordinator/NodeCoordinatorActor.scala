@@ -221,7 +221,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       }
       datasetsInitialized = true
     }
-
   }
 
   /** Forwards shard actions to the ingester for the given dataset.

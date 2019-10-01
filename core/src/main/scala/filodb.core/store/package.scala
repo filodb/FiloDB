@@ -100,7 +100,7 @@ package object store {
    * @param ingestionTime seconds since 1970
    */
   @inline final def chunkID(startTime: Long, ingestionTime: Long): Long =
-    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60))
+    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60L))
 
   /**
    * Returns the start time portion of the chunk ID, as milliseconds from 1970.
@@ -130,7 +130,7 @@ package object store {
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[RowReader] =
-      source.scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
+      source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))
   }

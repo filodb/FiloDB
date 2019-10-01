@@ -128,7 +128,7 @@ trait ScalarVector extends RangeVector {
 
   override def rows: Iterator[RowReader] =  {
     val rowList =  new ListBuffer[TransientRow] ()
- for (i-> start to end by step){
+ for (i<- start to end by step){
 
  }
     rowList += new TransientRow(0, 1.0)

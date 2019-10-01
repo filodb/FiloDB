@@ -1,18 +1,19 @@
 package filodb.query.exec
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
+import filodb.query.ScalarFunctionId.{Scalar}
+
+import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
-import filodb.query.ScalarFunctionId.{Scalar}
-//import filodb.query.ScalarFunctionId.{Scalar, Time}
+import filodb.query.SortFunctionId.{Sort, SortDesc}
+
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
 import filodb.query._
 import monix.reactive.Observable
-
 
 
 /**
@@ -27,8 +28,7 @@ import monix.reactive.Observable
   * compute intensive and not I/O intensive.
   */
 trait RangeVectorTransformer extends java.io.Serializable {
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector]
@@ -36,7 +36,7 @@ trait RangeVectorTransformer extends java.io.Serializable {
   /**
     * Default implementation retains source schema
     */
-  def schema(dataset: Dataset, source: ResultSchema): ResultSchema = source
+  def schema(source: ResultSchema): ResultSchema = source
 
   /**
     * Args to use for the RangeVectorTransformer for printTree purposes only.
@@ -63,8 +63,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -86,7 +85,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
           val mapper = HistogramQuantileMapper(funcParams)
-          mapper.apply(dataset, source, queryConfig, limit, sourceSchema)
+          mapper.apply(source, queryConfig, limit, sourceSchema)
         } else {
           val instantFunction = InstantFunction.double(function, funcParams)
           source.map { rv =>
@@ -98,7 +97,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     }
   }
 
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+  override def schema(source: ResultSchema): ResultSchema = {
     // if source is histogram, determine what output column type is
     // otherwise pass along the source
     RangeVectorTransformer.valueColumnType(source) match {
@@ -162,8 +161,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -200,13 +198,12 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId,
   val miscFunction: MiscellaneousFunction = {
     function match {
       case LabelReplace => LabelReplaceFunction(funcParams)
-      case LabelJoin => LabelJoinFunction(funcParams)
-      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      case LabelJoin    => LabelJoinFunction(funcParams)
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -220,50 +217,51 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-//  val scalarFunction: ScalarFunction = {
-//    function match {
-//      case LabelReplace => LabelReplaceFunction(funcParams)
-//      case LabelJoin =>  LabelJoinFunction(funcParams)
-//      case _ => throw new UnsupportedOperationException(s"$function not supported.")
-//    }
-//  }
+  //  val scalarFunction: ScalarFunction = {
+  //    function match {
+  //      case LabelReplace => LabelReplaceFunction(funcParams)
+  //      case LabelJoin =>  LabelJoinFunction(funcParams)
+  //      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+  //    }
+  //  }
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
     val resultRv = source.toListL.map { rvs =>
       rvs.map { rv =>
         val value = if (rv.rows.size == 1) rv.rows.next().getDouble(1)
         else
-        Double.NaN
+          Double.NaN
 
-        new DoubleScalar(0,0,0,value)
+        new DoubleScalar(0, 0, 0, value)
+
+      }
+      //map(Observable.fromIterable)
+
 
     }.map(Observable.fromIterable)
-
     Observable.fromTask(resultRv).flatten
+
+    //  def timeImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
+    //    val resultRv = source.toListL.map { rvs =>
+    //      rvs.map { rv =>
+    //        new ScalarSample {
+    //
+    //          override def rows: Iterator[RowReader] =
+    //            rv.rows.map(x => new TransientRow(x.getLong(0), x.getLong(0)))
+    //
+    //         // override def ValueType: String = "scalar"
+    //        }
+    //      }
+    //
+    //    }.map(Observable.fromIterable)
+    //
+    //    Observable.fromTask(resultRv).flatten
+    /// }
   }
-
-//  def timeImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
-//    val resultRv = source.toListL.map { rvs =>
-//      rvs.map { rv =>
-//        new ScalarSample {
-//
-//          override def rows: Iterator[RowReader] =
-//            rv.rows.map(x => new TransientRow(x.getLong(0), x.getLong(0)))
-//
-//         // override def ValueType: String = "scalar"
-//        }
-//      }
-//
-//    }.map(Observable.fromIterable)
-//
-//    Observable.fromTask(resultRv).flatten
- /// }
-
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
-            queryConfig: QueryConfig,
-            limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    def apply(source: Observable[RangeVector],
+              queryConfig: QueryConfig,
+              limit: Int,
+              sourceSchema: ResultSchema): Observable[RangeVector] = {
       function match {
         case Scalar => scalarImpl(source)
         //case Time => timeImpl(source)
@@ -272,3 +270,40 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
     }
 
   }
+
+
+final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"function=$function"
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    if (sourceSchema.columns(1).colType == ColumnType.DoubleColumn) {
+
+      val ordering: Ordering[Double] = function match {
+        case Sort => (Ordering[Double])
+        case SortDesc => (Ordering[Double]).reverse
+        case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      }
+
+      val resultRv = source.toListL.map { rvs =>
+        rvs.map { rv =>
+          new RangeVector {
+            override def key: RangeVectorKey = rv.key
+
+            override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
+          }
+        }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
+        }(ordering)
+
+      }.map(Observable.fromIterable)
+
+      Observable.fromTask(resultRv).flatten
+    } else {
+      source
+    }
+  }
+}
+

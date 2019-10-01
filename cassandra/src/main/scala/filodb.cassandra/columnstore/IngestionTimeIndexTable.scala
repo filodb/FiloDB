@@ -74,6 +74,20 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
     Observable.fromIterator(it).handleObservableErrors
   }
 
+  def scanPartKeysByIngestionTime(tokens: Seq[(String, String)],
+                                  ingestionTimeStart: Long,
+                                  ingestionTimeEnd: Long): Observable[ByteBuffer] = {
+    def cql(start: String, end: String): String =
+      s"SELECT partition FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
+        s"AND ingestion_time >= $ingestionTimeStart AND ingestion_time <= $ingestionTimeEnd " +
+        s"ALLOW FILTERING"
+    val it = tokens.iterator.flatMap { case (start, end) =>
+      session.execute(cql(start, end)).iterator.asScala
+        .map { row => row.getBytes("partition") }
+    }
+    Observable.fromIterator(it).handleObservableErrors
+  }
+
   lazy val writeIndexCql = session.prepare(
     s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
     "VALUES (?, ?, ?, ?) USING TTL ?")

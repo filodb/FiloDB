@@ -9,7 +9,6 @@ import org.scalactic._
 import filodb.core._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
-import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
@@ -63,26 +62,6 @@ final case class Dataset(name: String, schema: Schema) {
     partKeyBuilder.reset()
     bytes
   }
-
-  import Accumulation._
-  import OptionSugar._
-  /**
-   * Returns the column IDs for the named columns or the missing column names
-   */
-  def colIDs(colNames: String*): Seq[Int] Or Seq[String] =
-    colNames.map { n => dataColumns.find(_.name == n).map(_.id)
-                          .orElse { partitionColumns.find(_.name == n).map(_.id) }
-                          .toOr(One(n)) }
-            .combined.badMap(_.toSeq)
-
-  /** Returns the Column instance given the ID */
-  def columnFromID(columnID: Int): Column =
-    if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }
-    else                                 { dataColumns(columnID) }
-
-  /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
-  def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
-    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
 }
 
 /**
@@ -97,7 +76,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
                           // For each key, copy the tag to the value if the value is absent
-                          copyTags: Map[String, String] = Map.empty) {
+                          copyTags: Seq[(String, String)] = Seq.empty) {
   override def toString: String = {
     toConfig.root.render(ConfigRenderOptions.concise)
   }
@@ -110,7 +89,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
       "ignoreShardKeyColumnSuffixes" ->
         ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
       "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
-      "copyTags" -> copyTags.asJava)
+      "copyTags" -> copyTags.groupBy(_._2).map { case (k, v) => (k, v.map(_._1).asJava)}.asJava)
 
     ConfigFactory.parseMap(map.asJava)
   }
@@ -137,14 +116,18 @@ object DatasetOptions {
   def fromString(s: String): DatasetOptions =
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
-  def fromConfig(config: Config): DatasetOptions =
+  def fromConfig(config: Config): DatasetOptions = {
+    val copyTagsValue = config.as[Map[String, Seq[String]]]("copyTags")
+                         .toSeq
+                         .flatMap { case (key, value) => value.map (_ -> key) }
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    hasDownsampledData = config.as[Option[Boolean]]("hasDownsampledData").getOrElse(false),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
                    ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
-                   copyTags = config.as[Map[String, String]]("copyTags"))
+                   copyTags = copyTagsValue)
+  }
 }
 
 /**

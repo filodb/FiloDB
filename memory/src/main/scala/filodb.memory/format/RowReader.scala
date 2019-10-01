@@ -76,12 +76,12 @@ trait RowReader {
   def as[T: ClassTag](columnNo: Int): T = getAny(columnNo).asInstanceOf[T]
 }
 
-trait MutableRowReader extends RowReader {
-  def setLong(columnNo: Int, value: Long): Unit
-  def setDouble(columnNo: Int, value: Double): Unit
-  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit
-  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
-}
+//trait MutableRowReader extends RowReader {
+//  def setLong(columnNo: Int, value: Long): Unit
+//  def setDouble(columnNo: Int, value: Double): Unit
+//  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit
+//  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
+//}
 
 /**
   * Represents intermediate sample which will be part of a transformed RangeVector.

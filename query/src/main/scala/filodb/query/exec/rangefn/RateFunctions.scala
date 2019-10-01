@@ -1,11 +1,11 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.query.{TransientHistRow, TransientRow}
 import scalaxy.loops._
-
-import filodb.memory.format.{vectors => bv, CounterVectorReader}
+import filodb.memory.format.{CounterVectorReader, vectors => bv}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
-import filodb.query.exec.{TransientHistRow, TransientRow}
+//import filodb.query.TransientRow
 
 object RateFunctions {
 

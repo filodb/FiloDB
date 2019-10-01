@@ -1,7 +1,8 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.query.TransientRow
 import filodb.query.QueryConfig
-import filodb.query.exec.TransientRow
+//import filodb.query.exec.TransientRow
 
 object RangeInstantFunctions {
   def derivFunction(window: Window): Double = {

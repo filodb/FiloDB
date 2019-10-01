@@ -6,7 +6,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.exec.TransientRow
+
 
 class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 

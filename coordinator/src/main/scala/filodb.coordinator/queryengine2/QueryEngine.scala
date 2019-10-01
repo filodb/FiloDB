@@ -18,6 +18,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, DoubleScalar, Filter}
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
+import filodb.query.LogicalPlan.ApplySortFunction
 import filodb.query.{exec, _}
 import filodb.query.exec._
 
@@ -85,7 +86,7 @@ class QueryEngine(dataset: Dataset,
             (timeRange.startInMillis / 1000), queryParams.step, (timeRange.endInMillis / 1000), queryParams.spread,
             false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
-          PromQlExec(queryId, InProcessPlanDispatcher(dataset), dataset.ref, promQlInvocationParams, submitTime)
+          PromQlExec(queryId, InProcessPlanDispatcher(), dataset.ref, promQlInvocationParams, submitTime)
       }
     }
 
@@ -94,7 +95,7 @@ class QueryEngine(dataset: Dataset,
     else
       // Stitch RemoteExec plan results with local using InProcessorDispatcher
       // Sort to move RemoteExec in end as it does not have schema
-       StitchRvsExec(queryId, InProcessPlanDispatcher(dataset),
+       StitchRvsExec(queryId, InProcessPlanDispatcher(),
         execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
   }
 
@@ -246,6 +247,8 @@ class QueryEngine(dataset: Dataset,
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
       case lp: ScalarPlan                  => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+
+      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
       case _                              => throw new BadQueryException("Invalid logical plan")
 
     }
@@ -340,8 +343,9 @@ class QueryEngine(dataset: Dataset,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
+    val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))
+      lp.end, Some(lp.window), Some(execRangeFn), lp.functionArgs)))
     rawSeries
   }
 
@@ -369,7 +373,7 @@ class QueryEngine(dataset: Dataset,
     val execPlans = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), colIDs)
+        dataset.schema, renamedFilters, toChunkScanMethod(lp.rangeSelector), colIDs)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -417,7 +421,7 @@ class QueryEngine(dataset: Dataset,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, lp.start, lp.end)
+        dataset.schema.partition, renamedFilters, lp.start, lp.end)
     }
     PlanResult(metaExec, false)
   }
@@ -429,12 +433,12 @@ class QueryEngine(dataset: Dataset,
                                       spreadProvider: SpreadProvider): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) dataset.schema.data.valueColName else lp.column
-    val colID = dataset.colIDs(colName).get.head
+    val colID = dataset.schema.colIDs(colName).get.head
     val renamedFilters = renameMetricFilter(lp.filters)
     val metaExec = shardsFromFilters(renamedFilters, options, spreadProvider).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectChunkInfosExec(queryId, submitTime, options.sampleLimit, dispatcher, dataset.ref, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), colID)
+        dataset.schema, renamedFilters, toChunkScanMethod(lp.rangeSelector), colID)
     }
     PlanResult(metaExec, false)
   }
@@ -458,6 +462,24 @@ class QueryEngine(dataset: Dataset,
     vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.functionArgs, lp.timeStepParams)))
     vectors
   }
+
+  private def materializeApplySortFunction(queryId: String,
+                                           submitTime: Long,
+                                           options: QueryOptions,
+                                           lp: ApplySortFunction,
+                                           spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    if(vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer((SortFunctionMapper(lp.function)))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(SortFunctionMapper(lp.function)))
+      vectors
+    }
+  }
+
   /**
    * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
    * if it is not the prometheus standard
@@ -477,7 +499,7 @@ class QueryEngine(dataset: Dataset,
     * as those are automatically prepended.
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
-    dataset.colIDs(cols: _*)
+    dataset.schema.colIDs(cols: _*)
       .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
       .get
   }

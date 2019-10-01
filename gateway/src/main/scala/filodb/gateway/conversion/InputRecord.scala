@@ -106,7 +106,7 @@ object PrometheusInputRecord {
     } else {
       val metric = metricTags.head._2
       val metricKey = metricTags.head._1
-      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options).toMap
+      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options)
       (0 until tsProto.getSamplesCount).map { i =>
         val sample = tsProto.getSamples(i)
         PrometheusInputRecord(transformedTags, metric, sample.getTimestampMs, sample.getValue)
@@ -119,17 +119,18 @@ object PrometheusInputRecord {
    * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
    * with the value from the source tag.
    */
-  def transformTags(tags: Seq[(String, String)], options: DatasetOptions): Seq[(String, String)] = {
-    val keys = tags.map(_._1).toSet
-    val extraTags = new collection.mutable.ArrayBuffer[(String, String)]()
-    tags.foreach { case (k, v) =>
-      if (options.copyTags contains k) {
-        val renamedKey = options.copyTags(k)
-        if (!(keys contains renamedKey))
-          extraTags += renamedKey -> v
+  def transformTags(tags: Seq[(String, String)],
+                    options: DatasetOptions): Map[String, String] = {
+    val extraTags = new collection.mutable.HashMap[String, String]()
+    val tagsMap = tags.toMap
+    for ((k, v) <- options.copyTags) {
+      if (!extraTags.contains(v)
+        && !tagsMap.contains(v)
+        && tagsMap.contains(k)) {
+        extraTags += v -> tagsMap(k)
       }
     }
-    tags ++ extraTags
+    tagsMap ++ extraTags
   }
 }
 
