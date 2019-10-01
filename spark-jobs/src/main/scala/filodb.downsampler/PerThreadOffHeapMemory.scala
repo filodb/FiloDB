@@ -7,16 +7,14 @@ import filodb.memory._
 
 class PerThreadOffHeapMemory(rawSchemas: Seq[Schema], kamonTags: Map[String, String], maxMetaSize: Int) {
 
-  val blockMemFactory = {
-      val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
-        stats = new MemoryStats(kamonTags),
-        reclaimer = new ReclaimListener {
-          override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
-        },
-        numPagesPerBlock = 50)
-      new BlockMemFactory(blockStore, None, maxMetaSize,
-        kamonTags, false)
-    }
+  val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
+    stats = new MemoryStats(kamonTags),
+    reclaimer = new ReclaimListener {
+      override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
+    },
+    numPagesPerBlock = 50)
+
+  val blockMemFactory = new BlockMemFactory(blockStore, None, maxMetaSize, kamonTags, false)
 
   val nativeMemoryManager = new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
 

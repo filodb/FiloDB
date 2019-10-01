@@ -86,10 +86,6 @@ object BatchDownsampler extends StrictLogging with Instance {
     res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }.toMap
 
-  private val offHeapMem = new ThreadLocal[PerThreadOffHeapMemory]() {
-    override def initialValue(): PerThreadOffHeapMemory = new PerThreadOffHeapMemory(rawSchemas, kamonTags, maxMetaSize)
-  }
-
   private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
   /**
@@ -99,7 +95,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                                            userTimeStart: Long,
                                            userTimeEnd: Long) = {
 
-    logger.debug(s"Starting to downsample batch of ${rawPartsBatch.size} partitions " +
+    logger.info(s"Starting to downsample batch of ${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
 
@@ -107,22 +103,21 @@ object BatchDownsampler extends StrictLogging with Instance {
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
     }
-    val rawPartsToFree = ArrayBuffer[PagedReadablePartition]()
-    val downsampledPartsPartsToFree = ArrayBuffer[TimeSeriesPartition]()
+    val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
+    val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
+    val offHeapMem = new PerThreadOffHeapMemory(rawSchemas, kamonTags, maxMetaSize)
     try {
       rawPartsBatch.foreach { rawPart =>
-        downsamplePart(rawPart, rawPartsToFree, downsampledPartsPartsToFree,
+        downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
           downsampledChunksToPersist, userTimeStart, userTimeEnd)
       }
       persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
-      // reclaim all blocks
-      offHeapMem.get().blockMemFactory.markUsedBlocksReclaimable()
-      // free partitions
-      rawPartsToFree.foreach(_.free())
-      rawPartsToFree.clear()
-      downsampledPartsPartsToFree.foreach(_.shutdown())
-      downsampledPartsPartsToFree.clear()
+      // free off-heap memory
+      offHeapMem.blockStore.releaseBlocks()
+      offHeapMem.nativeMemoryManager.shutdown()
+      pagedPartsToFree.clear()
+      downsampledPartsToFree.clear()
     }
 
     logger.info(s"Finished iterating through and downsampling batch of ${rawPartsBatch.size} " +
@@ -137,13 +132,14 @@ object BatchDownsampler extends StrictLogging with Instance {
     *
     * NOTE THAT THE DOWNSAMPLE PARTITIONS NEED TO BE FREED/SHUT DOWN BY THE CALLER ONCE CHUNKS ARE PERSISTED
     *
-    * @param rawPartsToFree raw partitions that need to be freed are added to this mutable list
-    * @param downsampledPartsPartsToFree downsample partitions to be freed are added to this mutable list
+    * @param pagedPartsToFree raw partitions that need to be freed are added to this mutable list
+    * @param downsampledPartsToFree downsample partitions to be freed are added to this mutable list
     * @param downsampledChunksToPersist downsample chunks to persist are added to this mutable map
     */
-  private[downsampler] def downsamplePart(rawPart: RawPartData,
-                                          rawPartsToFree: ArrayBuffer[PagedReadablePartition],
-                                          downsampledPartsPartsToFree: ArrayBuffer[TimeSeriesPartition],
+  private[downsampler] def downsamplePart(offHeapMem: PerThreadOffHeapMemory,
+                                          rawPart: RawPartData,
+                                          pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
+                                          downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                                           downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                                           userTimeStart: Long,
                                           userTimeEnd: Long) = {
@@ -154,24 +150,25 @@ object BatchDownsampler extends StrictLogging with Instance {
         logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
 
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
-          rawPart, offHeapMem.get().nativeMemoryManager)
-        val bufferPool = offHeapMem.get().bufferPools(rawSchemaId)
+          rawPart, offHeapMem.nativeMemoryManager)
+        val bufferPool = offHeapMem.bufferPools(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
-                                            0, bufferPool, shardStats, offHeapMem.get().nativeMemoryManager, 1)
+                                            0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
           res -> part
         }.toMap
 
-        downsampleChunks(rawReadablePart, downsamplers, downsampledParts, userTimeStart, userTimeEnd)
+        downsampleChunks(offHeapMem, rawReadablePart, downsamplers, downsampledParts, userTimeStart, userTimeEnd)
 
-        rawPartsToFree += rawReadablePart
-        downsampledPartsPartsToFree ++= downsampledParts.values
+        pagedPartsToFree += rawReadablePart
+        downsampledPartsToFree ++= downsampledParts.values
 
         downsampledParts.foreach { case (res, dsPartition) =>
-          dsPartition.switchBuffers(offHeapMem.get().blockMemFactory, true)
-          downsampledChunksToPersist(res) ++= dsPartition.makeFlushChunks(offHeapMem.get().blockMemFactory)
+          dsPartition.switchBuffers(offHeapMem.blockMemFactory, true)
+          val newIt = downsampledChunksToPersist(res) ++ dsPartition.makeFlushChunks(offHeapMem.blockMemFactory)
+          downsampledChunksToPersist(res) = newIt
         }
       case None =>
         logger.warn(s"Encountered partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)}" +
@@ -187,7 +184,8 @@ object BatchDownsampler extends StrictLogging with Instance {
     * @param downsampledParts the downsample parts in which to ingest downsampled data
     */
   // scalastyle:off method.length
-  private def downsampleChunks(rawPartToDownsample: ReadablePartition,
+  private def downsampleChunks(offHeapMem: PerThreadOffHeapMemory,
+                               rawPartToDownsample: ReadablePartition,
                                downsamplers: Seq[ChunkDownsampler],
                                downsampledParts: Map[FiniteDuration, TimeSeriesPartition],
                                userTimeStart: Long,
@@ -237,7 +235,7 @@ object BatchDownsampler extends StrictLogging with Instance {
             }
             logger.trace(s"Ingesting into part=${part.hashCode}: $downsampleRow")
             //use the userTimeStart as ingestionTime
-            part.ingest(userTimeStart, downsampleRowReader, offHeapMem.get().blockMemFactory)
+            part.ingest(userTimeStart, downsampleRowReader, offHeapMem.blockMemFactory)
           }
           pStart += resMillis
           pEnd += resMillis

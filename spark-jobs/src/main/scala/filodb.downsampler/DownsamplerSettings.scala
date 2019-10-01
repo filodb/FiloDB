@@ -41,6 +41,8 @@ object DownsamplerSettings extends StrictLogging {
 
   val batchSize = downsamplerConfig.getInt("num-partitions-per-cass-write")
 
+  val numCoresPerSparkExecutor = downsamplerConfig.getInt("num-cores-per-spark-executor")
+
   val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
 
   val nativeMemManagerSize = downsamplerConfig.getMemorySize("off-heap-native-memory-size").toBytes
