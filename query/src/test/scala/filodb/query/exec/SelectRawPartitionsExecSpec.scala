@@ -277,6 +277,10 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
+    execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
+    execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 4, 3)
+
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
     result.result.size shouldEqual 1

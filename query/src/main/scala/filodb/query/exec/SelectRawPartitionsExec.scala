@@ -48,6 +48,16 @@ object SelectRawPartitionsExec extends  {
     }
   }
 
+  def optimizeForHistMax(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+    histMaxColumn(schema, schema.data.columns.map(_.id)).map { maxColID =>
+      // Histogram with max column present.  Check for range functions and change if needed
+      val origFunc = findFirstRangeFunction(transformers)
+      val newFunc = RangeFunction.histMaxRangeFunction(origFunc)
+      qLogger.debug(s"Replacing range function for histogram max $origFunc with $newFunc...")
+      replaceRangeFunction(transformers, origFunc, newFunc)
+    }.getOrElse(transformers)
+  }
+
   def getColumnIDs(dataSchema: Schema,
                    colNames: Seq[String],
                    transformers: Seq[RangeVectorTransformer]): Seq[Types.ColumnId] = {
@@ -68,6 +78,14 @@ object SelectRawPartitionsExec extends  {
       }
     }
   }
+
+  // Automatically add column ID for max column if it exists and we picked histogram col already
+  // But make sure the max column isn't already included
+  def addIDsForHistMax(dataSchema: Schema, colIDs: Seq[Types.ColumnId]): Seq[Types.ColumnId] =
+    histMaxColumn(dataSchema, colIDs).filter { mId => !(colIDs contains mId) }
+      .map { maxColID =>
+        colIDs :+ maxColID
+      }.getOrElse(colIDs)
 }
 
 /**
@@ -84,22 +102,11 @@ final case class SelectRawPartitionsExec(id: String,
                                          lookupRes: Option[PartLookupResult],
                                          filterSchemas: Boolean,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
-  import SelectRawPartitionsExec._
-
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {
-    val numRowKeyCols = 1 // hardcoded since a future PR will indeed fix this to 1 timestamp column
-
-    // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
-    // But make sure the max column isn't already included
-    histMaxColumn(dataSchema, colIds).filter { mId => !(colIds contains mId) }
-                                  .map { maxColId =>
-      ResultSchema(dataSchema.infosFromIDs(colIds :+ maxColId),
-        numRowKeyCols, colIDs = (colIds :+ maxColId))
-    }.getOrElse {
-      ResultSchema(dataSchema.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
-    }
+    val numRowKeyCols = 1
+    ResultSchema(dataSchema.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
   }
 
   def doExecute(source: ChunkSource,
@@ -149,8 +156,10 @@ final case class MultiSchemaPartitionsExec(id: String,
                            .getOrElse(schemas(
                              lookupRes.firstSchemaId.getOrElse(schemas.schemas.values.head.schemaHash)))
 
-    val newxformers = optimizeForDownsample(dataSchema, rangeVectorTransformers)
-    val colIDs = getColumnIDs(dataSchema, colName.toSeq, rangeVectorTransformers)
+    val newxformers1 = optimizeForDownsample(dataSchema, rangeVectorTransformers)
+    val newxformers = optimizeForHistMax(dataSchema, newxformers1)
+    val colIDs1 = getColumnIDs(dataSchema, colName.toSeq, rangeVectorTransformers)
+    val colIDs  = addIDsForHistMax(dataSchema, colIDs1)
 
     val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
                                           dataSchema, Some(lookupRes),
