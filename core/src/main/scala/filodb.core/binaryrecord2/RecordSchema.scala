@@ -5,7 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
@@ -213,7 +213,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }
-    val schemaStr = partitionFieldStart.map(x => s"schema=${RecordSchema.schemaID(base, offset)} ").getOrElse("")
+    val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
+    val schemaStr = partitionFieldStart.map(x => s"schema=$schemaName ").getOrElse("")
     s"b2[$schemaStr ${result.mkString(",")}]"
   }
 
