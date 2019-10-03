@@ -212,7 +212,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            schema.data.blockMetaSize.toShort)
 
-    infoPut(ChunkSetInfo(metaAddr + 4))
+    val newInfo = ChunkSetInfo(metaAddr + 4)
+    _log.trace(s"Adding new chunk $newInfo to part $stringPartition")
+    infoPut(newInfo)
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
     bufferPool.release(info.infoAddr, appenders)
@@ -237,6 +239,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     encodeAndReleaseBuffers(blockHolder)
     infosToBeFlushed
       .map { info =>
+        // FIXME Two traces below to debug SEGV seen on read of info.id during downsampling
+        // Remove after debug is done
+        _log.trace(s"Preparing to flush part $stringPartition")
+        _log.trace(s"Preparing to flush chunk $info of part $stringPartition")
         ChunkSet(info, partitionKey, Nil,
                  (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
