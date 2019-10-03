@@ -212,7 +212,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            schema.data.blockMetaSize.toShort)
 
-    infoPut(ChunkSetInfo(metaAddr + 4))
+    val newInfo = ChunkSetInfo(metaAddr + 4)
+    logger.trace(s"Adding new chunk $newInfo to part $stringPartition")
+    infoPut(newInfo)
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
     bufferPool.release(info.infoAddr, appenders)
