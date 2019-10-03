@@ -24,7 +24,6 @@ sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
-final case class FlushCommand(groupNum: Int) extends DataOrCommand
 final case class FlushIndexTimeBuckets(timeBucket: Int)
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
@@ -91,7 +90,6 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushSched the Scheduler to use to schedule flush tasks
-   * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
@@ -100,7 +98,6 @@ trait MemStore extends ChunkSource {
                    shard: Int,
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
-                   flushStream: Observable[FlushCommand] = FlushStream.empty,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]

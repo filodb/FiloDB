@@ -99,43 +99,23 @@ extends MemStore with StrictLogging {
     getShardE(dataset, shard).ingest(data.records, data.offset)
 
   // Should only be called once per dataset/shard
-  def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
-    val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, cancelTask)
-  }
-
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
-    getShardE(dataset, shard).recoverIndex()
-
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
-                   combinedStream: Observable[DataOrCommand],
+                   stream: Observable[SomeData],
                    flushSched: Scheduler,
-                   cancelTask: Task[Unit]): CancelableFuture[Unit] = {
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
-    combinedStream.map {
-                    case d: SomeData =>       shard.ingest(d.records, d.offset, Some(flushSched))
-                                              None
-                    // The write buffers for all partitions in a group are switched here, in line with ingestion
-                    // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
-                    // at the same offset/watermark
-                    case FlushCommand(group) => Some(shard.prepareFlushGroup(group))
-                    case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
-                  }.collect { case Some(flushGroup) => flushGroup }
-                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
-                           // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-                  .completedL
-                  .doOnCancel(cancelTask)
-                  .runAsync(shard.ingestSched)
+    stream.map { case d: SomeData => shard.ingest(d.records, d.offset, Some(flushSched)) }
+      .completedL
+      .doOnCancel(cancelTask)
+      .runAsync(shard.ingestSched)
   }
+
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
+    getShardE(dataset, shard).recoverIndex()
 
   // a more optimized ingest stream handler specifically for recovery
   // TODO: See if we can parallelize ingestion stream for even better throughput
