@@ -114,54 +114,60 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
-      val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
-      }
-      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-      val builder = SerializableRangeVector.newBuilder()
-      var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      finalRes._1
-        .map {
-          case srv: SerializableRangeVector =>
-            numResultSamples += srv.numRowsInt
-            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (enforceLimit && numResultSamples > limit)
-              throw new BadQueryException(s"This query results in more than $limit samples. " +
-                s"Try applying more filters or reduce time range.")
-            srv
-          case rv: RangeVector =>
-            // materialize, and limit rows per RV
-            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
-            numResultSamples += srv.numRowsInt
-            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (enforceLimit && numResultSamples > limit)
-              throw new BadQueryException(s"This query results in more than $limit samples. " +
-                s"Try applying more filters or reduce time range.")
-            srv
+      // It is possible a null schema is returned (due to no time series). In that case just return empty results
+      val resultTask = if (resSchema == ResultSchema.empty) {
+        qLogger.debug(s"Empty plan $this, returning empty results")
+        Task.eval(QueryResult(id, resSchema, Nil))
+      } else {
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
         }
-        .take(limit)
-        .toListL
-        .map { r =>
-          val numBytes = builder.allContainers.map(_.numBytes).sum
-          SerializableRangeVector.queryResultBytes.record(numBytes)
-          if (numBytes > 5000000) {
-            // 5MB limit. Configure if necessary later.
-            // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
-            // is < 2MB
-            qLogger.warn(s"queryId: ${id} result was " +
-              s"large size ${numBytes}. May need to tweak limits. " +
-              s"ExecPlan was: ${printTree()} " +
-              s"Limit was: ${limit}")
+        val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+        val builder = SerializableRangeVector.newBuilder()
+        var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        finalRes._1
+          .map {
+            case srv: SerializableRangeVector =>
+              numResultSamples += srv.numRowsInt
+              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+              if (enforceLimit && numResultSamples > limit)
+                throw new BadQueryException(s"This query results in more than $limit samples. " +
+                  s"Try applying more filters or reduce time range.")
+              srv
+            case rv: RangeVector =>
+              // materialize, and limit rows per RV
+              val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
+              numResultSamples += srv.numRowsInt
+              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+              if (enforceLimit && numResultSamples > limit)
+                throw new BadQueryException(s"This query results in more than $limit samples. " +
+                  s"Try applying more filters or reduce time range.")
+              srv
           }
-          qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
-          QueryResult(id, finalRes._2, r)
-        }
-        .onErrorHandle { case ex: Throwable =>
-          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-            qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
-          QueryError(id, ex)
-        }
+          .take(limit)
+          .toListL
+          .map { r =>
+            val numBytes = builder.allContainers.map(_.numBytes).sum
+            SerializableRangeVector.queryResultBytes.record(numBytes)
+            if (numBytes > 5000000) {
+              // 5MB limit. Configure if necessary later.
+              // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
+              // is < 2MB
+              qLogger.warn(s"queryId: ${id} result was " +
+                s"large size ${numBytes}. May need to tweak limits. " +
+                s"ExecPlan was: ${printTree()} " +
+                s"Limit was: ${limit}")
+            }
+            qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
+            QueryResult(id, finalRes._2, r)
+          }
+      }
+      resultTask.onErrorHandle { case ex: Throwable =>
+        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+        QueryError(id, ex)
+      }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
       if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
@@ -288,11 +294,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
         case other: Any                => ResultSchema.empty
       }
 
-      // Check schema from all tasks
+      // Check schema from all tasks, but skip over empty results with empty schemas
       var sch = ResultSchema.empty
-      val processedTasks = (Observable.fromTask(firstResult) ++ childTasks).zipWithIndex.map { case (res, i) =>
-        sch = reduceSchemas(sch, res, i.toInt)
-        (res, i.toInt)
+      val processedTasks = (Observable.fromTask(firstResult) ++ childTasks).zipWithIndex.collect {
+        case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
+          sch = reduceSchemas(sch, res, i.toInt)
+          (res, i.toInt)
+        case (e: QueryError, i) =>
+          (e, i.toInt)
       }
 
       val outputRvs = compose(processedTasks, outputSchema, queryConfig)
@@ -306,15 +315,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
    * Can be overridden if needed.
    * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
    */
-  def reduceSchemas(rs: ResultSchema, resp: QueryResponse, i: Int): ResultSchema = {
+  def reduceSchemas(rs: ResultSchema, resp: QueryResult, i: Int): ResultSchema = {
     resp match {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
       case QueryResult(_, schema, _) =>
         if (rs != schema) throw new IllegalArgumentException(s"Schema mismatch: $rs != $schema")
         else rs
-      case e: QueryError =>
-        rs         /// Just return original one, ignore errors
     }
   }
 

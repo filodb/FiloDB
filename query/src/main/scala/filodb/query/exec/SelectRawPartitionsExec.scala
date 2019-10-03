@@ -4,6 +4,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import monix.eval.Task
 import monix.execution.Scheduler
+import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
@@ -98,15 +99,17 @@ final case class SelectRawPartitionsExec(id: String,
                                          limit: Int,
                                          dispatcher: PlanDispatcher,
                                          datasetRef: DatasetRef,
-                                         dataSchema: Schema,
+                                         dataSchema: Option[Schema],
                                          lookupRes: Option[PartLookupResult],
                                          filterSchemas: Boolean,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {
-    val numRowKeyCols = 1
-    ResultSchema(dataSchema.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
+    dataSchema.map { sch =>
+      val numRowKeyCols = 1
+      ResultSchema(sch.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
+    }.getOrElse(ResultSchema.empty)
   }
 
   def doExecute(source: ChunkSource,
@@ -114,13 +117,15 @@ final case class SelectRawPartitionsExec(id: String,
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")}" +
-      s"schema=${dataSchema.name} is configured to use columnIDs=$colIds")
-    val rvs = source.rangeVectors(datasetRef, lookupRes.get, colIds, dataSchema, filterSchemas)
+      s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
+    val rvs = dataSchema.map { sch =>
+      source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)
+    }.getOrElse(Observable.empty)
     ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 
   protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +
-                               s"schema=${dataSchema.name}, filterSchemas=$filterSchemas, " +
+                               s"schema=${dataSchema.map(_.name)}, filterSchemas=$filterSchemas, " +
                                s"chunkMethod=${lookupRes.map(_.chunkMethod).getOrElse("")}, colIDs=$colIds"
 }
 
@@ -156,17 +161,27 @@ final case class MultiSchemaPartitionsExec(id: String,
                            .getOrElse(schemas(
                              lookupRes.firstSchemaId.getOrElse(schemas.schemas.values.head.schemaHash)))
 
-    val newxformers1 = optimizeForDownsample(dataSchema, rangeVectorTransformers)
-    val newxformers = optimizeForHistMax(dataSchema, newxformers1)
-    val colIDs1 = getColumnIDs(dataSchema, colName.toSeq, rangeVectorTransformers)
-    val colIDs  = addIDsForHistMax(dataSchema, colIDs1)
+    // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
+    schema.map { s => schemas.schemas(s) }
+          .orElse(lookupRes.firstSchemaId.map(schemas.apply))
+          .map { sch =>
+            val newxformers1 = optimizeForDownsample(sch, rangeVectorTransformers)
+            val newxformers = optimizeForHistMax(sch, newxformers1)
+            val colIDs1 = getColumnIDs(sch, colName.toSeq, rangeVectorTransformers)
+            val colIDs  = addIDsForHistMax(sch, colIDs1)
 
-    val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
-                                          dataSchema, Some(lookupRes),
-                                          schema.isDefined, colIDs)
-    qLogger.debug(s"Discovered schema ${dataSchema.name} and created inner plan $newPlan")
-    newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
-    newPlan
+            val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
+                                                  Some(sch), Some(lookupRes),
+                                                  schema.isDefined, colIDs)
+            qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
+            newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
+            newPlan
+          }.getOrElse {
+            qLogger.debug(s"No time series found for filters $filters... employing empty plan")
+            SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
+                                    None, Some(lookupRes),
+                                    schema.isDefined, Nil)
+          }
   }
 
   def doExecute(source: ChunkSource,

@@ -132,6 +132,19 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     partKeyRead shouldEqual partKeyKVWithMetric
   }
 
+  it("should get empty schema if query returns no results") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("metric", Filter.Equals("not_a_metric!".utf8)),
+                       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      dsRef, 0, filters, AllChunkScan)
+
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.isEmpty shouldEqual true
+    result.result.size shouldEqual 0
+  }
+
   it ("should read raw Long samples from Memstore using IntervalSelector") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("series", Filter.Equals("Series 1".utf8)))

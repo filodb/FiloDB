@@ -233,7 +233,8 @@ object MachineMetricsData {
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
-  val dataset1 = Dataset("metrics1", Seq("series:string"), columns)
+  val options = DatasetOptions.DefaultOptions.copy(metricColumn = "series")
+  val dataset1 = Dataset("metrics1", Seq("series:string"), columns, options)
   val schema1 = dataset1.schema
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")

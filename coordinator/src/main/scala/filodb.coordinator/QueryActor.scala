@@ -77,6 +77,7 @@ final class QueryActor(memStore: MemStore,
   val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyNames, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
+  logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
   val queryEngine2 = new QueryEngine(dsRef, schemas, shardMapFunc,
     EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))

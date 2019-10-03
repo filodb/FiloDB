@@ -87,7 +87,6 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
   val histMaxData: Stream[Seq[Any]] = MMD.histMax(histData)
 
   it ("inprocess dispatcher should execute and return monix task which in turn should return QueryResult") {
-
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
@@ -99,6 +98,32 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
       timeseriesDataset.ref, 0, filters, AllChunkScan)
     val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, AllChunkScan)
+
+    val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
+    val result = dispatcher.dispatch(sep).runAsync.futureValue
+
+    result match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.result.size shouldEqual 1
+        r.result.head.numRows shouldEqual Some(numRawSamples)
+    }
+  }
+
+  it ("inprocess dispatcher should work when a child plan returns no time series") {
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+
+    val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
+
+    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, emptyFilters, AllChunkScan)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
