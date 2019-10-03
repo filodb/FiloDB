@@ -213,7 +213,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
                                            schema.data.blockMetaSize.toShort)
 
     val newInfo = ChunkSetInfo(metaAddr + 4)
-    logger.trace(s"Adding new chunk $newInfo to part $stringPartition")
+    _log.trace(s"Adding new chunk $newInfo to part $stringPartition")
     infoPut(newInfo)
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
@@ -241,8 +241,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       .map { info =>
         // FIXME Two traces below to debug SEGV seen on read of info.id during downsampling
         // Remove after debug is done
-        logger.trace(s"Preparing to flush part $stringPartition")
-        logger.trace(s"Preparing to flush chunk $info of part $stringPartition")
+        _log.trace(s"Preparing to flush part $stringPartition")
+        _log.trace(s"Preparing to flush chunk $info of part $stringPartition")
         ChunkSet(info, partitionKey, Nil,
                  (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
