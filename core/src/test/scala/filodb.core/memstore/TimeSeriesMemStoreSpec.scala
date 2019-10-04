@@ -242,6 +242,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
     Thread sleep 1000
+
     val initTimeBuckets = timebucketsWritten
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.timeBucketBitmaps.keySet.asScala shouldEqual Set(0)
@@ -254,10 +255,13 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     Thread sleep 1000
 
     // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
-    timebucketsWritten shouldEqual initTimeBuckets + 25
+    // Due to race conditions with background flushes, this can vary a bit sometimes.
+    timebucketsWritten should be >= initTimeBuckets + 24
+    timebucketsWritten should be <= initTimeBuckets + 25
 
     // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
-    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
+    // 6 buckets retained + one for current
+    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25)
   }
 
   /**
