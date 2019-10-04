@@ -256,12 +256,13 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
     // Due to race conditions with background flushes, this can vary a bit sometimes.
-    timebucketsWritten should be >= initTimeBuckets + 24
-    timebucketsWritten should be <= initTimeBuckets + 25
+    val delta = (initTimeBuckets + 25) - timebucketsWritten
+    delta should be >= 0
+    delta should be <= 1
 
     // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
     // 6 buckets retained + one for current
-    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25)
+    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual (19 - delta).to(25 - delta)
   }
 
   /**
