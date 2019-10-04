@@ -271,42 +271,39 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
     * using the abstract method 'compose' to arrive at the higher level
-    * result.  Note that the schema is extracted from the first task.
+    * result.
+    * The schema from all the tasks are checked; empty results are dropped and schema is determined
+    * from the non-empty results.
     */
   final def doExecute(source: ChunkSource,
                       queryConfig: QueryConfig)
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
-    if (children.isEmpty) {
-      ExecResult(Observable.empty, Task.eval(ResultSchema.empty))
-    } else {
-      // Guaranteed to have at least one child.  Separate out first task for the schema.
-      val spanFromHelper = Kamon.currentSpan()
-      val firstResult = dispatchRemotePlan(children.head, spanFromHelper)
-      val childTasks = Observable.fromIterable(children.tail)
-                                 .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-                                   dispatchRemotePlan(plan, spanFromHelper)
-                                 }
+    val spanFromHelper = Kamon.currentSpan()
+    // Create tasks for all results
+    val childTasks = Observable.fromIterable(children)
+                               .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
+                                 dispatchRemotePlan(plan, spanFromHelper)
+                               }
 
-      // Get schema from first task
-      val outputSchema = firstResult.map {
-        case QueryResult(_, schema, _) => schema
-        case other: Any                => ResultSchema.empty
-      }
+    // The first valid schema is returned as the Task.  If all results are empty, then return
+    // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
+    var sch = ResultSchema.empty
+    val processedTasks = childTasks.zipWithIndex.collect {
+      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
+        sch = reduceSchemas(sch, res, i.toInt)
+        (res, i.toInt)
+      case (e: QueryError, i) =>
+        (e, i.toInt)
+    // cache caches results so that multiple subscribers can process
+    }.cache
 
-      // Check schema from all tasks, but skip over empty results with empty schemas
-      var sch = ResultSchema.empty
-      val processedTasks = (Observable.fromTask(firstResult) ++ childTasks).zipWithIndex.collect {
-        case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
-          sch = reduceSchemas(sch, res, i.toInt)
-          (res, i.toInt)
-        case (e: QueryError, i) =>
-          (e, i.toInt)
-      }
+    val outputSchema = processedTasks.collect {
+      case (QueryResult(_, schema, _), _) => schema
+    }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
 
-      val outputRvs = compose(processedTasks, outputSchema, queryConfig)
-      ExecResult(outputRvs, outputSchema)
-    }
+    val outputRvs = compose(processedTasks, outputSchema, queryConfig)
+    ExecResult(outputRvs, outputSchema)
   }
 
   /**
