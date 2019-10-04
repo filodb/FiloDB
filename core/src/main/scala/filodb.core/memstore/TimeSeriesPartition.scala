@@ -239,9 +239,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     encodeAndReleaseBuffers(blockHolder)
     infosToBeFlushed
       .map { info =>
-        // FIXME Two traces below to debug SEGV seen on read of info.id during downsampling
-        // Remove after debug is done
-        _log.trace(s"Preparing to flush part $stringPartition")
         _log.trace(s"Preparing to flush chunk ${info.debugString} of part $stringPartition")
         ChunkSet(info, partitionKey, Nil,
                  (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
