@@ -12,6 +12,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
+import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -198,7 +199,7 @@ extends MemStore with StrictLogging {
         .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =
+                             end: Long, start: Long, limit: Int): Iterator[PartKey] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, end, start, limit)).getOrElse(Iterator.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
