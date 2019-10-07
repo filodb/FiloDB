@@ -154,11 +154,11 @@ final class StdvarAggTransientRow extends MutableRowReader {
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
-  else if (columnNo == 3) count
-  else throw new IllegalArgumentException()
+                                     else if (columnNo == 3) count
+                                     else throw new IllegalArgumentException()
   def getDouble(columnNo: Int): Double = if (columnNo == 1) stdVar
-  else if (columnNo == 2) avg
-  else throw new IllegalArgumentException()
+                                         else if (columnNo == 2) avg
+                                         else throw new IllegalArgumentException()
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
