@@ -345,8 +345,8 @@ object RowAggregator {
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
       case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
-      case Stdvar => StdvarRowAggregator
-      case _      => ???
+      case Stdvar   => StdvarRowAggregator
+      case _     => ???
     }
   }
 }
