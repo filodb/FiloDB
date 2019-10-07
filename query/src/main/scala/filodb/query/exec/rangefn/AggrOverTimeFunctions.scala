@@ -622,6 +622,7 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
 
 class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
@@ -647,6 +648,7 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
 
 class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
   final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
