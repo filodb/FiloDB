@@ -339,5 +339,7 @@ object Schemas {
   val global = fromConfig(GlobalConfig.defaultFiloConfig).get
   val gauge = global.schemas("gauge")
   val promCounter = global.schemas("prom-counter")
+  val untyped = global.schemas("untyped")
+  val promHistogram = global.schemas("prom-histogram")
   val dsGauge = global.schemas("ds-gauge")
 }
