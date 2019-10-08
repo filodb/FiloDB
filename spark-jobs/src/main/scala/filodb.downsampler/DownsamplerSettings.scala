@@ -39,7 +39,11 @@ object DownsamplerSettings extends StrictLogging {
 
   val ttlByResolution = downsampleResolutions.zip(downsampleTtls).toMap
 
-  val batchSize = downsamplerConfig.getInt("num-partitions-per-cass-write")
+  val batchSize = downsamplerConfig.getInt("cass-write-batch-size")
+
+  val batchTime = downsamplerConfig.as[FiniteDuration]("cass-write-batch-time")
+
+  val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
   val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
 
