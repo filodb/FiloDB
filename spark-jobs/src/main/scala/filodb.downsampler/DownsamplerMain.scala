@@ -42,8 +42,6 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
       .appName("FiloDBDownsampler")
       .getOrCreate()
 
-    val splits = cassandraColStore.getScanSplits(rawDatasetRef)
-
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
     // Use the spark property spark.filodb.downsampler.user-time-override to override the
@@ -65,6 +63,10 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
       s"ingestionTimeEnd=${millisToString(ingestionTimeEnd)} " +
       s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
 
+    val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
+    logger.info(s"Cassandra split size: ${splits.size}. We will have this may spark partitions. " +
+      s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
+
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
@@ -72,7 +74,7 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
         val rawDataSource = cassandraColStore
         rawDataSource.getChunksByIngestionTimeRange(rawDatasetRef, splitIter,
           ingestionTimeStart, ingestionTimeEnd,
-          userTimeStart, userTimeEnd, batchSize).toIterator()
+          userTimeStart, userTimeEnd, batchSize, batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEnd)

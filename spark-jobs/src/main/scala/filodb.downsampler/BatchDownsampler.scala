@@ -252,8 +252,12 @@ object BatchDownsampler extends StrictLogging with Instance {
                                     downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Unit = {
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
+      // FIXME if listener below is not overridden to no-op, we get a SEGV because
+      // of a bug in either monix's mapAsync or cassandra driver where the future is completed prematurely.
+      // This causes a race condition between free memory and chunkInfo.id access in updateFlushedId.
+      val chunksToPersist = chunks.map(_.copy(listener = _ => {}))
       cassandraColStore.write(downsampleDatasetRefs(res),
-        Observable.fromIterator(chunks), settings.ttlByResolution(res))
+        Observable.fromIterator(chunksToPersist), settings.ttlByResolution(res))
     }
 
     writeFut.foreach { fut =>
