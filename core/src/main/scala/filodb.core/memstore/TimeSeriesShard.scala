@@ -638,19 +638,18 @@ class TimeSeriesShard(val ref: DatasetRef,
       var foundValue = false
       while(partIterator.hasNext && index < limit && !foundValue) {
         val partId = partIterator.next()
+
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
-        if (nextPart != UnsafeUtils.ZeroPointer) {
-          // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
-          // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
-          // have a centralized service/store for serving metadata
-          currVal = schemas.part.binSchema.toStringPairs(nextPart.base, nextPart.offset)
-            .filter(labelNames contains _._1).map(pair => {
-            (pair._1.utf8 -> pair._2.utf8)
-          }).toMap
-          foundValue = currVal.size > 0
-        } else {
-          // FIXME partKey is evicted. Get partition key from lucene index
-        }
+
+        // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+        // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+        // have a centralized service/store for serving metadata
+        currVal = schemas.part.binSchema.toStringPairs(nextPart.base, nextPart.offset)
+          .filter(labelNames contains _._1).map(pair => {
+          (pair._1.utf8 -> pair._2.utf8)
+        }).toMap
+        foundValue = currVal.size > 0
       }
       foundValue
     }
@@ -688,13 +687,14 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private def partKeyFromPartId(partId: Int): PartKey = {
     val nextPart = partitions.get(partId)
-    (if (nextPart != UnsafeUtils.ZeroPointer)
+    if (nextPart != UnsafeUtils.ZeroPointer)
       PartKey(nextPart.partKeyBase, nextPart.partKeyOffset)
     else { //retrieving PartKey from lucene index
       val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
       if (partKeyByteBuf.isDefined) PartKey(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset)
-      else UnsafeUtils.ZeroPointer
-    }).asInstanceOf[PartKey]
+      else throw new IllegalStateException("This is not an expected behavior." +
+        " PartId should always have a corresponding PartKey!")
+    }
   }
 
   /**
