@@ -35,9 +35,9 @@ object Dependencies {
   val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
 
   lazy val commonDeps = Seq(
-    "io.kamon" %% "kamon-core" % kamonVersion,
-    "io.kamon" %% "kamon-akka-2.5" % "1.1.3",
-    "io.kamon" %% "kamon-executors" % "1.0.2",
+    "io.kamon" %% "kamon-core"            % kamonVersion,
+    "io.kamon" %% "kamon-akka-2.5"        % "1.1.3",
+    "io.kamon" %% "kamon-executors"       % "1.0.2",
     "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
     logbackDep % Test,
     scalaTest  % Test,
@@ -53,25 +53,25 @@ object Dependencies {
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
     "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
-    "org.spire-math"      %% "debox"             % "0.8.0" withJavadoc(),
+    "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
     scalaLoggingDep,
     scalaxyDep
   )
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
-    "io.kamon"             %% "kamon-zipkin"      % "1.0.0",
-    "org.slf4j"             % "slf4j-api"         % "1.7.10",
-    "com.beachape"         %% "enumeratum"        % "1.5.10",
-    "io.monix"             %% "monix"             % "2.3.0",
-    "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
-    "net.ceedubs"          %% "ficus"             % ficusVersion,
-    "io.fastjson"           % "boon"              % "0.33",
-    "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6" withJavadoc(),
-    "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
-    "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
-    "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
-    "com.github.alexandrnikitin" %% "bloom-filter" % "0.11.0",
+    "io.kamon"                     %% "kamon-zipkin"      % "1.0.0",
+    "org.slf4j"                    % "slf4j-api"          % "1.7.10",
+    "com.beachape"                 %% "enumeratum"        % "1.5.10",
+    "io.monix"                     %% "monix"             % "2.3.0",
+    "com.googlecode.concurrentlinkedhashmap"              % "concurrentlinkedhashmap-lru" % "1.4",
+    "net.ceedubs"                  %% "ficus"             % ficusVersion,
+    "io.fastjson"                  % "boon"               % "0.33",
+    "com.googlecode.javaewah"      % "JavaEWAH"           % "1.1.6" withJavadoc(),
+    "com.github.rholder.fauxflake" % "fauxflake-core"     % "1.1.0",
+    "org.scalactic"                %% "scalactic"         % "2.2.6" withJavadoc(),
+    "org.apache.lucene"            % "lucene-core"        % "7.3.0" withJavadoc(),
+    "com.github.alexandrnikitin"   %% "bloom-filter"      % "0.11.0",
     scalaxyDep
   )
 
@@ -83,7 +83,7 @@ object Dependencies {
 
   lazy val cassDeps = commonDeps ++ Seq(
     // other dependencies separated by commas
-    "org.lz4"                %  "lz4-java"         % "1.4",
+    "org.lz4"                %  "lz4-java"             % "1.4",
     "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
     logbackDep % Test
   )
@@ -98,44 +98,44 @@ object Dependencies {
   )
 
   lazy val coordDeps = commonDeps ++ Seq(
-    "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
-    "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion withJavadoc(),
-    "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
-    "de.javakaffee"        % "kryo-serializers"      % "0.42" excludeAll(excludeMinlog),
-    "io.kamon"             %% "kamon-prometheus"  % "1.1.1",
+    "com.typesafe.akka"      %% "akka-slf4j"                  % akkaVersion,
+    "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
+    "com.github.romix.akka"  %% "akka-kryo-serialization"     % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
+    "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
+    "io.kamon"               %% "kamon-prometheus"            % "1.1.1",
     // Redirect minlog logs to SLF4J
-    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
-    "com.opencsv"          % "opencsv"            % "3.3",
+    "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
+    "com.opencsv"            % "opencsv"                      % "3.3",
     "com.github.TanUkkii007" %% "akka-cluster-custom-downing" % "0.0.12",
-    "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % Test,
-    "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
+    "com.typesafe.akka"      %% "akka-testkit"                % akkaVersion % Test,
+    "com.typesafe.akka"      %% "akka-multi-node-testkit"     % akkaVersion % Test
   )
 
   lazy val cliDeps = Seq(
     logbackDep,
-    "io.kamon" %% "kamon-akka-2.5" % "1.1.3",
-    "io.kamon" %% "kamon-executors" % "1.0.2",
-    "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
-    "com.quantifind"    %% "sumac"          % "0.3.0"
+    "io.kamon"          %% "kamon-akka-2.5"        % "1.1.3",
+    "io.kamon"          %% "kamon-executors"       % "1.0.2",
+    "io.kamon"          %% "kamon-akka-remote-2.5" % "1.1.0",
+    "com.quantifind"    %% "sumac"                 % "0.3.0"
   )
 
   lazy val kafkaDeps = Seq(
     "io.monix"          %% "monix-kafka-1x" % monixKafkaVersion,
-    "org.apache.kafka"  % "kafka-clients"   % "1.0.0" % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
+    "org.apache.kafka"  % "kafka-clients"   % "1.0.0"     % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
     "com.typesafe.akka" %% "akka-testkit"   % akkaVersion % "test,it",
     scalaTest  % "test,it",
     logbackDep % "test,it")
 
   lazy val promDeps = Seq(
-    "com.google.protobuf" % "protobuf-java" % "2.5.0",
+    "com.google.protobuf"    % "protobuf-java"             % "2.5.0",
     "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(
     scalaxyDep,
     logbackDep,
-    "io.monix" %% "monix-kafka-1x" % monixKafkaVersion,
-    "org.rogach" %% "scallop" % "3.1.1"
+    "io.monix"   %% "monix-kafka-1x" % monixKafkaVersion,
+    "org.rogach" %% "scallop"        % "3.1.1"
   )
 
   lazy val httpDeps = Seq(
