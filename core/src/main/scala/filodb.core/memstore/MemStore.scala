@@ -13,7 +13,7 @@ import filodb.core.downsample.DownsampleConfig
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
-import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
+import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
 
@@ -196,6 +196,11 @@ trait MemStore extends ChunkSource {
   def refreshIndexForTesting(dataset: DatasetRef): Unit
 
   /**
+   * Analyzes a corrupt pointer/vector for reclaim and ownership history, and logs details
+   */
+  def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit
+
+  /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
@@ -232,7 +237,9 @@ object MemStore {
                                   detectDrops = col.params.as[Option[Boolean]]("detectDrops").getOrElse(false))
         case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, config.maxBlobBufferSize)
-        case HistogramColumn => bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
+        case HistogramColumn => val counter = col.params.as[Option[Boolean]]("counter").getOrElse(false)
+                                if (counter) bv.HistogramVector.appendingSect(memFactory, config.maxBlobBufferSize)
+                                else         bv.HistogramVector.appending(memFactory, config.maxBlobBufferSize)
         case other: Column.ColumnType => ???
       }
     }.toArray

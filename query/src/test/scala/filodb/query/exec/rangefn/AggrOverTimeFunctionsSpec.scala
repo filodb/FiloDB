@@ -22,9 +22,14 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), null, 16)
-  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize, true)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesDataset.blockMetaSize,
+                                      MMD.dummyContext, true)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesDataset, storeConf)
+
+  protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleDataset.blockMetaSize,
+                                      MMD.dummyContext, true)
+  protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleDataset, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
@@ -52,6 +57,19 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     part.switchBuffers(ingestBlockHolder, encode = true)
     // part.encodeAndReleaseBuffers(ingestBlockHolder)
     RawDataRangeVector(null, part, AllChunkScan, Array(0, 1))
+  }
+
+  def timeValueRvDownsample(tuples: Seq[(Long, Double, Double, Double, Double, Double)],
+                            colIds: Array[Int]): RawDataRangeVector = {
+    val part = TimeSeriesPartitionSpec.makePart(0, downsampleDataset, bufferPool = tsBufferPool2)
+    val readers = tuples.map { case (ts, d1, d2, d3, d4, d5) =>
+      TupleRowReader((Some(ts), Some(d1), Some(d2), Some(d3), Some(d4), Some(d5)))
+    }
+    readers.foreach { row => part.ingest(row, ingestBlockHolder2) }
+    // Now flush and ingest the rest to ensure two separate chunks
+    part.switchBuffers(ingestBlockHolder2, encode = true)
+    // part.encodeAndReleaseBuffers(ingestBlockHolder)
+    RawDataRangeVector(null, part, AllChunkScan, colIds)
   }
 
   def timeValueRV(data: Seq[Double], startTS: Long = defaultStartTS): RawDataRangeVector = {
@@ -135,7 +153,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
-
       val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
       val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
       // drop first sample because of exclusive start
@@ -242,6 +259,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
       aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
+      aggregated5.drop(0) shouldEqual data.sliding(windowSize, step).map(_.length - 2).drop(0).toBuffer
     }
   }
 
@@ -275,4 +296,46 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
+  it("should correctly do changes") {
+    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+    val rv = timeValueRV(data)
+    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+    val windowSize = 100
+    val step = 20
+
+    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
+      new ChangesChunkedFunctionD(), queryConfig)
+    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
+
+  it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
+    "than one chunks") {
+    val data1= (1 to 240).map(_.toDouble)
+    val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      // Append double data and shuffle so that it becomes DoubleVectorDataReader
+      val data = scala.util.Random.shuffle(data2 ++ data1)
+
+      val rv = timeValueRV(data)
+      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+      val stepTimeMillis = step.toLong * pubFreq
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
+
+      data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
+        case(val1, val2) => if (val1 == -1 ) {
+                               val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
+                             } else {
+                               val1 shouldEqual (val2)
+                             }
+      }
+    }
+  }
 }

@@ -7,17 +7,16 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
+import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{SomeData, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store._
-import filodb.core.Types.{PartitionKey, UTF8Map}
-import filodb.memory.format._
-import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.{vectors => bv}
 import filodb.memory._
+import filodb.memory.format.{vectors => bv, _}
+import filodb.memory.format.ZeroCopyUTF8String._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -52,7 +51,7 @@ object TestData {
   val sourceConf = ConfigFactory.parseString(sourceConfStr)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
-  val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
+  val nativeMem = new NativeMemoryManager(50 * 1024 * 1024)
 
   val optionsString = """
   options {
@@ -218,6 +217,7 @@ object MachineMetricsData {
   import scala.util.Random.nextInt
 
   val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
+  val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
                        incr: Long = 1000): Stream[Product] = {
@@ -344,8 +344,10 @@ object MachineMetricsData {
     }
   }
 
-  val histMaxDS = Dataset("histmax", Seq("tags:map"),
-                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"))
+  val histMaxDS = Dataset.make("histmax", Seq("tags:map"),
+                          Seq("timestamp:ts", "count:long", "sum:long", "max:double", "h:hist:counter=false"),
+                          Seq("timestamp"),
+                          options = DatasetOptions.DefaultOptions).get
 
   // Pass in the output of linearHistSeries here.
   // Adds in the max column before h/hist
@@ -364,16 +366,17 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.addFromObjects(extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, true)
+  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.blockMetaSize, dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8):
+  def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
+                  ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
   (Stream[Seq[Any]], RawDataRangeVector) = {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
-    val container = records(histDataset, histData).records
-    val part = TimeSeriesPartitionSpec.makePart(0, histDataset, partKey=histPartKey, bufferPool=histBufferPool)
-    container.iterate(histDataset.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
+    val container = records(ds, histData).records
+    val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(row, histIngestBH) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
@@ -407,7 +410,7 @@ object CustomMetricsData {
                         columns,
                         Seq("timestamp"),
                         Seq.empty,
-                        DatasetOptions(Seq("metric", "_ns"), "metric", "count")).get
+                        options = DatasetOptions(Seq("metric", "_ns"), "metric", "count", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, metricdataset.partKeySchema, 2048)
   val defaultPartKey = partKeyBuilder.addFromObjects("metric1", "app1")
 
@@ -418,7 +421,7 @@ object CustomMetricsData {
                         columns,
                         Seq("timestamp"),
                         Seq.empty,
-                        DatasetOptions(Seq("__name__"), "__name__", "count")).get
+                        options = DatasetOptions(Seq("__name__"), "__name__", "count", true)).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, metricdataset2.partKeySchema, 2048)
   val defaultPartKey2 = partKeyBuilder2.addFromObjects(Map(ZeroCopyUTF8String("abc") -> ZeroCopyUTF8String("cba")))
 
@@ -430,7 +433,15 @@ object MetricsTestData {
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq("timestamp"),
                                   Seq.empty,
-                                  DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+                                  options = DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+
+  val downsampleDataset = Dataset.make("tsdbdata",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "min:double", "max:double", "sum:double", "count:double", "avg:double"),
+    Seq("timestamp"),
+    Seq.empty,
+    options = DatasetOptions(Seq("__name__"), "__name__", "average", true)
+  ).get
 
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 

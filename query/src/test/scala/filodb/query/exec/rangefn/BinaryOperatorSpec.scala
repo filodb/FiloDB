@@ -214,7 +214,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     // ceil
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, scalar, true)
-    val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
+    val resultObs = binaryOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -229,7 +230,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
   private def applyBinaryOperationAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalar, scalarOnLhs)
-    val resultObs = scalarOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = scalarOpMapper(MetricsTestData.timeseriesDataset,
+      Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {

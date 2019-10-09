@@ -252,19 +252,21 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
     */
-  private[memstore] final val partSet = PartitionSet.ofSize(InitialNumPartitions, ingestSchema, recordComp)
+  private[memstore] final val partSet = PartitionSet.ofSize(InitialNumPartitions)
   // Use a StampedLock because it supports optimistic read locking. This means that no blocking
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
 
   // The off-heap block store used for encoded chunks
+  private val context = Map("dataset" -> dataset.ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize, context)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
+  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize,
+                                             context ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
@@ -771,7 +773,7 @@ class TimeSeriesShard(val dataset: Dataset,
       .withTag("shard", shardNum).start()
 
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = blockFactoryPool.checkout()
+    val blockHolder = blockFactoryPool.checkout(Map("flushGroup" -> flushGroup.groupNum.toString))
 
     // This initializes the containers for the downsample records. Yes, we create new containers
     // and not reuse them at the moment and there is allocation for every call of this method
@@ -1026,7 +1028,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private[filodb] def getOrAddPartitionForIngestion(recordBase: Any, recordOff: Long,
                                                     group: Int, ingestOffset: Long) = {
     assertThreadName(IngestSchedName)
-    var part = partSet.getWithIngestBR(recordBase, recordOff)
+    var part = partSet.getWithIngestBR(recordBase, recordOff, dataset)
     if (part == null) {
       part = addPartitionForIngestion(recordBase, recordOff, group)
     }
@@ -1247,6 +1249,9 @@ class TimeSeriesShard(val dataset: Dataset,
     id
   }
 
+  def analyzeAndLogCorruptPtr(cve: CorruptVectorException): Unit =
+    logger.error(cve.getMessage + "\n" + BlockDetective.stringReport(cve.ptr, blockStore, blockFactoryPool))
+
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This must be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
@@ -1353,7 +1358,7 @@ class TimeSeriesShard(val dataset: Dataset,
     // nothing changed in the set, and the partition object is the correct one.
     var stamp = partSetLock.tryOptimisticRead()
     if (stamp != 0) {
-      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
+      part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, dataset)
     }
     if (!partSetLock.validate(stamp)) {
       // Because the stamp changed, the write lock was acquired and the set likely changed.
@@ -1362,7 +1367,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // the correct partition is returned.
       stamp = partSetLock.readLock()
       try {
-        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
+        part = partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset, dataset)
       } finally {
         partSetLock.unlockRead(stamp)
       }

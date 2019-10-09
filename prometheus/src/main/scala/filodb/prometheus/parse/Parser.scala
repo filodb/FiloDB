@@ -346,10 +346,52 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
-    expression match {
+    val expressionWithPrecedence = expression match {
+      case binaryExpression: BinaryExpression => assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
+                                                    binaryExpression.vectorMatch, binaryExpression.rhs)
+      case _                                  => expression
+    }
+
+    expressionWithPrecedence match {
       case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)
       case r: SimpleSeries => r.toRawSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  /**
+    * Recursively assign precedence to BinaryExpression by creating new BinaryExpression with inner expressions
+    *  rearranged based on precedence
+    */
+  def assignPrecedence(lhs: Expression,
+                       operator: Operator,
+                       vectorMatch: Option[VectorMatch],
+                       rhs: Expression): Expression = {
+    rhs match {
+      case rhsBE: BinaryExpression => val rhsWithPrecedence = assignPrecedence(rhsBE.lhs, rhsBE.operator,
+        rhsBE.vectorMatch, rhsBE.rhs) // Assign Precedence to RHS Expression
+        rhsWithPrecedence match {
+          case rhsWithPrecBE: BinaryExpression => val rhsOp = rhsWithPrecBE.operator.
+            getPlanOperator
+            val precd = rhsOp.precedence -
+              operator.getPlanOperator.precedence
+            if ((precd < 0) || (precd == 0 &&
+              !rhsOp.isRightAssociative)) {
+              // Assign Precedence to LHS Expression
+              val lhsWithPrecedence =
+                assignPrecedence(lhs, operator,
+                  vectorMatch, rhsWithPrecBE.lhs)
+              // Create new BinaryExpression as existing precedence is not correct
+              // New expression will have "lhs operator rhs.lhs" first as operator.precedence > rhsOp.precedence
+              BinaryExpression(lhsWithPrecedence, rhsWithPrecBE.operator,
+                rhsWithPrecBE.vectorMatch, rhsWithPrecBE.rhs)
+            } else {
+              BinaryExpression(lhs, operator, vectorMatch, rhsWithPrecedence)
+            }
+          case _ => BinaryExpression(lhs, operator,
+            vectorMatch, rhsWithPrecedence)
+        }
+      case _ => BinaryExpression(lhs, operator, vectorMatch, rhs)
     }
   }
 

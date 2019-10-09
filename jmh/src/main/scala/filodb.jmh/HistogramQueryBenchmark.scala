@@ -14,15 +14,15 @@ import org.openjdk.jmh.annotations._
 
 import filodb.coordinator.{FilodbCluster, IngestionStarted, ShardMapper}
 import filodb.coordinator.client.QueryCommands._
-import filodb.coordinator.queryengine2.QueryEngine
-import filodb.core.{MachineMetricsData, MetricsTestData, TestData}
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
+import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.memory.format.SeqRowReader
 import filodb.memory.MemFactory
+import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.QueryConfig
+import filodb.query.{QueryConfig, QueryOptions}
 
 //scalastyle:off regex
 /**
@@ -76,8 +76,8 @@ class HistogramQueryBenchmark {
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
   // Query configuration
-  val hEngine = new QueryEngine(histDataset, shardMapper)
-  val pEngine = new QueryEngine(promDataset, shardMapper)
+  val hEngine = new QueryEngine(histDataset, shardMapper, EmptyFailureProvider)
+  val pEngine = new QueryEngine(promDataset, shardMapper, EmptyFailureProvider)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total{job="prometheus",__col__="h"}[30s]))"""
@@ -88,12 +88,12 @@ class HistogramQueryBenchmark {
   val qOptions = QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
     copy(shardOverrides = Some(Seq(0)))
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
-  val hExecPlan = hEngine.materialize(hLogicalPlan, qOptions)
+  val hExecPlan = hEngine.materialize(hLogicalPlan, qOptions, UnavailablePromQlQueryParams)
   val querySched = Scheduler.singleThread(s"benchmark-query")
   val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val pLogicalPlan = Parser.queryToLogicalPlan(promQuery, startTime/1000)
-  val pExecPlan = pEngine.materialize(pLogicalPlan, qOptions)
+  val pExecPlan = pEngine.materialize(pLogicalPlan, qOptions, UnavailablePromQlQueryParams)
 
   @TearDown
   def shutdownFiloActors(): Unit = {

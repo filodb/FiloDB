@@ -168,4 +168,40 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
     blockManager.releaseBlocks()
   }
+
+  it should ("allocate blocks using BlockMemFactory with ownership and reclaims") in {
+    val stats = new MemoryStats(Map("test5" -> "test5"))
+    // This block manager has 5 blocks capacity
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
+
+    blockManager.usedBlocks.size() shouldEqual 0
+    blockManager.numTimeOrderedBlocks shouldEqual 0
+    blockManager.usedBlocksTimeOrdered.size shouldEqual 0
+
+    val factory = new BlockMemFactory(blockManager, Some(10000L), 24, Map("foo" -> "bar"), false)
+
+    // There should be one time ordered block allocated, owned by factory
+    blockManager.usedBlocks.size shouldEqual 0
+    blockManager.numTimeOrderedBlocks shouldEqual 1
+    blockManager.hasTimeBucket(10000L) shouldEqual true
+
+    factory.currentBlock.owner shouldEqual Some(factory)
+
+    // Now allocate 4 more regular blocks, that will use up all blocks
+    blockManager.requestBlock(None).isDefined shouldEqual true
+    blockManager.requestBlock(None).isDefined shouldEqual true
+    blockManager.requestBlock(None).isDefined shouldEqual true
+    blockManager.requestBlock(None).isDefined shouldEqual true
+    blockManager.usedBlocks.size shouldEqual 4
+    blockManager.numTimeOrderedBlocks shouldEqual 1
+
+    // Mark as reclaimable the blockMemFactory's block.  Then request more blocks, that one will be reclaimed.
+    // Check ownership is now cleared.
+    factory.currentBlock.markReclaimable
+    blockManager.requestBlock(Some(9000L)).isDefined shouldEqual true
+    blockManager.hasTimeBucket(10000L) shouldEqual false
+    blockManager.hasTimeBucket(9000L) shouldEqual true
+
+    factory.currentBlock.owner shouldEqual None  // new requestor did not have owner
+  }
 }

@@ -206,6 +206,22 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
     new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
   }
+
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+      val itr = iterate(vector, start)
+      var prevVector: Long = prev
+      var changes = 0
+      for {i <- start until end + 1 optimized} {
+        val cur = itr.next
+        if (i == start && ignorePrev) //Initialize prev
+          prevVector = cur
+        if (prevVector != cur)
+          changes += 1
+        prevVector = cur
+      }
+      (changes, prevVector)
+  }
 }
 
 /**
@@ -252,6 +268,15 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
       curBase += slope(vector)
       out
     }
+  }
+
+  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    val firstValue = apply(vector, start)
+    val lastValue = apply(vector, end)
+    // compare current element with last element(prev) of previous chunk
+    val changes = if (!ignorePrev && prev != firstValue) 1 else 0
+    if (slope(vector) == 0) (changes, lastValue) else (end - start + changes, lastValue)
   }
 }
 
