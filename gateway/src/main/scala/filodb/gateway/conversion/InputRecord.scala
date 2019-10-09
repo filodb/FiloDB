@@ -154,7 +154,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
   final def getMetric: String = metric
 
   final def addToBuilder(builder: RecordBuilder): Unit =
-    InputRecord.writePromCounterRecord(builder, metric, tags, timestamp, value)
+    InputRecord.writeUntypedRecord(builder, metric, tags, timestamp, value)
 }
 
 object PrometheusInputRecord {
