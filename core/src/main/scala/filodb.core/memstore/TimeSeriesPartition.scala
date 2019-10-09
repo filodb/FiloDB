@@ -5,6 +5,7 @@ import scalaxy.loops._
 
 import filodb.core.DatasetRef
 import filodb.core.Types._
+import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
@@ -455,8 +456,8 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 }
 
 
-final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
-  var currVal: TimeSeriesPartition = _
+final case class PartKeyRowReader(records: Iterator[PartKey]) extends Iterator[RowReader] {
+  var currVal: PartKey = _
 
   private val rowReader = new RowReader {
     def notNull(columnNo: Int): Boolean = true
@@ -468,10 +469,10 @@ final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extend
     def getString(columnNo: Int): String = ???
     def getAny(columnNo: Int): Any = ???
 
-    def getBlobBase(columnNo: Int): Any = currVal.partKeyBase
-    def getBlobOffset(columnNo: Int): Long = currVal.partKeyOffset
+    def getBlobBase(columnNo: Int): Any = currVal.base
+    def getBlobOffset(columnNo: Int): Long = currVal.offset
     def getBlobNumBytes(columnNo: Int): Int =
-      BinaryRegionLarge.numBytes(currVal.partKeyBase, currVal.partKeyOffset) + BinaryRegionLarge.lenBytes
+      BinaryRegionLarge.numBytes(currVal.base, currVal.offset) + BinaryRegionLarge.lenBytes
   }
 
   override def hasNext: Boolean = records.hasNext
