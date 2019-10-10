@@ -17,7 +17,7 @@ import filodb.query.exec.TransientRow
 class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
+  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
   val sampleBase: Array[RangeVector] = Array(
@@ -214,8 +214,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     // ceil
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, scalar, true)
-    val resultObs = binaryOpMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
+    val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -230,8 +229,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
   private def applyBinaryOperationAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalar, scalarOnLhs)
-    val resultObs = scalarOpMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = scalarOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {

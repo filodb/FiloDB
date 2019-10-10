@@ -5,7 +5,6 @@ import scala.collection.mutable.ListBuffer
 
 import monix.reactive.Observable
 
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -46,12 +45,11 @@ final case class SetOperatorExec(id: String,
 
   def children: Seq[ExecPlan] = lhs ++ rhs
 
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = lhs(0).schema(dataset)
+  protected def schemaOfCompose(): ResultSchema = lhs(0).schema()
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
-  protected[exec] def compose(dataset: Dataset,
-                              childResponses: Observable[(QueryResponse, Int)],
+  protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               queryConfig: QueryConfig): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), i) => (result, i)

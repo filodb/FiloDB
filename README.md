@@ -133,10 +133,22 @@ kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partit
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
-Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
+Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
 
 ```
 bin/cassandra
+```
+
+You should install Cassandra using a tool which you're the most familiar with.
+
+For instance, one easy way to install it is via `brew`
+```
+brew install cassandra
+```
+
+Start Cassandra
+```
+brew services start cassandra
 ```
 
 Build the required projects
@@ -148,10 +160,11 @@ First initialize the keyspaces and tables in Cassandra.
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
+Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
 
 ```
 ./filodb-dev-start.sh
@@ -215,7 +228,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ns="App-2"}'
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ws_="demo", _ns_="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -223,7 +236,27 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
-1a) Restart Kafka, this is sometimes necessary.
+
+- Before you remove a topic, update server.properties from configuration(conf) folder and have delete.topic.enable property set to true:
+`delete.topic.enable=true`
+- Run below kafka-topics.sh command with “–delete” option to remove “timeseries-dev” and "timeseries-dev-ds-1m":
+```sh
+ /usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev \
+                --delete  
+
+```
+```
+/usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev-ds-1m \
+                --delete
+```
+- You should see: 
+```
+Topic timeseries-dev is marked for deletion.
+Note: This will have no impact if delete.topic.enable is not set to true.
+```
+
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
 3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
@@ -385,7 +418,7 @@ The number of shards in each dataset is preconfigured in the source config.  Ple
 
 Metrics are routed to shards based on factors:
 
-1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency.
+1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_`, `metric` labels are mandatory to calculate shard key along with `metric` column.
 2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
 ## Querying FiloDB
@@ -396,7 +429,7 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
-    http_req_timer{_ns="foo",__col__="min"}
+    http_req_timer{_ws_="demo", _ns_="foo",__col__="min"}
 
 By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
 
@@ -410,7 +443,7 @@ Some special functions exist to aid debugging and for other purposes:
 
 Example of debugging chunk metadata using the CLI:
 
-    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ws_="demo",_ns_="App-0"})' --start XX --end YY
 
 ### First-Class Histogram Support
 
@@ -432,7 +465,7 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%_ns="filodb"%7D%5B1m%5D&time=1539908476'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total{_ws_="demo", _ns_="filodb"}[5m]&time=1568756529'
 
 ```json
 {
@@ -445,7 +478,8 @@ Example:
           "shard": "1",
           "__name__": "memstore_rows_ingested_total",
           "dataset": "prometheus",
-          "_ns": "filodb"
+          "_ws_": "demo"
+          "_ns_": "filodb"
         },
         "values": [
           [
@@ -480,7 +514,8 @@ Example:
           "shard": "0",
           "__name__": "memstore_rows_ingested_total",
           "dataset": "prometheus",
-          "_ns": "filodb"
+          "_ws_": "demo"
+          "_ns_": "filodb"
         },
         "values": [
           [
@@ -589,7 +624,7 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ns="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ws_="demo", _ns_="filodb"}'
 
 ```
 Sending query command to server for prometheus with options QueryOptions(<function1>,16,60,100,None)...

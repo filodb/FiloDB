@@ -1,13 +1,11 @@
 package filodb.gateway.conversion
 
-import scala.language.postfixOps
-
 import remote.RemoteStorage.TimeSeries
-import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{DatasetOptions, Schema}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 /**
  * An InputRecord represents one "record" of timeseries data for input to FiloDB system.
@@ -35,6 +33,94 @@ trait InputRecord {
    * Adds the contents of this record to RecordBuilder as one or more Filo records
    */
   def addToBuilder(builder: RecordBuilder): Unit
+}
+
+// Utilities for adding data for standard schemas
+object InputRecord {
+  import filodb.core.metadata.Schemas._
+  import ZCUTF8._
+
+  /**
+   * Writes a BinaryRecord for the built-in gauge schema.  Note that tags are NOT manipulated at all.
+   */
+  def writeGaugeRecord(builder: RecordBuilder,
+                       metric: String,
+                       tags: Map[String, String],
+                       timestamp: Long,
+                       value: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, value, gauge)
+
+  private def writeKVRecord(builder: RecordBuilder,
+                            metric: String,
+                            tags: Map[String, String],
+                            timestamp: Long,
+                            value: Double,
+                            schema: Schema): Unit = {
+    builder.startNewRecord(schema)
+    builder.addLong(timestamp)
+    builder.addDouble(value)
+
+    builder.addString(metric)
+    builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+    builder.endRecord()
+  }
+
+  def writePromCounterRecord(builder: RecordBuilder,
+                             metric: String,
+                             tags: Map[String, String],
+                             timestamp: Long,
+                             count: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, count, promCounter)
+
+  def writeUntypedRecord(builder: RecordBuilder,
+                         metric: String,
+                         tags: Map[String, String],
+                         timestamp: Long,
+                         value: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, value, untyped)
+
+
+  /**
+   * Writes a Prometheus-style increasing histogram record, along with the sum and count,
+   * using the efficient prom-histogram schema, storing the entire histogram together for efficiency.
+   * The list of key-values should have "sum", "count", and bucket tops as keys, in any order.
+   * This code will sort and encode histograms correctly from those.
+   */
+  def writePromHistRecord(builder: RecordBuilder,
+                          metric: String,
+                          tags: Map[String, String],
+                          timestamp: Long,
+                          kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+                         false
+      case ("count", v) => count = v
+                           false
+      case other      => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) =>      (k.toDouble, v.toLong)
+    }.sorted
+
+    // Built up custom histogram objects and scheme, then encode
+    val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+    val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+    // Now, write out histogram
+    builder.startNewRecord(promHistogram)
+    builder.addLong(timestamp)
+    builder.addDouble(sum)
+    builder.addDouble(count)
+    builder.addBlob(hist.serialize())
+
+    builder.addString(metric)
+    builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+    builder.endRecord()
+  }
 }
 
 /**
@@ -67,23 +153,8 @@ case class PrometheusInputRecord(tags: Map[String, String],
   val nonMetricShardValues: Seq[String] = nonMetricShardCols.flatMap(tags.get)
   final def getMetric: String = metric
 
-  final def addToBuilder(builder: RecordBuilder): Unit = {
-    builder.startNewRecord(promCounter)
-    builder.addLong(timestamp)
-    builder.addDouble(value)
-
-    builder.addString(metric)
-
-    builder.startMap()
-    for { i <- 0 until javaTags.size optimized } {
-      val (k, v) = javaTags.get(i)
-      builder.addMapKeyValue(k.getBytes, v.getBytes)
-      builder.updatePartitionHash(hashes(i))
-    }
-    builder.endMap(bulkHash = false)
-
-    builder.endRecord()
-  }
+  final def addToBuilder(builder: RecordBuilder): Unit =
+    InputRecord.writeUntypedRecord(builder, metric, tags, timestamp, value)
 }
 
 object PrometheusInputRecord {
@@ -106,7 +177,7 @@ object PrometheusInputRecord {
     } else {
       val metric = metricTags.head._2
       val metricKey = metricTags.head._1
-      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options).toMap
+      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options)
       (0 until tsProto.getSamplesCount).map { i =>
         val sample = tsProto.getSamples(i)
         PrometheusInputRecord(transformedTags, metric, sample.getTimestampMs, sample.getValue)
@@ -119,17 +190,18 @@ object PrometheusInputRecord {
    * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
    * with the value from the source tag.
    */
-  def transformTags(tags: Seq[(String, String)], options: DatasetOptions): Seq[(String, String)] = {
-    val keys = tags.map(_._1).toSet
-    val extraTags = new collection.mutable.ArrayBuffer[(String, String)]()
-    tags.foreach { case (k, v) =>
-      if (options.copyTags contains k) {
-        val renamedKey = options.copyTags(k)
-        if (!(keys contains renamedKey))
-          extraTags += renamedKey -> v
+  def transformTags(tags: Seq[(String, String)],
+                    options: DatasetOptions): Map[String, String] = {
+    val extraTags = new collection.mutable.HashMap[String, String]()
+    val tagsMap = tags.toMap
+    for ((k, v) <- options.copyTags) {
+      if (!extraTags.contains(v)
+        && !tagsMap.contains(v)
+        && tagsMap.contains(k)) {
+        extraTags += v -> tagsMap(k)
       }
     }
-    tags ++ extraTags
+    tagsMap ++ extraTags
   }
 }
 

@@ -5,6 +5,7 @@ import scalaxy.loops._
 
 import filodb.core.DatasetRef
 import filodb.core.Types._
+import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
@@ -66,7 +67,9 @@ class TimeSeriesPartition(val partID: Int,
 extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
   import TimeSeriesPartition._
 
-  require(bufferPool.schema == schema.data)  // Really important that buffer pool schema matches
+  // Really important that buffer pool schema matches
+  require(bufferPool.schema == schema.data,
+    s"BufferPool schema was ${bufferPool.schema} but partition schema was ${schema.data}")
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
@@ -210,7 +213,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            schema.data.blockMetaSize.toShort)
 
-    infoPut(ChunkSetInfo(metaAddr + 4))
+    val newInfo = ChunkSetInfo(metaAddr + 4)
+    _log.trace(s"Adding new chunk ${newInfo.debugString} to part $stringPartition")
+    infoPut(newInfo)
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
     bufferPool.release(info.infoAddr, appenders)
@@ -235,6 +240,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     encodeAndReleaseBuffers(blockHolder)
     infosToBeFlushed
       .map { info =>
+        _log.trace(s"Preparing to flush chunk ${info.debugString} of part $stringPartition")
         ChunkSet(info, partitionKey, Nil,
                  (0 until schema.numDataColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
                  // Updates the newestFlushedID when the flush succeeds.
@@ -450,8 +456,8 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 }
 
 
-final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
-  var currVal: TimeSeriesPartition = _
+final case class PartKeyRowReader(records: Iterator[PartKey]) extends Iterator[RowReader] {
+  var currVal: PartKey = _
 
   private val rowReader = new RowReader {
     def notNull(columnNo: Int): Boolean = true
@@ -463,10 +469,10 @@ final case class PartKeyRowReader(records: Iterator[TimeSeriesPartition]) extend
     def getString(columnNo: Int): String = ???
     def getAny(columnNo: Int): Any = ???
 
-    def getBlobBase(columnNo: Int): Any = currVal.partKeyBase
-    def getBlobOffset(columnNo: Int): Long = currVal.partKeyOffset
+    def getBlobBase(columnNo: Int): Any = currVal.base
+    def getBlobOffset(columnNo: Int): Long = currVal.offset
     def getBlobNumBytes(columnNo: Int): Int =
-      BinaryRegionLarge.numBytes(currVal.partKeyBase, currVal.partKeyOffset) + BinaryRegionLarge.lenBytes
+      BinaryRegionLarge.numBytes(currVal.base, currVal.offset) + BinaryRegionLarge.lenBytes
   }
 
   override def hasNext: Boolean = records.hasNext

@@ -15,7 +15,6 @@ import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Dataset
-import filodb.core.query.ColumnFilter
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -60,7 +59,7 @@ final class QueryActor(memStore: MemStore,
   val config = context.system.settings.config
 
   var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
-  val applicationShardKeyName = dataset.options.nonMetricShardColumns.headOption
+  val applicationShardKeyNames = dataset.options.nonMetricShardColumns
   val defaultSpread = config.getInt("filodb.spread-default")
 
   implicit val spreadOverrideReader: ValueReader[SpreadAssignment] = ValueReader.relative { spreadAssignmentConfig =>
@@ -73,9 +72,7 @@ final class QueryActor(memStore: MemStore,
   val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
   spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
-  val spreadFunc = applicationShardKeyName.map { appKey =>
-                     QueryOptions.simpleMapSpreadFunc(appKey, filodbSpreadMap, defaultSpread)
-                   }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
+  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyNames, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
@@ -96,7 +93,7 @@ final class QueryActor(memStore: MemStore,
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
       .withTag("query-id", q.id)
       .start()
-    q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
+    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res

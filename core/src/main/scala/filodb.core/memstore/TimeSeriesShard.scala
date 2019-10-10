@@ -120,6 +120,16 @@ object TimeSeriesShard {
     }
   }
 
+  /**
+    * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
+    */
+  def writeMetaWithoutPartId(addr: Long, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+    ChunkSetInfo.copy(bytes, addr)
+    for { i <- 0 until vectors.size optimized } {
+      ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
+    }
+  }
+
   val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
     ColumnInfo("endTime", ColumnType.LongColumn),
     ColumnInfo("partKey", ColumnType.StringColumn)))
@@ -193,8 +203,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                      (implicit val ioPool: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
 
-  import TimeSeriesShard._
   import FiloSchedulers._
+  import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
 
@@ -238,9 +248,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
       val partID = UnsafeUtils.getInt(metaAddr)
       val partition = partitions.get(partID)
-      assert(numBytes == partition.schema.data.blockMetaSize)
-      val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       if (partition != UnsafeUtils.ZeroPointer) {
+        assert(numBytes == partition.schema.data.blockMetaSize)
+        val chunkID = UnsafeUtils.getLong(metaAddr + 4)
         partition.removeChunksAt(chunkID)
       }
     }
@@ -661,19 +671,18 @@ class TimeSeriesShard(val ref: DatasetRef,
       var foundValue = false
       while(partIterator.hasNext && index < limit && !foundValue) {
         val partId = partIterator.next()
-        val nextPart = getPartitionFromPartId(partId)
-        if (nextPart != UnsafeUtils.ZeroPointer) {
-          // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
-          // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
-          // have a centralized service/store for serving metadata
-          currVal = schemas.part.binSchema.toStringPairs(nextPart.partKeyBase, nextPart.partKeyOffset)
-            .filter(labelNames contains _._1).map(pair => {
-            (pair._1.utf8 -> pair._2.utf8)
-          }).toMap
-          foundValue = currVal.size > 0
-        } else {
-          // FIXME partKey is evicted. Get partition key from lucene index
-        }
+
+        //retrieve PartKey either from In-memory map or from PartKeyIndex
+        val nextPart = partKeyFromPartId(partId)
+
+        // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+        // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+        // have a centralized service/store for serving metadata
+        currVal = schemas.part.binSchema.toStringPairs(nextPart.base, nextPart.offset)
+          .filter(labelNames contains _._1).map(pair => {
+          (pair._1.utf8 -> pair._2.utf8)
+        }).toMap
+        foundValue = currVal.size > 0
       }
       foundValue
     }
@@ -690,9 +699,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[TimeSeriesPartition] = {
+                          limit: Int): Iterator[PartKey] = {
     partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-      .map(getPartitionFromPartId, limit)
+      .map(partKeyFromPartId, limit)
       .filter(_ != UnsafeUtils.ZeroPointer) // Needed since we have not addressed evicted partitions yet
   }
 
@@ -707,18 +716,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   /**
-    * WARNING, returns null for evicted partitions
+    * retrieve partKey for a given PartId
     */
-  private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
+  private def partKeyFromPartId(partId: Int): PartKey = {
     val nextPart = partitions.get(partId)
-    if (nextPart == UnsafeUtils.ZeroPointer)
-      logger.warn(s"PartId=$partId was not found in memory and was not included in metadata query result. ")
-    // TODO Revisit this code for evicted partitions
-    /*if (nextPart == UnsafeUtils.ZeroPointer) {
-      val partKey = partKeyIndex.partKeyFromPartId(partId)
-      //map partKey bytes to UTF8String
-    }*/
-    nextPart
+    if (nextPart != UnsafeUtils.ZeroPointer)
+      PartKey(nextPart.partKeyBase, nextPart.partKeyOffset)
+    else { //retrieving PartKey from lucene index
+      val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
+      if (partKeyByteBuf.isDefined) PartKey(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset)
+      else throw new IllegalStateException("This is not an expected behavior." +
+        " PartId should always have a corresponding PartKey!")
+    }
   }
 
   /**

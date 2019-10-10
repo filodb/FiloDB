@@ -59,6 +59,7 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
   val globalConfig = ConfigFactory.parseString(ourConf)
                        .withFallback(ConfigFactory.parseResources("application_test.conf"))
                        .withFallback(ConfigFactory.load("filodb-defaults.conf"))
+  FilodbSettings.initialize(globalConfig)
   commonConfig(globalConfig)
 }
 

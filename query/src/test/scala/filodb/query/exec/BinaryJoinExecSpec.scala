@@ -93,7 +93,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
                          .toListL.runAsync.futureValue
 
     result.foreach { rv =>
@@ -125,7 +125,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                          .toListL.runAsync.futureValue
 
     result.foreach { rv =>
@@ -166,7 +166,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
 
-    val fut = execPlan.compose(dataset, Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
+    val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                       .toListL.runAsync
     ScalaFutures.whenReady(fut.failed) { e =>
       e shouldBe a[BadQueryException]
@@ -200,7 +200,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
 
-    val fut = execPlan.compose(dataset, Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
+    val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                       .toListL.runAsync
     ScalaFutures.whenReady(fut.failed) { e =>
       e shouldBe a[BadQueryException]
@@ -224,7 +224,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     result.foreach { rv =>
@@ -255,7 +255,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     result.foreach { rv =>

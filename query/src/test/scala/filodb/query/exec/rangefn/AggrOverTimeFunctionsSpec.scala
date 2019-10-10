@@ -153,7 +153,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
-
       val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
       val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
       // drop first sample because of exclusive start
@@ -260,6 +259,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
       aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
+
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated5 = changesChunked.map(_.getDouble(1)).toBuffer
+      aggregated5.drop(0) shouldEqual data.sliding(windowSize, step).map(_.length - 2).drop(0).toBuffer
     }
   }
 
@@ -305,5 +308,89 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       new ChangesChunkedFunctionD(), queryConfig)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+  }
+
+  it("should correctly calculate quantileovertime") {
+    val twoSampleData = Seq(0.0, 1.0)
+    val threeSampleData = Seq(1.0, 0.0, 2.0)
+    val unevenSampleData = Seq(0.0, 1.0, 4.0)
+
+    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2)
+    val twoSampleDataResponses = Seq(0, 0.5, 0.75, 0.8, 1, Double.NegativeInfinity, Double.PositiveInfinity)
+    val threeSampleDataResponses = Seq(0, 1, 1.5, 1.6, 2, Double.NegativeInfinity, Double.PositiveInfinity)
+    val unevenSampleDataResponses = Seq(0, 1, 2.5, 2.8, 4, Double.NegativeInfinity, Double.PositiveInfinity)
+
+    val n = quantiles.length
+    for (i <- 0 until n) {
+      var rv = timeValueRV(twoSampleData)
+      val chunkedItTwoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregated2 = chunkedItTwoSample.map(_.getDouble(1)).toBuffer
+      aggregated2(0) shouldEqual twoSampleDataResponses(i) +- 0.0000000001
+
+      rv = timeValueRV(threeSampleData)
+      val chunkedItThreeSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 50000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregated3 = chunkedItThreeSample.map(_.getDouble(1)).toBuffer
+      aggregated3(0) shouldEqual threeSampleDataResponses(i) +- 0.0000000001
+
+      rv = timeValueRV(unevenSampleData)
+      val chunkedItUnevenSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 30000,
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+      val aggregatedUneven = chunkedItUnevenSample.map(_.getDouble(1)).toBuffer
+      aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
+    }
+    val emptyData = Seq()
+    var rv = timeValueRV(emptyData)
+    val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
+      new QuantileOverTimeChunkedFunctionD(Seq(0.5)), queryConfig)
+    val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
+    aggregatedEmpty(0) isNaN
+
+    def median(s: Seq[Double]): Double = {
+      val (lower, upper) = s.sortWith(_<_).splitAt(s.size / 2)
+      if (s.size % 2 == 0) (lower.last + upper.head) / 2.0 else upper.head
+    }
+
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val minChunkedIt = chunkedWindowIt(data, rv2, new QuantileOverTimeChunkedFunctionD(Seq(0.5)), windowSize, step)
+      val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
+    }
+  }
+  
+  it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
+    "than one chunks") {
+    val data1= (1 to 240).map(_.toDouble)
+    val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
+
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      // Append double data and shuffle so that it becomes DoubleVectorDataReader
+      val data = scala.util.Random.shuffle(data2 ++ data1)
+
+      val rv = timeValueRV(data)
+      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+      val stepTimeMillis = step.toLong * pubFreq
+      val changesChunked = chunkedWindowIt(data, rv, new ChangesChunkedFunctionD(), windowSize, step)
+      val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
+
+      data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
+        case(val1, val2) => if (val1 == -1 ) {
+                               val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
+                             } else {
+                               val1 shouldEqual (val2)
+                             }
+      }
+    }
   }
 }

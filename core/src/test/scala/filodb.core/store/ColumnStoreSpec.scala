@@ -114,7 +114,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
 
-    val rowIt = memStore.scanRows(dataset2, dataset2.colIDs("NumArticles").get,
+    val rowIt = memStore.scanRows(dataset2, schema2.colIDs("NumArticles").get,
                                   FilteredPartitionScan(paramSet.head))
     rowIt.map(_.getInt(0)).sum should equal (492)
   }
@@ -132,7 +132,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
     val method = FilteredPartitionScan(paramSet.head, Seq(filter))
-    val rowIt = memStore.scanRows(dataset2, dataset2.colIDs("NumArticles").get, method)
+    val rowIt = memStore.scanRows(dataset2, schema2.colIDs("NumArticles").get, method)
     rowIt.map(_.getInt(0)).sum should equal (22)
   }
 
@@ -149,7 +149,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
     val method = FilteredPartitionScan(paramSet.head, Seq(filter))
-    val rangeVectorObs = memStore.rangeVectors(dataset2, dataset2.colIDs("NumArticles").get,
+    val rangeVectorObs = memStore.rangeVectors(dataset2.ref, schema2, schema2.colIDs("NumArticles").get,
                                                method, AllChunkScan)
     val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
 

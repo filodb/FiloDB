@@ -414,7 +414,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     memStore.refreshIndexForTesting(dataset1.ref)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
-    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
+    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
@@ -450,7 +450,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // one more part
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val filter = ColumnFilter("series", Filter.Equals("Series 0".utf8))
-    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)))
+    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
@@ -527,7 +527,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.refreshIndexForTesting(dataset1.ref)
     // Check partitions are now 0 to 20, 21/22 did not get added
     val split = memStore.getScanSplits(dataset1.ref, 1).head
-    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
+    val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]

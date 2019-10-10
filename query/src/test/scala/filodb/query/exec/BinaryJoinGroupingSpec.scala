@@ -10,7 +10,6 @@ import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -124,7 +123,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -159,7 +158,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -183,8 +182,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
-                      queryConfig, 1000, tvSchema)
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
@@ -200,7 +198,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -245,7 +243,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -263,8 +261,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
-                 queryConfig, 1000, tvSchema)
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
@@ -280,7 +277,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),

@@ -14,7 +14,7 @@ import filodb.query.exec.TransientRow
 
 class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
+  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
@@ -101,8 +101,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("dst", "-", "src", "src1", "src2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
-    val resultObs = labelVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -133,8 +132,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("dst", "-", "src", "src3", "src1")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
-    val resultObs = labelVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -164,8 +162,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("dst", "", "emptysrc", "emptysrc1", "emptysrc2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
-    val resultObs = labelVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -196,8 +193,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("dst", "-", "src", "src1", "src2")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
-    val resultObs = labelVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -227,8 +223,7 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("dst", "-")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin, funcParams)
-    val resultObs = labelVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -253,22 +248,19 @@ class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin,
         funcParams1)
-      miscellaneousFunctionMapper(MetricsTestData.timeseriesDataset,
-        Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Invalid source label name in label_join()"
 
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin,
         funcParams2)
-      miscellaneousFunctionMapper(MetricsTestData.timeseriesDataset,
-        Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Invalid destination label name in label_join()"
 
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelJoin,
         Seq("dst"))
-      miscellaneousFunctionMapper(MetricsTestData.timeseriesDataset,
-        Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: expected at least 3 argument(s) in call to label_join"
   }
 }

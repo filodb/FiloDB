@@ -22,7 +22,8 @@ class GatewayBenchmark extends StrictLogging {
   val tagMap = Map(
     "__name__" -> "heap_usage",
     "dc"       -> "DC1",
-    "_ns"      -> "App-123",
+    "_ws_"      -> "demo",
+    "_ns_"      -> "App-123",
     "partition" -> "partition-2",
     "host"     -> "abc.xyz.company.com",
     "instance" -> s"Instance-123"

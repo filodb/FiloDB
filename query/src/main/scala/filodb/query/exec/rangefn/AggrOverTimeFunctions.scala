@@ -3,6 +3,8 @@ package filodb.query.exec.rangefn
 import java.lang.{Double => JLDouble}
 import java.util
 
+import debox.Buffer
+
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.query.QueryConfig
@@ -552,8 +554,9 @@ class StdVarOverTimeChunkedFunctionL extends VarOverTimeChunkedFunctionL() {
   }
 }
 
-abstract class ChangesChunkedFunction(var changes: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { changes = Double.NaN }
+abstract class ChangesChunkedFunction(var changes: Double = Double.NaN, var prev: Double = Double.NaN)
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { changes = Double.NaN; prev = Double.NaN }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, changes)
   }
@@ -568,7 +571,10 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
     if (changes.isNaN) {
       changes = 0d
     }
-    changes += doubleReader.changes(doubleVect, startRowNum, endRowNum)
+
+    val changesResult = doubleReader.changes(doubleVect, startRowNum, endRowNum, prev)
+    changes += changesResult._1
+    prev = changesResult._2
   }
 }
 
@@ -582,6 +588,84 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
     if (changes.isNaN) {
       changes = 0d
     }
-    changes += longReader.changes(longVect, startRowNum, endRowNum)
+    val changesResult = longReader.changes(longVect, startRowNum, endRowNum, prev.toLong)
+    changes += changesResult._1
+    prev = changesResult._2
   }
 }
+
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
+                                               var quantileResult: Double = Double.NaN,
+                                               var values: Buffer[Double] = Buffer.empty[Double])
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { quantileResult = Double.NaN; values = Buffer.empty[Double] }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
+      val counter = values.length
+      values.sort(spire.algebra.Order.fromOrdering[Double])
+      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
+      if (counter > 0) {
+        quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
+      }
+    }
+    sampleToEmit.setValues(endTimestamp, quantileResult)
+  }
+  def calculateRank(q: Double, counter: Int): (Double, Int, Int) = {
+    val rank = q*(counter - 1)
+    val lowerIndex = Math.max(0, Math.floor(rank))
+    val upperIndex = Math.min(counter - 1, lowerIndex + 1)
+    val weight = rank - math.floor(rank)
+    (weight, upperIndex.toInt, lowerIndex.toInt)
+  }
+}
+
+class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOverTimeChunkedFunction(funcParams)
+  with ChunkedDoubleRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    if (q < 0) quantileResult = Double.NegativeInfinity
+    else if (q > 1) quantileResult = Double.PositiveInfinity
+    else {
+      var rowNum = startRowNum
+      val it = doubleReader.iterate(doubleVect, startRowNum)
+      while (rowNum <= endRowNum) {
+        var nextvalue = it.next
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!JLDouble.isNaN(nextvalue)) {
+          values += nextvalue
+        }
+        rowNum += 1
+      }
+    }
+  }
+}
+
+class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
+  extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    if (q < 0) quantileResult = Double.NegativeInfinity
+    else if (q > 1) quantileResult = Double.PositiveInfinity
+    else {
+      var rowNum = startRowNum
+      val it = longReader.iterate(longVect, startRowNum)
+      while (rowNum <= endRowNum) {
+        var nextvalue = it.next
+        values += nextvalue
+        rowNum += 1
+      }
+    }
+  }
+}
+

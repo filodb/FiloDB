@@ -3,6 +3,7 @@ package filodb.cassandra.columnstore
 import java.net.InetSocketAddress
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
 import com.typesafe.config.Config
@@ -13,7 +14,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
-import filodb.cassandra.Util
 import filodb.core._
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -108,15 +108,16 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
                val future =
                  for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLive)
+                       if writeChunksResp == Success
                        writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, diskTimeToLive)
-                                            if writeChunksResp == Success
+                       if writeIndicesResp == Success
                  } yield {
                    span.finish()
                    sinkStats.chunksetWrite()
                    writeIndicesResp
                  }
                Task.fromFuture(future)
-             }.takeWhile(_ == Success)
+             }
              .countL.runAsync
              .map { chunksWritten =>
                if (chunksWritten > 0) Success else NotApplied
@@ -145,6 +146,39 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val info = chunkset.info
       val infos = Seq((info.ingestionTime, info.startTime, ChunkSetInfo.toBytes(info)))
       indexTable.writeIndices(partition, infos, sinkStats, diskTimeToLive)
+    }
+  }
+
+  /**
+    * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
+    * ** User/Ingestion End times are exclusive **
+    */
+  def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                    splits: Iterator[ScanSplit],
+                                    ingestionTimeStart: Long,
+                                    ingestionTimeEnd: Long,
+                                    userTimeStart: Long,
+                                    userTimeEnd: Long,
+                                    batchSize: Int,
+                                    batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
+    val partKeys = Observable.fromIterator(splits).flatMap {
+      case split: CassandraTokenRangeSplit =>
+        val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
+        logger.debug(s"Querying cassandra for partKeys for split=$split ingestionTimeStart=$ingestionTimeStart " +
+          s"ingestionTimeEnd=$ingestionTimeEnd")
+        indexTable.scanPartKeysByIngestionTime(split.tokens, ingestionTimeStart, ingestionTimeEnd)
+      case split => throw new UnsupportedOperationException(s"Unknown split type $split seen")
+    }
+
+    import filodb.core.Iterators._
+
+    val chunksTable = getOrCreateChunkTable(datasetRef)
+    partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
+      logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
+        s"userTimeEnd=$userTimeEnd")
+      // TODO evaluate if we can increase parallelism here. This needs to be tuneable
+      // based on how much faster downsampling should run, and how much additional read load cassandra can take.
+      chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd).toIterator().toSeq
     }
   }
 
