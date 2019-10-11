@@ -7,6 +7,7 @@ import debox.Buffer
 
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.QueryConfig
 import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
 
@@ -669,3 +670,120 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
   }
 }
 
+abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
+                                          var b0: Double = Double.NaN,
+                                          var s0: Double = Double.NaN,
+                                          var nextvalue: Double = Double.NaN)
+  extends ChunkedRangeFunction[TransientRow] {
+
+  override final def reset(): Unit = { s0 = Double.NaN
+                                       b0 = Double.NaN
+                                       nextvalue = Double.NaN }
+
+  def parseParameters(funcParams: Seq[Any]): (Double, Double) = {
+    require(funcParams.size == 2, "Holt winters needs 2 parameters")
+    require(funcParams.head.isInstanceOf[Number], "sf parameter must be a number")
+    require(funcParams(1).isInstanceOf[Number], "tf parameter must be a number")
+    val sf = funcParams.head.asInstanceOf[Number].doubleValue()
+    val tf = funcParams(1).asInstanceOf[Number].doubleValue()
+    require(sf >= 0 & sf <= 1, "Sf should be in between 0 and 1")
+    require(tf >= 0 & tf <= 1, "tf should be in between 0 and 1")
+    (sf, tf)
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, s0)
+  }
+}
+
+/**
+  * @param funcParams - Additional required function parameters
+  * Refer https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing
+  */
+class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+  with ChunkedDoubleRangeFunction {
+
+  val (sf, tf) = parseParameters(funcParams)
+
+  // Returns the first non-Nan value encountered
+  def getNextValue(startRowNum: Int, endRowNum: Int, it: DoubleIterator): (Double, Int) = {
+    var res = Double.NaN
+    var currRowNum = startRowNum
+    while (currRowNum <= endRowNum && JLDouble.isNaN(res)) {
+      val nextvalue = it.next
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!JLDouble.isNaN(nextvalue)) {
+        res = nextvalue
+      }
+      currRowNum += 1
+    }
+    (res, currRowNum)
+  }
+
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    var rowNum = startRowNum
+    if (JLDouble.isNaN(b0)) {
+      // not continuation of a chunk
+      val (_s0, firstrow) = getNextValue(startRowNum, endRowNum, it)
+      var (_b0, currRow) = getNextValue(firstrow, endRowNum, it)
+      nextvalue = _b0
+      b0 = _b0 - _s0
+      rowNum = currRow - 1
+      s0 = _s0
+    } else {
+      it.next
+    }
+    if (!JLDouble.isNaN(b0)) {
+      while (rowNum <= endRowNum) {
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!JLDouble.isNaN(nextvalue)) {
+          val smoothedResult  = sf*nextvalue + (1-sf)*(s0 + b0)
+          b0 = tf*(smoothedResult - s0) + (1-tf)*b0
+          s0 = smoothedResult
+        }
+        nextvalue = it.next
+        rowNum += 1
+      }
+    }
+  }
+}
+
+class HoltWintersChunkedFunctionL(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+  with ChunkedLongRangeFunction {
+
+  val (sf, tf) = parseParameters(funcParams)
+
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    val it = longReader.iterate(longVect, startRowNum)
+    var rowNum = startRowNum
+    if (JLDouble.isNaN(b0)) {
+      if (endRowNum - startRowNum >= 2) {
+        s0 = it.next.toDouble
+        b0 = it.next.toDouble
+        nextvalue = b0
+        b0 = b0 - s0
+        rowNum = startRowNum + 1
+      }
+    } else {
+      it.next
+    }
+    if (!JLDouble.isNaN(b0)) {
+      while (rowNum <= endRowNum) {
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        var nextvalue = it.next
+        val smoothedResult  = sf*nextvalue + (1-sf)*(s0 + b0)
+        b0 = tf*(smoothedResult - s0) + (1-tf)*b0
+        s0 = smoothedResult
+        nextvalue = it.next
+        rowNum += 1
+      }
+    }
+  }
+}

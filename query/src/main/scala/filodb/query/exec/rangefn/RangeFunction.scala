@@ -337,6 +337,7 @@ object RangeFunction {
       case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionD
       case Some(Changes)          => () => new ChangesChunkedFunctionD()
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
+      case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
