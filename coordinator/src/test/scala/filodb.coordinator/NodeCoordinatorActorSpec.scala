@@ -231,7 +231,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should parse and execute concurrent LogicalPlan queries") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
@@ -259,9 +259,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
