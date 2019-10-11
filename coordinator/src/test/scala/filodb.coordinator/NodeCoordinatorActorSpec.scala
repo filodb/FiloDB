@@ -104,7 +104,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         shardMap = mapper
       }
     }
-    probe.ignoreMsg { case m: Any => { print(m + "\n"); m.isInstanceOf[CurrentShardSnapshot] }}
+    probe.ignoreMsg { case m: Any => m.isInstanceOf[CurrentShardSnapshot] }
   }
 
   def filters(keyValue: (String, String)*): Seq[ColumnFilter] =
@@ -288,9 +288,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries(2)
       // Same series is ingested into two shards.  I know, this should not happen in real life.
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
