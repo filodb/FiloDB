@@ -289,8 +289,10 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.ignoreMsg { case m: Any => m.isInstanceOf[CurrentShardSnapshot] }
       // Same series is ingested into two shards.  I know, this should not happen in real life.
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
+      probe.ignoreMsg { case m: Any => m.isInstanceOf[CurrentShardSnapshot] }
       probe.expectMsg(Ack(0L))
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
+      probe.ignoreMsg { case m: Any => m.isInstanceOf[CurrentShardSnapshot] }
       probe.expectMsg(Ack(0L))
 
       memStore.refreshIndexForTesting(dataset1.ref)
