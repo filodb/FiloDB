@@ -291,12 +291,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsgPF() {
         case Ack(0L) =>
-        case CurrentShardSnapshot =>
+        case c: CurrentShardSnapshot =>
       }
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsgPF() {
         case Ack(0L) =>
-        case CurrentShardSnapshot =>
+        case c: CurrentShardSnapshot =>
       }
 
       memStore.refreshIndexForTesting(dataset1.ref)
