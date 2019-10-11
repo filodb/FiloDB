@@ -696,8 +696,14 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
   }
 }
 
+/**
+  * @param funcParams - Additional required function parameters
+  * Refer https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing
+  */
 class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
+
+  val (sf, tf) = parseParameters(funcParams)
 
   // Returns the first non-Nan value encountered
   def getNextValue(startRowNum: Int, endRowNum: Int, it: DoubleIterator): (Double, Int) = {
@@ -718,7 +724,6 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    val (sf, tf) = parseParameters(funcParams)
     val it = doubleReader.iterate(doubleVect, startRowNum)
     var rowNum = startRowNum
     if (JLDouble.isNaN(b0)) {
@@ -750,11 +755,12 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
 class HoltWintersChunkedFunctionL(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedLongRangeFunction {
 
+  val (sf, tf) = parseParameters(funcParams)
+
   final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    val (sf, tf) = parseParameters(funcParams)
     val it = longReader.iterate(longVect, startRowNum)
     var rowNum = startRowNum
     if (JLDouble.isNaN(b0)) {
