@@ -56,23 +56,23 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   //  4. upload to memory and return partition
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   //scalastyle:off
-  override def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
+  override def scanPartitions(partLookupRes: PartLookupResult): Observable[ReadablePartition] = {
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed
     // 3. We don't have a safe way to prevent JVM crashes if someone reads a column that wasn't paged in
 
     // 1. Fetch partitions from memstore
-    val partIdsNotInMemory = iterResult.partIdsNotInMemory
+    val partIdsNotInMemory = partLookupRes.partIdsNotInMemory
     // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val pagingMethods = new ArrayBuffer[ChunkScanMethod]
     val inMemOdp = debox.Set.empty[Int]
 
-    iterResult.partIdsMemTimeGap.foreach { case (pId, startTime) =>
+    partLookupRes.partIdsMemTimeGap.foreach { case (pId, startTime) =>
       val p = partitions.get(pId)
       if (p != null) {
-        val odpChunkScan = chunksToODP(p, iterResult.chunkMethod, pagingEnabled, startTime)
+        val odpChunkScan = chunksToODP(p, partLookupRes.chunkMethod, pagingEnabled, startTime)
         odpChunkScan.foreach { rawChunkMethod =>
           pagingMethods += rawChunkMethod // TODO: really determine range for all partitions
           partKeyBytesToPage += p.partKeyBytes
@@ -86,17 +86,17 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       }
     }
     logger.debug(s"Query on dataset=$ref shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
-      s"and full ODP of partIds ${iterResult.partIdsNotInMemory}")
+      s"and full ODP of partIds ${partLookupRes.partIdsNotInMemory}")
 
     // partitions that do not need ODP are those that are not in the inMemOdp collection
-    val noOdpPartitions = iterResult.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
+    val noOdpPartitions = partLookupRes.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
     val result = Observable.fromIterator(noOdpPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
-                                        iterResult.chunkMethod)).flatMap { odpParts =>
+                                        partLookupRes.chunkMethod)).flatMap { odpParts =>
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
@@ -110,7 +110,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
         }
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
-                                        iterResult.chunkMethod)).flatMap { odpParts =>
+                                        partLookupRes.chunkMethod)).flatMap { odpParts =>
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))

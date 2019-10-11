@@ -18,7 +18,7 @@ import filodb.query._
 
 class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
-  import SelectRawPartitionsExecSpec._
+  import MultiSchemaPartitionsExecSpec._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))

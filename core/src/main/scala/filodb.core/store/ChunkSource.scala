@@ -86,7 +86,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
 
   // Internal API that needs to actually be implemented
   def scanPartitions(ref: DatasetRef,
-                     iter: PartLookupResult): Observable[ReadablePartition]
+                     lookupRes: PartLookupResult): Observable[ReadablePartition]
 
   // internal method to find # of groups in a dataset
   def groupsInDataset(ref: DatasetRef): Int
@@ -112,7 +112,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
-   * @param iter: PartLookupResult from lookupPartitions()
+   * @param lookupRes: PartLookupResult from lookupPartitions()
    * @param schema the Schema to read data for
    * @param filterSchemas if true, partitions are filtered only for the desired schema.
    *                      if false, then every partition is checked to ensure it is that schema, otherwise an error
@@ -120,7 +120,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
    * @return an Observable of RangeVectors
    */
   def rangeVectors(ref: DatasetRef,
-                   iter: PartLookupResult,
+                   lookupRes: PartLookupResult,
                    columnIDs: Seq[Types.ColumnId],
                    schema: Schema,
                    filterSchemas: Boolean): Observable[RangeVector] = {
@@ -129,15 +129,15 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     val numGroups = groupsInDataset(ref)
 
     val filteredParts = if (filterSchemas) {
-      scanPartitions(ref, iter)
-        .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(iter.chunkMethod) }
+      scanPartitions(ref, lookupRes)
+        .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
     } else {
-      iter.firstSchemaId match {
+      lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
-          scanPartitions(ref, iter).filter { p =>
+          scanPartitions(ref, lookupRes).filter { p =>
             if (p.schema.schemaHash != reqSchemaId)
               throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
-            p.hasChunks(iter.chunkMethod)
+            p.hasChunks(lookupRes.chunkMethod)
           }
         case None =>
           Observable.empty
@@ -151,7 +151,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
       val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
                                             schema.partKeySchema, partCols, partition.shard,
                                             subgroup, partition.partID)
-      RawDataRangeVector(key, partition, iter.chunkMethod, ids)
+      RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids)
     }
   }
 }

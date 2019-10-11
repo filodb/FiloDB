@@ -9,7 +9,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
-import filodb.core.query.{ColumnFilter, ResultSchema}
+import filodb.core.query.ResultSchema
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
 import filodb.query.exec.rangefn.RangeFunction
@@ -37,8 +37,9 @@ object SelectRawPartitionsExec extends  {
       case other: RangeVectorTransformer => other
     }
 
-  // Optimize transformers, replacing range functions for downsampled gauge queries if needed
-  def optimizeForDownsample(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+  // Transform transformers, replacing range functions for downsampled gauge queries if needed
+  def newXFormersForDownsample(schema: Schema,
+                               transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
     if (schema == Schemas.dsGauge) {
       val origFunc = findFirstRangeFunction(transformers)
       val newFunc = RangeFunction.downsampleRangeFunction(origFunc)
@@ -49,7 +50,7 @@ object SelectRawPartitionsExec extends  {
     }
   }
 
-  def optimizeForHistMax(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+  def newXFormersForHistMax(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
     histMaxColumn(schema, schema.data.columns.map(_.id)).map { maxColID =>
       // Histogram with max column present.  Check for range functions and change if needed
       val origFunc = findFirstRangeFunction(transformers)
@@ -59,6 +60,7 @@ object SelectRawPartitionsExec extends  {
     }.getOrElse(transformers)
   }
 
+  // Given optional column names, find the column IDs, adjusting for the schema
   def getColumnIDs(dataSchema: Schema,
                    colNames: Seq[String],
                    transformers: Seq[RangeVectorTransformer]): Seq[Types.ColumnId] = {
@@ -90,9 +92,16 @@ object SelectRawPartitionsExec extends  {
 }
 
 /**
-  * ExecPlan to select raw data from partitions that the given filter resolves to,
-  * in the given shard, for the given row key range.  Specific to a particular schema.
+  * ExecPlan to select raw data from partitions.  Specific to a particular schema.
+  * This plan should be created with transformers and column IDs exactly as needed to query data given the
+  * schema. It does not perform any magic to transform column IDs or range functions further.
   * This plan and its transformers should know exactly what kind of data they are dealing with.
+  * Note that it needs to be a separate ExecPlan as its transformers might have been modified by the parent ExecPlan.
+  *
+  * @param dataSchema normally Some(schema), but may be None if schema cannot be discovered.
+  * @param filterSchemas if true, filter the partitions for the given schema.
+  *                      if false, the given schema is expected for all partitions, error will be thrown otherwise.
+  * @param colIds the exact column IDs that are needed for querying the raw data
   */
 final case class SelectRawPartitionsExec(id: String,
                                          submitTime: Long,
@@ -106,6 +115,7 @@ final case class SelectRawPartitionsExec(id: String,
   def dataset: DatasetRef = datasetRef
 
   private def schemaOfDoExecute(): ResultSchema = {
+    // If the data schema cannot be found, then return empty ResultSchema
     dataSchema.map { sch =>
       val numRowKeyCols = 1
       ResultSchema(sch.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
@@ -128,71 +138,3 @@ final case class SelectRawPartitionsExec(id: String,
                                s"schema=${dataSchema.map(_.name)}, filterSchemas=$filterSchemas, " +
                                s"chunkMethod=${lookupRes.map(_.chunkMethod).getOrElse("")}, colIDs=$colIds"
 }
-
-/**
-  * ExecPlan to select raw data from partitions that the given filter resolves to,
-  * in the given shard, for the given row key range.  Schema-agnostic - discovers the schema and
-  * creates an inner SelectRawPartitionsExec with the right column IDs and other details depending on schema.
-  * @param schema an optional schema to filter partitions using
-  */
-final case class MultiSchemaPartitionsExec(id: String,
-                                           submitTime: Long,
-                                           limit: Int,
-                                           dispatcher: PlanDispatcher,
-                                           dataset: DatasetRef,
-                                           shard: Int,
-                                           filters: Seq[ColumnFilter],
-                                           chunkMethod: ChunkScanMethod,
-                                           schema: Option[String] = None,
-                                           colName: Option[String] = None) extends LeafExecPlan {
-  import SelectRawPartitionsExec._
-
-  override def allTransformers: Seq[RangeVectorTransformer] = finalPlan.rangeVectorTransformers
-
-  var finalPlan: ExecPlan = _
-
-  private def finalizePlan(source: ChunkSource): ExecPlan = {
-    val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
-
-    // Find the schema if one wasn't supplied
-    val schemas = source.schemas(dataset).get
-    val dataSchema = schema.map { s => schemas.schemas(s) }
-                           .getOrElse(schemas(
-                             lookupRes.firstSchemaId.getOrElse(schemas.schemas.values.head.schemaHash)))
-
-    // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
-    schema.map { s => schemas.schemas(s) }
-          .orElse(lookupRes.firstSchemaId.map(schemas.apply))
-          .map { sch =>
-            val newxformers1 = optimizeForDownsample(sch, rangeVectorTransformers)
-            val newxformers = optimizeForHistMax(sch, newxformers1)
-            val colIDs1 = getColumnIDs(sch, colName.toSeq, rangeVectorTransformers)
-            val colIDs  = addIDsForHistMax(sch, colIDs1)
-
-            val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
-                                                  Some(sch), Some(lookupRes),
-                                                  schema.isDefined, colIDs)
-            qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
-            newxformers.foreach { xf => newPlan.addRangeVectorTransformer(xf) }
-            newPlan
-          }.getOrElse {
-            qLogger.debug(s"No time series found for filters $filters... employing empty plan")
-            SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
-                                    None, Some(lookupRes),
-                                    schema.isDefined, Nil)
-          }
-  }
-
-  def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
-     finalPlan = finalizePlan(source)
-     finalPlan.doExecute(source, queryConfig)(sched, timeout)
-   }
-
-  protected def args: String = s"dataset=$dataset, shard=$shard, " +
-                               s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName"
-}
-

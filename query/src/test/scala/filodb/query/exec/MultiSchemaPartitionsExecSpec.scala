@@ -19,7 +19,7 @@ import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 import monix.execution.Scheduler
 
-object SelectRawPartitionsExecSpec {
+object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler,
@@ -33,10 +33,10 @@ object SelectRawPartitionsExecSpec {
   val builder = new RecordBuilder(MemFactory.onHeapFactory)
 }
 
-class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
   import ZeroCopyUTF8String._
   import filodb.core.{MachineMetricsData => MMD}
-  import SelectRawPartitionsExecSpec._
+  import MultiSchemaPartitionsExecSpec._
   import Schemas.promCounter
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
@@ -290,6 +290,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    info(execPlan.printTree())
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
     execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 4, 3)

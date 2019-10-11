@@ -187,7 +187,7 @@ case class PartLookupResult(shard: Int,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
 
 final case class SchemaMismatch(expected: String, found: String) extends
-Exception(s"Expected schema $expected, found schema $found")
+Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
 
 object SchemaMismatch {
   def apply(expected: Schema, found: Schema): SchemaMismatch = SchemaMismatch(expected.name, found.name)

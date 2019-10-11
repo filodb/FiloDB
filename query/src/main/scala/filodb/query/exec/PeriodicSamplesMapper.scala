@@ -46,6 +46,7 @@ final case class PeriodicSamplesMapper(start: Long,
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
+    // If a max column is present, the ExecPlan's job is to put it into column 2
     val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
                       sourceSchema.columns(2).name == "max"
     val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig, funcParams)

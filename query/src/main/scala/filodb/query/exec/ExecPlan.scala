@@ -11,7 +11,7 @@ import monix.reactive.Observable
 import monix.reactive.observables.ConnectableObservable
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
@@ -114,6 +114,7 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
+      FiloSchedulers.assertThreadName(QuerySchedName)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resultTask = if (resSchema == ResultSchema.empty) {
         qLogger.debug(s"Empty plan $this, returning empty results")
@@ -207,10 +208,13 @@ trait ExecPlan extends QueryCommand {
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
     val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val curNode = curNodeText(nextLevel)
     val childr = children.map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
+
+  def curNodeText(level: Int): String =
+    s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
     val transf = printRangeVectorTransformersForLevel(level)
@@ -317,7 +321,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
       case QueryResult(_, schema, _) =>
-        if (rs != schema) throw new IllegalArgumentException(s"Schema mismatch: $rs != $schema")
+        if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }
   }
