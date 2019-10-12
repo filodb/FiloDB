@@ -3,7 +3,7 @@ package filodb.query.exec.rangefn
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schema
 import filodb.core.query.ResultSchema
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store.{ChunkSetInfo, ChunkSetInfoT}
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
@@ -99,9 +99,9 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
    * @param startTime starting timestamp in millis since Epoch for time window, inclusive
    * @param endTime ending timestamp in millis since Epoch for time window, inclusive
    */
-  def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit
+  def addChunks(tsVectorBase: Any, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorBase: Any, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit
 
   /**
    * Return the computed result in sampleToEmit for the given window.

@@ -80,9 +80,9 @@ trait ReadablePartition extends FiloPartition {
   /**
    * Obtains the correct VectorDataReader for the given column and pointer
    */
-  final def chunkReader(columnID: Int, vector: BinaryVector.BinaryVectorPtr): VectorDataReader = {
+  final def chunkReader(columnID: Int, base: Any, vector: BinaryVector.BinaryVectorPtr): VectorDataReader = {
     require(columnID < schema.numDataColumns)
-    schema.dataReaders(columnID)(vector)
+    schema.dataReaders(columnID)(base, vector)
   }
 
   /**

@@ -104,12 +104,12 @@ trait VectorDataReader extends AvailableReader {
   /**
    * Returns the number of bytes of the BinaryVector FOLLOWING the 4-byte length header.
    */
-  final def numBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(addr)
+  final def numBytes(base: Any, addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(base, addr)
 
   /**
    * Returns the number of eleemnts in the vector
    */
-  def length(addr: BinaryVectorPtr): Int
+  def length(base: Any, addr: BinaryVectorPtr): Int
 
   /**
    * Returns a TypedIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -119,7 +119,7 @@ trait VectorDataReader extends AvailableReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
+  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
 
   def asIntReader: vectors.IntVectorDataReader = this.asInstanceOf[vectors.IntVectorDataReader]
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
@@ -148,7 +148,7 @@ trait CounterVectorReader extends VectorDataReader {
    * @param meta CorrectionMeta obtained from updateCorrection()
    * @return a new CorrectionMeta with adjusted correction value if needed
    */
-  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+  def detectDropAndCorrection(base: Any, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 
   /**
    * Updates the CorrectionMeta from this vector,
@@ -158,7 +158,7 @@ trait CounterVectorReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
    */
-  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+  def updateCorrection(base: Any, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
