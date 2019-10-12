@@ -25,8 +25,10 @@ object BinaryVector {
   /**
    * Returns the vector type and subtype from the WireFormat bytes of a BinaryVector
    */
-  def vectorType(addr: BinaryVectorPtr): Int = WireFormat.majorAndSubType(UnsafeUtils.getShort(addr + 4))
-  def majorVectorType(addr: BinaryVectorPtr): Int = WireFormat.majorVectorType(UnsafeUtils.getShort(addr + 4))
+  def vectorType(base: Any, addr: BinaryVectorPtr): Int =
+    WireFormat.majorAndSubType(UnsafeUtils.getShort(base, addr + 4))
+  def majorVectorType(base: Any, addr: BinaryVectorPtr): Int =
+    WireFormat.majorVectorType(UnsafeUtils.getShort(base, addr + 4))
 
   def writeMajorAndSubType(addr: BinaryVectorPtr, majorType: Int, subType: Int): Unit =
     UnsafeUtils.setShort(addr + 4, WireFormat(majorType, subType).toShort)
@@ -90,7 +92,8 @@ trait AvailableReader {
    * Returns a BooleanIterator returning true or false for each element's availability
    * By default returns one that says every element is available.  Override if this is not true.
    */
-  def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator = AlwaysAvailableIterator
+  def iterateAvailable(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    AlwaysAvailableIterator
 }
 
 /**

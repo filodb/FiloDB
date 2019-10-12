@@ -102,12 +102,12 @@ trait LongVectorDataReader extends VectorDataReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(vector: BinaryVectorPtr, n: Int): Long
+  def apply(base: Any, vector: BinaryVectorPtr, n: Int): Long
 
   /**
    * Returns the number of elements in this vector
    */
-  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - PrimitiveVector.HeaderLen) / 8
+  def length(base: Any, vector: BinaryVectorPtr): Int = (numBytes(base, vector) - PrimitiveVector.HeaderLen) / 8
 
   /**
    * Returns a LongIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -117,7 +117,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
+  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
 
   /**
    * Sums up the Long values in the vector from position start to position end.
@@ -126,7 +126,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * @param end the ending element # in the vector to sum, inclusive
    * @return a Double, since Longs might possibly overflow
    */
-  def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double
+  def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int): Double
 
   /**
    * Efficiently searches for the first element # where the vector element is greater than or equal to item.
@@ -136,17 +136,18 @@ trait LongVectorDataReader extends VectorDataReader {
    *           If all the elements in vector are less than item, then the vector length is returned.
    *         bit 31   : set if element did not match exactly / no match
    */
-  def binarySearch(vector: BinaryVectorPtr, item: Long): Int
+  def binarySearch(base: Any, vector: BinaryVectorPtr, item: Long): Int
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long)
+  def changes(base: Any, vector: BinaryVectorPtr, start: Int, end: Int,
+              prev: Long, ignorePrev: Boolean = false): (Long, Long)
   /**
    * Searches for the last element # whose element is <= the item, assuming all elements are increasing.
    * Typically used to find the last timestamp <= item.
    * Uses binarySearch.  TODO: maybe optimize by comparing item to first item.
    * @return integer row or element #.  -1 means item is less than the first item in vector.
    */
-  final def ceilingIndex(vector: BinaryVectorPtr, item: Long): Int =
-    binarySearch(vector, item) match {
+  final def ceilingIndex(base: Any, vector: BinaryVectorPtr, item: Long): Int =
+    binarySearch(base, vector, item) match {
       // if endTime does not match, we want last row such that timestamp < endTime
       // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
       case row if row < 0 => (row & 0x7fffffff) - 1
@@ -159,11 +160,11 @@ trait LongVectorDataReader extends VectorDataReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
+  def toBuffer(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
     val newBuf = Buffer.empty[Long]
-    val dataIt = iterate(vector, startElement)
-    val availIt = iterateAvailable(vector, startElement)
-    val len = length(vector)
+    val dataIt = iterate(base, vector, startElement)
+    val availIt = iterateAvailable(base, vector, startElement)
+    val len = length(base, vector)
     for { n <- startElement until len optimized } {
       val item = dataIt.next
       if (availIt.next) newBuf += item
@@ -179,26 +180,28 @@ object LongVectorDataReader64 extends LongVectorDataReader {
   import PrimitiveVector.OffsetData
 
   // Put addr in constructor to make accesses much faster
-  class Long64Iterator(var addr: Long) extends LongIterator {
+  class Long64Iterator(base: Any, var addr: Long) extends LongIterator {
     final def next: Long = {
-      val data = UnsafeUtils.getLong(addr)
+      val data = UnsafeUtils.getLong(base, addr)
       addr += 8
       data
     }
   }
 
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + OffsetData + n * 8)
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
-    new Long64Iterator(vector + OffsetData + startElement * 8)
+  final def apply(base: Any, vector: BinaryVectorPtr, n: Int): Long =
+    UnsafeUtils.getLong(base, vector + OffsetData + n * 8)
+  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+    new Long64Iterator(base, vector + OffsetData + startElement * 8)
 
   // end is inclusive
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+  final def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(base, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(base, vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var sum: Double = 0d
     while (addr < untilAddr) {
-      sum += UnsafeUtils.getLong(addr)
+      sum += UnsafeUtils.getLong(base, addr)
       addr += 8
     }
     sum
@@ -208,15 +211,15 @@ object LongVectorDataReader64 extends LongVectorDataReader {
    * Default O(log n) binary search implementation assuming fast random access, which is true here.
    * Everything should be intrinsic and registers so should be super fast
    */
-  def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    var len = length(vector)
+  def binarySearch(base: Any, vector: BinaryVectorPtr, item: Long): Int = {
+    var len = length(base, vector)
     if (len == 0) return 0x80000000
     var first = 0
     var element = 0L
     while (len > 0) {
       val half = len >>> 1
       val middle = first + half
-      element = UnsafeUtils.getLong(vector + OffsetData + middle * 8)
+      element = UnsafeUtils.getLong(base, vector + OffsetData + middle * 8)
       if (element == item) {
         return middle
       } else if (element < item) {
@@ -229,16 +232,17 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     if (element == item) first else first | 0x80000000
   }
 
-  final def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false):
+  final def changes(base: Any, vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false):
   (Long, Long) = {
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
+    require(start >= 0 && end < length(base, vector), s"($start, $end) is out of bounds, " +
+      s"length=${length(base, vector)}")
     var prevVector: Long = prev
     val startAddr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
     var changes = 0
     var addr = startAddr
     while (addr < untilAddr) {
-      val cur = UnsafeUtils.getLong(addr)
+      val cur = UnsafeUtils.getLong(base, addr)
       if (addr == startAddr) prevVector = cur
       if (prevVector != cur) changes += 1
       prevVector = cur
