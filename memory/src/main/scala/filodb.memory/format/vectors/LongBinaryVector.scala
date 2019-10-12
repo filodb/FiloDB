@@ -45,7 +45,10 @@ object LongBinaryVector {
     new TimestampAppendingVector(addr, bytesRequired, dispose)
   }
 
-  def apply(buffer: ByteBuffer): LongVectorDataReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
+  def apply(buffer: ByteBuffer): LongVectorDataReader = {
+    require(buffer.isDirect)
+    apply(UnsafeUtils.ZP, UnsafeUtils.addressFromDirectBuffer(buffer))
+  }
 
   import WireFormat._
 
@@ -53,7 +56,7 @@ object LongBinaryVector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * LongVectorDataReader object for parsing it
    */
-  def apply(vector: BinaryVectorPtr): LongVectorDataReader = BinaryVector.vectorType(vector) match {
+  def apply(base: Any, vector: BinaryVectorPtr): LongVectorDataReader = BinaryVector.vectorType(base, vector) match {
     case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK) => DeltaDeltaDataReader
     case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)   => DeltaDeltaConstDataReader
     case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedLongDataReader
@@ -256,7 +259,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
  * VectorDataReader for a masked (NA bit) Long BinaryVector, uses underlying DataReader for subvector
  */
 object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = {
+  final def apply(base: Any, vector: BinaryVectorPtr, n: Int): Long = {
     val subvect = subvectAddr(vector)
     LongBinaryVector(subvect).apply(subvect, n)
   }
@@ -290,10 +293,10 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
-  private final val readVect = LongBinaryVector(addr)
-  final def apply(index: Int): Long = readVect.apply(addr, index)
+  private final val readVect = LongBinaryVector(UnsafeUtils.ZP, addr)
+  final def apply(index: Int): Long = readVect.apply(UnsafeUtils.ZP, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64
-  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(addr)
+  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(UnsafeUtils.ZP, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue

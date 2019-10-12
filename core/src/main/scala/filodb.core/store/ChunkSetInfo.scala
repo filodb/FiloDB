@@ -341,21 +341,6 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
   final def unlock(): Unit = base.unlock()
 }
 
-/**
- * Stores, for each chunk in the WindowedChunkIterator, the reader and vector pointer for both
- * the timestamp and value columns.
- * NOTE: to prevent object bloat for value classes, the pointer to the info is stored.  Use info member
- * for easy access.
- */
-//final case class ChunkQueryInfo(infoPtr: NativePointer,
-//                                tsVector: BinaryVector.BinaryVectorPtr,
-//                                tsReader: vectors.LongVectorDataReader,
-//                                valueVector: BinaryVector.BinaryVectorPtr,
-//                                valueReader: VectorDataReader) {
-//  // ChunkSetInfo is a value class, use this for typed and efficient access without allocations
-//  def info: ChunkSetInfoT = ChunkSetInfo(infoPtr)
-//}
-
 final case class CorruptVectorException(ptr: NativePointer,
                                         chunkStartTime: Long,
                                         partKeyString: String,
@@ -385,7 +370,6 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             windowInfos: Buffer[ChunkSetInfoT] = Buffer.empty[ChunkSetInfoT])
 extends Iterator[ChunkSetInfoT] {
   private val infos = rv.chunkInfos(start - window, end)
-  private val tsColID = rv.timestampColID
 
   final def close(): Unit = infos.close()
 
@@ -423,19 +407,6 @@ extends Iterator[ChunkSetInfoT] {
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         windowInfos += next
         // FIXME restore MatchError debugging
-
-//        val tsVector = next.vectorPtr(tsColID)
-//        try {
-//          val tsReader = vectors.LongBinaryVector(tsVector)
-//          val valueVector = next.vectorPtr(rv.valueColID)
-//          val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
-//          windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
-//        } catch {
-//          case m: MatchError =>
-//            throw CorruptVectorException(tsVector, next.startTime, rv.partition.stringPartition,
-//                                         rv.partition.shard, m)
-//        }
-//        lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }
   }
@@ -490,9 +461,9 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
     case IntColumn    => vectors.IntBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case TimestampColumn => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case DoubleColumn => vectors.DoubleVector(info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
     case StringColumn => vectors.UTF8Vector(info.vectorPtr(column.id)).getClass.getName
     case o: Any       => "nananana, heyheyhey, goodbye"
   }

@@ -84,6 +84,10 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
+
+object RangeVector {
+  val timestampColID = 0
+}
 /**
   * Represents a single result of any FiloDB Query.
   */
