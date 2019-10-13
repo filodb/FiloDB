@@ -50,14 +50,14 @@ object BinaryVector {
     case Classes.Histogram => (b => vectors.HistogramVector(b))
   }
 
-  type PtrToDataReader = PartialFunction[Class[_], BinaryVectorPtr => VectorDataReader]
+  type PtrToDataReader = PartialFunction[Class[_], (Any, BinaryVectorPtr) => VectorDataReader]
 
   val defaultPtrToReader: PtrToDataReader = {
-    case Classes.Int    => (p => vectors.IntBinaryVector(p))
-    case Classes.Long   => (p => vectors.LongBinaryVector(p))
-    case Classes.Double => (p => vectors.DoubleVector(p))
-    case Classes.UTF8   => (p => vectors.UTF8Vector(p))
-    case Classes.Histogram => (p => vectors.HistogramVector(p))
+    case Classes.Int    => (b, p) => vectors.IntBinaryVector(b, p)
+    case Classes.Long   => (b, p) => vectors.LongBinaryVector(b, p)
+    case Classes.Double => (b, p) => vectors.DoubleVector(b, p)
+    case Classes.UTF8   => (b, p) => vectors.UTF8Vector(b, p)
+    case Classes.Histogram => (b, p) => vectors.HistogramVector(b, p)
   }
 
   /**
@@ -481,15 +481,17 @@ object PrimitiveVector {
 
 object PrimitiveVectorReader {
   import PrimitiveVector._
-  final def nbits(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetNBits) & NBitsMask
-  final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
-  final def signed(vector: BinaryVectorPtr): Boolean =
-    (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
-  final def dropped(vector: BinaryVectorPtr): Boolean =
-    (UnsafeUtils.getShort(vector + OffsetNBits) & DropMask) != 0
+  final def nbits(base: Any, vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(base, vector + OffsetNBits) & NBitsMask
+  final def bitShift(base: Any, vector: BinaryVectorPtr): Int =
+    UnsafeUtils.getByte(base, vector + OffsetBitShift) & 0x03f
+  final def signed(base: Any, vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getByte(base, vector + OffsetNBits) & SignMask) != 0
+  final def dropped(base: Any, vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getShort(base, vector + OffsetNBits) & DropMask) != 0
 
-  final def markDrop(vector: BinaryVectorPtr): Unit =
-    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | DropMask).toShort)
+  final def markDrop(base: Any, vector: BinaryVectorPtr): Unit =
+    UnsafeUtils.setShort(base, vector + OffsetNBits,
+      (UnsafeUtils.getShort(base, vector + OffsetNBits) | DropMask).toShort)
 }
 
 /**

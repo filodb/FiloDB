@@ -47,7 +47,10 @@ object DoubleVector {
     vect
   }
 
-  def apply(buffer: ByteBuffer): DoubleVectorDataReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
+  def apply(buffer: ByteBuffer): DoubleVectorDataReader = {
+    require(buffer.isDirect)
+    apply(UnsafeUtils.ZP, UnsafeUtils.addressFromDirectBuffer(buffer))
+  }
 
   import WireFormat._
 
@@ -62,7 +65,7 @@ object DoubleVector {
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
     }
-    if (PrimitiveVectorReader.dropped(base, vector)) new CorrectingDoubleVectorReader(reader, vector)
+    if (PrimitiveVectorReader.dropped(base, vector)) new CorrectingDoubleVectorReader(reader, base, vector)
     else                                       reader
   }
 
@@ -134,7 +137,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param start the starting element # in the vector to sum, 0 == first element
    * @param end the ending element # in the vector to sum, inclusive
-   * @param ignoreNan if true, ignore samples which have NaN value (sometimes used for special purposes)
+   * @param ignoreNaN if true, ignore samples which have NaN value (sometimes used for special purposes)
    */
   def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double
 
@@ -394,14 +397,14 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data < last) PrimitiveVectorReader.markDrop(addr)
+    if (data < last) PrimitiveVectorReader.markDrop(UnsafeUtils.ZP, addr)
     last = data
     super.addData(data)
   }
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
     val newChunk = DoubleVector.optimize(memFactory, this)
-    if (PrimitiveVectorReader.dropped(addr)) PrimitiveVectorReader.markDrop(newChunk)
+    if (PrimitiveVectorReader.dropped(UnsafeUtils.ZP, addr)) PrimitiveVectorReader.markDrop(UnsafeUtils.ZP, newChunk)
     newChunk
   }
 
