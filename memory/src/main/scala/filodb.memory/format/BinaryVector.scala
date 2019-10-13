@@ -165,13 +165,13 @@ trait CounterVectorReader extends VectorDataReader {
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
-class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
+class BitmapMaskIterator(base: Any, vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
   var bitmapAddr: Long = vector + 12 + (startElement >> 6) * 8
   var bitMask: Long = 1L << (startElement & 0x3f)
 
   // Rotates mask and returns if next element is available or not
   final def next: Boolean = {
-    val avail = (UnsafeUtils.getLong(bitmapAddr) & bitMask) == 0
+    val avail = (UnsafeUtils.getLong(base, bitmapAddr) & bitMask) == 0
     bitMask <<= 1
     if (bitMask == 0) {
       bitmapAddr += 8
@@ -186,17 +186,18 @@ class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends Boo
  */
 trait BitmapMaskVector extends AvailableReader {
   // Returns the address of the subvector
-  final def subvectAddr(addr: BinaryVectorPtr): BinaryVectorPtr = addr + UnsafeUtils.getInt(addr + 8)
+  final def subvectAddr(base: Any, addr: BinaryVectorPtr): BinaryVectorPtr =
+    addr + UnsafeUtils.getInt(base, addr + 8)
 
-  final def isAvailable(addr: BinaryVectorPtr, index: Int): Boolean = {
+  final def isAvailable(base: Any, addr: BinaryVectorPtr, index: Int): Boolean = {
     // NOTE: length of bitMask may be less than (length / 64) longwords.
     val maskIndex = index >> 6
-    val maskVal = UnsafeUtils.getLong(addr + 12 + maskIndex * 8)
+    val maskVal = UnsafeUtils.getLong(base, addr + 12 + maskIndex * 8)
     (maskVal & (1L << (index & 63))) == 0
   }
 
-  override def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
-    new BitmapMaskIterator(vector, startElement)
+  override def iterateAvailable(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    new BitmapMaskIterator(base, vector, startElement)
 }
 
 object BitmapMask extends BitmapMaskVector {
@@ -616,7 +617,7 @@ extends BinaryAppendableVector[A] {
 
   override final def length: Int = subVect.length
   final def numBytes: Int = 12 + bitmapMaskBufferSize + subVect.numBytes
-  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(addr, index)
+  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(UnsafeUtils.ZP, addr, index)
   final def apply(index: Int): A = subVect.apply(index)
 
   final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {

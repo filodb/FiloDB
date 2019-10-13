@@ -335,24 +335,25 @@ extends DoubleVectorDataReader {
  * VectorDataReader for a masked (NA bit) Double BinaryVector, uses underlying DataReader for subvector
  */
 object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVector {
-  final def apply(vector: BinaryVectorPtr, n: Int): Double = {
-    val subvect = subvectAddr(vector)
-    DoubleVector(subvect).apply(subvect, n)
+  final def apply(base: Any, vector: BinaryVectorPtr, n: Int): Double = {
+    val subvect = subvectAddr(base, vector)
+    DoubleVector(base, subvect).apply(base, subvect, n)
   }
 
-  override def length(vector: BinaryVectorPtr): Int = super.length(subvectAddr(vector))
+  override def length(base: Any, vector: BinaryVectorPtr): Int = super.length(base, subvectAddr(base, vector))
 
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
-    DoubleVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end, ignoreNaN)
+  final def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+    DoubleVector(base, subvectAddr(base, vector)).sum(base, subvectAddr(base, vector), start, end, ignoreNaN)
 
-  final def count(vector: BinaryVectorPtr, start: Int, end: Int): Int =
-    DoubleVector(subvectAddr(vector)).count(subvectAddr(vector), start, end)
+  final def count(base: Any, vector: BinaryVectorPtr, start: Int, end: Int): Int =
+    DoubleVector(base, subvectAddr(base, vector)).count(base, subvectAddr(base, vector), start, end)
 
-  override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
-    DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+  override def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+    DoubleVector(base, subvectAddr(base, vector)).iterate(base, subvectAddr(base, vector), startElement)
 
-  override def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Double, ignorePrev: Boolean = false):
-  (Double, Double) = DoubleVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end, prev)
+  override def changes(base: Any, vector: BinaryVectorPtr, start: Int, end: Int,
+                       prev: Double, ignorePrev: Boolean = false): (Double, Double) =
+    DoubleVector(base, subvectAddr(base, vector)).changes(base, subvectAddr(base, vector), start, end, prev)
 }
 
 class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)

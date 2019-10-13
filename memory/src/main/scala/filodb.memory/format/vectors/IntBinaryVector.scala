@@ -450,18 +450,18 @@ object OffheapUnsignedIntVector2 extends IntVectorDataReader {
 
 
 object MaskedIntBinaryVector extends IntVectorDataReader with BitmapMaskVector {
-  final def apply(vector: BinaryVectorPtr, n: Int): Int = {
-    val subvect = subvectAddr(vector)
-    IntBinaryVector.simple(subvect).apply(subvect, n)
+  final def apply(base: Any, vector: BinaryVectorPtr, n: Int): Int = {
+    val subvect = subvectAddr(base, vector)
+    IntBinaryVector.simple(base, subvect).apply(base, subvect, n)
   }
 
-  override def length(vector: BinaryVectorPtr): Int = super.length(subvectAddr(vector))
+  override def length(base: Any, vector: BinaryVectorPtr): Int = super.length(base, subvectAddr(base, vector))
 
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long =
-    IntBinaryVector.simple(subvectAddr(vector)).sum(subvectAddr(vector), start, end)
+  final def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int): Long =
+    IntBinaryVector.simple(base, subvectAddr(base, vector)).sum(base, subvectAddr(base, vector), start, end)
 
-  override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
-    IntBinaryVector.simple(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+  override def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
+    IntBinaryVector.simple(base, subvectAddr(base, vector)).iterate(base, subvectAddr(base, vector), startElement)
 }
 
 abstract class IntAppendingVector(addr: BinaryRegion.NativePointer,

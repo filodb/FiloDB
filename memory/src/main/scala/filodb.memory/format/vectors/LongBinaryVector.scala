@@ -260,24 +260,25 @@ object LongVectorDataReader64 extends LongVectorDataReader {
  */
 object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
   final def apply(base: Any, vector: BinaryVectorPtr, n: Int): Long = {
-    val subvect = subvectAddr(vector)
-    LongBinaryVector(subvect).apply(subvect, n)
+    val subvect = subvectAddr(base, vector)
+    LongBinaryVector(base, subvect).apply(base, subvect, n)
   }
 
-  override def length(vector: BinaryVectorPtr): Int =
-    LongBinaryVector(subvectAddr(vector)).length(subvectAddr(vector))
+  override def length(base: Any, vector: BinaryVectorPtr): Int =
+    LongBinaryVector(base, subvectAddr(base, vector)).length(base, subvectAddr(base, vector))
 
-  override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
-    LongBinaryVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+  override def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+    LongBinaryVector(base, subvectAddr(base, vector)).iterate(base, subvectAddr(base, vector), startElement)
 
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double =
-    LongBinaryVector(subvectAddr(vector)).sum(subvectAddr(vector), start, end)
+  final def sum(base: Any, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+    LongBinaryVector(base, subvectAddr(base, vector)).sum(base, subvectAddr(base, vector), start, end)
 
-  def binarySearch(vector: BinaryVectorPtr, item: Long): Int =
-    LongBinaryVector(subvectAddr(vector)).binarySearch(subvectAddr(vector), item)
+  def binarySearch(base: Any, vector: BinaryVectorPtr, item: Long): Int =
+    LongBinaryVector(base, subvectAddr(base, vector)).binarySearch(base, subvectAddr(base, vector), item)
 
-   def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) =
-     LongBinaryVector(subvectAddr(vector)).changes(subvectAddr(vector), start, end, prev)
+   def changes(base: Any, vector: BinaryVectorPtr, start: Int, end: Int,
+               prev: Long, ignorePrev: Boolean = false): (Long, Long) =
+     LongBinaryVector(base, subvectAddr(base, vector)).changes(base, subvectAddr(base, vector), start, end, prev)
 }
 
 class LongAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
@@ -338,7 +339,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   def nbits: Short = 64
 
   val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(addr)
+  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(UnsafeUtils.ZP, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
