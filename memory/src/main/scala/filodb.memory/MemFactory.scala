@@ -274,12 +274,6 @@ class BlockMemFactory(blockStore: BlockManager,
     * @return the Long native address of the last metadata block written
     */
   def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
-    if (!metadataSpan.last.hasCapacity(metaSize + 2)) {
-      // Can be caused by the first block being nearly full, and allocateOffheap was never
-      // called.  Always make sure that a non-zero address is returned by this method.
-      doAllocateOffheap(0, metaSize)
-    }
-
     var metaAddr: Long = 0
     metadataSpan.foreach { blk =>
       // It is possible that the first block(s) did not have enough memory.  Don't write metadata to full blocks
@@ -287,7 +281,17 @@ class BlockMemFactory(blockStore: BlockManager,
       if (metaAddr != 0) metadataWriter(metaAddr)
     }
 
-    assert(metaAddr != 0)
+    if (metaAddr == 0) {
+      // Can be caused by the first block being nearly full, and allocateOffheap was never
+      // called.  Always make sure that a non-zero address is returned by this method.
+      val last = metadataSpan.last
+      assume(!last.hasCapacity(metaSize + 2))
+      doAllocateOffheap(0, metaSize)
+      val newLast = metadataSpan.last
+      assume(newLast != last)
+      metaAddr = newLast.allocMetadata(metaSize)
+      assert(metaAddr != 0)
+    }
 
     metaAddr
   }
