@@ -209,11 +209,11 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     val stats = new MemoryStats(Map("test5" -> "test5"))
     val capacity = (5 * pageSize).toInt
     val blockManager = new PageAlignedBlockManager(capacity, stats, testReclaimer, 1)
-    val metaSize: Short = 271
+    val metaSize: Short = 271 // nothing special about this value
     val factory = new BlockMemFactory(blockManager, Some(10000L), metaSize, Map("foo" -> "bar"), false)
 
-    // Make sure that no excpeptions are thrown or any internal assertions fail. Don't allocate
-    // more than the block manager allows.
+    // Make sure that no exceptions are thrown or any internal assertions fail. Don't allocate
+    // more than what the block manager allows.
     for (i <- 1 to (capacity / metaSize)) {
       factory.startMetaSpan()
       factory.endMetaSpan(_ => {}, metaSize) should not be 0
