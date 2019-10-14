@@ -21,52 +21,53 @@ final private[format] case class SectionType(n: Int) extends AnyVal
  */
 final case class Section private(addr: Long) extends AnyVal {
   // not including length bytes
-  final def sectionNumBytes: Int = Ptr.U16(addr).getU16
+  final def sectionNumBytes(base: Any): Int = Ptr.U16(addr).getU16(base)
 
-  final def numElements: Int = Ptr.U8(addr).add(2).getU8
+  final def numElements(base: Any): Int = Ptr.U8(addr).add(2).getU8(base)
 
-  final def sectionType: SectionType = SectionType(Ptr.U8(addr).add(3).getU8)
+  final def sectionType(base: Any): SectionType = SectionType(Ptr.U8(addr).add(3).getU8(base))
 
   // Ptr to first record of section
   final def firstElem: Ptr.U8 = Ptr.U8(addr) + 4
 
   // The address at the end of this section's elements, based on current num bytes
-  final def endAddr: Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes)
+  final def endAddr(base: Any): Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes(base))
 
-  final def isComplete: Boolean = numElements > 0
+  final def isComplete(base: Any): Boolean = numElements(base) > 0
 
   /**
    * Updates the number of bytes and elements atomically.
    * Checks that new values make sense.
    */
-  final def update(addedBytes: Int, addedElements: Int): Unit = {
+  final def update(base: Any, addedBytes: Int, addedElements: Int): Unit = {
     require(addedBytes > 0 && addedElements > 0)
-    val newNumElements = numElements + addedElements
-    val newNumBytes = sectionNumBytes + addedBytes
+    val newNumElements = numElements(base) + addedElements
+    val newNumBytes = sectionNumBytes(base) + addedBytes
     require(newNumElements <= 255 && newNumBytes <= 65535)
-    Ptr.I32(addr).asMut.set(newNumBytes | (newNumElements << 16) | (sectionType.n << 24))
+    Ptr.I32(addr).asMut.set(base, newNumBytes | (newNumElements << 16) | (sectionType(base).n << 24))
   }
 
-  final def setNumElements(num: Int): Unit = {
+  final def setNumElements(base: Any, num: Int): Unit = {
     require(num >= 0 && num <= 255)
-    Ptr.U8(addr).add(2).asMut.set(num)
+    Ptr.U8(addr).add(2).asMut.set(base, num)
   }
 
-  final def setType(typ: SectionType): Unit = {
-    Ptr.U8(addr).add(3).asMut.set(typ.n)
+  final def setType(base: Any, typ: SectionType): Unit = {
+    Ptr.U8(addr).add(3).asMut.set(base, typ.n)
   }
 
-  def debugString: String = s"Section@$addr: {numBytes=$sectionNumBytes, len=$numElements, type=$sectionType}"
+  def debugString(base: Any): String = s"Section@$addr: {numBytes=${sectionNumBytes(base)}, " +
+    s"len=${numElements(base)}, type=${sectionType(base)}"
 }
 
 object Section {
   def fromPtr(addr: Ptr.U8): Section = Section(addr.addr)
 
-  def init(sectionAddr: Ptr.U8, typ: SectionType = TypeNormal): Section = {
+  def init(base: Any, sectionAddr: Ptr.U8, typ: SectionType = TypeNormal): Section = {
     val newSect = Section(sectionAddr.addr)
-    newSect.setNumElements(0)
-    newSect.setType(typ)
-    sectionAddr.asU16.asMut.set(0)
+    newSect.setNumElements(base, 0)
+    newSect.setType(base, typ)
+    sectionAddr.asU16.asMut.set(base, 0)
     newSect
   }
 
@@ -84,7 +85,7 @@ trait SectionWriter {
 
   // Call to initialize the section writer with the address of the first section and how many bytes left
   def initSectionWriter(firstSectionAddr: Ptr.U8, remainingBytes: Int): Unit = {
-    curSection = Section.init(firstSectionAddr)
+    curSection = Section.init(UnsafeUtils.ZP, firstSectionAddr)
     bytesLeft = remainingBytes - 4    // account for initial section header bytes
   }
 
@@ -171,7 +172,7 @@ trait SectionReader {
     } else if (elemNo > curElemNo) {
       // Jump forward to next section until we are in section containing elemNo.  BUT, don't jump beyond cur length
       while (elemNo >= (sectStartingElemNo + curSection.numElements) && curSection.endAddr.addr < endAddr.addr) {
-        setSection(curSection.endAddr, sectStartingElemNo + curSection.numElements)
+        setSection(curSection.endAddr(base), sectStartingElemNo + curSection.numElements)
       }
 
       curHist = skipAhead(curHist, elemNo - curElemNo)
@@ -184,7 +185,7 @@ trait SectionReader {
         curHist = curSection.firstElem
       } else {
         // Otherwise restart search at beginning
-        setSection(firstSectionAddr)
+        setSection(firstSectionBase, firstSectionAddr)
       }
       locate(elemNo)
     }
@@ -196,18 +197,19 @@ trait SectionReader {
     var togo = numElems
     var ptr = startPtr
     while (togo > 0) {
-      ptr += ptr.asU16.getU16 + 2
+      // FIXME dont understand why we are creating new pointer with value
+      ptr += ptr.asU16.getU16(base) + 2
       togo -= 1
     }
     ptr
   }
 
   def iterateSections: Iterator[Section] = new Iterator[Section] {
-    var curSect = Section.fromPtr(firstSectionAddr)
+    var curSect = Section.fromPtr(firstSectionBase, firstSectionAddr)
     final def hasNext: Boolean = curSect.endAddr.addr <= endAddr.addr
     final def next: Section = {
       val sect = curSect
-      curSect = Section.fromPtr(curSect.endAddr)
+      curSect = Section.fromPtr(curSect.base, curSect.endAddr)
       sect
     }
   }

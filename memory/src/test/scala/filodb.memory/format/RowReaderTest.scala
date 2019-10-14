@@ -43,7 +43,8 @@ class RowReaderTest extends FunSpec with Matchers {
     )
     readers.foreach { r => appenders.zipWithIndex.foreach { case (a, i) => a.addFromReader(r, i + 1) } }
     val ptrs = appenders.map(_.optimize(memFactory)).toArray
-    val reader = new MutableFiloRowReader {
+    val reader = new
+        MutableFiloRowReader {
       def reader(columnNo: Int): VectorDataReader = columnNo match {
         case 0 => IntBinaryVector(ptrs(0))
         case 1 => LongBinaryVector(ptrs(1))
