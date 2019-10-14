@@ -36,13 +36,21 @@ trait Expressions extends Aggregates with Functions {
 
       lhs match {
         case expression: ScalarExpression if rhs.isInstanceOf[PeriodicSeries] =>
-          val scalar = expression.toScalar
+          val scalar = ScalarFixedDoublePlan(expression.toScalar)
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
         case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
-          val scalar = rhs.asInstanceOf[ScalarExpression].toScalar
+          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar)
           val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
+        case function: Function if function.name.equalsIgnoreCase("scalar")  && rhs.isInstanceOf[PeriodicSeries] =>
+          val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+          val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
+        case series: PeriodicSeries if rhs.isInstanceOf[Function] && rhs.asInstanceOf[Function].name.equalsIgnoreCase("scalar") =>
+          val scalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+          val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = false)
         case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>
           val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)

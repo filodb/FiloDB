@@ -172,6 +172,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarVaryingDoublePlan => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case _ => throw new BadQueryException("Invalid logical plan")
     }
   }

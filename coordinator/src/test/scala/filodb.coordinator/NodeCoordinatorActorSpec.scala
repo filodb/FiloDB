@@ -15,7 +15,7 @@ import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
-import filodb.prometheus.ast.TimeStepParams
+//import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
@@ -173,7 +173,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       val to = System.currentTimeMillis() / 1000
       val from = to - 50
-      val qParams = TimeStepParams(from, 10, to)
+      val qParams = filodb.prometheus.ast.TimeStepParams(from, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, series_1)", qParams)
       val q1 = LogicalPlan2Query(ref, logPlan, UnavailablePromQlQueryParams, qOpt)
       probe.send(coordinatorActor, q1)

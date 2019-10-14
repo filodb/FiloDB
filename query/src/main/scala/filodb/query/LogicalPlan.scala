@@ -91,7 +91,7 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        end: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan
+                                       functionArgs: Seq[FunctionParamsPlan] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan
 {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
@@ -135,7 +135,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   * Apply Scalar Binary operation to a collection of RangeVectors
   */
 case class ScalarVectorBinaryOperation(operator: BinaryOperator,
-                                       scalar: AnyVal,
+                                       scalar: ScalarPlan,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vector)
@@ -146,7 +146,7 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   */
 case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                functionArgs: Seq[FunctionParamsPlan] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
@@ -155,33 +155,40 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   */
 case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
                                 function: MiscellaneousFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                functionArgs: Seq[FunctionParamsPlan] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
-case class ScalarPlan(vectors: PeriodicSeriesPlan,
+trait FunctionParamsPlan extends LogicalPlan
+trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionParamsPlan
+//extends PeriodicSeriesPla
+case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
                       function: ScalarFunctionId,
                       timeStepParams: TimeStepParams,
-                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                      functionArgs: Seq[FunctionParamsPlan] = Nil)  extends ScalarPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
-case class FunctionWithoutMetricPlan(function: ScalarFunctionId,
-                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan  {
+
+case class ScalarTimeBasedPlan(function: ScalarFunctionId) extends ScalarPlan  {
 }
 
-case class VectorOfScalarFunctionPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+case class ScalarFixedDoublePlan(scalar: Double) extends ScalarPlan with FunctionParamsPlan  {
+}
+
+case class StringParam(value: String) extends ScalarPlan with FunctionParamsPlan  {
+}
+
+case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
 }
-
-case class VectorOfScalarPlan(scalars: Any) extends PeriodicSeriesPlan
 
 /**
   * Apply Sort Function to a collection of RangeVectors
   */
 case class ApplySortFunction(vectors: PeriodicSeriesPlan,
                                       function: SortFunctionId,
-                                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                      functionArgs: Seq[FunctionParamsPlan] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 

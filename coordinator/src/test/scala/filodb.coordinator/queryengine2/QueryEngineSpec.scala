@@ -580,4 +580,16 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child.params.step shouldEqual step
     child.params.processFailure shouldEqual(false)
   }
+
+  it ("should generate Scalar exec plan") {
+    val logicalPlan = ScalarVaryingDoublePlan(summed1,ScalarFunctionId.withName("scalar"), filodb.query.TimeStepParams(100,2,300) )
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan,
+      QueryOptions(), promQlQueryParams)
+    execPlan.printTree()
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+
+  // TO do add asserts
+  }
 }

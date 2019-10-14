@@ -4,16 +4,17 @@ package filodb.core.query
 import java.time.{LocalTime, ZoneId}
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import org.joda.time.DateTime
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
-import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
+import kamon.Kamon
+import org.joda.time.DateTime
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /**
@@ -89,15 +90,6 @@ object CustomRangeVectorKey {
 }
 
 
-//trait BaseVector {
-//  def rows: Iterator[RowReader]
-//  def numRows: Option[Int] = None
-//  def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
-//}
-
- //trait ResultSample
-
-
 /*
   * Represents a single result of any FiloDB Query.
   */
@@ -106,48 +98,57 @@ object CustomRangeVectorKey {
   def rows: Iterator[RowReader]
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
-  def ValueType : String = "matrix"
-}
 
-//   trait ScalarSample extends RangeVector {
-//     def key:RangeVectorKey = CustomRangeVectorKey(Map.empty)
-//   }
-//
-//   case class TimeScalar (rows: Iterator[RowReader],  sourceShards: Seq[Int] = Nil) extends ScalarSample
-//
-//   case class FixedDouble (rows: Iterator[RowReader]) extends ScalarSample
-//
-//case class ScalarVector(key: RangeVectorKey = CustomRangeVectorKey(Map.empty) , rows: Iterator[RowReader]) extends RangeVector
-
-trait ScalarVector extends RangeVector {
-  def start: Long
-  def end: Long
-  def step: Long
-
-  def key:RangeVectorKey = CustomRangeVectorKey(Map.empty)
-
-  override def rows: Iterator[RowReader] =  {
-    val rowList =  new ListBuffer[TransientRow] ()
- for (i<- start to end by step){
-
- }
-    rowList += new TransientRow(0, 1.0)
-//    Stream.from(start to end by step).map { n=>
-//      new TransientRow(n.toLong, n.toDouble)
-//    }.
-    rowList.iterator
-
+  def getRowMap = {
+    val timeValueMap = new mutable.HashMap[Long, Double]()
+    rows.foreach(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
+    println("timeValueMap:" + timeValueMap)
+    timeValueMap
   }
 }
 
+trait ScalarVector extends RangeVector {
+  def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+}
 
-case class DoubleScalar(start: Long, end: Long, step: Long, value: Double) extends ScalarVector
-case class TimeScalar(start: Long, end: Long, step:Long) extends ScalarVector
-case class HourScalar(start: Long, end: Long, step:Long) extends ScalarVector
+case class ScalarVaryingDouble(rows: Iterator[RowReader]) extends ScalarVector {
+//  val timeValueMap = new mutable.HashMap[Long, Double]()
+//  rows.map(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
+//  override def getRowMap = timeValueMap
+}
+
+trait ScalarSingleValue extends ScalarVector {
+  def start: Long
+
+  def end: Long
+
+  def step: Long
+
+  override def rows: Iterator[RowReader] = {
+    val rowList = new ListBuffer[TransientRow]()
+    for (i <- start to end by step) {
+      rowList += new TransientRow(i, getValue(i))
+    }
+    rowList.iterator
+
+  }
+
+  def getValue(time: Long = 0): Double
+}
+
+
+case class ScalarFixedDouble(start: Long, end: Long, step: Long, value: Double) extends ScalarSingleValue {
+  def getValue(time: Long): Double = value
+}
+case class TimeScalar(start: Long, end: Long, step:Long) extends ScalarSingleValue  {
+  override def getValue(time: Long): Double = time
+}
+case class HourScalar(start: Long, end: Long, step:Long) extends ScalarSingleValue
 {
   def value: Double ={
     LocalTime.now(ZoneId.of("GMT")).getHour
   }
+  override def getValue(time: Long): Double = value
 }
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,

@@ -5,7 +5,7 @@ import enumeratum.{Enum, EnumEntry}
 //scalastyle:off
 sealed abstract class InstantFunctionId(override val entryName: String) extends EnumEntry
 
-object InstantFunctionId extends Enum[InstantFunctionId] {
+  object InstantFunctionId extends Enum[InstantFunctionId] {
   val values = findValues
 
   case object Abs extends InstantFunctionId("abs")
@@ -260,7 +260,4 @@ object VectorFunctionId extends Enum[VectorFunctionId] {
 
 //scalastyle:on
 
-
-
-//scalastyle:on
 
