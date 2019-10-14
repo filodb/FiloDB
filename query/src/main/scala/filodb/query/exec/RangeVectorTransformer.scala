@@ -249,10 +249,6 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
   } else {
     Nil
   }
-//  val stringParam : Seq[StringParamExec] = funcParams match {
-//    case str: Seq[StringParamExec] => str
-//    case _ => throw new UnsupportedOperationException(s"$funcParams not supported.")
-//  }
 
   val miscFunction: MiscellaneousFunction = {
     function match {
@@ -316,26 +312,10 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   val recSchema = SerializableRangeVector.toSchema(columns)
 
   val resultSchema = ResultSchema(columns, 1)
- // val resultSchema = da
   val builder = SerializableRangeVector.newBuilder()
 
-  //  val scalarFunction: ScalarFunction = {
-  //    function match {
-  //      case LabelReplace => LabelReplaceFunction(funcParams)
-  //      case LabelJoin =>  LabelJoinFunction(funcParams)
-  //      case _ => throw new UnsupportedOperationException(s"$function not supported.")
-  //    }
-  //  }
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
-
-//    val paramsList = paramsResponse.get().map {
-//      case (QueryResult(_, _, result), i) => (result)
-//      case (QueryError(_, ex), _)         => throw ex
-//    }.toListL
-
-
-
 
 
     val resultRv = source.toListL.map { rvs =>
@@ -353,13 +333,8 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
             limit: Int,
             sourceSchema: ResultSchema, paramResponse: Option[Observable[Seq[RangeVector]]] = None): Observable[RangeVector] = {
 
-//    val taskOfResults = paramsResponse.get.map {
-//      case (QueryResult(_, _, result)) => result
-//      case (QueryError(_, ex))         => throw ex
-//    }.toListL
     function match {
       case Scalar => scalarImpl(source)
-      //case Time => timeImpl(source)
       case _ => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
