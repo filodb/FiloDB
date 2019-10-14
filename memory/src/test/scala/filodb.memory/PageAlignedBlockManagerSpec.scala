@@ -204,4 +204,19 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
     factory.currentBlock.owner shouldEqual None  // new requestor did not have owner
   }
+
+  it should ("allow empty meta spans") in {
+    val stats = new MemoryStats(Map("test5" -> "test5"))
+    val capacity = (5 * pageSize).toInt
+    val blockManager = new PageAlignedBlockManager(capacity, stats, testReclaimer, 1)
+    val metaSize: Short = 271
+    val factory = new BlockMemFactory(blockManager, Some(10000L), metaSize, Map("foo" -> "bar"), false)
+
+    // Make sure that no excpeptions are thrown or any internal assertions fail. Don't allocate
+    // more than the block manager allows.
+    for (i <- 1 to (capacity / metaSize)) {
+      factory.startMetaSpan()
+      factory.endMetaSpan(_ => {}, metaSize) should not be 0
+    }
+  }
 }

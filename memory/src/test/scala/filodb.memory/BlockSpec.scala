@@ -42,7 +42,7 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
 
     block.position(3800)
     block.remaining shouldEqual (4096-3800)
-    intercept[OutOfOffheapMemoryException] { block.allocMetadata(300) }
+    block.allocMetadata(300) shouldEqual 0
     block.remaining shouldEqual (4096-3800)   // still same space remaining
   }
 
