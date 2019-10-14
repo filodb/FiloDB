@@ -281,8 +281,6 @@ class BlockMemFactory(blockStore: BlockManager,
       if (metaAddr != 0) metadataWriter(metaAddr)
     }
 
-    print("meta: " + metaAddr + "\n")
-
     if (metaAddr == 0) {
       // Can be caused by the first block being nearly full, and allocateOffheap was never
       // called.  Always make sure that a non-zero address is returned by this method.
