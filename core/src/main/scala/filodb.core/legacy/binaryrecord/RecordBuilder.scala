@@ -14,6 +14,8 @@ import filodb.memory.format.vectors.Histogram
 
 // scalastyle:off number.of.methods
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * A RecordBuilder allocates fixed size containers and builds BinaryRecords within them.
  * The size of the container should be much larger than the average size of a record for efficiency.
  * Many BinaryRecords are built within one container.

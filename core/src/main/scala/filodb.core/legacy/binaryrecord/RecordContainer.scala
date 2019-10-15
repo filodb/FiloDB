@@ -10,6 +10,8 @@ import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge}
 import filodb.memory.format.{RowReader, UnsafeUtils}
 
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * A RecordContainer is a binary, wire-compatible container for BinaryRecords V2.
  * Example uses: for holding/batching multiple BinaryRecords for Kafka, or as a set of partition keys.
  * It is also the container to which the RecordBuilder writes into.

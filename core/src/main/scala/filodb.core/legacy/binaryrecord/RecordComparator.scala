@@ -5,6 +5,8 @@ import scalaxy.loops._
 import filodb.memory.format.UnsafeUtils
 
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * A fast, no-heap-allocation comparator and copier specifically designed for two tasks:
  * 1) Compare an ingestion-based BinaryRecord2 with a partition key only BinaryRecord2
  * 2) Copy an ingestion BinaryRecord2 to a partition key BinaryRecord2

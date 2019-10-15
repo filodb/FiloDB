@@ -15,6 +15,8 @@ import filodb.memory.format.{vectors => bv}
 // scalastyle:off number.of.methods
 
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * A RecordSchema is the schema for a BinaryRecord - what type of each field a BR holds.
  * Since it knows the schema it can also read values out efficiently.  It does not mutate memory or BinaryRecords.
  *

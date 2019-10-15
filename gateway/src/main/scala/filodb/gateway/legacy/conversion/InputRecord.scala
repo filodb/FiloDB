@@ -10,6 +10,8 @@ import filodb.core.metadata.Dataset
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String => ZCUTF8}
 
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * An InputRecord represents one "record" of timeseries data for input to FiloDB system.
  * It knows how to extract the information necessary for shard calculation as well as
  * how to add the right fields to the RecordBuilder.
