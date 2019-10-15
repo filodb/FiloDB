@@ -7,9 +7,9 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.Types.ColumnId
-import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats,
-  PartitionScanMethod, RawPartData, ReadablePartition, ScanSplit}
+import filodb.core.memstore.PartLookupResult
+import filodb.core.metadata.Schemas
+import filodb.core.store._
 import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
 
 /**
@@ -36,12 +36,19 @@ case class InProcessPlanDispatcher() extends PlanDispatcher {
   * No-op chunk source which does nothing and throws exception for all functions.
   */
 case class UnsupportedChunkSource() extends ChunkSource {
-  override def scanPartitions(dataset: DatasetRef, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
-                              chunkMethod: ChunkScanMethod): Observable[ReadablePartition] =
+  def scanPartitions(ref: DatasetRef,
+                     iter: PartLookupResult): Observable[ReadablePartition] =
+    throw new UnsupportedOperationException("This operation is not supported")
+
+  def lookupPartitions(ref: DatasetRef,
+                       partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult =
     throw new UnsupportedOperationException("This operation is not supported")
 
   override def groupsInDataset(dataset: DatasetRef): Int =
     throw new UnsupportedOperationException("This operation is not supported")
+
+  def schemas(ref: DatasetRef): Option[Schemas] = None
 
   override def stats: ChunkSourceStats =
     throw new UnsupportedOperationException("This operation is not supported")

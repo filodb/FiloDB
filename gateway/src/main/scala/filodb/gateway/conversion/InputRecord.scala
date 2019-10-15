@@ -141,7 +141,7 @@ case class PrometheusInputRecord(tags: Map[String, String],
   import PrometheusInputRecord._
   import collection.JavaConverters._
 
-  val trimmedMetric = RecordBuilder.trimShardColumn(promCounter, metricCol, metric)
+  val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
 
   // Get hashes and sort tags of the keys/values for shard calculation

@@ -6,6 +6,7 @@ import scala.collection.mutable
 
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.reactive.Observable
 import scalaxy.loops._
 
@@ -30,18 +31,21 @@ final case class ReduceAggregateExec(id: String,
                                      aggrParams: Seq[Any]) extends NonLeafExecPlan {
   def children: Seq[ExecPlan] = childAggregates
 
-  protected def schemaOfCompose(): ResultSchema = childAggregates.head.schema()
-
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+        case (QueryResult(_, schema, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val aggregator = RowAggregator(aggrOp, aggrParams, schemaOfCompose())
-    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
+    val task = for { schema <- firstSchema }
+               yield {
+                 val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
+               }
+    Observable.fromTask(task).flatten
   }
 }
 

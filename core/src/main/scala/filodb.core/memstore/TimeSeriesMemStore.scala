@@ -10,7 +10,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response, Types}
+import filodb.core.{DatasetRef, Response}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
@@ -210,16 +210,26 @@ extends MemStore with StrictLogging {
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
   def scanPartitions(ref: DatasetRef,
-                     columnIDs: Seq[Types.ColumnId],
-                     partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
+                     iter: PartLookupResult): Observable[ReadablePartition] = {
+    val shard = datasets(ref).get(iter.shard)
+
+    if (shard == UnsafeUtils.ZeroPointer) {
+      throw new IllegalArgumentException(s"Shard ${iter.shard} of dataset $ref is not assigned to " +
+        s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
+    }
+    shard.scanPartitions(iter)
+  }
+
+  def lookupPartitions(ref: DatasetRef,
+                       partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult = {
     val shard = datasets(ref).get(partMethod.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.scanPartitions(columnIDs, partMethod, chunkMethod)
+    shard.lookupPartitions(partMethod, chunkMethod)
   }
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
@@ -239,6 +249,9 @@ extends MemStore with StrictLogging {
 
   def groupsInDataset(ref: DatasetRef): Int =
     datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+
+  def schemas(ref: DatasetRef): Option[Schemas] =
+    datasets.get(ref).map(_.values.asScala.head.schemas)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     getShard(ref, cve.shard).get.analyzeAndLogCorruptPtr(cve)

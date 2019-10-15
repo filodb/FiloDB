@@ -212,7 +212,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         println("Schema validated.\nPartition schema:")
         partSchema.columns.foreach(c => println(s"\t$c"))
         schemas.foreach { case (schemaName, sch) =>
-          println(s"Schema $schemaName:")
+          println(s"Schema $schemaName (id=${sch.schemaHash}):")
           sch.data.columns.foreach(c => println(s"\t$c"))
           println(s"\n\tDownsamplers: ${sch.data.downsamplers}\n\tDownsample schema: ${sch.data.downsampleSchema}")
         }

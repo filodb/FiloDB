@@ -17,7 +17,7 @@ object TimeSeriesPartitionSpec {
   import MachineMetricsData._
   import BinaryRegion.NativePointer
 
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  val memFactory = new NativeMemoryManager(50 * 1024 * 1024)
 
   val maxChunkSize = TestData.storeConf.maxChunksSize
   protected val myBufferPool = new WriteBufferPool(memFactory, schema1.data, TestData.storeConf)
@@ -67,7 +67,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     }
   }
 
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
+  private val blockStore = new PageAlignedBlockManager(200 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, schema1.data.blockMetaSize,
                                       dummyContext, true)
