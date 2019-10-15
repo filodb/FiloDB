@@ -46,6 +46,8 @@ extends MemStore with StrictLogging {
     new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
+  def isReadOnly: Boolean = false
+
   private def makeAndStartPublisher(downsample: DownsampleConfig): DownsamplePublisher = {
     val pub = downsample.makePublisher()
     pub.start()

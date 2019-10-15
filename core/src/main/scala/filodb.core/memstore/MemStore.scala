@@ -44,6 +44,9 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
+
+  def isReadOnly: Boolean
+
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
     * read from this store on demand as needed for recovery purposes.
@@ -93,7 +96,6 @@ trait MemStore extends ChunkSource {
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushSched the Scheduler to use to schedule flush tasks
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
-   * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
    */
