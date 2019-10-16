@@ -262,7 +262,6 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /**
    * The maximum blockMetaSize amongst all the schemas this Dataset could ingest
-   * TODO: actually compute the max
    */
   val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
