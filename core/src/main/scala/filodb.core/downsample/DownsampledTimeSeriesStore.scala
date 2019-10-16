@@ -49,7 +49,7 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new DownsampledTimeSeriesShard(ref, schemas, shard, config)
+      val tsdb = new DownsampledTimeSeriesShard(ref, schemas, store, shard, filodbConfig)
       shards.put(shard, tsdb)
     }
   }

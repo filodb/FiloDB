@@ -12,7 +12,6 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._

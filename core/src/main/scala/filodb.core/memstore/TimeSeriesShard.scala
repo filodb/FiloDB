@@ -247,7 +247,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, storeConfig)
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
+    storeConfig.demandPagedRetentionPeriod)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -500,7 +501,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def startFlushingIndex(): Unit = partKeyIndex.startFlushThread()
+  def startFlushingIndex(): Unit =
+    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMaxDelaySeconds, storeConfig.partIndexFlushMinDelaySeconds)
 
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 

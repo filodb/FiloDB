@@ -10,7 +10,6 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter

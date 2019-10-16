@@ -5,7 +5,6 @@ import scalaxy.loops._
 
 import filodb.core.DatasetRef
 import filodb.core.Types._
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.{Column, PartitionSchema, Schema}
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
