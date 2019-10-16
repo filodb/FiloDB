@@ -225,6 +225,7 @@ class BlockMemFactory(blockStore: BlockManager,
 
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
+  private var metadataSpanActive: Boolean = false
 
   // Last time this factory was used for allocation.
   private var lastUsedNanos = now
@@ -263,7 +264,7 @@ class BlockMemFactory(blockStore: BlockManager,
     */
   def startMetaSpan(): Unit = {
     metadataSpan.clear()
-    metadataSpan += accessCurrentBlock()
+    metadataSpanActive = true
   }
 
   /**
@@ -272,14 +273,33 @@ class BlockMemFactory(blockStore: BlockManager,
     * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
     * @return the Long native address of the last metadata block written
+    * @throws IllegalStateException if startMetaSpan wasn't called, or if metaSize is larger
+    * than max allowed, or if nothing was allocated
     */
   def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
+    if (!metadataSpanActive) {
+      throw new IllegalStateException("Not in a metadata span")
+    }
+
+    if (metaSize > metadataAllocSize) {
+      // If the given meta size is larger than the max allowed, then the call to allocMetadata
+      // might fail because no space is left for the metadata.
+      throw new IllegalStateException("Metadata size is too large: " + metaSize + " > " + metadataAllocSize)
+    }
+
     var metaAddr: Long = 0
     metadataSpan.foreach { blk =>
-      // It is possible that the first block(s) did not have enough memory.  Don't write metadata to full blocks
       metaAddr = blk.allocMetadata(metaSize)
-      if (metaAddr != 0) metadataWriter(metaAddr)
+      metadataWriter(metaAddr)
     }
+
+    metadataSpan.clear()
+    metadataSpanActive = false
+
+    if (metaAddr == 0) {
+      throw new IllegalStateException("Nothing was allocated")
+    }
+
     metaAddr
   }
 
@@ -290,7 +310,12 @@ class BlockMemFactory(blockStore: BlockManager,
 
   protected def ensureCapacity(forSize: Long): Block = synchronized {
     var block = accessCurrentBlock()
-    if (!block.hasCapacity(forSize)) {
+    if (block.hasCapacity(forSize)) {
+      if (metadataSpanActive && metadataSpan.isEmpty) {
+        // Add the first block.
+        metadataSpan += block
+      }
+    } else {
       val newBlock = requestBlock()
       if (markFullBlocksAsReclaimable) {
         block.markReclaimable()
@@ -299,7 +324,9 @@ class BlockMemFactory(blockStore: BlockManager,
       }
       block = newBlock
       currentBlock = block
-      metadataSpan += block
+      if (metadataSpanActive) {
+        metadataSpan += block
+      }
     }
     block
   }
