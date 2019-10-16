@@ -153,9 +153,10 @@ object TimeSeriesShard {
     Math.abs(schema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
   }
 
-  private[memstore] final case class PartKey(base: Any, offset: Long)
   private[memstore] final val CREATE_NEW_PARTID = -1
 }
+
+private[core] final case class PartKey(base: Any, offset: Long)
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
   def skippedPartIDs: Buffer[Int]

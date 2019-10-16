@@ -1,21 +1,34 @@
-package filodb.core.memstore
+package filodb.core.downsample
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.FiniteDuration
 
+import com.typesafe.config.Config
 import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
 import filodb.core.Types.ColumnId
-import filodb.core.memstore.TimeSeriesShard.PartKey
+import filodb.core.memstore.{PartKey, TermInfo, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store.{ChunkScanMethod, PartitionScanMethod, ReadablePartition}
 import filodb.memory.format.ZeroCopyUTF8String
 
-class TimeSeriesReadOnlyShard(ref: DatasetRef, schemas: Schemas, shardNum: Int)
-                             (implicit val ioPool: ExecutionContext) {
+class DownsampledTimeSeriesShard(ref: DatasetRef, schemas: Schemas,
+                                 shardNum: Int,
+                                 filodbConfig: Config)
+                                (implicit val ioPool: ExecutionContext) {
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
+
+  val downsamplerConfig = filodbConfig.getConfig("downsampler")
+  val downsampleResolutions = downsamplerConfig.as[Seq[FiniteDuration]]("resolutions")
+  val downsampleTtls = downsamplerConfig.as[Seq[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
+  require(downsampleResolutions.length == downsampleTtls.length,
+    "Invalid configuration. Downsample resolutions and ttl have different length")
+
+  val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -39,6 +52,14 @@ class TimeSeriesReadOnlyShard(ref: DatasetRef, schemas: Schemas, shardNum: Int)
   def scanPartitions(columnIDs: Seq[ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
+    // Step 1: Choose the downsample level depending on the range requested
+
+    // Step 2: Query Cassandra table for that downsample level
+
+    // Step 3: Create a ReadablePartition objects that contain the time series data. This can be either a
+    // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
+    // when query is complete.
+
     Observable.empty
   }
 

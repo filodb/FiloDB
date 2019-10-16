@@ -6,6 +6,7 @@ import net.ceedubs.ficus.Ficus._
 final case class DownsampleConfig(config: Config) {
   val enabled = config.hasPath("enabled") && config.getBoolean("enabled")
   val resolutions = if (enabled) config.as[Seq[Int]]("resolutions-ms") else Seq.empty
+  val retentions = if (enabled) config.as
 
   def makePublisher(): DownsamplePublisher = {
     if (!enabled) {

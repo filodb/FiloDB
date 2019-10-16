@@ -17,7 +17,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, Iterators}
-import filodb.core.downsample.DownsampleConfig
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
@@ -386,7 +386,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     // Release memory for shard in MemStore
 
     memStore match {
-      case ro: TimeSeriesReadOnlyStore => ro.getShard(ref, shardNum)
+      case ro: DownsampledTimeSeriesStore => ro.getShard(ref, shardNum)
                                             .foreach { shard =>
                                               ro.removeShard(ref, shardNum, shard)
                                             }

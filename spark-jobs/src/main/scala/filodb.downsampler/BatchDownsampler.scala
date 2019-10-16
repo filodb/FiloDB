@@ -14,7 +14,7 @@ import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.RecordSchema
-import filodb.core.downsample.{ChunkDownsampler, DoubleChunkDownsampler, HistChunkDownsampler, TimeChunkDownsampler}
+import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
@@ -81,9 +81,8 @@ object BatchDownsampler extends StrictLogging with Instance {
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  private val downsampleDatasetRefs = settings.downsampleResolutions.map { res =>
-    res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
-  }.toMap
+  private val downsampleDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(rawDatasetRef, settings.downsampleResolutions)
+
 
   private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 

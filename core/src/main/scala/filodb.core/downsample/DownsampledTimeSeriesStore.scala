@@ -1,8 +1,10 @@
-package filodb.core.memstore
+package filodb.core.downsample
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration.FiniteDuration
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
@@ -10,20 +12,29 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
-import filodb.core.downsample.DownsampleConfig
-import filodb.core.memstore.TimeSeriesShard.PartKey
+import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class TimeSeriesReadOnlyStore(val store: ColumnStore,
-                              val metastore: MetaStore)
-                             (implicit val ioPool: ExecutionContext)
+object DownsampledTimeSeriesStore {
+  def downsampleDatasetRefs(rawDatasetRef: DatasetRef,
+                            downsampleResolutions: Seq[FiniteDuration]): Map[FiniteDuration, DatasetRef] = {
+    downsampleResolutions.map { res =>
+      res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
+    }.toMap
+  }
+}
+
+class DownsampledTimeSeriesStore(val store: ColumnStore,
+                                 val metastore: MetaStore,
+                                 val filodbConfig: Config)
+                                (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
 
-  type Shards = NonBlockingHashMapLong[TimeSeriesReadOnlyShard]
+  type Shards = NonBlockingHashMapLong[DownsampledTimeSeriesShard]
 
   private val datasets = new HashMap[DatasetRef, Shards]
 
@@ -34,11 +45,11 @@ extends MemStore with StrictLogging {
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
-    val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesReadOnlyShard](32, false))
+    val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[DownsampledTimeSeriesShard](32, false))
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new TimeSeriesReadOnlyShard(ref, schemas, shard)
+      val tsdb = new DownsampledTimeSeriesShard(ref, schemas, shard, config)
       shards.put(shard, tsdb)
     }
   }
@@ -54,14 +65,14 @@ extends MemStore with StrictLogging {
   /**
     * Retrieve shard for given dataset and shard number as an Option
     */
-  private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesReadOnlyShard] =
+  private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[DownsampledTimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
   /**
     * Retrieve shard for given dataset and shard number. Raises exception if
     * the shard is not setup.
     */
-  private[filodb] def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesReadOnlyShard = {
+  private[filodb] def getShardE(dataset: DatasetRef, shard: Int): DownsampledTimeSeriesShard = {
     datasets.get(dataset)
             .flatMap(shards => Option(shards.get(shard)))
             .getOrElse(throw new IllegalArgumentException(s"dataset=$dataset shard=$shard have not been set up"))
@@ -128,7 +139,7 @@ extends MemStore with StrictLogging {
     store.reset()
   }
 
-  def removeShard(dataset: DatasetRef, shardNum: Int, shard: TimeSeriesReadOnlyShard): Boolean = {
+  def removeShard(dataset: DatasetRef, shardNum: Int, shard: DownsampledTimeSeriesShard): Boolean = {
     datasets.get(dataset).map(_.remove(shardNum, shard)).getOrElse(false)
   }
 

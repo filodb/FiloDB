@@ -6,7 +6,8 @@ import monix.execution.Scheduler
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.StoreFactory
-import filodb.core.memstore.{TimeSeriesMemStore, TimeSeriesReadOnlyStore}
+import filodb.core.downsample.DownsampledTimeSeriesStore
+import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.store.NullColumnStore
 
 /**
@@ -23,10 +24,10 @@ class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFa
 }
 
 
-class CassandraReadOnlyStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
+class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
   val colStore = new CassandraColumnStore(config, ioPool)(ioPool)
   val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)
-  val memStore = new TimeSeriesReadOnlyStore(colStore, metaStore)(ioPool)
+  val memStore = new DownsampledTimeSeriesStore(colStore, metaStore, config)(ioPool)
 }
 
 /**
