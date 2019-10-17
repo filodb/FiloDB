@@ -14,7 +14,6 @@ import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import kamon.Kamon
 import org.joda.time.DateTime
 
-import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /**
@@ -99,41 +98,43 @@ object CustomRangeVectorKey {
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 
-  def getRowMap = {
-    val timeValueMap = new mutable.HashMap[Long, Double]()
-    rows.foreach(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
-    println("timeValueMap:" + timeValueMap)
-    timeValueMap
-  }
+//  def getRowMap = {
+//    val timeValueMap = new mutable.HashMap[Long, Double]()
+//    rows.foreach(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
+//    println("timeValueMap:" + timeValueMap)
+//    timeValueMap
+//  }
+}
+trait SerializableRangeVector extends RangeVector {
+  def numRowsInt: Int
 }
 
-trait ScalarVector extends RangeVector {
+trait ScalarVector extends SerializableRangeVector {
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+  def getValue(time: Long): Double
 }
 
-case class ScalarVaryingDouble(rows: Iterator[RowReader]) extends ScalarVector {
-//  val timeValueMap = new mutable.HashMap[Long, Double]()
-//  rows.map(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
-//  override def getRowMap = timeValueMap
+case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarVector {
+  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).map{x=> new TransientRow(x._1, x._2)}.iterator
+  def getValue(time: Long): Double = timeValueMap.get(time).get
+
+  override def numRowsInt: Int = timeValueMap.size
 }
 
 trait ScalarSingleValue extends ScalarVector {
   def start: Long
-
   def end: Long
-
   def step: Long
+  var numRowsInt : Int = 0
 
   override def rows: Iterator[RowReader] = {
     val rowList = new ListBuffer[TransientRow]()
     for (i <- start to end by step) {
       rowList += new TransientRow(i, getValue(i))
+      numRowsInt= numRowsInt + 1
     }
     rowList.iterator
-
   }
-
-  def getValue(time: Long = 0): Double
 }
 
 
@@ -145,9 +146,7 @@ case class TimeScalar(start: Long, end: Long, step:Long) extends ScalarSingleVal
 }
 case class HourScalar(start: Long, end: Long, step:Long) extends ScalarSingleValue
 {
-  def value: Double ={
-    LocalTime.now(ZoneId.of("GMT")).getHour
-  }
+  def value: Double = LocalTime.now(ZoneId.of("GMT")).getHour
   override def getValue(time: Long): Double = value
 }
 // First column of columnIDs should be the timestamp column
@@ -184,13 +183,13 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
 }
 
 /**
-  * SerializableRangeVector represents a RangeVector that can be serialized over the wire.
+  * SerializedRangeVector represents a RangeVector that can be serialized over the wire.
   * RecordContainers may be shared amongst all the SRV's from a single Result to minimize space and heap usage --
   *   this is the reason for the startRecordNo, the row # of the first container.
   * PLEASE PLEASE use Kryo to serialize this as it will make sure the single shared RecordContainer is
   * only serialized once as a single instance.
   */
-final class SerializableRangeVector(val key: RangeVectorKey,
+final class SerializedRangeVector(val key: RangeVectorKey,
                                     val numRowsInt: Int,
                                     containers: Seq[RecordContainer],
                                     val schema: RecordSchema,
@@ -224,13 +223,13 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   }
 }
 
-object SerializableRangeVector extends StrictLogging {
+object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
 
   /**
-    * Creates a SerializableRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
+    * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
     * The most efficient option when you need to create multiple SRVs as the containers are automatically
     * shared correctly.
     * The containers are sent whole as most likely more than one would be sent, so they should mostly be packed.
@@ -238,7 +237,7 @@ object SerializableRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializableRangeVector = {
+            execPlan: String): SerializedRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -262,14 +261,14 @@ object SerializableRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-    new SerializableRangeVector(rv.key, numRows, containers, schema, startRecordNo)
+    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo)
   }
 
   /**
-    * Creates a SerializableRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
+    * Creates a SerializedRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
     * Since it wastes space when working with multiple RVs, should be used mostly for testing.
     */
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
     val schema = toSchema(cols)
     apply(rv, newBuilder(), schema, "Test-Only-Plan")
   }

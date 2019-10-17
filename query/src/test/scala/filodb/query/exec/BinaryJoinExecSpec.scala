@@ -33,7 +33,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)
 
-  val samplesLhs: Array[RangeVector] = Array.tabulate(200) { i =>
+  val samplesLhs: Array[RangeVector] = Array.tabulate(3) { i =>
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricLhs".utf8,
@@ -43,7 +43,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
-  val samplesRhs: Array[RangeVector] = Array.tabulate(200) { i =>
+  val samplesRhs: Array[RangeVector] = Array.tabulate(3) { i =>
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
@@ -89,8 +89,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
@@ -122,8 +122,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                          .toListL.runAsync.futureValue
@@ -150,25 +150,26 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
-
+//Binar
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag1"), Nil)
+      Nil, Nil, Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                       .toListL.runAsync
     ScalaFutures.whenReady(fut.failed) { e =>
+      e.printStackTrace()
       e shouldBe a[BadQueryException]
     }
   }
@@ -196,13 +197,14 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
 
     val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                       .toListL.runAsync
     ScalaFutures.whenReady(fut.failed) { e =>
+      e.printStackTrace()
       e shouldBe a[BadQueryException]
     }
   }
@@ -219,9 +221,9 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
-    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
@@ -251,8 +253,8 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       ColumnInfo("value", ColumnType.DoubleColumn))
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)

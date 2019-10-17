@@ -60,6 +60,7 @@ final case class BinaryJoinExec(id: String,
 
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               queryConfig: QueryConfig): Observable[RangeVector] = {
+   // childResponses.
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
@@ -77,8 +78,14 @@ final case class BinaryJoinExec(id: String,
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
-        if (oneSideMap.contains(jk))
+        println("rv key:" + rv.key)
+        println("rv labelValues:" + rv.key.labelValues)
+        println("jk:" + jk)
+        if (oneSideMap.contains(jk)) {
+          println("Error many found")
+          println("oneSideMap keys:" + oneSideMap.keySet)
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+        }
         oneSideMap.put(jk, rv)
       }
 

@@ -214,7 +214,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result7(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
   }
 
-  it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
+  it ("should be able to serialize to and deserialize t-digest from SerializedRangeVector") {
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
       toRv(Seq((1L, 4.6d), (2L, 4.4d))),
@@ -228,10 +228,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result7 = resultObs7.toListL.runAsync.futureValue
     result7.size shouldEqual 1
 
-    val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
-    val builder = SerializableRangeVector.newBuilder()
-    val srv = SerializableRangeVector(result7(0), builder, recSchema, "Unit-Test")
+    val builder = SerializedRangeVector.newBuilder()
+    val srv = SerializedRangeVector(result7(0), builder, recSchema, "Unit-Test")
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue

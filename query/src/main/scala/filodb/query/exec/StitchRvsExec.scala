@@ -90,7 +90,7 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsMapper: Stitching results:")
     val stitched = source.toListL.map { rvs =>
       val groups = rvs.groupBy(_.key)
@@ -104,4 +104,6 @@ final case class StitchRvsMapper() extends RangeVectorTransformer {
   }
 
   override protected[query] def args: String = ""
+
+  override def funcParams: Seq[FuncArgs] = Nil
 }

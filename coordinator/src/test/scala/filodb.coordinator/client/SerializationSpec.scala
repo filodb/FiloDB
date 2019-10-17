@@ -138,7 +138,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         override val rows: Iterator[RowReader] = rowbuf.iterator
         override val key: RangeVectorKey = rvKey
       }
-      val srv = SerializableRangeVector(rv, cols)
+      val srv = SerializedRangeVector(rv, cols)
       val observedTs = srv.rows.toSeq.map(_.getLong(0))
       val observedVal = srv.rows.toSeq.map(_.getDouble(1))
       observedTs shouldEqual tuples.map(_._1)
@@ -156,8 +156,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     for { i <- 0 until roundTripResult.result.size } {
       // BinaryVector deserializes to different impl, so cannot compare top level object
       roundTripResult.result(i)
-        .asInstanceOf[query.SerializableRangeVector].schema shouldEqual result.result(i)
-        .asInstanceOf[query.SerializableRangeVector].schema
+        .asInstanceOf[query.SerializedRangeVector].schema shouldEqual result.result(i)
+        .asInstanceOf[query.SerializedRangeVector].schema
       roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
         result.result(i).rows.map(_.getDouble(1)).toSeq
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
@@ -280,7 +280,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                       UTF8Str("key2") -> UTF8Str("val2"))
     val key = CustomRangeVectorKey(keysMap)
     val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
-    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
+    val ser = SerializedRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.schema.infosFromIDs(0 to 0), 1)
 
@@ -296,7 +296,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val expected = Seq(Map("App-0" -> "App-1"))
     val schema = new ResultSchema(Seq(new ColumnInfo("_ns_", ColumnType.MapColumn)), 1)
     val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
-    val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+    val ser = Seq(SerializedRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
       new UTF8MapIteratorRowReader(input.toIterator)), cols))
 
     val result = QueryResult2("someId", schema, ser)
@@ -307,7 +307,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     srv.rows.size shouldEqual 1
     val actual = srv.rows.map(record => {
       val rowReader = record.asInstanceOf[BinaryRecordRowReader]
-      srv.asInstanceOf[query.SerializableRangeVector]
+      srv.asInstanceOf[query.SerializedRangeVector]
         .schema.toStringPairs(rowReader.recordBase, rowReader.recordOffset).toMap
     })
     actual.toList shouldEqual expected

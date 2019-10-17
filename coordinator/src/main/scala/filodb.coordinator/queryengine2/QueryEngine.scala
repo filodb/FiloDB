@@ -10,7 +10,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, Filter, ScalarFixedDouble}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.core.{SpreadProvider, Types}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
@@ -246,7 +246,7 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ScalarPlan                  => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
 
       case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp, spreadProvider)
       case _                               => throw new BadQueryException("Invalid logical plan")
@@ -260,19 +260,19 @@ class QueryEngine(dataset: Dataset,
                                            lp: ScalarVectorBinaryOperation,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
-    val scalarExec = lp.scalar match {
-      case num: ScalarFixedDoublePlan => Seq(ScalarFixedDoubleParamExec(num.scalar))
-      case  s: ScalarVaryingDoublePlan => Seq(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider))
+    val funcArg = lp.scalar match {
+      case num: ScalarFixedDoublePlan => Seq(StaticFuncArgs(num.scalar))
+      case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider)))
       case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
     }
 
-    if (vectors.plans.length > 1 && scalarExec.isInstanceOf[ScalarVaryingDoublePlan]) {
+    if (vectors.plans.length > 1 && funcArg.isInstanceOf[ExecPlanFuncArgs]) {
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
-      topPlan.addRangeVectorTransformer((ScalarOperationMapper(lp.operator, lp.scalarIsLhs, scalarExec)))
+      topPlan.addRangeVectorTransformer((ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
-      vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, scalarExec)))
+      vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
       vectors
     }
 //    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, scalarExec)))
@@ -348,7 +348,7 @@ class QueryEngine(dataset: Dataset,
                                               lp: ApplyInstantFunction, spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
     val paramsExec = if (!lp.functionArgs.isEmpty) {
-      materializeFunctionParams(lp.functionArgs, queryId, submitTime, options, spreadProvider)
+      materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     } else {
       Nil
     }
@@ -363,14 +363,9 @@ class QueryEngine(dataset: Dataset,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
-    val paramExec : Seq[ExecPlan]  = if (!lp.functionArgs.isEmpty) {
-      materializeFunctionParams(lp.functionArgs, queryId, submitTime, options, spreadProvider)
-    } else {
-      Nil
-    }
 
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), paramExec)))
+      lp.end, Some(lp.window), Some(execRangeFn))))
     rawSeries
   }
 
@@ -474,45 +469,37 @@ class QueryEngine(dataset: Dataset,
                                                     lp: ApplyMiscellaneousFunction,
                                                     spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    val paramExec: Seq[ExecPlan] = if (!lp.functionArgs.isEmpty) {
-      materializeFunctionParams(lp.functionArgs, queryId, submitTime, options, spreadProvider)
-    } else
-      Nil
-    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function,paramExec)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function,lp.stringArgs)))
     vectors
   }
 
-  private def materializeFunctionParams(functionParams: Seq[FunctionParamsPlan],queryId: String,
+  private def materializeFunctionArgs( functionParams: Seq[FunctionArgsPlan],queryId: String,
                                          submitTime: Long,
                                          options: QueryOptions,
-                                         spreadProvider: SpreadProvider): Seq[ExecPlan] = {
+                                         spreadProvider: SpreadProvider): Seq[FuncArgs] = {
     functionParams.map { param =>
-      param match
-      {
-        case num: ScalarFixedDouble => ScalarFixedDoubleParamExec(num.value)
-        case s: ScalarVaryingDoublePlan => generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider)
-        case str: StringParam =>  StringParamExec(str.value)
+        param match {
+        case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar)
+        case  s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider))
+        case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
       }
     }
   }
 
   private def materializeScalarPlan(queryId: String, submitTime: Long,
                                     options: QueryOptions,
-                                    lp: ScalarPlan,
+                                    lp: ScalarVaryingDoublePlan,
                                     spreadProvider: SpreadProvider): PlanResult = {
-    lp match {
-      case num: ScalarFixedDouble => PlanResult(Seq(ScalarFixedDoubleParamExec(num.value)), false)
-      case s: ScalarVaryingDoublePlan => val vectors = walkLogicalPlanTree(s.vectors, queryId, submitTime, options, spreadProvider)
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
         if (vectors.plans.length > 1) {
           val targetActor = pickDispatcher(vectors.plans)
           val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
-          topPlan.addRangeVectorTransformer((ScalarFunctionMapper(s.function, s.timeStepParams)))
+          topPlan.addRangeVectorTransformer((ScalarFunctionMapper(lp.function, lp.timeStepParams)))
           PlanResult(Seq(topPlan), vectors.needsStitch)
         } else {
-          vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(s.function, s.timeStepParams)))
+          vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.timeStepParams)))
           vectors
         }
-    }
   }
 
   private def materializeApplySortFunction(queryId: String,

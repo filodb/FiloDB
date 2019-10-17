@@ -3,7 +3,7 @@ package filodb.query.exec
 import filodb.core.DatasetRef
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
+import filodb.core.query.{RangeVector, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, ScalarVector, SerializableRangeVector, SerializedRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query.Query.qLogger
@@ -114,23 +114,33 @@ trait ExecPlan extends QueryCommand  {
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, queryConfig)
-      val paramsRes = executeFunctionParams
+     // val paramsRes = executeFunctionParams
       val resSchema = schemaOfDoExecute()
       val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector = if (transf.funcParams.forall(_.isInstanceOf[FunctionParamsExec]))
-                          None
-                        else
-                       Some(paramsRes.next())
+        val paramRangeVector :Observable[ScalarVector] = if(transf.funcParams.isEmpty){
+           Observable.empty
+        } else {
+          transf.funcParams.head.getResult
+        }
+
 
 
         (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
       }
-      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-      val builder = SerializableRangeVector.newBuilder()
+      val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+      val builder = SerializedRangeVector.newBuilder()
       var numResultSamples = 0 // BEWARE - do not modify concurrently!!
       finalRes._1
         .map {
+
+          case srv: SerializedRangeVector  =>
+            numResultSamples += srv.numRowsInt
+            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+            if (enforceLimit && numResultSamples > limit)
+              throw new BadQueryException(s"This query results in more than $limit samples. " +
+                s"Try applying more filters or reduce time range.")
+            srv
 
           case srv: SerializableRangeVector  =>
             numResultSamples += srv.numRowsInt
@@ -139,9 +149,10 @@ trait ExecPlan extends QueryCommand  {
               throw new BadQueryException(s"This query results in more than $limit samples. " +
                 s"Try applying more filters or reduce time range.")
             srv
+
           case rv: RangeVector =>
             // materialize, and limit rows per RV
-            val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
+            val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
             numResultSamples += srv.numRowsInt
             // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
             if (enforceLimit && numResultSamples > limit)
@@ -153,7 +164,7 @@ trait ExecPlan extends QueryCommand  {
         .toListL
         .map { r =>
           val numBytes = builder.allContainers.map(_.numBytes).sum
-          SerializableRangeVector.queryResultBytes.record(numBytes)
+          SerializedRangeVector.queryResultBytes.record(numBytes)
           if (numBytes > 5000000) {
             // 5MB limit. Configure if necessary later.
             // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
@@ -179,22 +190,22 @@ trait ExecPlan extends QueryCommand  {
     }
   }
 
-  final protected def executeFunctionParams(implicit sched: Scheduler,
-                                            timeout: FiniteDuration): Iterator[Observable[Seq[RangeVector]]] = {
-    rangeVectorTransformers.filterNot(_.funcParams.forall(_.isInstanceOf[FunctionParamsExec])).map { transf =>
-      Observable.fromIterable(transf.funcParams)
-        .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-          plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-            qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-            QueryError(id, ex)
-          }
-        }.map {
-        case (QueryResult(_, _, result) )=> result
-        case (QueryError(_, ex)) => throw ex
-      }
-
-    }.toIterator
-  }
+//  final protected def executeFunctionParams(implicit sched: Scheduler,
+//                                            timeout: FiniteDuration): Iterator[Observable[Seq[RangeVector]]] = {
+//    rangeVectorTransformers.filterNot(_.funcParams.forall(_.isInstanceOf[FunctionParamsExec])).map { transf =>
+//      Observable.fromIterable(transf.funcParams)
+//        .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
+//          plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+//            qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
+//            QueryError(id, ex)
+//          }
+//        }.map {
+//        case (QueryResult(_, _, result) )=> result
+//        case (QueryError(_, ex)) => throw ex
+//      }
+//
+//    }.toIterator
+//  }
 
 
   /**
@@ -266,55 +277,80 @@ abstract class LeafExecPlan extends ExecPlan {
   final def children: Seq[ExecPlan] = Nil
 }
 
-class FunctionParamsExec extends ExecPlan {
-  /**
-    * The query id
-    */
-  override def id: String = ???
-
-  /**
-    * Child execution plans representing sub-queries
-    */
-  override def children: Seq[ExecPlan] = ???
-
-  override def submitTime: Long = ???
-
-  /**
-    * Limit on number of samples returned by this ExecPlan
-    */
-  override def limit: Int = ???
-
-  override def dataset: DatasetRef = ???
-
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  override def dispatcher: PlanDispatcher = ???
-
-  /**
-    * Sub classes should override this method to provide a concrete
-    * implementation of the operation represented by this exec plan
-    * node
-    */
-  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)(implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  override protected def schemaOfDoExecute(): ResultSchema = ???
-
-  /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
-  override protected def args: String = ???
+sealed trait FuncArgs{
+  def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarVector]
+}
+case class ExecPlanFuncArgs(execPlan: ExecPlan) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
+    Observable.now(execPlan)
+      .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
+        plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+          qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${plan.printTree()}", ex)
+          QueryError(execPlan.id, ex)
+        }
+      }.map {
+      case (QueryResult(_, _, result) )=> result.head.asInstanceOf[ScalarVaryingDouble]
+      case (QueryError(_, ex)) => throw ex
+    }
+  }
 }
 
-case class ScalarFixedDoubleParamExec (value: Double) extends FunctionParamsExec
-case class StringParamExec(value: String) extends FunctionParamsExec
+case class StaticFuncArgs(scalar: Double, timeStepParams: TimeStepParams = TimeStepParams(0,0,0)) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
+    Observable.now(
+     new ScalarFixedDouble(timeStepParams.start, timeStepParams.end, timeStepParams.step, scalar))
+  }
+}
+
+
+
+//case class
+//case class ScalarFixedDoubleParamExec (value: Double) extends LeafExecPlan{
+//  /**
+//    * The query id
+//    */
+//  override def id: String = ???
+//
+//  override def submitTime: Long = ???
+//
+//  /**
+//    * Limit on number of samples returned by this ExecPlan
+//    */
+//  override def limit: Int = ???
+//
+//  override def dataset: DatasetRef = ???
+//
+//  /**
+//    * The dispatcher is used to dispatch the ExecPlan
+//    * to the node where it will be executed. The Query Engine
+//    * will supply this parameter
+//    */
+//  override def dispatcher: PlanDispatcher = ???
+//
+//  /**
+//    * Sub classes should override this method to provide a concrete
+//    * implementation of the operation represented by this exec plan
+//    * node
+//    */
+//  override protected def execute(source: ChunkSource, queryConfig: QueryConfig)
+//                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = {
+//         Observable.now(new lar
+//         })
+//  }
+//
+//  /**
+//    * Sub classes should implement this with schema of RangeVectors returned
+//    * from doExecute() abstract method.
+//    */
+//  override protected def schemaOfDoExecute(): ResultSchema = ???
+//
+//  /**
+//    * Args to use for the ExecPlan for printTree purposes only.
+//    * DO NOT change to a val. Increases heap usage.
+//    */
+//  override protected def args: String = ???
+//}
+//case class StringParamExec(value: String) extends FunctionParamsExec
 abstract class NonLeafExecPlan extends ExecPlan {
 
   /**

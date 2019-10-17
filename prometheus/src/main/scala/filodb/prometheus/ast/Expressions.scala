@@ -36,11 +36,11 @@ trait Expressions extends Aggregates with Functions {
 
       lhs match {
         case expression: ScalarExpression if rhs.isInstanceOf[PeriodicSeries] =>
-          val scalar = ScalarFixedDoublePlan(expression.toScalar)
+          val scalar = ScalarFixedDoublePlan(expression.toScalar, filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
         case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
-          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar)
+          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
         case function: Function if function.name.equalsIgnoreCase("scalar")  && rhs.isInstanceOf[PeriodicSeries] =>

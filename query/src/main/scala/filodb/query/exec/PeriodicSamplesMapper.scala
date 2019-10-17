@@ -25,7 +25,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
-                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+                                       funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
@@ -40,7 +40,7 @@ final case class PeriodicSamplesMapper(start: Long,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
