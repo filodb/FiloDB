@@ -89,7 +89,8 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       s"and full ODP of partIds ${partLookupRes.partIdsNotInMemory}")
 
     // partitions that do not need ODP are those that are not in the inMemOdp collection
-    val noOdpPartitions = partLookupRes.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
+    val inMemParts = InMemPartitionIterator(partLookupRes.partsInMemoryIter.intIterator())
+    val noOdpPartitions = inMemParts.filterNot(p => inMemOdp(p.partID))
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix

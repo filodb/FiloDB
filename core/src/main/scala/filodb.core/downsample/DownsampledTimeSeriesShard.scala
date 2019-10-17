@@ -9,15 +9,15 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.DatasetRef
-import filodb.core.Types.ColumnId
-import filodb.core.memstore.{PartKey, PartKeyLuceneIndex, TermInfo, TimeSeriesShardStats}
+import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesShard(ref: DatasetRef,
-                                 schemas: Schemas,
+                                 val schemas: Schemas,
                                  colStore: ColumnStore,
                                  shardNum: Int,
                                  filodbConfig: Config)
@@ -72,44 +72,57 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   def refreshPartKeyIndexBlocking(): Unit = {}
 
 
-  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = ???
-
-  def scanPartitions(columnIDs: Seq[ColumnId],
-                     partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
-
-    // Step 1: Look up index and find matching part keys
-    import filodb.core.Iterators._
-    val partKeys = partMethod match {
-      case SinglePartitionScan(partition, _) => ???
-      case MultiPartitionScan(partKeys, _) => ???
+  def lookupPartitions(partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+    partMethod match {
+      case SinglePartitionScan(partition, _) => throw new UnsupportedOperationException
+      case MultiPartitionScan(partKeys, _) => throw new UnsupportedOperationException
       case FilteredPartitionScan(split, filters) =>
-        // TODO: There are other filters that need to be added and translated to Lucene queries
+
         if (filters.nonEmpty) {
-          partKeyIndex.partIdsFromFilters(filters,
-                                                                          chunkMethod.startTime,
-                                                                          chunkMethod.endTime)
-            .map(p => partKeyFromPartId(p), 10000)
+
+          val res = partKeyIndex.partIdsFromFilters2(filters,
+            chunkMethod.startTime,
+            chunkMethod.endTime)
+          val _schema = Option(res.getFirstSetBit).filter(_ >= 0).map(schemaIDFromPartID)
+          // send index result in the partsInMemoryIter field of lookup
+          PartLookupResult(shardNum, chunkMethod, res,
+            _schema, debox.Map.empty[Int, Long], debox.Buffer.empty)
         } else {
-          ???
+          throw new UnsupportedOperationException("Cannot have empty filters")
         }
     }
+  }
 
-    // Step 2: Choose the downsample level depending on the range requested
-    val downsampledDataset = chooseDownsampleResolution(chunkMethod)
+  def scanPartitions(lookup: PartLookupResult): Observable[ReadablePartition] = {
 
-    // Step 3: Query Cassandra table for that downsample level using colStore
+    // Step 1: Choose the downsample level depending on the range requested
+    val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)
+
+    // Step 2: Query Cassandra table for that downsample level using colStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
+    import filodb.core.Iterators._
+    val partKeys = lookup.partsInMemoryIter.intIterator().map(partKeyFromPartId, 10000) // TODO configure
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
-        colStore.readRawPartitions(downsampledDataset, SinglePartitionScan(partBytes, shardNum), chunkMethod)
+        colStore.readRawPartitions(downsampledDataset, SinglePartitionScan(partBytes, shardNum), lookup.chunkMethod)
           .map(makePagedPartition)
           .toListL
           .map(Observable.fromIterable)
       }.flatten
   }
+
+
+  protected def schemaIDFromPartID(partID: Int): Int = {
+    partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
+      val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
+      RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
+    }.getOrElse(throw new IllegalStateException("PartId returned by lucene, but partKey not found"))
+  }
+
+  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = ???
 
   private def makePagedPartition(part: RawPartData): ReadablePartition = ???
 

@@ -182,7 +182,7 @@ object PartitionIterator {
   */
 case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
-                            partsInMemoryIter: PartitionIterator,
+                            partsInMemoryIter: EWAHCompressedBitmap,
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
@@ -418,16 +418,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       findNext()
       toReturn
     }
-  }
-
-  // An iterator over partitions looked up from partition keys stored as byte[]'s
-  // Note that we cannot give skippedPartIDs because we don't have IDs only have keys
-  // and we cannot look up IDs from keys since part keys are not indexed in Lucene
-  case class ByteKeysPartitionIterator(keys: Seq[Array[Byte]]) extends PartitionIterator {
-    val skippedPartIDs = debox.Buffer.empty[Int]
-    private val partIt = keys.toIterator.flatMap(getPartition)
-    final def hasNext: Boolean = partIt.hasNext
-    final def next: TimeSeriesPartition = partIt.next
   }
 
   private[memstore] def initTimeBuckets() = {
@@ -1472,11 +1462,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
     case SinglePartitionScan(partition, _) =>
-      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(Seq(partition)),
-                       Some(RecordSchema.schemaID(partition)))
+      val bitmap = new EWAHCompressedBitmap()
+      getPartition(partition).foreach(p => bitmap.set(p.partID))
+      PartLookupResult(shardNum, chunkMethod, bitmap, Some(RecordSchema.schemaID(partition)))
     case MultiPartitionScan(partKeys, _)   =>
-      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(partKeys),
-                       partKeys.headOption.map(RecordSchema.schemaID))
+      val bitmap = new EWAHCompressedBitmap()
+      partKeys.flatMap(getPartition).foreach(p => bitmap.set(p.partID))
+      PartLookupResult(shardNum, chunkMethod, bitmap, partKeys.headOption.map(RecordSchema.schemaID))
     case FilteredPartitionScan(split, filters) =>
       // No matter if there are filters or not, need to run things through Lucene so we can discover potential
       // TSPartitions to read back from disk
@@ -1501,12 +1493,13 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       // now provide an iterator that additionally supplies the startTimes for
       // those partitions that may need to be paged
-      PartLookupResult(shardNum, chunkMethod, new InMemPartitionIterator(coll.intIterator()),
+      PartLookupResult(shardNum, chunkMethod, coll,
                        _schema, startTimes, partIdsNotInMem)
   }
 
   def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
-    Observable.fromIterator(iterResult.partsInMemoryIter.map { p =>
+    val partIter = new InMemPartitionIterator(iterResult.partsInMemoryIter.intIterator())
+    Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })
