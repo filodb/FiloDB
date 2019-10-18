@@ -89,7 +89,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil, Nil)
+      Nil, Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
@@ -119,7 +119,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil, Nil)
+      Nil, Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
@@ -156,7 +156,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag1"), Nil)
+      Nil, Seq("tag1"), Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
@@ -182,12 +182,12 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesLhs2 = scala.util.Random.shuffle(duplicate +: samplesLhs.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec("some ID", dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag1"), Nil)
+      Nil, Seq("tag1"), Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhs2.map(rv => SerializableRangeVector(rv, schema)))
@@ -207,7 +207,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Seq("tag2"), Nil)
+      Nil, Seq("tag2"), Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
@@ -236,7 +236,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Seq("tag1", "job"), Nil, Nil)
+      Seq("tag1", "job"), Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
