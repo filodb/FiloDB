@@ -124,8 +124,6 @@ trait ExecPlan extends QueryCommand  {
           transf.funcParams.head.getResult
         }
 
-
-
         (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
       }
       val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
@@ -189,23 +187,6 @@ trait ExecPlan extends QueryCommand  {
       QueryError(id, ex)
     }
   }
-
-//  final protected def executeFunctionParams(implicit sched: Scheduler,
-//                                            timeout: FiniteDuration): Iterator[Observable[Seq[RangeVector]]] = {
-//    rangeVectorTransformers.filterNot(_.funcParams.forall(_.isInstanceOf[FunctionParamsExec])).map { transf =>
-//      Observable.fromIterable(transf.funcParams)
-//        .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-//          plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-//            qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-//            QueryError(id, ex)
-//          }
-//        }.map {
-//        case (QueryResult(_, _, result) )=> result
-//        case (QueryError(_, ex)) => throw ex
-//      }
-//
-//    }.toIterator
-//  }
 
 
   /**
@@ -302,55 +283,6 @@ case class StaticFuncArgs(scalar: Double, timeStepParams: TimeStepParams = TimeS
   }
 }
 
-
-
-//case class
-//case class ScalarFixedDoubleParamExec (value: Double) extends LeafExecPlan{
-//  /**
-//    * The query id
-//    */
-//  override def id: String = ???
-//
-//  override def submitTime: Long = ???
-//
-//  /**
-//    * Limit on number of samples returned by this ExecPlan
-//    */
-//  override def limit: Int = ???
-//
-//  override def dataset: DatasetRef = ???
-//
-//  /**
-//    * The dispatcher is used to dispatch the ExecPlan
-//    * to the node where it will be executed. The Query Engine
-//    * will supply this parameter
-//    */
-//  override def dispatcher: PlanDispatcher = ???
-//
-//  /**
-//    * Sub classes should override this method to provide a concrete
-//    * implementation of the operation represented by this exec plan
-//    * node
-//    */
-//  override protected def execute(source: ChunkSource, queryConfig: QueryConfig)
-//                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = {
-//         Observable.now(new lar
-//         })
-//  }
-//
-//  /**
-//    * Sub classes should implement this with schema of RangeVectors returned
-//    * from doExecute() abstract method.
-//    */
-//  override protected def schemaOfDoExecute(): ResultSchema = ???
-//
-//  /**
-//    * Args to use for the ExecPlan for printTree purposes only.
-//    * DO NOT change to a val. Increases heap usage.
-//    */
-//  override protected def args: String = ???
-//}
-//case class StringParamExec(value: String) extends FunctionParamsExec
 abstract class NonLeafExecPlan extends ExecPlan {
 
   /**
