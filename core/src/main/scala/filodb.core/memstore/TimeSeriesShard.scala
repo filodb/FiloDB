@@ -170,6 +170,30 @@ object PartitionIterator {
   }
 }
 
+/**
+  * TSPartition lookup from filters result, usually step 1 of querying.
+  *
+  * @param partsInMemoryIter iterates through the in-Memory partitions, some of which may not need ODP.
+  *                          Caller needs to filter further
+  * @param firstSchemaId if defined, the first Schema ID found. If not defined, probably there's no data.
+  * @param partIdsMemTimeGap contains partIDs in memory but with potential time gaps in data. Their
+  *                          startTimes from Lucene are mapped from the ID.
+  * @param partIdsNotInMemory is a collection of partIds fully not in memory
+  */
+case class PartLookupResult(shard: Int,
+                            chunkMethod: ChunkScanMethod,
+                            partsInMemoryIter: PartitionIterator,
+                            firstSchemaId: Option[Int] = None,
+                            partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
+                            partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
+
+final case class SchemaMismatch(expected: String, found: String) extends
+Exception(s"Multiple schemas found, please filter. Expected schema $expected, found schema $found")
+
+object SchemaMismatch {
+  def apply(expected: Schema, found: Schema): SchemaMismatch = SchemaMismatch(expected.name, found.name)
+}
+
 // scalastyle:off number.of.methods
 // scalastyle:off file.size.limit
 /**
@@ -191,7 +215,7 @@ object PartitionIterator {
   * @param downsamplePublisher is shared among all shards of the dataset on the node
   */
 class TimeSeriesShard(val ref: DatasetRef,
-                      schemas: Schemas,
+                      val schemas: Schemas,
                       val storeConfig: StoreConfig,
                       val shardNum: Int,
                       val bufferMemoryManager: MemFactory,
@@ -239,7 +263,6 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   /**
    * The maximum blockMetaSize amongst all the schemas this Dataset could ingest
-   * TODO: actually compute the max
    */
   val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
@@ -1463,47 +1486,59 @@ class TimeSeriesShard(val ref: DatasetRef,
     part.map(_.asInstanceOf[TimeSeriesPartition])
   }
 
-  /**
-    * Result of a iteratePartitions method call.
-    *
-    * Note that there is a leak in abstraction here we should not be talking about ODP here.
-    * ODPagingShard really should not have been a sub-class of TimeSeriesShard. Instead
-    * composition should have been used instead of inheritance. Overriding the iteratePartitions()
-    * method is the best I could do to keep the leak minimal and not increase scope.
-    *
-    * TODO: clean this all up in a bigger refactoring effort later.
-    *
-    * @param partsInMemoryIter iterates through the in-Memory partitions, some of which may not need ODP.
-    *                          Caller needs to filter further
-    * @param partIdsInMemoryMayNeedOdp has partIds from partsInMemoryIter in memory that may need chunk ODP. Their
-    *                          startTimes from Lucene are included
-    * @param partIdsNotInMemory is a collection of partIds fully not in memory
-    */
-  case class IterationResult(partsInMemoryIter: PartitionIterator,
-                             partIdsInMemoryMayNeedOdp: debox.Map[Int, Long] = debox.Map.empty,
-                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
-
-  /**
-    * See documentation for IterationResult.
-    */
-  def iteratePartitions(partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod): IterationResult = partMethod match {
-    case SinglePartitionScan(partition, _) => IterationResult(ByteKeysPartitionIterator(Seq(partition)))
-    case MultiPartitionScan(partKeys, _)   => IterationResult(ByteKeysPartitionIterator(partKeys))
-    case FilteredPartitionScan(split, filters) =>
-      // TODO: There are other filters that need to be added and translated to Lucene queries
-      if (filters.nonEmpty) {
-        val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-        IterationResult(new InMemPartitionIterator(indexIt))
-      } else {
-        IterationResult(PartitionIterator.fromPartIt(partitions.values.iterator.asScala))
-      }
+  protected def schemaIDFromPartID(partID: Int): Int = {
+    partitions.get(partID) match {
+      case TimeSeriesShard.OutOfMemPartition =>
+        partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
+          val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
+          RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
+        }.getOrElse(-1)
+      case p: TimeSeriesPartition => p.schema.schemaHash
+    }
   }
 
-  def scanPartitions(columnIDs: Seq[Types.ColumnId],
-                     partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
-    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod).partsInMemoryIter.map { p =>
+  /**
+    * Looks up partitions and schema info from ScanMethods, usually by doing a Lucene search.
+    * Also returns detailed information about what is in memory and not, and does schema discovery.
+    */
+  def lookupPartitions(partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
+    case SinglePartitionScan(partition, _) =>
+      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(Seq(partition)),
+                       Some(RecordSchema.schemaID(partition)))
+    case MultiPartitionScan(partKeys, _)   =>
+      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(partKeys),
+                       partKeys.headOption.map(RecordSchema.schemaID))
+    case FilteredPartitionScan(split, filters) =>
+      // No matter if there are filters or not, need to run things through Lucene so we can discover potential
+      // TSPartitions to read back from disk
+      val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
+
+      // first find out which partitions are being queried for data not in memory
+      val _schema = Option(coll.getFirstSetBit).filter(_ >= 0).map(schemaIDFromPartID)
+      val it1 = InMemPartitionIterator(coll.intIterator())
+      val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+      val partIdsNotInMem = it1.skippedPartIDs
+      val startTimes = if (partIdsToPage.nonEmpty) {
+        val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+        logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
+          s"startTime lookup for query in dataset=$ref shard=$shardNum " +
+          s"resulted in startTimes=$st")
+        st
+      }
+      else {
+        logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
+          s"shard=$shardNum are in memory")
+        debox.Map.empty[Int, Long]
+      }
+      // now provide an iterator that additionally supplies the startTimes for
+      // those partitions that may need to be paged
+      PartLookupResult(shardNum, chunkMethod, new InMemPartitionIterator(coll.intIterator()),
+                       _schema, startTimes, partIdsNotInMem)
+  }
+
+  def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
+    Observable.fromIterator(iterResult.partsInMemoryIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

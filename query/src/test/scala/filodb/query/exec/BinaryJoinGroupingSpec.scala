@@ -18,7 +18,7 @@ import filodb.query._
 
 class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
-  import SelectRawPartitionsExecSpec._
+  import MultiSchemaPartitionsExecSpec._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
@@ -26,6 +26,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
+  val tvSchemaTask = Task.now(tvSchema)
 
   val rand = new Random()
 
@@ -123,7 +124,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -158,7 +159,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -198,7 +199,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -243,7 +244,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -277,7 +278,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),

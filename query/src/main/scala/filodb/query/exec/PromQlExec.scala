@@ -5,7 +5,6 @@ import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
@@ -29,24 +28,15 @@ case class PromQlExec(id: String,
 
   val builder = SerializableRangeVector.newBuilder()
 
-  /**
-    * Limit on number of samples returned by this ExecPlan
-    */
-  override def limit: Int = ???
+  def limit: Int = ???
 
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
     * node
     */
-  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  override protected def schemaOfDoExecute(): ResultSchema = ???
+  def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+               (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)

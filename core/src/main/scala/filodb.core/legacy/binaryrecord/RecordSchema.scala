@@ -1,20 +1,22 @@
-package filodb.core.binaryrecord2
+package filodb.core.legacy.binaryrecord
 
 import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
-import filodb.core.metadata.{Column, Schemas}
-import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column.ColumnType.{LongColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
-import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => bv}
 
 // scalastyle:off number.of.methods
 
 /**
+ * WARNING: THIS CLASS IS DEPRECATED!! ADDED TO SUPPORT BACKWARD COMPATIBILITY FOR MULTI-SCHEMA.
+ *
  * A RecordSchema is the schema for a BinaryRecord - what type of each field a BR holds.
  * Since it knows the schema it can also read values out efficiently.  It does not mutate memory or BinaryRecords.
  *
@@ -31,13 +33,12 @@ import filodb.memory.format.{vectors => bv}
  *   the fact that all variable length fields after the partitionFieldStart are contiguous and can be binary compared
  *
  * @param columns In order, the column of each field in this schema
- * @param hash the 16-bit Schema Hash (see DataSchema class) for verification purposes
  * @param brSchema schema of any binary record type column
  * @param partitionFieldStart Some(n) from n to the last field are considered the partition key.  A field number.
  * @param predefinedKeys A list of predefined keys to save space for the tags/MapColumn field(s)
  */
+@Deprecated
 final class RecordSchema(val columns: Seq[ColumnInfo],
-                         // val hash: Int,
                          val partitionFieldStart: Option[Int] = None,
                          val predefinedKeys: Seq[String] = Nil,
                          val brSchema: Map[Int, RecordSchema] = Map.empty) {
@@ -49,14 +50,13 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   val colNames = columns.map(_.name)
   val columnTypes = columns.map(_.colType)
   require(columnTypes.nonEmpty, "columnTypes cannot be empty")
-  require(predefinedKeys.length <= 64, "Too many predefined keys")
+  require(predefinedKeys.length < 4096, "Too many predefined keys")
   require(partitionFieldStart.isEmpty ||
           partitionFieldStart.get < columnTypes.length, s"partitionFieldStart $partitionFieldStart is too high")
 
-  // Offset to fixed area for each field.  Extra element at end is end of fixed size area / hash.
+  // Offset to fixed area for each field.  Extra elemnt at end is end of fixed size area / hash.
   // Note: these offsets start at 4, after the length header
-  val fixedStart = partitionFieldStart.map(x => 6).getOrElse(4)
-  private val offsets = columnTypes.map(colTypeToFieldSize).scan(fixedStart)(_ + _).toArray
+  private val offsets = columnTypes.map(colTypeToFieldSize).scan(4)(_ + _).toArray
 
   // Offset from BR start to beginning of variable area.  Also the minimum length of a BR.
   val variableAreaStart = partitionFieldStart.map(x => 4).getOrElse(0) + offsets.last
@@ -213,9 +213,7 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }
-    val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
-    val schemaStr = partitionFieldStart.map(x => s"schema=$schemaName ").getOrElse("")
-    s"b2[$schemaStr ${result.mkString(",")}]"
+    s"b2[${result.mkString(",")}]"
   }
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
@@ -253,20 +251,20 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    */
   def consumeMapItems(base: Any, offset: Long, index: Int, consumer: MapItemConsumer): Unit = {
     val mapOffset = offset + UnsafeUtils.getInt(base, offset + offsets(index))
-    val mapNumBytes = UnsafeUtils.getShort(base, mapOffset).toInt
-    var curOffset = mapOffset + 2
+    val mapNumBytes = UnsafeUtils.getInt(base, mapOffset)
+    var curOffset = mapOffset + 4
     val endOffset = curOffset + mapNumBytes
     var itemIndex = 0
     while (curOffset < endOffset) {
       // Read key length.  Is it a predefined key?
-      val keyLen = UnsafeUtils.getShort(base, curOffset) & 0x00FF
-      val keyIndex = keyLen ^ 0x0C0
-      if (keyIndex < 64) {   // predefined key; no key bytes
-        consumer.consume(predefKeyBytes, predefKeyOffsets(keyIndex), base, curOffset + 1, itemIndex)
-        curOffset += 3 + (UnsafeUtils.getShort(base, curOffset + 1) & 0x0FFFF)
+      val keyLen = UnsafeUtils.getShort(base, curOffset) & 0x0FFFF
+      val keyIndex = keyLen ^ 0x0F000
+      if (keyIndex < 0x1000) {   // predefined key; no key bytes
+        consumer.consume(predefKeyBytes, predefKeyOffsets(keyIndex), base, curOffset + 2, itemIndex)
+        curOffset += 4 + (UnsafeUtils.getShort(base, curOffset + 2) & 0x0FFFF)
       } else {
-        consumer.consume(base, curOffset, base, curOffset + 1 + keyLen, itemIndex)
-        curOffset += 3 + keyLen + (UnsafeUtils.getShort(base, curOffset + 1 + keyLen) & 0x0FFFF)
+        consumer.consume(base, curOffset, base, curOffset + 2 + keyLen, itemIndex)
+        curOffset += 4 + keyLen + (UnsafeUtils.getShort(base, curOffset + 2 + keyLen) & 0x0FFFF)
       }
       itemIndex += 1
     }
@@ -305,7 +303,6 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
    * Allows us to compare two RecordSchemas against each other
    */
   override def equals(other: Any): Boolean = other match {
-    case UnsafeUtils.ZeroPointer => false
     case r: RecordSchema => columnTypes == r.columnTypes &&
                             partitionFieldStart == r.partitionFieldStart &&
                             predefinedKeys == r.predefinedKeys
@@ -318,18 +315,17 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   import debox.{Map => DMap}   // An unboxed, fast Map
 
   private def makePredefinedStructures(predefinedKeys: Seq[String]): (Array[Long], Array[Byte], DMap[Long, Int]) = {
-    // Convert predefined keys to UTF8StringShorts.  First estimate size they would all take.
-    val totalNumBytes = predefinedKeys.map(_.length + 1).sum
+    // Convert predefined keys to UTF8StringMediums.  First estimate size they would all take.
+    val totalNumBytes = predefinedKeys.map(_.length + 2).sum
     val stringBytes = new Array[Byte](totalNumBytes)
     val keyToNum = DMap.empty[Long, Int]
     var index = 0
     val offsets = predefinedKeys.scanLeft(UnsafeUtils.arayOffset.toLong) { case (offset, str) =>
                     val bytes = str.getBytes
-                    require(bytes.size < 192, s"Predefined key $str too long")
-                    UTF8StringShort.copyByteArrayTo(bytes, stringBytes, offset)
+                    UTF8StringMedium.copyByteArrayTo(bytes, stringBytes, offset)
                     keyToNum(makeKeyKey(bytes)) = index
                     index += 1
-                    offset + bytes.size + 1
+                    offset + bytes.size + 2
                   }.toArray
     (offsets, stringBytes, keyToNum)
   }
@@ -339,11 +335,13 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     (columns, partitionFieldStart, predefinedKeys, brSchema)
 }
 
+@Deprecated
 trait MapItemConsumer {
   /**
-   * Invoked for each key and value pair.
-   * @param (keyBase, keyOffset) pointer to the key UTF8StringShort
-   * @param (valueBase, valueOffset) pointer to the value UTF8StringMedium
+   * Invoked for each key and value pair.  The (base, offset) points to a UTF8StringMedium, use that objects
+   * methods to work with each UTF8 string.
+   * @param (keyBase,keyOffset) pointer to the key UTF8String
+   * @param (valueBase, valueOffset) pointer to the value UTF8String
    * @param index an increasing index of the pair within the map, starting at 0
    */
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit
@@ -352,15 +350,17 @@ trait MapItemConsumer {
 /**
  * A MapItemConsumer which turns the key and value pairs into strings
  */
+@Deprecated
 class StringifyMapItemConsumer extends MapItemConsumer {
   val stringPairs = new collection.mutable.ArrayBuffer[(String, String)]
   def prettyPrint: String = "{" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "}"
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    stringPairs += (UTF8StringShort.toString(keyBase, keyOffset) ->
+    stringPairs += (UTF8StringMedium.toString(keyBase, keyOffset) ->
                     UTF8StringMedium.toString(valueBase, valueOffset))
   }
 }
 
+@Deprecated
 object RecordSchema {
   import Column.ColumnType._
 
@@ -380,30 +380,26 @@ object RecordSchema {
    * we don't want to box.
    * In the output, the lower 32 bits is the hashcode of the bytes.
    */
-  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long = {
+  private[binaryrecord] def makeKeyKey(strBytes: Array[Byte]): Long = {
     val hash = BinaryRegion.hasher32.hash(strBytes, 0, strBytes.size, BinaryRegion.Seed)
     (UnsafeUtils.getInt(strBytes, UnsafeUtils.arayOffset).toLong << 32) | hash
   }
 
-  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
+  private[binaryrecord] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
     val hash = if (keyHash != 7) { keyHash }
                else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
     (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
   }
 
   /**
-   * Extracts the schemaID out of a BinaryRecord which contains a partition key.  Do not use this on a BR which
-   * is not ingestion or partition key.
+   * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
    */
-  final def schemaID(base: Any, offset: Long): Int = {
-    require(UnsafeUtils.getInt(base, offset) >= 2, "Empty BinaryRecord/not large enough")
-    UnsafeUtils.getShort(base, offset + 4) & 0x0ffff
+  def ingestion(dataset: Dataset, predefinedKeys: Seq[String] = Nil): RecordSchema = {
+    val columns = dataset.dataColumns ++ dataset.partitionColumns
+    new RecordSchema(columns.map(c => ColumnInfo(c.name, c.columnType)),
+                     Some(dataset.dataColumns.length),
+                     predefinedKeys)
   }
-
-  final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
-
-  final def schemaID(bytes: Array[Byte]): Int =
-    if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
 
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
@@ -411,27 +407,28 @@ object RecordSchema {
 }
 
 // Used with PartitionTimeRangeReader, when a user queries for a partition column
+@Deprecated
 final class PartKeyUTF8Iterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.UTF8Iterator {
   val blob = schema.asZCUTF8Str(base, offset, fieldNo)
   final def next: ZeroCopyUTF8String = blob
 }
 
+@Deprecated
 final class PartKeyLongIterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.LongIterator {
   val num = schema.getLong(base, offset, fieldNo)
   final def next: Long = num
 }
 
 /**
- * This is a trait meant to provide a RowReader API for the new BinaryRecord v2.
+ * This is a class meant to provide a RowReader API for the new BinaryRecord v2.
  * NOTE: Strings cause an allocation of a ZeroCopyUTF8String instance.  TODO: provide a better API that does
  * not result in allocations.
  * It is meant to be reused again and again and is MUTABLE.
  */
-trait BinaryRecordRowReaderBase extends RowReader {
-  def schema: RecordSchema
-  def recordBase: Any
-  def recordOffset: Long
-
+@Deprecated
+final class BinaryRecordRowReader(schema: RecordSchema,
+                                  var recordBase: Any = UnsafeUtils.ZeroPointer,
+                                  var recordOffset: Long = 0L) extends RowReader {
   // BinaryRecordV2 fields always have a value
   def notNull(columnNo: Int): Boolean = columnNo >= 0 && columnNo < schema.numFields
   def getBoolean(columnNo: Int): Boolean = schema.getInt(recordBase, recordOffset, columnNo) != 0
@@ -442,14 +439,7 @@ trait BinaryRecordRowReaderBase extends RowReader {
   def getString(columnNo: Int): String = filoUTF8String(columnNo).toString
   override def getHistogram(columnNo: Int): bv.Histogram =
     bv.BinaryHistogram.BinHistogram(blobAsBuffer(columnNo)).toHistogram
-
-  // getAny is not used for anything fast, and we can make sure Map items are returned correctly
-  def getAny(columnNo: Int): Any = schema.columnTypes(columnNo) match {
-    case MapColumn => val consumer = new StringifyMapItemConsumer
-                      schema.consumeMapItems(recordBase, recordOffset, columnNo, consumer)
-                      consumer.stringPairs.toMap
-    case _: Any    => schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
-  }
+  def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 
   def getBlobBase(columnNo: Int): Any = schema.blobBase(recordBase, recordOffset, columnNo)
@@ -463,13 +453,4 @@ trait BinaryRecordRowReaderBase extends RowReader {
                               getBlobNumBytes(columnNo) + 2, buf)
     buf
   }
-}
-
-final class BinaryRecordRowReader(val schema: RecordSchema,
-                                  var recordBase: Any = UnsafeUtils.ZeroPointer,
-                                  var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase
-
-final class MultiSchemaBRRowReader(var recordBase: Any = UnsafeUtils.ZeroPointer,
-                                   var recordOffset: Long = 0L) extends BinaryRecordRowReaderBase {
-  var schema: RecordSchema = _
 }

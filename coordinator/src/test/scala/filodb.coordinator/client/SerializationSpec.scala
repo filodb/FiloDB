@@ -172,7 +172,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val mapper = new ShardMapper(1)
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
-    val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")),
@@ -211,7 +211,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
@@ -241,7 +241,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(

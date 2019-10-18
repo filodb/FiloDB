@@ -266,9 +266,8 @@ object RangeFunction {
             columnType: ColumnType,
             config: QueryConfig,
             funcParams: Seq[Any] = Nil,
-            maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
-    generatorFor(schema, func, columnType, config, funcParams, maxCol, useChunked)()
+    generatorFor(schema, func, columnType, config, funcParams, useChunked)()
 
   /**
    * Given a function type and column type, returns a RangeFunctionGenerator
@@ -278,13 +277,12 @@ object RangeFunction {
                    columnType: ColumnType,
                    config: QueryConfig,
                    funcParams: Seq[Any] = Nil,
-                   maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator = {
     if (useChunked) columnType match {
       case ColumnType.DoubleColumn => doubleChunkedFunction(schema, func, config, funcParams)
       case ColumnType.LongColumn => longChunkedFunction(schema, func, funcParams)
       case ColumnType.TimestampColumn => longChunkedFunction(schema, func, funcParams)
-      case ColumnType.HistogramColumn => histChunkedFunction(func, funcParams, maxCol)
+      case ColumnType.HistogramColumn => histChunkedFunction(schema, func, funcParams)
       case other: ColumnType => throw new IllegalArgumentException(s"Column type $other not supported")
     } else {
       iteratingFunction(func, funcParams)
@@ -337,16 +335,26 @@ object RangeFunction {
       case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionD
       case Some(Changes)          => () => new ChangesChunkedFunctionD()
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
+      case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
 
-  def histChunkedFunction(func: Option[InternalRangeFunction],
-                          funcParams: Seq[Any] = Nil,
-                          maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
-    case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
+  def histMaxRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
+    f match {
+      case None                   => Some(LastSampleHistMax)
+      case Some(SumOverTime)      => Some(SumAndMaxOverTime)
+      case other                  => other
+    }
+
+  def histChunkedFunction(schema: ResultSchema,
+                          func: Option[InternalRangeFunction],
+                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionH
-    case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
+    case Some(LastSampleHistMax) => require(schema.columns(2).name == "max")
+                                 () => new LastSampleChunkedFunctionHMax(schema.colIDs(2))
+    case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
+                                 () => new SumAndMaxOverTimeFuncHD(schema.colIDs(2))
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
     case Some(Increase)       => () => new HistIncreaseFunction
