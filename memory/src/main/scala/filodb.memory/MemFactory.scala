@@ -273,7 +273,7 @@ class BlockMemFactory(blockStore: BlockManager,
     * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
     * @return the Long native address of the last metadata block written
-    * @throws IllegalStateException if startMetaSpan wasn't called, or if metaSize is larger
+    * throws IllegalStateException if startMetaSpan wasn't called, or if metaSize is larger
     * than max allowed, or if nothing was allocated
     */
   def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
