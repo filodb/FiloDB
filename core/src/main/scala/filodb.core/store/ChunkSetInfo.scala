@@ -56,15 +56,15 @@ object ChunkSet {
   */
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
-  def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
+  def id: ChunkID = ChunkSetInfo.getChunkID(MemoryAccessor.rawPointer, infoAddr)
   // ingestion time as milliseconds from 1970
-  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(infoAddr)
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(MemoryAccessor.rawPointer, infoAddr)
   // number of rows encoded by this chunkset
-  def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
+  def numRows: Int = ChunkSetInfo.getNumRows(MemoryAccessor.rawPointer, infoAddr)
   // the starting timestamp of this chunkset
-  def startTime: Long = ChunkSetInfo.getStartTime(infoAddr)
+  def startTime: Long = ChunkSetInfo.getStartTime(MemoryAccessor.rawPointer, infoAddr)
   // The ending timestamp of this chunkset
-  def endTime: Long = ChunkSetInfo.getEndTime(infoAddr)
+  def endTime: Long = ChunkSetInfo.getEndTime(MemoryAccessor.rawPointer, infoAddr)
 
   /**
    * Returns the vector pointer for a particular column
@@ -149,40 +149,32 @@ object ChunkSetInfo extends StrictLogging {
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
 
-  def getChunkID(infoPointer: Long, base: Any = UnsafeUtils.ZeroPointer): ChunkID = {
-    UnsafeUtils.getLong(base, infoPointer + OffsetChunkID)
+  def getChunkID(acc: MemoryAccessor, infoPointer: Long): ChunkID = {
+    acc.getLong(infoPointer + OffsetChunkID)
   }
-  def getChunkID(infoBytes: Array[Byte]): ChunkID =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
-  def getIngestionTime(infoPointer: NativePointer, base: Any = UnsafeUtils.ZeroPointer): Long = {
-    UnsafeUtils.getLong(base, infoPointer + OffsetIngestionTime)
+  def getIngestionTime(acc: MemoryAccessor, infoPointer: Long): Long = {
+    acc.getLong(infoPointer + OffsetIngestionTime)
   }
-  def getIngestionTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
   def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
 
-  def getNumRows(infoPointer: NativePointer, base: Any = UnsafeUtils.ZeroPointer): Int = {
-    UnsafeUtils.getInt(infoPointer + OffsetNumRows)
+  def getNumRows(acc: MemoryAccessor, infoPointer: Long): Int = {
+    acc.getInt(infoPointer + OffsetNumRows)
   }
-  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(infoPointer: Long, base: Any = UnsafeUtils.ZeroPointer): Long = {
-    startTimeFromChunkID(getChunkID(infoPointer, base))
+  def getStartTime(acc: MemoryAccessor, infoPointer: Long): Long = {
+    startTimeFromChunkID(getChunkID(acc, infoPointer))
   }
-  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
 
-  def getEndTime(infoPointer: Long, base: Any = UnsafeUtils.ZeroPointer): Long = {
-    UnsafeUtils.getLong(base, infoPointer + OffsetEndTime)
+  def getEndTime(acc: MemoryAccessor, infoPointer: Long): Long = {
+    acc.getLong(infoPointer + OffsetEndTime)
   }
-  def getEndTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
   def setEndTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
 
@@ -199,8 +191,8 @@ object ChunkSetInfo extends StrictLogging {
   def copy(orig: ChunkSetInfo, newAddr: NativePointer): Unit =
     UnsafeUtils.copy(orig.infoAddr, newAddr, OffsetVectors)
 
-  def copy(bytes: Array[Byte], newAddr: NativePointer): Unit =
-    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, newAddr, bytes.size)
+//  def copy(bytes: Array[Byte], newAddr: NativePointer): Unit =
+//    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, newAddr, bytes.size)
 
   /**
    * Actually compares the contents of the ChunkSetInfo non-vector metadata to see if they are equal
@@ -449,7 +441,7 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getBoolean(columnNo: Int): Boolean = ???
   def getInt(columnNo: Int): Int = columnNo match {
     case 1 => info.numRows
-    case 4 => BinaryVector.totalBytes(info.vectorPtr(column.id))
+    case 4 => BinaryVector.totalBytes(MemoryAccessor.rawPointer, info.vectorPtr(column.id))
   }
   def getLong(columnNo: Int): Long = columnNo match {
     case 0 => info.id
@@ -460,11 +452,12 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getDouble(columnNo: Int): Double = ???
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
-    case IntColumn    => vectors.IntBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
-    case TimestampColumn => vectors.LongBinaryVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
-    case DoubleColumn => vectors.DoubleVector(UnsafeUtils.ZP, info.vectorPtr(column.id)).getClass.getName
-    case StringColumn => vectors.UTF8Vector(info.vectorPtr(column.id)).getClass.getName
+    case IntColumn    => vectors.IntBinaryVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(MemoryAccessor.rawPointer,
+                                    info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
     case o: Any       => "nananana, heyheyhey, goodbye"
   }
 

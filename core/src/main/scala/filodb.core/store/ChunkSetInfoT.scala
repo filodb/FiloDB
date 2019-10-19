@@ -3,7 +3,7 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.{MemoryAccessor, UnsafeUtils}
 
 trait ChunkSetInfoT {
   /**
@@ -35,7 +35,7 @@ trait ChunkSetInfoT {
     *
     * Base for vector pointers given column
     */
-  def vectorBase(colId: Int): Any
+  def vectorAccessor(colId: Int): MemoryAccessor
 
   /**
     *
@@ -46,16 +46,16 @@ trait ChunkSetInfoT {
 }
 
 final case class ChunkSetInfoOnHeap(bytes: ByteBuffer, vectors: Seq[ByteBuffer]) extends ChunkSetInfoT {
-  val (base, offset, numBytes) = UnsafeUtils.BOLfromBuffer(bytes)
-  val vectorsBol = vectors.map(UnsafeUtils.BOLfromBuffer(_))
+  val bytesAcc = MemoryAccessor.fromOnHeapByteBuffer(bytes)
+  val vectorsAcc = vectors.map(MemoryAccessor.fromOnHeapByteBuffer)
 
-  def id: ChunkID = ChunkSetInfo.getChunkID(offset, base)
-  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(offset, base)
-  def numRows: Int = ChunkSetInfo.getNumRows(offset, base)
-  def startTime: Long = ChunkSetInfo.getStartTime(offset, base)
-  def endTime: Long = ChunkSetInfo.getEndTime(offset, base)
-  def vectorBase(colId: Int): Any = vectorsBol(colId)._1
-  def vectorOffset(colId: Int): Long = vectorsBol(colId)._2
+  def id: ChunkID = ChunkSetInfo.getChunkID(bytesAcc, 0)
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(bytesAcc, 0)
+  def numRows: Int = ChunkSetInfo.getNumRows(bytesAcc, 0)
+  def startTime: Long = ChunkSetInfo.getStartTime(bytesAcc, 0)
+  def endTime: Long = ChunkSetInfo.getEndTime(bytesAcc, 0)
+  def vectorAccessor(colId: Int): MemoryAccessor = vectorsAcc(colId)
+  def vectorOffset(colId: Int): Long = 0
 }
 
 final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoT {
@@ -66,7 +66,7 @@ final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoT {
   def numRows: Int = csi.numRows
   def startTime: Long = csi.startTime
   def endTime: Long = csi.endTime
-  def vectorBase(colId: Int): Any = UnsafeUtils.ZeroPointer
+  def vectorAccessor(colId: Int): MemoryAccessor = MemoryAccessor.rawPointer
   def vectorOffset(colId: Int): Long = csi.vectorPtr(colId)
 }
 

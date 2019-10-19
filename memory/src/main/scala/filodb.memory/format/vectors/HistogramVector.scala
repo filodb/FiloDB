@@ -242,7 +242,8 @@ class AppendableHistogramVector(factory: MemFactory,
   protected def vectSubType: Int = WireFormat.SUBTYPE_H_SIMPLE
 
   // Initialize header
-  BinaryVector.writeMajorAndSubType(addr, WireFormat.VECTORTYPE_HISTOGRAM, vectSubType)
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.rawPointer,
+    addr, WireFormat.VECTORTYPE_HISTOGRAM, vectSubType)
   reset()
 
   final def addr: BinaryVectorPtr = vectPtr.addr
