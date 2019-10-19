@@ -161,24 +161,27 @@ object HistogramVector {
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
 
-  final def getNumBuckets(base: Any, addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16(base)
+  final def getNumBuckets(acc: MemoryAccessor, addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16(acc)
 
-  final def getNumHistograms(base: Any, addr: Ptr.U8): Int = addr.add(OffsetNumHistograms).asU16.getU16(base)
-  final def resetNumHistograms(base: Any, addr: Ptr.U8): Unit = addr.add(OffsetNumHistograms).asU16.asMut.set(base, 0)
-  final def incrNumHistograms(base: Any, addr: Ptr.U8): Unit =
-    addr.add(OffsetNumHistograms).asU16.asMut.set(base, getNumHistograms(base, addr) + 1)
+  final def getNumHistograms(acc: MemoryAccessor, addr: Ptr.U8): Int = addr.add(OffsetNumHistograms).asU16.getU16(acc)
+  final def resetNumHistograms(acc: MemoryAccessor, addr: Ptr.U8): Unit =
+    addr.add(OffsetNumHistograms).asU16.asMut.set(acc, 0)
+  final def incrNumHistograms(acc: MemoryAccessor, addr: Ptr.U8): Unit =
+    addr.add(OffsetNumHistograms).asU16.asMut.set(acc, getNumHistograms(acc, addr) + 1)
 
   // Note: the format code defines bucket definition format + format of each individual compressed histogram
-  final def formatCode(base: Any, addr: Ptr.U8): Byte = addr.add(OffsetFormatCode).getU8(base).toByte
-  final def afterBucketDefAddr(base: Any, addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef + bucketDefNumBytes(base, addr)
-  final def bucketDefNumBytes(base: Any, addr: Ptr.U8): Int = addr.add(OffsetBucketDefSize).asU16.getU16(base)
-  final def bucketDefAddr(base: Any, addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
+  final def formatCode(acc: MemoryAccessor, addr: Ptr.U8): Byte = addr.add(OffsetFormatCode).getU8(acc).toByte
+  final def afterBucketDefAddr(acc: MemoryAccessor, addr: Ptr.U8): Ptr.U8 =
+    addr + OffsetBucketDef + bucketDefNumBytes(acc, addr)
+  final def bucketDefNumBytes(acc: MemoryAccessor, addr: Ptr.U8): Int =
+    addr.add(OffsetBucketDefSize).asU16.getU16(acc)
+  final def bucketDefAddr(acc: MemoryAccessor, addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
 
   // Matches the bucket definition whose # bytes is at (base, offset)
-  final def matchBucketDef(hist: BinaryHistogram.BinHistogram, base: Any, addr: Ptr.U8): Boolean =
-    (hist.formatCode == formatCode(base, addr)) &&
-    (hist.bucketDefNumBytes == bucketDefNumBytes(base, addr)) && {
-      UnsafeUtils.equate(UnsafeUtils.ZeroPointer, bucketDefAddr(base, addr).addr,
+  final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryAccessor, addr: Ptr.U8): Boolean =
+    (hist.formatCode == formatCode(acc, addr)) &&
+    (hist.bucketDefNumBytes == bucketDefNumBytes(acc, addr)) && {
+      UnsafeUtils.equate(UnsafeUtils.ZeroPointer, bucketDefAddr(acc, addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
 
@@ -199,14 +202,14 @@ object HistogramVector {
 
   def apply(buffer: ByteBuffer): HistogramReader = {
     require(buffer.isDirect)
-    apply(UnsafeUtils.ZP, UnsafeUtils.addressFromDirectBuffer(buffer))
+    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
   }
 
   import WireFormat._
 
-  def apply(base: Any, p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(base, p) match {
-    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(base, Ptr.U8(p))
-    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) =>new SectDeltaHistogramReader(base, Ptr.U8(p))
+  def apply(acc: MemoryAccessor, p: BinaryVectorPtr): HistogramReader = BinaryVector.vectorType(acc, p) match {
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SIMPLE) => new RowHistogramReader(acc, Ptr.U8(p))
+    case x if x == WireFormat(VECTORTYPE_HISTOGRAM, SUBTYPE_H_SECTDELTA) =>new SectDeltaHistogramReader(acc, Ptr.U8(p))
   }
 
   // Thread local buffer used as temp buffer for histogram vector encoding ONLY
@@ -250,15 +253,15 @@ class AppendableHistogramVector(factory: MemFactory,
     factory.freeMemory(addr)
   }
 
-  final def numBytes: Int = vectPtr.asI32.getI32(UnsafeUtils.ZP) + 4
-  final def length: Int = getNumHistograms(UnsafeUtils.ZP, vectPtr)
+  final def numBytes: Int = vectPtr.asI32.getI32(MemoryAccessor.rawPointer) + 4
+  final def length: Int = getNumHistograms(MemoryAccessor.rawPointer, vectPtr)
   final def isAvailable(index: Int): Boolean = true
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
 
   private def setNumBytes(len: Int): Unit = {
     require(len >= 0)
-    vectPtr.asI32.asMut.set(UnsafeUtils.ZP, len)
+    vectPtr.asI32.asMut.set(MemoryAccessor.rawPointer, len)
   }
 
   // NOTE: to eliminate allocations, re-use the DirectBuffer and keep passing the same instance to addData
@@ -271,21 +274,21 @@ class AppendableHistogramVector(factory: MemFactory,
     }
     if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
 
-    val numItems = getNumHistograms(UnsafeUtils.ZP, vectPtr)
+    val numItems = getNumHistograms(MemoryAccessor.rawPointer, vectPtr)
     val numBuckets = h.numBuckets
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-                                    UnsafeUtils.ZP, bucketDefAddr(UnsafeUtils.ZP, vectPtr).addr, h.bucketDefNumBytes)
+        MemoryAccessor.rawPointer, bucketDefAddr(MemoryAccessor.rawPointer, vectPtr).addr, h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
       // Initialize the first section
-      val firstSectPtr = afterBucketDefAddr(UnsafeUtils.ZP, vectPtr)
-      initSectionWriter(UnsafeUtils.ZP, firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
+      val firstSectPtr = afterBucketDefAddr(MemoryAccessor.rawPointer, vectPtr)
+      initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     } else {
       // check the bucket schema is identical.  If not, return BucketSchemaMismatch
-      if (!matchBucketDef(h, UnsafeUtils.ZP, vectPtr)) return BucketSchemaMismatch
+      if (!matchBucketDef(h, MemoryAccessor.rawPointer, vectPtr)) return BucketSchemaMismatch
     }
 
     val res = appendHist(buf, h, numItems)
@@ -293,7 +296,7 @@ class AppendableHistogramVector(factory: MemFactory,
       // set new number of bytes first. Remember to exclude initial 4 byte length prefix
       setNumBytes(maxBytes - bytesLeft - 4)
       // Finally, increase # histograms which is the ultimate safe gate for access by readers
-      incrNumHistograms(UnsafeUtils.ZP, vectPtr)
+      incrNumHistograms(MemoryAccessor.rawPointer, vectPtr)
     }
     res
   }
@@ -312,10 +315,10 @@ class AppendableHistogramVector(factory: MemFactory,
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   // NOTE: do not access reader below unless this vect is nonempty.  TODO: fix this, or don't if we don't use this class
-  lazy val reader: VectorDataReader = new RowHistogramReader(UnsafeUtils.ZP, vectPtr)
+  lazy val reader: VectorDataReader = new RowHistogramReader(MemoryAccessor.rawPointer, vectPtr)
 
   def reset(): Unit = {
-    resetNumHistograms(UnsafeUtils.ZP, vectPtr)
+    resetNumHistograms(MemoryAccessor.rawPointer, vectPtr)
     setNumBytes(OffsetNumBuckets + 2)
   }
 
@@ -409,10 +412,11 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
     }
   }
 
-  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(UnsafeUtils.ZP, vectPtr)
+  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(MemoryAccessor.rawPointer, vectPtr)
 }
 
 trait HistogramReader extends VectorDataReader {
+  def acc: MemoryAccessor
   def buckets: HistogramBuckets
   def apply(index: Int): HistogramWithBuckets
   def sum(start: Int, end: Int): MutableHistogram
@@ -422,27 +426,26 @@ trait HistogramReader extends VectorDataReader {
  * A reader for row-based Histogram vectors.  Mostly contains logic to skip around the vector to find the right
  * record pointer.
  */
-class RowHistogramReader(base: Any, histVect: Ptr.U8) extends HistogramReader with SectionReader {
+class RowHistogramReader(val acc: MemoryAccessor, histVect: Ptr.U8) extends HistogramReader with SectionReader {
   import HistogramVector._
 
-  final def length: Int = getNumHistograms(base, histVect)
-  val numBuckets = if (length > 0) getNumBuckets(base, histVect) else 0
+  final def length: Int = getNumHistograms(acc, histVect)
+  val numBuckets = if (length > 0) getNumBuckets(acc, histVect) else 0
 
-  val buckets = HistogramBuckets(bucketDefAddr(base, histVect).add(-2), formatCode(base, histVect))
+  val buckets = HistogramBuckets(bucketDefAddr(acc, histVect).add(-2), formatCode(acc, histVect))
   val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
-  val endAddr = histVect + histVect.asI32.getI32(base) + 4
+  val endAddr = histVect + histVect.asI32.getI32(acc) + 4
 
-  def firstSectionAddr: Ptr.U8 = afterBucketDefAddr(base, histVect)
-  def firstSectionBase: Any = base
+  def firstSectionAddr: Ptr.U8 = afterBucketDefAddr(acc, histVect)
 
   /**
    * Iterates through each histogram. Note this is expensive due to materializing the Histogram object
    * every time.  Using higher level functions such as sum is going to be a much better bet usually.
    */
-  def iterate(histBase: Any, vector: BinaryVectorPtr, startElement: Int): TypedIterator =
+  def iterate(accNotUsed: MemoryAccessor, vectorNotUsed: BinaryVectorPtr, startElement: Int): TypedIterator =
   new Iterator[Histogram] with TypedIterator {
     var elem = startElement
-    def hasNext: Boolean = elem < getNumHistograms(histBase, histVect)
+    def hasNext: Boolean = elem < getNumHistograms(acc, histVect)
     def next: Histogram = {
       val h = apply(elem)
       elem += 1
@@ -450,7 +453,7 @@ class RowHistogramReader(base: Any, histVect: Ptr.U8) extends HistogramReader wi
     }
   }
 
-  def length(histBase: Any, addr: BinaryVectorPtr): Int = length
+  def length(accNotUsed: MemoryAccessor, vectorNotUsed: BinaryVectorPtr): Int = length
 
   protected val dSink = NibblePack.DeltaSink(returnHist.values)
 
@@ -458,7 +461,7 @@ class RowHistogramReader(base: Any, histVect: Ptr.U8) extends HistogramReader wi
   def apply(index: Int): HistogramWithBuckets = {
     require(length > 0)
     val histPtr = locate(index)
-    val histLen = histPtr.asU16.getU16(base)
+    val histLen = histPtr.asU16.getU16(acc)
     val buf = BinaryHistogram.valuesBuf
     buf.wrap(histPtr.add(2).addr, histLen)
     dSink.reset()
@@ -487,20 +490,20 @@ trait CounterHistogramReader extends HistogramReader with CounterVectorReader {
 /**
  * A reader for SectDelta encoded histograms, including correction/drop functionality
  */
-class SectDeltaHistogramReader(base: Any, histVect: Ptr.U8) extends RowHistogramReader(base, histVect)
-                                                            with CounterHistogramReader {
+class SectDeltaHistogramReader(acc2: MemoryAccessor, histVect: Ptr.U8)
+      extends RowHistogramReader(acc2, histVect) with CounterHistogramReader {
   // baseHist is section base histogram; summedHist used to compute base + delta or other sums
   private val summedHist = LongHistogram.empty(buckets)
   private val baseHist = summedHist.copy
   private val baseSink = NibblePack.DeltaSink(baseHist.values)
 
   // override setSection: also set the base histogram for getting real value
-  override def setSection(sectBase: Any, sectAddr: Ptr.U8, newElemNo: Int = 0): Unit = {
-    super.setSection(sectBase, sectAddr, newElemNo)
+  override def setSection(sectAddr: Ptr.U8, newElemNo: Int = 0): Unit = {
+    super.setSection(sectAddr, newElemNo)
     // unpack to baseHist
     baseSink.reset()
     val buf = BinaryHistogram.valuesBuf
-    buf.wrap(curHist.add(2).addr, curHist.asU16.getU16(base))
+    buf.wrap(curHist.add(2).addr, curHist.asU16.getU16(acc))
     NibblePack.unpackToSink(buf, baseSink, numBuckets)
   }
 
@@ -511,7 +514,7 @@ class SectDeltaHistogramReader(base: Any, histVect: Ptr.U8) extends RowHistogram
     // Just return the base histogram if we are at start of section
     if (index == sectStartingElemNo) baseHist
     else {
-      val histLen = histPtr.asU16.getU16(base)
+      val histLen = histPtr.asU16.getU16(acc)
       val buf = BinaryHistogram.valuesBuf
       buf.wrap(histPtr.add(2).addr, histLen)
       dSink.reset()
@@ -526,7 +529,8 @@ class SectDeltaHistogramReader(base: Any, histVect: Ptr.U8) extends RowHistogram
   // TODO: optimized summing.  It's wasteful to apply the base + delta math so many times ...
   // instead add delta + base * n if possible.   However, do we care about sum performance on increasing histograms?
 
-  def detectDropAndCorrection(base: Any, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = meta match {
+  def detectDropAndCorrection(accNotUsed: MemoryAccessor, vectorNotUsed: BinaryVectorPtr,
+                              meta: CorrectionMeta): CorrectionMeta = meta match {
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
     case h @ HistogramCorrection(lastValue, correction) =>
       val firstValue = apply(0)
@@ -541,13 +545,14 @@ class SectDeltaHistogramReader(base: Any, histVect: Ptr.U8) extends RowHistogram
   lazy val corrections = {
     var index = 0
     // Step 1: build an iterator of (starting-index, section) for each section
-    iterateSections.map { case (s) => val o = (index, s); index += s.numElements; o }.collect {
-      case (i, s) if i > 0 && s.sectionType == Section.TypeDrop =>
+    iterateSections.map { case (s) => val o = (index, s); index += s.numElements(acc); o }.collect {
+      case (i, s) if i > 0 && s.sectionType(acc) == Section.TypeDrop =>
         (i, apply(i - 1).asInstanceOf[LongHistogram].copy)
     }.toBuffer
   }
 
-  def updateCorrection(base: Any, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
+  def updateCorrection(accNotUsed: MemoryAccessor, vectorNotUsed: BinaryVectorPtr,
+                       meta: CorrectionMeta): CorrectionMeta = {
     val correction = meta match {
       case NoCorrection                 => LongHistogram.empty(buckets)
       case HistogramCorrection(_, corr) => corr

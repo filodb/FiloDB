@@ -12,7 +12,6 @@ object UnsafeUtils {
 
   // scalastyle:off
   val ZeroPointer: Any = null
-  def ZP: Any = null.asInstanceOf[Any]
   val ZeroArray = null.asInstanceOf[Array[Byte]]
   // scalastyle:on
 

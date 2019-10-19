@@ -49,7 +49,7 @@ object UTF8Vector {
    */
   def apply(buffer: ByteBuffer): UTF8VectorDataReader = {
     require(buffer.isDirect)
-    apply(UnsafeUtils.ZP, UnsafeUtils.addressFromDirectBuffer(buffer))
+    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
   }
 
   import WireFormat._
@@ -58,11 +58,13 @@ object UTF8Vector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * UTF8VectorDataReader object for parsing it
    */
-  def apply(base: Any, vector: BinaryVectorPtr): UTF8VectorDataReader = BinaryVector.vectorType(base, vector) match {
-    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_UTF8)     => UTF8FlexibleVectorDataReader
-    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_FIXEDMAXUTF8) => ???
-    case x if x == WireFormat(VECTORTYPE_BINDICT, SUBTYPE_UTF8)       => UTF8DictVectorDataReader
-    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_REPEATED) => UTF8ConstVector
+  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr): UTF8VectorDataReader = {
+    BinaryVector.vectorType(acc, vector) match {
+      case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_UTF8)     => UTF8FlexibleVectorDataReader
+      case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_FIXEDMAXUTF8) => ???
+      case x if x == WireFormat(VECTORTYPE_BINDICT, SUBTYPE_UTF8)       => UTF8DictVectorDataReader
+      case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_REPEATED) => UTF8ConstVector
+    }
   }
 
   val SmallOffsetNBits  = 20
@@ -104,7 +106,7 @@ trait UTF8VectorDataReader extends VectorDataReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(base: Any, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String
+  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String
 
   /**
    * Returns a UTF8Iterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -114,18 +116,18 @@ trait UTF8VectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
+  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[ZeroCopyUTF8String] = {
+  def toBuffer(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[ZeroCopyUTF8String] = {
     val newBuf = Buffer.empty[ZeroCopyUTF8String]
-    val dataIt = iterate(base, vector, startElement)
-    val availIt = iterateAvailable(base, vector, startElement)
-    val len = length(base, vector)
+    val dataIt = iterate(acc, vector, startElement)
+    val availIt = iterateAvailable(acc, vector, startElement)
+    val len = length(acc, vector)
     for { n <- startElement until len optimized } {
       val item = dataIt.next
       if (availIt.next) newBuf += item
@@ -148,32 +150,33 @@ trait UTF8VectorDataReader extends VectorDataReader {
 object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
   import UTF8Vector._
 
-  final def length(base: Any, vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(base, vector + 8)
-  final def apply(base: Any, vector: BinaryVectorPtr, index: Int): ZeroCopyUTF8String = {
-    val fixedData = UnsafeUtils.getInt(base, vector + 12 + index * 4)
+  final def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = acc.getInt(vector + 8)
+  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, index: Int): ZeroCopyUTF8String = {
+    val fixedData = acc.getInt(vector + 12 + index * 4)
     if (fixedData != NABlob) {
       val utf8addr = vector + (if (fixedData < 0) smallOff(fixedData) else (fixedData))
-      val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else UnsafeUtils.getInt(base, vector + fixedData)
-      new ZeroCopyUTF8String(base, utf8addr, utf8len)
+      val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else acc.getInt(vector + fixedData)
+      new ZeroCopyUTF8String(acc, utf8addr, utf8len)
     } else {
       ZeroCopyUTF8String.NA
     }
   }
 
-  final def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+  final def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr,
+                    startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
     private final var n = startElement
     final def next: ZeroCopyUTF8String = {
-      val data = apply(base, vector, n)
+      val data = apply(acc, vector, n)
       n += 1
       data
     }
   }
 
-  override def iterateAvailable(base: Any, vector: BinaryVectorPtr,
+  override def iterateAvailable(acc: MemoryAccessor, vector: BinaryVectorPtr,
                                 startElement: Int = 0): BooleanIterator = new BooleanIterator {
     private final var fixedDataPtr = vector + 12 + startElement * 4
     final def next: Boolean = {
-      val avail = UnsafeUtils.getInt(base, fixedDataPtr) != NABlob
+      val avail = acc.getInt(fixedDataPtr) != NABlob
       fixedDataPtr += 4
       avail
     }
@@ -237,17 +240,17 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     case other: AddResponse => other
   }
 
-  final def apply(n: Int): ZeroCopyUTF8String = UTF8FlexibleVectorDataReader.apply(UnsafeUtils.ZP, addr, n)
-  final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
+  final def apply(n: Int): ZeroCopyUTF8String = UTF8FlexibleVectorDataReader.apply(MemoryAccessor.rawPointer, addr, n)
+  final def isAvailable(n: Int): Boolean = MemoryAccessor.rawPointer.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
-  def copyToBuffer: Buffer[ZeroCopyUTF8String] = UTF8FlexibleVectorDataReader.toBuffer(UnsafeUtils.ZP, addr)
+  def copyToBuffer: Buffer[ZeroCopyUTF8String] = UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.rawPointer, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
   final def isAllNA: Boolean = {
     var fixedOffset = addr + 12
     while (fixedOffset < curFixedOffset) {
-      if (UnsafeUtils.getInt(fixedOffset) != NABlob) return false
+      if (MemoryAccessor.rawPointer.getInt(fixedOffset) != NABlob) return false
       fixedOffset += 4
     }
     return true
@@ -256,7 +259,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
   final def noNAs: Boolean = {
     var fixedOffset = addr + 12
     while (fixedOffset < curFixedOffset) {
-      if (UnsafeUtils.getInt(fixedOffset) == NABlob) return false
+      if (MemoryAccessor.rawPointer.getInt(fixedOffset) == NABlob) return false
       fixedOffset += 4
     }
     return true
@@ -278,9 +281,9 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     var min = Int.MaxValue
     var max = 0
     for {index <- 0 until _len optimized} {
-      val fixedData = UnsafeUtils.getInt(addr + 12 + index * 4)
+      val fixedData = MemoryAccessor.rawPointer.getInt(addr + 12 + index * 4)
       if (fixedData != NABlob) {
-        val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else UnsafeUtils.getInt(addr + fixedData)
+        val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else MemoryAccessor.rawPointer.getInt(addr + fixedData)
         if (utf8len < min) min = utf8len
         if (utf8len > max) max = utf8len
       }
@@ -290,7 +293,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
 
   override def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {
     val offsetDiff = -((maxElements - _len) * 4)
-    adjustOffsets(UnsafeUtils.ZeroPointer, newAddr, offsetDiff)
+    adjustOffsets(MemoryAccessor.rawPointer, newAddr, offsetDiff)
     UnsafeUtils.setInt(newAddr, frozenSize - 4)
     newAddr
   }
@@ -322,9 +325,9 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     }
 
   // WARNING: no checking for if delta pushes small offsets out.  Intended for compactions only.
-  private def adjustOffsets(newBase: Any, newOff: Long, delta: Int): Unit = {
+  private def adjustOffsets(newAcc: MemoryAccessor, newOff: Long, delta: Int): Unit = {
     for {i <- 0 until _len optimized} {
-      val fixedData = UnsafeUtils.getInt(newBase, newOff + 12 + i * 4)
+      val fixedData = newAcc.getInt(newOff + 12 + i * 4)
       val newData = if (fixedData < 0) {
         if (fixedData == NABlob) {
           NABlob
@@ -335,7 +338,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
       } else {
         fixedData + delta
       }
-      UnsafeUtils.setInt(newBase, newOff + 12 + i * 4, newData)
+      UnsafeUtils.setInt(newAcc, newOff + 12 + i * 4, newData)
     }
   }
 
@@ -379,12 +382,12 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
  * +0012 UTF8StringMedium (2 length bytes followed by UTF8 data)
  */
 object UTF8ConstVector extends ConstVector with UTF8VectorDataReader {
-  override def length(base: Any, vector: BinaryVectorPtr): Int = numElements(base, vector)
+  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = numElements(acc, vector)
   // TODO: return just a pointer (NativePointer) or a UTF8StringMedium value class
-  def apply(base: Any, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String =
-    new ZeroCopyUTF8String(base, vector + 14,
-                           UnsafeUtils.getShort(base, vector + 12) & 0x0ffff)
-  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
-    def next: ZeroCopyUTF8String = apply(base, vector, 0)
+  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String =
+    new ZeroCopyUTF8String(acc, vector + 14,
+                           acc.getShort(vector + 12) & 0x0ffff)
+  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+    def next: ZeroCopyUTF8String = apply(acc, vector, 0)
   }
 }

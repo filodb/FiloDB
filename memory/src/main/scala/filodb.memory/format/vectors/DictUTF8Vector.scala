@@ -109,25 +109,25 @@ object DictUTF8Vector {
  */
 object UTF8DictVectorDataReader extends UTF8VectorDataReader {
   // FIXME vector + ??
-  final def codeVectAddr(base: Any, vector: BinaryVectorPtr): BinaryVectorPtr =
-    vector + UnsafeUtils.getInt(base, vector + 8)
-  final def length(base: Any, vector: BinaryVectorPtr): Int =
-    IntBinaryVector(base, codeVectAddr(base, vector)).length(base, codeVectAddr(base, vector))
-  final def apply(base: Any, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
-    val code = IntBinaryVector(base, codeVectAddr(base, vector))(base, codeVectAddr(base, vector), n)
-    UTF8FlexibleVectorDataReader(base, vector + 12, code)
+  final def codeVectAddr(acc: MemoryAccessor, vector: BinaryVectorPtr): BinaryVectorPtr =
+    vector + acc.getInt(vector + 8)
+  final def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+    IntBinaryVector(acc, codeVectAddr(acc, vector)).length(acc, codeVectAddr(acc, vector))
+  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
+    val code = IntBinaryVector(acc, codeVectAddr(acc, vector))(acc, codeVectAddr(acc, vector), n)
+    UTF8FlexibleVectorDataReader(acc, vector + 12, code)
   }
 
-  def iterate(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
-    private final val codeIt = IntBinaryVector(base, codeVectAddr(base, vector))
-                        .iterate(base, codeVectAddr(base, vector), startElement)
-    def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(base, vector + 12, codeIt.next)
+  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+    private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
+                        .iterate(acc, codeVectAddr(acc, vector), startElement)
+    def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(acc, vector + 12, codeIt.next)
   }
 
-  override def iterateAvailable(base: Any, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+  override def iterateAvailable(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
     new BooleanIterator {
-      private final val codeIt = IntBinaryVector(base, codeVectAddr(base, vector))
-        .iterate(codeVectAddr(base, vector), startElement)
+      private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
+        .iterate(acc, codeVectAddr(acc, vector), startElement)
       final def next: Boolean = codeIt.next != 0
     }
 }

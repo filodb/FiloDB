@@ -14,7 +14,7 @@ import filodb.memory.{MemFactory, UTF8StringMedium}
 trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
   import ZeroCopyBinary._
 
-  def base: Any
+  def acc: MemoryAccessor
   def offset: Long
   def numBytes: Int
 
@@ -112,7 +112,7 @@ object ZeroCopyBinary {
  * deserialize to a regular Java string
  */
 // scalastyle:off
-final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int) extends ZeroCopyBinary {
+final class ZeroCopyUTF8String(val acc: MemoryAccessor, val offset: Long, val numBytes: Int) extends ZeroCopyBinary {
   import ZeroCopyUTF8String._
   import filodb.memory.UTF8String._
 
