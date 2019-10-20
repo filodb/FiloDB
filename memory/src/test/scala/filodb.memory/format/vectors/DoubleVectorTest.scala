@@ -6,8 +6,6 @@ import filodb.memory.format._
 
 class DoubleVectorTest extends NativeVectorTest {
 
-  val acc = MemoryAccessor.rawPointer
-
   describe("DoubleMaskedAppendableVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = DoubleVector.appendingVector(memFactory, 100)

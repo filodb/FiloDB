@@ -65,16 +65,16 @@ class UTF8VectorTest extends NativeVectorTest {
       utf8vect.frozenSize should equal (12 + 12 + 5 + 3 + 7)
 
       val frozen = utf8vect.freeze(memFactory)
-      UTF8Vector(frozen).length(frozen) shouldEqual 3
-      UTF8Vector(frozen).toBuffer(frozen).toList shouldEqual strs
-      BinaryVector.totalBytes(frozen) should equal (12 + 12 + 5 + 3 + 7)
+      UTF8Vector(acc, frozen).length(acc, frozen) shouldEqual 3
+      UTF8Vector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual strs
+      BinaryVector.totalBytes(acc, frozen) should equal (12 + 12 + 5 + 3 + 7)
     }
 
     it("should be able to parse with UTF8Vector() a DirectBuffer") {
       val strs = Seq("apple", "zoe", "bananas").map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, strs).optimize(memFactory)
       val readVect2 = UTF8Vector(BinaryVector.asBuffer(ptr))
-      readVect2.toBuffer(ptr).toList shouldEqual strs
+      readVect2.toBuffer(acc, ptr).toList shouldEqual strs
     }
 
     it("should be able to grow the UTF8Vector if run out of initial maxBytes") {
@@ -83,14 +83,14 @@ class UTF8VectorTest extends NativeVectorTest {
       val utf8vect = UTF8Vector.appendingVector(memFactory, 50, 16384)
       strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       val ptr = utf8vect.optimize(memFactory)
-      UTF8Vector(ptr).toBuffer(ptr) shouldEqual Buffer.fromIterable(strs)
+      UTF8Vector(acc, ptr).toBuffer(acc, ptr) shouldEqual Buffer.fromIterable(strs)
 
       val vect2 = UTF8Vector.appendingVector(memFactory, 50, 8192)
       vect2 shouldBe a[GrowableVector[_]]
       vect2.asInstanceOf[GrowableVector[_]].inner shouldBe a[UTF8AppendableVector]
       strs.foreach(s => vect2.addData(s) shouldEqual Ack)
       val ptr2 = vect2.optimize(memFactory)
-      UTF8Vector(ptr2).toBuffer(ptr2) shouldEqual Buffer.fromIterable(strs)
+      UTF8Vector(acc, ptr2).toBuffer(acc, ptr2) shouldEqual Buffer.fromIterable(strs)
     }
   }
 
@@ -98,25 +98,25 @@ class UTF8VectorTest extends NativeVectorTest {
     it("should produce a UTF8Vector if strings mostly same length") {
       val strs = Seq("apple", "zoe", "jack").map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, strs).optimize(memFactory)
-      val reader = UTF8Vector(ptr)
+      val reader = UTF8Vector(acc, ptr)
       reader shouldEqual UTF8FlexibleVectorDataReader
-      reader.toBuffer(ptr).toList shouldEqual strs
+      reader.toBuffer(acc, ptr).toList shouldEqual strs
     }
 
     it("should produce a UTF8Vector if one string much longer") {
       val strs = Seq("apple", "zoe", "jacksonhole, wyoming").map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, strs).optimize(memFactory)
-      val reader = UTF8Vector(ptr)
+      val reader = UTF8Vector(acc, ptr)
       reader shouldEqual UTF8FlexibleVectorDataReader
-      reader.toBuffer(ptr).toList shouldEqual strs
+      reader.toBuffer(acc, ptr).toList shouldEqual strs
     }
 
     it("should produce a UTF8ConstVector if all strings the same") {
       val strs = Seq.fill(50)("apple").map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, strs).optimize(memFactory)
-      val reader = UTF8Vector(ptr)
+      val reader = UTF8Vector(acc, ptr)
       reader shouldEqual UTF8ConstVector
-      reader.toBuffer(ptr).toList shouldEqual strs
+      reader.toBuffer(acc, ptr).toList shouldEqual strs
     }
   }
 
@@ -139,11 +139,11 @@ class UTF8VectorTest extends NativeVectorTest {
       val strs = ZeroCopyUTF8String.NA +:
                  Seq("apple", "zoe", "grape").permutations.flatten.toList.map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, strs).optimize(memFactory, AutoDictString(samplingRate=0.5))
-      val reader = UTF8Vector(ptr)
+      val reader = UTF8Vector(acc, ptr)
       reader shouldEqual UTF8DictVectorDataReader
-      reader.length(ptr) shouldEqual strs.length
-      reader.toBuffer(ptr).toList shouldEqual strs.drop(1)
-      reader(ptr, 0) // shouldEqual ZeroCopyUTF8String("")
+      reader.length(acc, ptr) shouldEqual strs.length
+      reader.toBuffer(acc, ptr).toList shouldEqual strs.drop(1)
+      reader(acc, ptr, 0) // shouldEqual ZeroCopyUTF8String("")
     }
 
     // Negative byte values might not get converted to ints properly, leading
@@ -152,11 +152,11 @@ class UTF8VectorTest extends NativeVectorTest {
       val orig = (0 to 130).map(_.toString).map(ZeroCopyUTF8String.apply)
       val ptr = UTF8Vector(memFactory, orig).optimize(memFactory,
                                              AutoDictString(spaceThreshold = 1.1))
-      val reader = UTF8Vector(ptr)
+      val reader = UTF8Vector(acc, ptr)
       reader shouldEqual UTF8DictVectorDataReader
 
-      reader.length(ptr) shouldEqual orig.length
-      reader.toBuffer(ptr).toList shouldEqual orig
+      reader.length(acc, ptr) shouldEqual orig.length
+      reader.toBuffer(acc, ptr).toList shouldEqual orig
     }
   }
 }

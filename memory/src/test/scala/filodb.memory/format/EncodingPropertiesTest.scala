@@ -12,6 +12,7 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
 
   import filodb.memory.format.Encodings._
 
+  val acc = MemoryAccessor.rawPointer
   // Generate a list of bounded integers, every time bound it slightly differently
   // (to test different int compression techniques)
   def boundedIntList: Gen[Seq[Option[Int]]] =
@@ -39,9 +40,9 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
       val intVect = IntBinaryVector.appendingVector(memFactory, 1000)
       s.foreach(intVect.add)
       val ptr = intVect.optimize(memFactory)
-      val reader = IntBinaryVector(ptr)
-      reader.length(ptr) should equal (s.length)
-      reader.toBuffer(ptr).toList shouldEqual s.flatten
+      val reader = IntBinaryVector(acc, ptr)
+      reader.length(acc, ptr) should equal (s.length)
+      reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
     }
   }
 
@@ -54,9 +55,9 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
         val utf8vect = UTF8Vector.appendingVector(memFactory, 500, 50 * 1024)
         s.foreach(utf8vect.add)
         val ptr = utf8vect.optimize(memFactory)
-        val reader = UTF8Vector(ptr)
-        reader.length(ptr) should equal (s.length)
-        reader.toBuffer(ptr).toList shouldEqual s.flatten
+        val reader = UTF8Vector(acc, ptr)
+        reader.length(acc, ptr) should equal (s.length)
+        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }
@@ -70,9 +71,9 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
         val utf8strs = s.map(_.getOrElse(ZeroCopyUTF8String.NA))
         val ptr = UTF8Vector(memFactory, utf8strs).optimize(memFactory,
                                                             AutoDictString(spaceThreshold=0.8))
-        val reader = UTF8Vector(ptr)
-        reader.length(ptr) should equal (s.length)
-        reader.toBuffer(ptr).toList shouldEqual s.flatten
+        val reader = UTF8Vector(acc, ptr)
+        reader.length(acc, ptr) should equal (s.length)
+        reader.toBuffer(acc, ptr).toList shouldEqual s.flatten
       } finally {
         memFactory.freeAll()
       }
