@@ -6,7 +6,6 @@ import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.{ChunkSetInfoT, ReadablePartition}
-import filodb.memory.format.{BinaryVector, MemoryAccessor, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
 /**
   * Enum of supported downsampling function names
@@ -272,15 +271,6 @@ case class AvgScDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
     sumSum / sumCount
   }
 
-//  def downsampleChunk(colReader: VectorDataReader,
-//                      vectorAcc: MemoryAccessor,
-//                      vectorPtr: BinaryVector.BinaryVectorPtr,
-//                      startRow: Int,
-//                      endRow: Int): Double = {
-//    val sum = colReader.asDoubleReader.sum(vectorPtr, startRow, endRow)
-//    val count = colReader.asDoubleReader.count(vectorPtr, startRow, endRow)
-//    sum / count
-//  }
 }
 
 /**
@@ -296,16 +286,8 @@ case class AvgDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
     val vecPtr = chunkset.vectorOffset(colIds(0))
     val vecAcc = chunkset.vectorAccessor(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
-    downsampleChunk(colReader, vecAcc, vecPtr, startRow, endRow)
-  }
-
-  private def downsampleChunk(colReader: VectorDataReader,
-                              vectorAcc: MemoryAccessor,
-                              vectorPtr: BinaryVector.BinaryVectorPtr,
-                              startRow: Int,
-                              endRow: Int): Double = {
-    val sum = colReader.asDoubleReader.sum(vectorAcc, vectorPtr, startRow, endRow)
-    val count = colReader.asDoubleReader.count(vectorAcc, vectorPtr, startRow, endRow)
+    val sum = colReader.asDoubleReader.sum(vecAcc, vecPtr, startRow, endRow)
+    val count = colReader.asDoubleReader.count(vecAcc, vecPtr, startRow, endRow)
     sum / count
   }
 
@@ -326,13 +308,6 @@ case class TimeDownsampler(override val colIds: Seq[Int]) extends TimeChunkDowns
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr).asLongReader
     colReader.apply(vecAcc, vecPtr, endRow)
   }
-
-//  def downsampleChunk(colReader: LongVectorDataReader,
-//                      vectorPtr: BinaryVector.BinaryVectorPtr,
-//                      startRow: Int,
-//                      endRow: Int): Long = {
-//    colReader.apply(vectorPtr, endRow)
-//  }
 
 }
 

@@ -276,7 +276,6 @@ class AppendableHistogramVector(factory: MemFactory,
     if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
 
     val numItems = getNumHistograms(MemoryAccessor.rawPointer, vectPtr)
-    val numBuckets = h.numBuckets
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,

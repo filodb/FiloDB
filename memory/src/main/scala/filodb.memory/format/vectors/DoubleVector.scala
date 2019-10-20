@@ -327,7 +327,7 @@ extends DoubleVectorDataReader {
   }
 
   override def updateCorrection(acc2: MemoryAccessor, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
-    assert(vector == vect)
+    assert(vector == vect && acc == acc2)
     val lastValue = apply(acc2, vector, length(acc2, vector) - 1)
     // Return the last (original) value and all corrections onward
     meta match {

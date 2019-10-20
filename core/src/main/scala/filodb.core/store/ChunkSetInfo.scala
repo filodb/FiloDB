@@ -398,6 +398,7 @@ extends Iterator[ChunkSetInfoT] {
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         windowInfos += next
         // FIXME restore MatchError debugging
+        lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }
   }

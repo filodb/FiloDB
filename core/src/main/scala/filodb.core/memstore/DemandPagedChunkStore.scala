@@ -41,9 +41,8 @@ extends RawToPartitionMaker with StrictLogging {
   // block factories for each time bucket
   private val memFactories = new NonBlockingHashMapLong[BlockMemFactory](chunkRetentionHours, false)
 
-  import collection.JavaConverters._
-
   import TimeSeriesShard._
+  import collection.JavaConverters._
 
   private val baseContext = Map("dataset" -> tsShard.ref.toString,
                                 "shard"   -> tsShard.shardNum.toString)

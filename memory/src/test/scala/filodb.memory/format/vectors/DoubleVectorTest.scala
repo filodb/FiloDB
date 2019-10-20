@@ -5,6 +5,9 @@ import debox.Buffer
 import filodb.memory.format._
 
 class DoubleVectorTest extends NativeVectorTest {
+
+  val acc = MemoryAccessor.rawPointer
+
   describe("DoubleMaskedAppendableVector") {
     it("should append a list of all NAs and read all NAs back") {
       val builder = DoubleVector.appendingVector(memFactory, 100)
@@ -12,9 +15,11 @@ class DoubleVectorTest extends NativeVectorTest {
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
       val sc = builder.freeze(memFactory)
-      DoubleVector(sc).length(sc) shouldEqual 1
-      DoubleVector(sc)(sc, 0)   // Just to make sure this does not throw an exception
-      DoubleVector(sc).toBuffer(sc) shouldEqual Buffer.empty[Double]
+      DoubleVector(acc, sc).length(acc, sc) shouldEqual 1
+      // Just to make sure this does not throw an exception
+      DoubleVector(acc, sc)(acc, sc, 0)
+      DoubleVector(acc, sc)
+        .toBuffer(acc, sc) shouldEqual Buffer.empty[Double]
     }
 
     it("should encode a mix of NAs and Doubles and decode iterate and skip NAs") {
@@ -28,9 +33,11 @@ class DoubleVectorTest extends NativeVectorTest {
       cb.noNAs should be (false)
       val sc = cb.freeze(memFactory)
 
-      DoubleVector(sc).length(sc) shouldEqual 5
-      DoubleVector(sc)(sc, 1) shouldEqual 101.0
-      DoubleVector(sc).toBuffer(sc) shouldEqual Buffer(101, 102.5, 103)
+      DoubleVector(acc, sc)
+        .length(acc, sc) shouldEqual 5
+      DoubleVector(acc, sc)(acc, sc, 1) shouldEqual 101.0
+      DoubleVector(acc, sc)
+        .toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 103)
     }
 
     it("should be able to append lots of Doubles off-heap and grow vector") {
@@ -60,21 +67,23 @@ class DoubleVectorTest extends NativeVectorTest {
       (0 to 4).map(_.toDouble).foreach(builder.addData)
       builder.numBytes should equal (12 + 16 + 8 + 40)
       val frozen = builder.freeze(memFactory)
-      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 8 + 40)  // bitmask truncated
+      BinaryVector.totalBytes(acc, frozen) should equal (12 + 8 + 8 + 40)  // bitmask truncated
 
-      DoubleVector(frozen).length(frozen) shouldEqual 5
-      DoubleVector(frozen).toBuffer(frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toDouble))
+      DoubleVector(acc, frozen).length(acc, frozen) shouldEqual 5
+      DoubleVector(acc, frozen)
+        .toBuffer(acc, frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toDouble))
     }
 
     it("should be able to optimize all integral vector to DeltaDeltaVector") {
       val orig = (0 to 9).map(_.toDouble)
       val builder = DoubleVector(memFactory, orig)
       val optimized = builder.optimize(memFactory)
-      DoubleVector(optimized).length(optimized) shouldEqual 10
-      DoubleVector(optimized).toBuffer(optimized).toList shouldEqual orig
-      DoubleVector(optimized)(optimized, 0) shouldEqual 0.0
-      DoubleVector(optimized)(optimized, 2) shouldEqual 2.0
-      BinaryVector.totalBytes(optimized) shouldEqual 24   // Const DeltaDeltaVector (since this is linearly increasing)
+      DoubleVector(acc, optimized).length(acc, optimized) shouldEqual 10
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
+      DoubleVector(acc, optimized)(acc, optimized, 0) shouldEqual 0.0
+      DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 2.0
+      // Const DeltaDeltaVector (since this is linearly increasing)
+      BinaryVector.totalBytes(acc, optimized) shouldEqual 24
     }
 
     it("should encode some edge cases correctly to DDV") {
@@ -84,9 +93,9 @@ class DoubleVectorTest extends NativeVectorTest {
       appender.length shouldEqual orig.length
 
       val optimized = appender.optimize(memFactory)
-      DoubleVector(optimized).length(optimized) shouldEqual orig.length
-      DoubleVector(optimized).toBuffer(optimized).toList shouldEqual orig
-      BinaryVector.totalBytes(optimized) should be > (24)   // Not const DDV!
+      DoubleVector(acc, optimized).length(acc, optimized) shouldEqual orig.length
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
+      BinaryVector.totalBytes(acc, optimized) should be > (24)   // Not const DDV!
     }
 
     it("should be able to optimize off-heap No NA integral vector to DeltaDeltaVector") {
@@ -95,10 +104,12 @@ class DoubleVectorTest extends NativeVectorTest {
       (100000 to 100004).map(_.toDouble).foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
 
-      DoubleVector(optimized).length(optimized) shouldEqual 5
-      DoubleVector(optimized).toBuffer(optimized) shouldEqual Buffer.fromIterable((100000 to 100004).map(_.toDouble))
-      DoubleVector(optimized)(optimized, 2) shouldEqual 100002.0
-      BinaryVector.totalBytes(optimized) shouldEqual 24   // Const DeltaDeltaVector (since this is linearly increasing)
+      DoubleVector(acc, optimized).length(acc, optimized) shouldEqual 5
+      DoubleVector(acc, optimized)
+        .toBuffer(acc, optimized) shouldEqual Buffer.fromIterable((100000 to 100004).map(_.toDouble))
+      DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 100002.0
+      // Const DeltaDeltaVector (since this is linearly increasing)
+      BinaryVector.totalBytes(acc, optimized) shouldEqual 24
     }
 
     it("should iterate with startElement > 0") {
@@ -108,7 +119,7 @@ class DoubleVectorTest extends NativeVectorTest {
       builder.length shouldEqual orig.length
       val frozen = builder.optimize(memFactory)
       (2 to 5).foreach { start =>
-        DoubleVector(frozen).toBuffer(frozen, start).toList shouldEqual orig.drop(start)
+        DoubleVector(acc, frozen).toBuffer(acc, frozen, start).toList shouldEqual orig.drop(start)
       }
     }
 
@@ -118,12 +129,12 @@ class DoubleVectorTest extends NativeVectorTest {
       orig.foreach(builder.addData)
 
       val reader = builder.reader.asDoubleReader
-      reader.sum(builder.addr, 2, orig.length - 1) shouldEqual (orig.drop(2).sum)
+      reader.sum(acc, builder.addr, 2, orig.length - 1) shouldEqual (orig.drop(2).sum)
 
       // Now add a NaN
       builder.addData(Double.NaN)
       builder.length shouldEqual (orig.length + 1)
-      reader.sum(builder.addr, 2, orig.length) shouldEqual (orig.drop(2).sum)
+      reader.sum(acc, builder.addr, 2, orig.length) shouldEqual (orig.drop(2).sum)
     }
 
     it("should not allow sum() with out of bound indices") {
@@ -132,15 +143,15 @@ class DoubleVectorTest extends NativeVectorTest {
       orig.foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
 
-      builder.reader.asDoubleReader.sum(builder.addr, 0, 4) shouldEqual orig.take(5).sum
+      builder.reader.asDoubleReader.sum(acc, builder.addr, 0, 4) shouldEqual orig.take(5).sum
 
       intercept[IllegalArgumentException] {
-        builder.reader.asDoubleReader.sum(builder.addr, 1, orig.length)
+        builder.reader.asDoubleReader.sum(acc, builder.addr, 1, orig.length)
       }
 
-      val readVect = DoubleVector(optimized)
+      val readVect = DoubleVector(acc, optimized)
       intercept[IllegalArgumentException] {
-        readVect.sum(optimized, 1, orig.length)
+        readVect.sum(acc, optimized, 1, orig.length)
       }
     }
 
@@ -152,7 +163,7 @@ class DoubleVectorTest extends NativeVectorTest {
       orig.foreach(cb.addData)
       cb.copyToBuffer.toList shouldEqual orig
       val optimized = cb.optimize(memFactory)
-      DoubleVector(optimized).toBuffer(optimized).toList shouldEqual orig
+      DoubleVector(acc, optimized).toBuffer(acc, optimized).toList shouldEqual orig
 
       // Now the optimize should not have damaged original vector
       cb.copyToBuffer.toList shouldEqual orig
@@ -160,7 +171,7 @@ class DoubleVectorTest extends NativeVectorTest {
       val orig2 = orig.map(_ * 2)
       orig2.foreach(cb.addData)
       val opt2 = cb.optimize(memFactory)
-      DoubleVector(opt2).toBuffer(opt2).toList shouldEqual orig2
+      DoubleVector(acc, opt2).toBuffer(acc, opt2).toList shouldEqual orig2
       cb.copyToBuffer.toList shouldEqual orig2
     }
   }
@@ -180,13 +191,13 @@ class DoubleVectorTest extends NativeVectorTest {
 
       val tsEncoded = timestampAppender.optimize(memFactory)
       val valuesEncoded = valuesAppender.optimize(memFactory)
-      val tsReader = LongBinaryVector(tsEncoded)
-      val dReader = DoubleVector(valuesEncoded)
+      val tsReader = LongBinaryVector(acc, tsEncoded)
+      val dReader = DoubleVector(acc, valuesEncoded)
 
       val samples = new collection.mutable.ArrayBuffer[Double]
       for { i <- 0 until timestampAppender.length by 10 } {
         samples.clear()
-        val iter = dReader.iterate(valuesEncoded, i)
+        val iter = dReader.iterate(acc, valuesEncoded, i)
         (i until timestampAppender.length).foreach(_ => samples.append(iter.next))
         samples shouldEqual origValues.drop(i)
       }
@@ -199,94 +210,94 @@ class DoubleVectorTest extends NativeVectorTest {
     orig.foreach(builder.addData)
     builder.length shouldEqual orig.length
     val frozen = builder.optimize(memFactory)
-    val reader = DoubleVector(frozen)
+    val reader = DoubleVector(acc, frozen)
 
     it("should detect drop correctly at beginning of chunk and adjust CorrectionMeta") {
-      reader.detectDropAndCorrection(frozen, NoCorrection) shouldEqual NoCorrection
+      reader.detectDropAndCorrection(acc, frozen, NoCorrection) shouldEqual NoCorrection
 
       // No drop in first value, correction should be returned unchanged
       val corr1 = DoubleCorrection(999.9, 100.0)
-      reader.detectDropAndCorrection(frozen, corr1) shouldEqual corr1
+      reader.detectDropAndCorrection(acc, frozen, corr1) shouldEqual corr1
 
       // Drop in first value, correction should be done
       val corr2 = DoubleCorrection(1201.2, 100.0)
-      reader.detectDropAndCorrection(frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1201.2)
+      reader.detectDropAndCorrection(acc, frozen, corr2) shouldEqual DoubleCorrection(1201.2, 100.0 + 1201.2)
     }
 
     it("should return correctedValue with correction adjustment even if vector has no drops") {
-      reader.correctedValue(frozen, 1, NoCorrection) shouldEqual 2001.1
+      reader.correctedValue(acc, frozen, 1, NoCorrection) shouldEqual 2001.1
 
       val corr1 = DoubleCorrection(999.9, 100.0)
-      reader.correctedValue(frozen, 3, corr1) shouldEqual 5223.4
+      reader.correctedValue(acc, frozen, 3, corr1) shouldEqual 5223.4
     }
 
     it("should updateCorrections correctly") {
-      reader.updateCorrection(frozen, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
+      reader.updateCorrection(acc, frozen, NoCorrection) shouldEqual DoubleCorrection(7678, 0.0)
 
       val corr1 = DoubleCorrection(999.9, 50.0)
-      reader.updateCorrection(frozen, corr1) shouldEqual DoubleCorrection(7678, 50.0)
+      reader.updateCorrection(acc, frozen, corr1) shouldEqual DoubleCorrection(7678, 50.0)
     }
 
     it("should detect drops with DoubleCounterAppender and carry flag to optimized version") {
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops = true)
       cb.addData(101)
       cb.addData(102.5)
 
       // So far, no drops
-      PrimitiveVectorReader.dropped(cb.addr) shouldEqual false
+      PrimitiveVectorReader.dropped(acc, cb.addr) shouldEqual false
 
       // Add dropped value, flag should be set to true
       cb.addData(9)
-      PrimitiveVectorReader.dropped(cb.addr) shouldEqual true
+      PrimitiveVectorReader.dropped(acc, cb.addr) shouldEqual true
 
       // Add more values, no drops, flag should still be true
       cb.addData(13.3)
       cb.addData(21.1)
-      PrimitiveVectorReader.dropped(cb.addr) shouldEqual true
+      PrimitiveVectorReader.dropped(acc, cb.addr) shouldEqual true
 
       // Optimize, flag should still be true in optimized version
       val sc = cb.optimize(memFactory)
-      PrimitiveVectorReader.dropped(sc) shouldEqual true
+      PrimitiveVectorReader.dropped(acc, sc) shouldEqual true
 
-      DoubleVector(sc).toBuffer(sc) shouldEqual Buffer(101, 102.5, 9, 13.3, 21.1)
+      DoubleVector(acc, sc).toBuffer(acc, sc) shouldEqual Buffer(101, 102.5, 9, 13.3, 21.1)
 
       // Make sure return correcting version of reader as well
       cb.reader shouldBe a[CorrectingDoubleVectorReader]
-      DoubleVector(sc) shouldBe a[CorrectingDoubleVectorReader]
+      DoubleVector(acc, sc) shouldBe a[CorrectingDoubleVectorReader]
     }
 
     it("should read out corrected values properly") {
       val orig = Seq(101, 102.5, 9, 13.3, 21.1)
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops = true)
       orig.foreach(cb.addData)
       cb.length shouldEqual orig.length
       val sc = cb.optimize(memFactory)
-      val reader = DoubleVector(sc)
+      val reader = DoubleVector(acc, sc)
       reader shouldBe a[CorrectingDoubleVectorReader]
 
-      reader.correctedValue(sc, 1, NoCorrection) shouldEqual 102.5
-      reader.correctedValue(sc, 2, NoCorrection) shouldEqual 111.5
-      reader.correctedValue(sc, 4, NoCorrection) shouldEqual (21.1 + 102.5)
+      reader.correctedValue(acc, sc, 1, NoCorrection) shouldEqual 102.5
+      reader.correctedValue(acc, sc, 2, NoCorrection) shouldEqual 111.5
+      reader.correctedValue(acc, sc, 4, NoCorrection) shouldEqual (21.1 + 102.5)
 
       val corr1 = DoubleCorrection(999.9, 50.0)
-      reader.correctedValue(sc, 1, corr1) shouldEqual 152.5
-      reader.correctedValue(sc, 2, corr1) shouldEqual 161.5
-      reader.correctedValue(sc, 4, corr1) shouldEqual (21.1 + 102.5 + 50)
+      reader.correctedValue(acc, sc, 1, corr1) shouldEqual 152.5
+      reader.correctedValue(acc, sc, 2, corr1) shouldEqual 161.5
+      reader.correctedValue(acc, sc, 4, corr1) shouldEqual (21.1 + 102.5 + 50)
 
-      reader.updateCorrection(sc, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
+      reader.updateCorrection(acc, sc, corr1) shouldEqual DoubleCorrection(21.1, 102.5 + 50.0)
     }
 
     it("should read out length and values correctly for corrected vectors") {
       val orig = Seq(4419.00, 4511.00, 4614.00, 4724.00, 4909.00, 948.00, 1000.00, 1095.00, 1102.00, 1201.00)
-      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops=true)
+      val cb = DoubleVector.appendingVectorNoNA(memFactory, 10, detectDrops = true)
       orig.foreach(cb.addData)
       cb.length shouldEqual orig.length
       val sc = cb.optimize(memFactory)
-      val reader = DoubleVector(sc)
+      val reader = DoubleVector(acc, sc)
       reader shouldBe a[CorrectingDoubleVectorReader]
 
-      reader.length(sc) shouldEqual orig.length
-      reader.toBuffer(sc).toList shouldEqual orig
+      reader.length(acc, sc) shouldEqual orig.length
+      reader.toBuffer(acc, sc).toList shouldEqual orig
     }
   }
 }
