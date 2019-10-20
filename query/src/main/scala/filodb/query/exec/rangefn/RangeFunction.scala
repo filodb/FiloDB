@@ -197,7 +197,7 @@ trait ChunkedDoubleRangeFunction extends TimeRangeFunction[TransientRow] {
                           reader: VectorDataReader,
                           startRowNum: Int,
                           endRowNum: Int): Unit =
-    addTimeDoubleChunks(vectBase, vectPtr, reader.asDoubleReader, startRowNum, endRowNum)
+    addTimeDoubleChunks(vectAcc, vectPtr, reader.asDoubleReader, startRowNum, endRowNum)
 
   /**
    * Add a Double BinaryVector in the range (startRowNum, endRowNum) to the range computation

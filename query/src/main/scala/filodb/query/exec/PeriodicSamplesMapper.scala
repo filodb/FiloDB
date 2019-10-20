@@ -152,22 +152,22 @@ extends Iterator[R] with StrictLogging {
     wit.nextWindow()
     while (wit.hasNext) {
       val nextInfo = wit.next
-      val tsVectorBase = nextInfo.vectorBase(timestampColID)
+      val tsVectorAcc = nextInfo.vectorAccessor(timestampColID)
       val tsVectorOffset = nextInfo.vectorOffset(timestampColID)
-      val tsReader = rv.partition.chunkReader(timestampColID, tsVectorBase, tsVectorOffset).asLongReader
-      val valueVectorBase = nextInfo.vectorBase(rv.valueColID)
+      val tsReader = rv.partition.chunkReader(timestampColID, tsVectorAcc, tsVectorOffset).asLongReader
+      val valueVectorAcc = nextInfo.vectorAccessor(rv.valueColID)
       val valueVectorOffset = nextInfo.vectorOffset(rv.valueColID)
-      val valueReader = rv.partition.chunkReader(rv.valueColID, valueVectorBase, valueVectorOffset)
+      val valueReader = rv.partition.chunkReader(rv.valueColID, valueVectorAcc, valueVectorOffset)
 
       try {
-        rangeFunction.addChunks(tsVectorBase, tsVectorOffset, tsReader,
-                                valueVectorBase, valueVectorOffset, valueReader,
+        rangeFunction.addChunks(tsVectorAcc, tsVectorOffset, tsReader,
+                                valueVectorAcc, valueVectorOffset, valueReader,
                                 wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
       } catch {
         case e: Exception =>
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
                        s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} " +
-                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(tsVectorBase, tsVectorOffset)}")
+                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(tsVectorAcc, tsVectorOffset)}")
           throw e
       }
     }

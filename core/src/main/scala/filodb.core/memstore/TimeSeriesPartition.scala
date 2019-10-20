@@ -216,9 +216,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
-      shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
+      shardStats.encodedBytes.increment(BinaryVector.totalBytes(MemoryAccessor.rawPointer, optimized))
       if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
-        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
+        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(MemoryAccessor.rawPointer, optimized))
       optimized
     }
     shardStats.numSamplesEncoded.increment(info.numRows)

@@ -3,7 +3,7 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
-import filodb.memory.format.{MemoryAccessor, UnsafeUtils}
+import filodb.memory.format.{MemoryAccessor}
 
 trait ChunkSetInfoT {
   /**

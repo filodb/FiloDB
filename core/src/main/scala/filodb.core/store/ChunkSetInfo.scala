@@ -149,32 +149,30 @@ object ChunkSetInfo extends StrictLogging {
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
 
-  def getChunkID(acc: MemoryAccessor, infoPointer: Long): ChunkID = {
-    acc.getLong(infoPointer + OffsetChunkID)
-  }
+  def getChunkID(acc: MemoryAccessor, infoPointer: Long): ChunkID = acc.getLong(infoPointer + OffsetChunkID)
+  def getChunkID(infoBytes: Array[Byte]): ChunkID =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
-  def getIngestionTime(acc: MemoryAccessor, infoPointer: Long): Long = {
-    acc.getLong(infoPointer + OffsetIngestionTime)
-  }
+  def getIngestionTime(acc: MemoryAccessor, infoPointer: Long): Long = acc.getLong(infoPointer + OffsetIngestionTime)
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
   def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
 
-  def getNumRows(acc: MemoryAccessor, infoPointer: Long): Int = {
-    acc.getInt(infoPointer + OffsetNumRows)
-  }
+  def getNumRows(acc: MemoryAccessor, infoPointer: Long): Int = acc.getInt(infoPointer + OffsetNumRows)
+  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(acc: MemoryAccessor, infoPointer: Long): Long = {
-    startTimeFromChunkID(getChunkID(acc, infoPointer))
-  }
+  def getStartTime(acc: MemoryAccessor, infoPointer: Long): Long = startTimeFromChunkID(getChunkID(acc, infoPointer))
+  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
 
-  def getEndTime(acc: MemoryAccessor, infoPointer: Long): Long = {
-    acc.getLong(infoPointer + OffsetEndTime)
-  }
+  def getEndTime(acc: MemoryAccessor, infoPointer: Long): Long = acc.getLong(infoPointer + OffsetEndTime)
+  def getEndTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
   def setEndTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
 
@@ -191,8 +189,8 @@ object ChunkSetInfo extends StrictLogging {
   def copy(orig: ChunkSetInfo, newAddr: NativePointer): Unit =
     UnsafeUtils.copy(orig.infoAddr, newAddr, OffsetVectors)
 
-//  def copy(bytes: Array[Byte], newAddr: NativePointer): Unit =
-//    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, newAddr, bytes.size)
+  def copy(bytes: Array[Byte], newAddr: NativePointer): Unit =
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, newAddr, bytes.size)
 
   /**
    * Actually compares the contents of the ChunkSetInfo non-vector metadata to see if they are equal
@@ -239,7 +237,8 @@ object ChunkSetInfo extends StrictLogging {
 trait ChunkInfoIterator { base: ChunkInfoIterator =>
   def close(): Unit
   def hasNext: Boolean
-  def nextInfo: ChunkSetInfoT
+  def nextInfoT: ChunkSetInfoT = ChunkSetInfoOffHeap(nextInfo)
+  def nextInfo: ChunkSetInfo
 
   /**
    * Explicit locking to guard access to native memory. See ElementIterator.
@@ -250,7 +249,7 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
   /**
    * Returns a new ChunkInfoIterator which filters items from this iterator
    */
-  def filter(func: ChunkSetInfoT => Boolean): ChunkInfoIterator =
+  def filter(func: ChunkSetInfo => Boolean): ChunkInfoIterator =
     new FilteredChunkInfoIterator(this, func)
 
   /**
@@ -273,9 +272,9 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    * Note that this will box and create objects around ChunkSetInfo, so
    * please only use this for testing or convenience.  VERY MEMORY EXPENSIVE.
    */
-  def toBuffer: Seq[ChunkSetInfoT] = {
+  def toBuffer: Seq[ChunkSetInfo] = {
     try {
-      val buf = new collection.mutable.ArrayBuffer[ChunkSetInfoT]
+      val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
       while (hasNext) { buf += nextInfo }
       buf
     } catch {
@@ -288,7 +287,7 @@ object ChunkInfoIterator {
   val empty = new ChunkInfoIterator {
     def close(): Unit = {}
     def hasNext: Boolean = false
-    def nextInfo: ChunkSetInfoT = UnsafeUtils.ZeroPointer.asInstanceOf[ChunkSetInfoT]
+    def nextInfo: ChunkSetInfo = ChunkSetInfo(0)
     def lock(): Unit = {}
     def unlock(): Unit = {}
   }
@@ -297,15 +296,15 @@ object ChunkInfoIterator {
 class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator {
   def close(): Unit = elIt.close()
   final def hasNext: Boolean = elIt.hasNext
-  final def nextInfo: ChunkSetInfoT = ChunkSetInfoOffHeap(ChunkSetInfo(elIt.next))
+  final def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
   final def lock(): Unit = elIt.lock()
   final def unlock(): Unit = elIt.unlock()
 }
 
 class FilteredChunkInfoIterator(base: ChunkInfoIterator,
-                                filter: ChunkSetInfoT => Boolean,
+                                filter: ChunkSetInfo => Boolean,
                                 // Move vars here for better performance -- no init field
-                                var nextnext: ChunkSetInfoT = UnsafeUtils.ZeroPointer.asInstanceOf[ChunkSetInfoT],
+                                var nextnext: ChunkSetInfo = ChunkSetInfo(0),
                                 var gotNext: Boolean = false) extends ChunkInfoIterator {
   def close(): Unit = {
     base.close()
@@ -323,9 +322,9 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
     }
   }
 
-  final def nextInfo: ChunkSetInfoT = {
+  final def nextInfo: ChunkSetInfo = {
     gotNext = false   // reset so we can look for the next item where filter == true
-    require(nextnext != UnsafeUtils.ZeroPointer, s"nextInfo called before hasNext!!")
+    require(nextnext.infoAddr != 0, s"nextInfo called before hasNext!!")
     nextnext
   }
 
@@ -393,7 +392,7 @@ extends Iterator[ChunkSetInfoT] {
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
-      val next = infos.nextInfo
+      val next = infos.nextInfoT
       require(next != UnsafeUtils.ZeroPointer, s"NULL nextInfo; curWindowEnd=$curWindowEnd, windowInfos=$windowInfos")
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {

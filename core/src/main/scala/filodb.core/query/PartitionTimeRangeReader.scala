@@ -4,7 +4,7 @@ import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, ReadablePartition}
-import filodb.memory.format.{vectors => bv, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv, MemoryAccessor, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
  * A RowReader iterator which iterates over a time range in the ReadablePartition.  Designed to be relatively memory
@@ -53,8 +53,8 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
       } else {
         val vectorPtr = info.vectorPtr(colID)
         require(vectorPtr != UnsafeUtils.ZeroPointer, s"Column ID $colID is NULL")
-        val reader    = part.chunkReader(colID, vectorPtr)
-        vectorIts(pos) = reader.iterate(vectorPtr, rowNo)
+        val reader    = part.chunkReader(colID, MemoryAccessor.rawPointer, vectorPtr)
+        vectorIts(pos) = reader.iterate(MemoryAccessor.rawPointer, vectorPtr, rowNo)
       }
     }
   }
@@ -63,14 +63,15 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     // Get reader for timestamp vector
     val timeVector = info.vectorPtr(timestampCol)
     require(timeVector != UnsafeUtils.ZeroPointer, s"NULL timeVector - did you read the timestamp column?")
-    val timeReader = part.chunkReader(timestampCol, timeVector).asLongReader
+    val timeReader = part.chunkReader(timestampCol, MemoryAccessor.rawPointer, timeVector).asLongReader
 
     // info intersection, compare start and end, do binary search if needed
-    rowNo = if (startTime <= info.startTime) 0 else timeReader.binarySearch(timeVector, startTime) & 0x7fffffff
+    rowNo = if (startTime <= info.startTime) 0
+            else timeReader.binarySearch(MemoryAccessor.rawPointer, timeVector, startTime) & 0x7fffffff
     endRowNo = if (endTime >= info.endTime) {
                  info.numRows - 1
                } else {
-                 timeReader.ceilingIndex(timeVector, endTime)
+                 timeReader.ceilingIndex(MemoryAccessor.rawPointer, timeVector, endTime)
                }
   }
 

@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core.metadata.Column.ColumnType
