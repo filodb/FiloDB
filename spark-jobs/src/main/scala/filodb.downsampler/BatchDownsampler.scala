@@ -202,11 +202,12 @@ object BatchDownsampler extends StrictLogging with Instance {
     val downsampleRowReader = SeqRowReader(downsampleRow)
 
     while (rawChunksets.hasNext) {
-      val chunkset = rawChunksets.nextInfo
+      val chunkset = rawChunksets.nextInfoT
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
-      val vecPtr = chunkset.vectorPtr(timestampCol)
-      val tsReader = rawPartToDownsample.chunkReader(timestampCol, vecPtr).asLongReader
+      val vecPtr = chunkset.vectorOffset(timestampCol)
+      val vecAcc = chunkset.vectorAccessor(timestampCol)
+      val tsReader = rawPartToDownsample.chunkReader(timestampCol, vecAcc, vecPtr).asLongReader
 
       // for each downsample resolution
       downsampledParts.foreach { case (resolution, part) =>
@@ -221,8 +222,8 @@ object BatchDownsampler extends StrictLogging with Instance {
         while (pStart <= endTime) {
           if (pEnd >= userTimeStart && pEnd <= userTimeEnd) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
-            val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
-            val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
+            val startRowNum = tsReader.binarySearch(vecAcc, vecPtr, pStart) & 0x7fffffff
+            val endRowNum = Math.min(tsReader.ceilingIndex(vecAcc, vecPtr, pEnd), chunkset.numRows - 1)
 
             // for each downsampler, add downsample column value
             for {col <- downsamplers.indices optimized} {
