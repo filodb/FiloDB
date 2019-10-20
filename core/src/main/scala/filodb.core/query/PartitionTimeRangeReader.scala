@@ -3,8 +3,8 @@ package filodb.core.query
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, ReadablePartition}
-import filodb.memory.format.{vectors => bv, MemoryAccessor, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoT, ReadablePartition}
+import filodb.memory.format.{vectors => bv, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
  * A RowReader iterator which iterates over a time range in the ReadablePartition.  Designed to be relatively memory
@@ -43,7 +43,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     override def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
-  private def populateIterators(info: ChunkSetInfo): Unit = {
+  private def populateIterators(info: ChunkSetInfoT): Unit = {
     setChunkStartEnd(info)
     for { pos <- 0 until columnIDs.size optimized } {
       val colID = columnIDs(pos)
@@ -51,27 +51,29 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
         // Look up the TypedIterator for that partition key
         vectorIts(pos) = part.schema.partColIterator(colID, part.partKeyBase, part.partKeyOffset)
       } else {
-        val vectorPtr = info.vectorPtr(colID)
+        val vectorAcc = info.vectorAccessor(colID)
+        val vectorPtr = info.vectorOffset(colID)
         require(vectorPtr != UnsafeUtils.ZeroPointer, s"Column ID $colID is NULL")
-        val reader    = part.chunkReader(colID, MemoryAccessor.rawPointer, vectorPtr)
-        vectorIts(pos) = reader.iterate(MemoryAccessor.rawPointer, vectorPtr, rowNo)
+        val reader    = part.chunkReader(colID, vectorAcc, vectorPtr)
+        vectorIts(pos) = reader.iterate(vectorAcc, vectorPtr, rowNo)
       }
     }
   }
 
-  private def setChunkStartEnd(info: ChunkSetInfo): Unit = {
+  private def setChunkStartEnd(info: ChunkSetInfoT): Unit = {
     // Get reader for timestamp vector
-    val timeVector = info.vectorPtr(timestampCol)
+    val timeVector = info.vectorOffset(timestampCol)
+    val timeAcc = info.vectorAccessor(timestampCol)
     require(timeVector != UnsafeUtils.ZeroPointer, s"NULL timeVector - did you read the timestamp column?")
-    val timeReader = part.chunkReader(timestampCol, MemoryAccessor.rawPointer, timeVector).asLongReader
+    val timeReader = part.chunkReader(timestampCol, timeAcc, timeVector).asLongReader
 
     // info intersection, compare start and end, do binary search if needed
     rowNo = if (startTime <= info.startTime) 0
-            else timeReader.binarySearch(MemoryAccessor.rawPointer, timeVector, startTime) & 0x7fffffff
+            else timeReader.binarySearch(timeAcc, timeVector, startTime) & 0x7fffffff
     endRowNo = if (endTime >= info.endTime) {
                  info.numRows - 1
                } else {
-                 timeReader.ceilingIndex(MemoryAccessor.rawPointer, timeVector, endTime)
+                 timeReader.ceilingIndex(timeAcc, timeVector, endTime)
                }
   }
 
@@ -81,7 +83,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
       while (curChunkID == Long.MinValue || rowNo > endRowNo) {
         // No more chunksets
         if (!infos.hasNext) return false
-        val nextInfo = infos.nextInfo
+        val nextInfo = infos.nextInfoT
         curChunkID = nextInfo.id
         populateIterators(nextInfo)
       }
