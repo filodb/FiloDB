@@ -473,7 +473,7 @@ class RowHistogramReader(val acc: MemoryAccessor, histVect: Ptr.U8) extends Hist
     require(length > 0 && start >= 0 && end < length)
     val summedHist = MutableHistogram.empty(buckets)
     for { i <- start to end optimized } {
-      summedHist.addNoCorrection(apply(i).asInstanceOf[HistogramWithBuckets])
+      summedHist.addNoCorrection(apply(i))
     }
     summedHist
   }

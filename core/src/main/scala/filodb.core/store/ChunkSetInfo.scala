@@ -8,7 +8,7 @@ import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
-import filodb.core.query.RawDataRangeVector
+import filodb.core.query.{RangeVector, RawDataRangeVector}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
@@ -397,7 +397,19 @@ extends Iterator[ChunkSetInfoT] {
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         windowInfos += next
-        // FIXME restore MatchError debugging
+        next.tsVectorAddr = next.vectorAddress(RangeVector.timestampColID)
+        try {
+          next.tsVectorAccessor = next.vectorAccessor(RangeVector.timestampColID)
+          next.tsReader = vectors.LongBinaryVector(next.tsVectorAccessor, next.tsVectorAddr)
+
+          next.valueVectorAccessor = next.vectorAccessor(rv.valueColID)
+          next.valueVectorAddr = next.vectorAddress(rv.valueColID)
+          next.valueReader = rv.partition.chunkReader(rv.valueColID, next.valueVectorAccessor, next.valueVectorAddr)
+        } catch {
+          case m: MatchError =>
+            throw CorruptVectorException(next.tsVectorAddr, next.startTime, rv.partition.stringPartition,
+              rv.partition.shard, m)
+        }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
     }

@@ -3,7 +3,8 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
-import filodb.memory.format.{MemoryAccessor}
+import filodb.memory.format.{BinaryVector, MemoryAccessor, VectorDataReader}
+import filodb.memory.format.vectors.LongVectorDataReader
 
 trait ChunkSetInfoT {
   /**
@@ -42,6 +43,14 @@ trait ChunkSetInfoT {
     * Long for vector pointers given column
     */
   def vectorAddress(colId: Int): Long
+
+  /* Below vars are stateful fields set during query processing for query optimization */
+  var tsVectorAccessor: MemoryAccessor = _
+  var tsVectorAddr: BinaryVector.BinaryVectorPtr = _
+  var valueVectorAccessor: MemoryAccessor = _
+  var valueVectorAddr: BinaryVector.BinaryVectorPtr = _
+  var tsReader: LongVectorDataReader = _
+  var valueReader: VectorDataReader = _
 
 }
 
