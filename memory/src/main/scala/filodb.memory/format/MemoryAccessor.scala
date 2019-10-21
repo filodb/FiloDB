@@ -8,15 +8,15 @@ import filodb.memory.format.UnsafeUtils._
 
 object MemoryAccessor {
 
-  def fromArray(array: Array[Byte]): MemoryAccessor = ByteArrayAccessor(array)
+  def fromArray(array: Array[Byte]): MemoryAccessor = new ByteArrayAccessor(array)
   def nativePointer: MemoryAccessor = NativePointerAccessor
   def fromByteBuffer(buf: ByteBuffer): MemoryAccessor = {
     if (buf.isDirect) DirectBufferAccessor(buf)
-    else OnHeapByteBufferAccessor(buf)
+    else new OnHeapByteBufferAccessor(buf)
   }
 }
 
-trait MemoryAccessor {
+sealed trait MemoryAccessor {
 
   def base: Any
   def baseOffset: Long
@@ -52,12 +52,12 @@ object NativePointerAccessor extends MemoryAccessor {
   val baseOffset: Long = 0
 }
 
-case class ByteArrayAccessor(base: Array[Byte]) extends MemoryAccessor {
+class ByteArrayAccessor(val base: Array[Byte]) extends MemoryAccessor {
   // TODO check bounds of array before accessing
   val baseOffset: Long = UnsafeUtils.arayOffset
 }
 
-case class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
+class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 
   var base: Any = _
   var baseOffset: Long = _
