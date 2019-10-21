@@ -125,7 +125,7 @@ case class SumDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
                                startRow: Int,
                                endRow: Int): Double = {
     val vecAcc = chunkset.vectorAccessor(colIds(0))
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     colReader.asDoubleReader.sum(vecAcc, vecPtr, startRow, endRow)
   }
@@ -139,7 +139,7 @@ case class HistSumDownsampler(val colIds: Seq[Int]) extends HistChunkDownsampler
                       startRow: Int,
                       endRow: Int): bv.Histogram = {
     val vecAcc = chunkset.vectorAccessor(colIds(0))
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val histReader = part.chunkReader(colIds(0), vecAcc, vecPtr).asHistReader
     histReader.sum(startRow, endRow)
   }
@@ -156,7 +156,7 @@ case class CountDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
                                startRow: Int,
                                endRow: Int): Double = {
     val vecAcc = chunkset.vectorAccessor(colIds(0))
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     colReader.asDoubleReader.count(vecAcc, vecPtr, startRow, endRow)
   }
@@ -174,7 +174,7 @@ case class MinDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
                                endRow: Int): Double = {
     // TODO MinOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(colIds(0))
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     var min = Double.MaxValue
     var rowNum = startRow
@@ -200,7 +200,7 @@ case class MaxDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
                                endRow: Int): Double = {
     // TODO MaxOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
     val vecAcc = chunkset.vectorAccessor(colIds(0))
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     var max = Double.MinValue
     var rowNum = startRow
@@ -227,10 +227,10 @@ case class AvgAcDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
                                startRow: Int,
                                endRow: Int): Double = {
     val avgVecAcc = chunkset.vectorAccessor(avgCol)
-    val avgVecPtr = chunkset.vectorOffset(avgCol)
+    val avgVecPtr = chunkset.vectorAddress(avgCol)
     val avgColReader = part.chunkReader(avgCol, avgVecAcc, avgVecPtr)
     val cntVecAcc = chunkset.vectorAccessor(countCol)
-    val cntVecPtr = chunkset.vectorOffset(countCol)
+    val cntVecPtr = chunkset.vectorAddress(countCol)
     val cntColReader = part.chunkReader(countCol, cntVecAcc, cntVecPtr)
     var rowNum = startRow
     val avgIt = avgColReader.iterate(avgVecAcc, avgVecPtr, startRow).asDoubleIt
@@ -261,10 +261,10 @@ case class AvgScDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
                                startRow: Int,
                                endRow: Int): Double = {
     val sumVecAcc = chunkset.vectorAccessor(sumCol)
-    val sumVecPtr = chunkset.vectorOffset(sumCol)
+    val sumVecPtr = chunkset.vectorAddress(sumCol)
     val sumColReader = part.chunkReader(sumCol, sumVecAcc, sumVecPtr)
     val cntVecAcc = chunkset.vectorAccessor(countCol)
-    val cntVecPtr = chunkset.vectorOffset(countCol)
+    val cntVecPtr = chunkset.vectorAddress(countCol)
     val cntColReader = part.chunkReader(countCol, cntVecAcc, cntVecPtr)
     val sumSum = sumColReader.asDoubleReader.sum(sumVecAcc, sumVecPtr, startRow, endRow)
     val sumCount = cntColReader.asDoubleReader.sum(cntVecAcc, cntVecPtr, startRow, endRow)
@@ -283,7 +283,7 @@ case class AvgDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
                                chunkset: ChunkSetInfoT,
                                startRow: Int,
                                endRow: Int): Double = {
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val vecAcc = chunkset.vectorAccessor(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     val sum = colReader.asDoubleReader.sum(vecAcc, vecPtr, startRow, endRow)
@@ -303,7 +303,7 @@ case class TimeDownsampler(override val colIds: Seq[Int]) extends TimeChunkDowns
                       chunkset: ChunkSetInfoT,
                       startRow: Int,
                       endRow: Int): Long = {
-    val vecPtr = chunkset.vectorOffset(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
     val vecAcc = chunkset.vectorAccessor(colIds(0))
     val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr).asLongReader
     colReader.apply(vecAcc, vecPtr, endRow)

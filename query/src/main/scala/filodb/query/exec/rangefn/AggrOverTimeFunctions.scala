@@ -229,7 +229,7 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
 
       // Get valueVector/reader for max column
       val maxVectAcc = info.vectorAccessor(maxColID)
-      val maxVectPtr = info.vectorOffset(maxColID)
+      val maxVectPtr = info.vectorAddress(maxColID)
       maxFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
     }
   }
@@ -268,7 +268,7 @@ class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunct
 
       // Get valueVector/reader for count column
       val countVectAcc = info.vectorAccessor(countColId)
-      val countVectPtr = info.vectorOffset(countColId)
+      val countVectPtr = info.vectorAddress(countColId)
       countFunc.addTimeChunks(countVectAcc, countVectPtr,
         bv.DoubleVector(countVectAcc, countVectPtr), startRowNum, endRowNum)
     }
@@ -308,7 +308,7 @@ class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunct
 
       // Get valueVector/reader for count column
       val cntVectAcc = info.vectorAccessor(countColId)
-      val cntVectPtr = info.vectorOffset(countColId)
+      val cntVectPtr = info.vectorAddress(countColId)
       countFunc.addTimeChunks(cntVectAcc, cntVectPtr, bv.DoubleVector(cntVectAcc, cntVectPtr), startRowNum, endRowNum)
     }
   }

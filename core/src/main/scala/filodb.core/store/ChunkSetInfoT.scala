@@ -41,7 +41,7 @@ trait ChunkSetInfoT {
     *
     * Long for vector pointers given column
     */
-  def vectorOffset(colId: Int): Long
+  def vectorAddress(colId: Int): Long
 
 }
 
@@ -55,7 +55,7 @@ final case class ChunkSetInfoOnHeap(bytes: ByteBuffer, vectors: Seq[ByteBuffer])
   def startTime: Long = ChunkSetInfo.getStartTime(bytesAcc, 0)
   def endTime: Long = ChunkSetInfo.getEndTime(bytesAcc, 0)
   def vectorAccessor(colId: Int): MemoryAccessor = vectorsAcc(colId)
-  def vectorOffset(colId: Int): Long = 0
+  def vectorAddress(colId: Int): Long = 0
 }
 
 final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoT {
@@ -66,8 +66,8 @@ final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoT {
   def numRows: Int = csi.numRows
   def startTime: Long = csi.startTime
   def endTime: Long = csi.endTime
-  def vectorAccessor(colId: Int): MemoryAccessor = MemoryAccessor.rawPointer
-  def vectorOffset(colId: Int): Long = csi.vectorPtr(colId)
+  def vectorAccessor(colId: Int): MemoryAccessor = MemoryAccessor.nativePointer
+  def vectorAddress(colId: Int): Long = csi.vectorPtr(colId)
 }
 
 

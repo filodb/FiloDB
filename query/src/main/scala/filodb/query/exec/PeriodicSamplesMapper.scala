@@ -153,10 +153,10 @@ extends Iterator[R] with StrictLogging {
     while (wit.hasNext) {
       val nextInfo = wit.next
       val tsVectorAcc = nextInfo.vectorAccessor(timestampColID)
-      val tsVectorOffset = nextInfo.vectorOffset(timestampColID)
+      val tsVectorOffset = nextInfo.vectorAddress(timestampColID)
       val tsReader = rv.partition.chunkReader(timestampColID, tsVectorAcc, tsVectorOffset).asLongReader
       val valueVectorAcc = nextInfo.vectorAccessor(rv.valueColID)
-      val valueVectorOffset = nextInfo.vectorOffset(rv.valueColID)
+      val valueVectorOffset = nextInfo.vectorAddress(rv.valueColID)
       val valueReader = rv.partition.chunkReader(rv.valueColID, valueVectorAcc, valueVectorOffset)
 
       try {

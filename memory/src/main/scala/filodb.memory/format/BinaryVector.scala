@@ -39,7 +39,7 @@ object BinaryVector {
   final def totalBytes(acc: MemoryAccessor, addr: BinaryVectorPtr): Int = acc.getInt(addr) + 4
 
   final def asBuffer(addr: BinaryVectorPtr): ByteBuffer = {
-    UnsafeUtils.asDirectBuffer(addr, totalBytes(MemoryAccessor.rawPointer, addr))
+    UnsafeUtils.asDirectBuffer(addr, totalBytes(MemoryAccessor.nativePointer, addr))
   }
 
   type BufToDataReader = PartialFunction[Class[_], ByteBuffer => VectorDataReader]
@@ -520,10 +520,10 @@ extends OptimizingPrimitiveAppender[A] {
   override final def length: Int = ((writeOffset - (addr + 8)).toInt * 8 + bitShift) / nbits
 
   UnsafeUtils.setInt(addr, HeaderLen)   // 4 bytes after this length word
-  BinaryVector.writeMajorAndSubType(MemoryAccessor.rawPointer, addr, vectMajorType, vectSubType)
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePointer, addr, vectMajorType, vectSubType)
   UnsafeUtils.setShort(addr + OffsetNBits, ((nbits & NBitsMask) | (if (signed) SignMask else 0)).toShort)
 
-  def numBytes: Int = MemoryAccessor.rawPointer.getInt(addr) + 4
+  def numBytes: Int = MemoryAccessor.nativePointer.getInt(addr) + 4
 
   private final val dangerZone = addr + maxBytes
   final def checkOffset(): AddResponse =
@@ -592,7 +592,7 @@ extends BinaryAppendableVector[A] {
   UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
 
   UnsafeUtils.setInt(addr, 8 + bitmapMaskBufferSize)
-  BinaryVector.writeMajorAndSubType(MemoryAccessor.rawPointer, addr, vectMajorType, vectSubType)
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePointer, addr, vectMajorType, vectSubType)
   val subVectOffset = 12 + bitmapMaskBufferSize
   UnsafeUtils.setInt(addr + 8, subVectOffset)
 
@@ -620,14 +620,14 @@ extends BinaryAppendableVector[A] {
 
   override final def length: Int = subVect.length
   final def numBytes: Int = 12 + bitmapMaskBufferSize + subVect.numBytes
-  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(MemoryAccessor.rawPointer, addr, index)
+  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(MemoryAccessor.nativePointer, addr, index)
   final def apply(index: Int): A = subVect.apply(index)
 
   final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {
     case Ack =>
       val resp = subVect.addNA()
       if (resp == Ack) {
-        val maskVal = MemoryAccessor.rawPointer.getLong(bitmapOffset + curBitmapOffset)
+        val maskVal = MemoryAccessor.nativePointer.getLong(bitmapOffset + curBitmapOffset)
         UnsafeUtils.setLong(bitmapOffset + curBitmapOffset, maskVal | curMask)
         nextMaskIndex()
       }
@@ -649,18 +649,18 @@ extends BinaryAppendableVector[A] {
 
   final def isAllNA: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (MemoryAccessor.rawPointer.getLong(bitmapOffset + word * 8) != -1L) return false
+      if (MemoryAccessor.nativePointer.getLong(bitmapOffset + word * 8) != -1L) return false
     }
     val naMask = curMask - 1
-    (MemoryAccessor.rawPointer.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
+    (MemoryAccessor.nativePointer.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
   }
 
   final def noNAs: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (MemoryAccessor.rawPointer.getLong(bitmapOffset + word * 8) != 0) return false
+      if (MemoryAccessor.nativePointer.getLong(bitmapOffset + word * 8) != 0) return false
     }
     val naMask = curMask - 1
-    (MemoryAccessor.rawPointer.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
+    (MemoryAccessor.nativePointer.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
   }
 
   def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {

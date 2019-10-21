@@ -492,7 +492,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
       if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
         val maxvectAcc = info.vectorAccessor(maxColID)
-        val maxVectOff = info.vectorOffset(maxColID)
+        val maxVectOff = info.vectorAddress(maxColID)
         timestamp = ts
         value = valueReader.asHistReader(endRowNum)
         max = bv.DoubleVector(maxvectAcc, maxVectOff)(maxvectAcc, maxVectOff, endRowNum)

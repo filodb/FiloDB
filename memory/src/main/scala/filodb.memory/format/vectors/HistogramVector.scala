@@ -242,7 +242,7 @@ class AppendableHistogramVector(factory: MemFactory,
   protected def vectSubType: Int = WireFormat.SUBTYPE_H_SIMPLE
 
   // Initialize header
-  BinaryVector.writeMajorAndSubType(MemoryAccessor.rawPointer,
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePointer,
     addr, WireFormat.VECTORTYPE_HISTOGRAM, vectSubType)
   reset()
 
@@ -254,15 +254,15 @@ class AppendableHistogramVector(factory: MemFactory,
     factory.freeMemory(addr)
   }
 
-  final def numBytes: Int = vectPtr.asI32.getI32(MemoryAccessor.rawPointer) + 4
-  final def length: Int = getNumHistograms(MemoryAccessor.rawPointer, vectPtr)
+  final def numBytes: Int = vectPtr.asI32.getI32(MemoryAccessor.nativePointer) + 4
+  final def length: Int = getNumHistograms(MemoryAccessor.nativePointer, vectPtr)
   final def isAvailable(index: Int): Boolean = true
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
 
   private def setNumBytes(len: Int): Unit = {
     require(len >= 0)
-    vectPtr.asI32.asMut.set(MemoryAccessor.rawPointer, len)
+    vectPtr.asI32.asMut.set(MemoryAccessor.nativePointer, len)
   }
 
   // NOTE: to eliminate allocations, re-use the DirectBuffer and keep passing the same instance to addData
@@ -275,20 +275,20 @@ class AppendableHistogramVector(factory: MemFactory,
     }
     if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
 
-    val numItems = getNumHistograms(MemoryAccessor.rawPointer, vectPtr)
+    val numItems = getNumHistograms(MemoryAccessor.nativePointer, vectPtr)
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-        MemoryAccessor.rawPointer, bucketDefAddr(MemoryAccessor.rawPointer, vectPtr).addr, h.bucketDefNumBytes)
+        MemoryAccessor.nativePointer, bucketDefAddr(MemoryAccessor.nativePointer, vectPtr).addr, h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
       // Initialize the first section
-      val firstSectPtr = afterBucketDefAddr(MemoryAccessor.rawPointer, vectPtr)
+      val firstSectPtr = afterBucketDefAddr(MemoryAccessor.nativePointer, vectPtr)
       initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     } else {
       // check the bucket schema is identical.  If not, return BucketSchemaMismatch
-      if (!matchBucketDef(h, MemoryAccessor.rawPointer, vectPtr)) return BucketSchemaMismatch
+      if (!matchBucketDef(h, MemoryAccessor.nativePointer, vectPtr)) return BucketSchemaMismatch
     }
 
     val res = appendHist(buf, h, numItems)
@@ -296,7 +296,7 @@ class AppendableHistogramVector(factory: MemFactory,
       // set new number of bytes first. Remember to exclude initial 4 byte length prefix
       setNumBytes(maxBytes - bytesLeft - 4)
       // Finally, increase # histograms which is the ultimate safe gate for access by readers
-      incrNumHistograms(MemoryAccessor.rawPointer, vectPtr)
+      incrNumHistograms(MemoryAccessor.nativePointer, vectPtr)
     }
     res
   }
@@ -315,10 +315,10 @@ class AppendableHistogramVector(factory: MemFactory,
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   // NOTE: do not access reader below unless this vect is nonempty.  TODO: fix this, or don't if we don't use this class
-  lazy val reader: VectorDataReader = new RowHistogramReader(MemoryAccessor.rawPointer, vectPtr)
+  lazy val reader: VectorDataReader = new RowHistogramReader(MemoryAccessor.nativePointer, vectPtr)
 
   def reset(): Unit = {
-    resetNumHistograms(MemoryAccessor.rawPointer, vectPtr)
+    resetNumHistograms(MemoryAccessor.nativePointer, vectPtr)
     setNumBytes(OffsetNumBuckets + 2)
   }
 
@@ -412,7 +412,7 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
     }
   }
 
-  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(MemoryAccessor.rawPointer, vectPtr)
+  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(MemoryAccessor.nativePointer, vectPtr)
 }
 
 trait HistogramReader extends VectorDataReader {

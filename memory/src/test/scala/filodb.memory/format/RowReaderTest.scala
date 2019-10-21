@@ -9,7 +9,7 @@ import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
 
 class RowReaderTest extends FunSpec with Matchers {
   val memFactory = new NativeMemoryManager(100000)
-  val acc = MemoryAccessor.rawPointer
+  val acc = MemoryAccessor.nativePointer
   val rows = Seq(
     (Some("Matthew Perry"), Some(18), Some(new Timestamp(10000L))),
     (Some("Michelle Pfeiffer"), None, Some(new Timestamp(10010L))),

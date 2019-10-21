@@ -88,7 +88,7 @@ class ShardDownsampler(datasetName: String,
         val chunkset = chunksets.nextInfoT
         val startTime = chunkset.startTime
         val endTime = chunkset.endTime
-        val tsPtr = chunkset.vectorOffset(0)
+        val tsPtr = chunkset.vectorAddress(0)
         val tsAcc = chunkset.vectorAccessor(0)
         val tsReader = part.chunkReader(0, tsAcc, tsPtr).asLongReader
         // for each downsample resolution

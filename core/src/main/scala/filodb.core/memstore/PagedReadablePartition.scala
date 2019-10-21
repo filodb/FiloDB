@@ -72,7 +72,7 @@ class PagedReadablePartition(override val schema: Schema,
   }
 
   override def hasChunksAt(id: ChunkID): Boolean =
-    chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(MemoryAccessor.rawPointer, _) == id)
+    chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(MemoryAccessor.nativePointer, _) == id)
 
   override def earliestTime: Long = ???
 

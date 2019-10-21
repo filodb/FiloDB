@@ -205,7 +205,7 @@ object BatchDownsampler extends StrictLogging with Instance {
       val chunkset = rawChunksets.nextInfoT
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
-      val vecPtr = chunkset.vectorOffset(timestampCol)
+      val vecPtr = chunkset.vectorAddress(timestampCol)
       val vecAcc = chunkset.vectorAccessor(timestampCol)
       val tsReader = rawPartToDownsample.chunkReader(timestampCol, vecAcc, vecPtr).asLongReader
 

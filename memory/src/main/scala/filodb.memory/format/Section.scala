@@ -87,7 +87,7 @@ trait SectionWriter {
 
   // Call to initialize the section writer with the address of the first section and how many bytes left
   def initSectionWriter(firstSectionAddr: Ptr.U8, remainingBytes: Int): Unit = {
-    curSection = Section.init(MemoryAccessor.rawPointer, firstSectionAddr)
+    curSection = Section.init(MemoryAccessor.nativePointer, firstSectionAddr)
     bytesLeft = remainingBytes - 4    // account for initial section header bytes
   }
 
@@ -97,15 +97,15 @@ trait SectionWriter {
   // Returns true if appending numBytes will start a new section
   protected def needNewSection(numBytes: Int): Boolean = {
     // Check remaining length/space.  A section must be less than 2^16 bytes long. Create new section if needed
-    val newNumBytes = curSection.sectionNumBytes(MemoryAccessor.rawPointer) + numBytes
-    curSection.numElements(MemoryAccessor.rawPointer) >= maxElementsPerSection.n || newNumBytes >= 65536
+    val newNumBytes = curSection.sectionNumBytes(MemoryAccessor.nativePointer) + numBytes
+    curSection.numElements(MemoryAccessor.nativePointer) >= maxElementsPerSection.n || newNumBytes >= 65536
   }
 
   // Appends a blob, writing a 2-byte length prefix before it.
   protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
     if (needNewSection(numBytes)) {
       if (bytesLeft >= (4 + numBytes)) {
-        curSection = Section.init(MemoryAccessor.rawPointer, curSection.endAddr(MemoryAccessor.rawPointer))
+        curSection = Section.init(MemoryAccessor.nativePointer, curSection.endAddr(MemoryAccessor.nativePointer))
         bytesLeft -= 4
       } else return VectorTooSmall(4 + numBytes, bytesLeft)
     }
@@ -115,7 +115,7 @@ trait SectionWriter {
   // Appends a blob, forcing creation of a new section too
   protected def newSectionWithBlob(base: Any, offset: Long, numBytes: Int, sectType: SectionType): AddResponse = {
     if (bytesLeft >= (4 + numBytes)) {
-      curSection = Section.init(MemoryAccessor.rawPointer, curSection.endAddr(MemoryAccessor.rawPointer), sectType)
+      curSection = Section.init(MemoryAccessor.nativePointer, curSection.endAddr(MemoryAccessor.nativePointer), sectType)
       bytesLeft -= 4
     } else return VectorTooSmall(4 + numBytes, bytesLeft)
     addBlobInner(base, offset, numBytes)
@@ -124,11 +124,11 @@ trait SectionWriter {
   private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse =
     // Copy bytes to end address, update variables
     if (bytesLeft >= (numBytes + 2)) {
-      val writeAddr = curSection.endAddr(MemoryAccessor.rawPointer)
-      writeAddr.asU16.asMut.set(MemoryAccessor.rawPointer, numBytes)
+      val writeAddr = curSection.endAddr(MemoryAccessor.nativePointer)
+      writeAddr.asU16.asMut.set(MemoryAccessor.nativePointer, numBytes)
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
-      curSection.update(MemoryAccessor.rawPointer, numBytes + 2, 1)
+      curSection.update(MemoryAccessor.nativePointer, numBytes + 2, 1)
       Ack
     } else VectorTooSmall(numBytes + 2, bytesLeft)
 }

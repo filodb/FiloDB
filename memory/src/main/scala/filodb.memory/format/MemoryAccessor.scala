@@ -8,33 +8,6 @@ import filodb.memory.format.UnsafeUtils._
 
 trait MemoryAccessor {
 
-  def getByte(offset: Long): Byte
-  def getShort(offset: Long): Short
-  def getInt(offset: Long): Int
-  def getIntVolatile(offset: Long): Int
-  def getLong(offset: Long): Long
-  def getLongVolatile(offset: Long): Long
-  def getDouble(offset: Long): Double
-  def getFloat(offset: Long): Double
-
-  def setByte(offset: Long, byt: Byte): Unit
-  def setShort(offset: Long, s: Short): Unit
-  def setInt(offset: Long, i: Int): Unit
-  def setIntVolatile(offset: Long, i: Int): Unit
-  def setLong(offset: Long, l: Long): Unit
-  def setDouble(offset: Long, d: Double): Unit
-  def setFloat(offset: Long, f: Float): Unit
-
-  //  def copyTo(offset: Long, dest: MemoryBase, destOffset: Long, numBytes: Long): Unit
-  //
-  //  def copyFrom(src: MemoryBase, srcOffset: Long, offset: Long, numBytes: Long): Unit
-  //
-  //  def wordCompare(thisOffset: Long, destObj: MemoryBase, destOffset: Long, n: Int): Int
-  //  def compareTo(offset1: Long, numBytes1: Int, base2: MemoryBase, offset2: Long, numBytes2: Int): Int
-}
-
-trait BaseOffsetAccessor extends MemoryAccessor {
-
   def base: Any
   def baseOffset: Long
 
@@ -55,19 +28,26 @@ trait BaseOffsetAccessor extends MemoryAccessor {
   final def setDouble(offset: Long, d: Double): Unit = unsafe.putDouble(base, baseOffset + offset, d)
   final def setFloat(offset: Long, f: Float): Unit = unsafe.putFloat(base, baseOffset + offset, f)
 
+  //  def copyTo(offset: Long, dest: MemoryBase, destOffset: Long, numBytes: Long): Unit
+  //
+  //  def copyFrom(src: MemoryBase, srcOffset: Long, offset: Long, numBytes: Long): Unit
+  //
+  //  def wordCompare(thisOffset: Long, destObj: MemoryBase, destOffset: Long, n: Int): Int
+  //  def compareTo(offset1: Long, numBytes1: Int, base2: MemoryBase, offset2: Long, numBytes2: Int): Int
+
 }
 
-object RawPointerAccessor extends BaseOffsetAccessor {
+object NativePointerAccessor extends MemoryAccessor {
   val base = ZeroPointer
   val baseOffset: Long = 0
 }
 
-case class ByteArrayAccessor(base: Array[Byte]) extends BaseOffsetAccessor {
+case class ByteArrayAccessor(base: Array[Byte]) extends MemoryAccessor {
   // TODO check bounds of array before accessing
   val baseOffset: Long = UnsafeUtils.arayOffset
 }
 
-case class OnHeapByteBufferAccessor(buf: ByteBuffer) extends BaseOffsetAccessor {
+case class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 
   var base: Any = _
   var baseOffset: Long = _
@@ -88,7 +68,7 @@ case class OnHeapByteBufferAccessor(buf: ByteBuffer) extends BaseOffsetAccessor 
   }
 }
 
-case class DirectBufferAccessor(buf: ByteBuffer) extends BaseOffsetAccessor {
+case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 
   var base: Any = _
   var baseOffset: Long = _
@@ -106,7 +86,7 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends BaseOffsetAccessor {
 object MemoryAccessor {
 
   def fromArray(array: Array[Byte]): MemoryAccessor = ByteArrayAccessor(array)
-  def rawPointer: MemoryAccessor = RawPointerAccessor
+  def nativePointer: MemoryAccessor = NativePointerAccessor
   def fromDirectBuffer(buf: ByteBuffer): MemoryAccessor = DirectBufferAccessor(buf)
   def fromOnHeapByteBuffer(buf: ByteBuffer): MemoryAccessor = OnHeapByteBufferAccessor(buf)
 

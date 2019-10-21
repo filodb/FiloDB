@@ -386,10 +386,10 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
     (min, max)
   }
 
-  private final val readVect = DoubleVector(MemoryAccessor.rawPointer, addr)
-  final def apply(index: Int): Double = readVect.apply(MemoryAccessor.rawPointer, addr, index)
+  private final val readVect = DoubleVector(MemoryAccessor.nativePointer, addr)
+  final def apply(index: Int): Double = readVect.apply(MemoryAccessor.nativePointer, addr, index)
   def reader: VectorDataReader = readVect
-  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(MemoryAccessor.rawPointer, addr)
+  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(MemoryAccessor.nativePointer, addr)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
@@ -404,19 +404,19 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data < last) PrimitiveVectorReader.markDrop(MemoryAccessor.rawPointer, addr)
+    if (data < last) PrimitiveVectorReader.markDrop(MemoryAccessor.nativePointer, addr)
     last = data
     super.addData(data)
   }
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
     val newChunk = DoubleVector.optimize(memFactory, this)
-    if (PrimitiveVectorReader.dropped(MemoryAccessor.rawPointer, addr))
-      PrimitiveVectorReader.markDrop(MemoryAccessor.rawPointer, newChunk)
+    if (PrimitiveVectorReader.dropped(MemoryAccessor.nativePointer, addr))
+      PrimitiveVectorReader.markDrop(MemoryAccessor.nativePointer, newChunk)
     newChunk
   }
 
-  override def reader: VectorDataReader = DoubleVector(MemoryAccessor.rawPointer, addr)
+  override def reader: VectorDataReader = DoubleVector(MemoryAccessor.nativePointer, addr)
 }
 
 class MaskedDoubleAppendingVector(addr: BinaryRegion.NativePointer,
@@ -430,7 +430,7 @@ BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAp
   def nbits: Short = 64
 
   val subVect = new DoubleAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(MemoryAccessor.rawPointer, addr)
+  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue

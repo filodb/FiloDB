@@ -52,7 +52,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
         vectorIts(pos) = part.schema.partColIterator(colID, part.partKeyBase, part.partKeyOffset)
       } else {
         val vectorAcc = info.vectorAccessor(colID)
-        val vectorPtr = info.vectorOffset(colID)
+        val vectorPtr = info.vectorAddress(colID)
         require(vectorPtr != UnsafeUtils.ZeroPointer, s"Column ID $colID is NULL")
         val reader    = part.chunkReader(colID, vectorAcc, vectorPtr)
         vectorIts(pos) = reader.iterate(vectorAcc, vectorPtr, rowNo)
@@ -62,7 +62,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
 
   private def setChunkStartEnd(info: ChunkSetInfoT): Unit = {
     // Get reader for timestamp vector
-    val timeVector = info.vectorOffset(timestampCol)
+    val timeVector = info.vectorAddress(timestampCol)
     val timeAcc = info.vectorAccessor(timestampCol)
     require(timeVector != UnsafeUtils.ZeroPointer, s"NULL timeVector - did you read the timestamp column?")
     val timeReader = part.chunkReader(timestampCol, timeAcc, timeVector).asLongReader

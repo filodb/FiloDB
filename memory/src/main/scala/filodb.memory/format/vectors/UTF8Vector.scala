@@ -156,7 +156,8 @@ object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
     if (fixedData != NABlob) {
       val utf8addr = vector + (if (fixedData < 0) smallOff(fixedData) else (fixedData))
       val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else acc.getInt(vector + fixedData)
-      new ZeroCopyUTF8String(acc, utf8addr, utf8len)
+      // FIXME translation from acc to base
+      new ZeroCopyUTF8String(UnsafeUtils.ZeroPointer, utf8addr, utf8len)
     } else {
       ZeroCopyUTF8String.NA
     }
@@ -240,17 +241,17 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     case other: AddResponse => other
   }
 
-  final def apply(n: Int): ZeroCopyUTF8String = UTF8FlexibleVectorDataReader.apply(MemoryAccessor.rawPointer, addr, n)
-  final def isAvailable(n: Int): Boolean = MemoryAccessor.rawPointer.getInt(addr + 12 + n * 4) != NABlob
+  final def apply(n: Int): ZeroCopyUTF8String = UTF8FlexibleVectorDataReader.apply(MemoryAccessor.nativePointer, addr, n)
+  final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
-  def copyToBuffer: Buffer[ZeroCopyUTF8String] = UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.rawPointer, addr)
+  def copyToBuffer: Buffer[ZeroCopyUTF8String] = UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
   final def isAllNA: Boolean = {
     var fixedOffset = addr + 12
     while (fixedOffset < curFixedOffset) {
-      if (MemoryAccessor.rawPointer.getInt(fixedOffset) != NABlob) return false
+      if (UnsafeUtils.getInt(fixedOffset) != NABlob) return false
       fixedOffset += 4
     }
     return true
@@ -259,7 +260,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
   final def noNAs: Boolean = {
     var fixedOffset = addr + 12
     while (fixedOffset < curFixedOffset) {
-      if (MemoryAccessor.rawPointer.getInt(fixedOffset) == NABlob) return false
+      if (UnsafeUtils.getInt(fixedOffset) == NABlob) return false
       fixedOffset += 4
     }
     return true
@@ -281,9 +282,9 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     var min = Int.MaxValue
     var max = 0
     for {index <- 0 until _len optimized} {
-      val fixedData = MemoryAccessor.rawPointer.getInt(addr + 12 + index * 4)
+      val fixedData = UnsafeUtils.getInt(addr + 12 + index * 4)
       if (fixedData != NABlob) {
-        val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else MemoryAccessor.rawPointer.getInt(addr + fixedData)
+        val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else UnsafeUtils.getInt(addr + fixedData)
         if (utf8len < min) min = utf8len
         if (utf8len > max) max = utf8len
       }
@@ -293,7 +294,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
 
   override def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {
     val offsetDiff = -((maxElements - _len) * 4)
-    adjustOffsets(MemoryAccessor.rawPointer, newAddr, offsetDiff)
+    adjustOffsets(UnsafeUtils.ZeroPointer, newAddr, offsetDiff)
     UnsafeUtils.setInt(newAddr, frozenSize - 4)
     newAddr
   }
@@ -325,9 +326,9 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     }
 
   // WARNING: no checking for if delta pushes small offsets out.  Intended for compactions only.
-  private def adjustOffsets(newAcc: MemoryAccessor, newOff: Long, delta: Int): Unit = {
+  private def adjustOffsets(newBase: Any, newOff: Long, delta: Int): Unit = {
     for {i <- 0 until _len optimized} {
-      val fixedData = newAcc.getInt(newOff + 12 + i * 4)
+      val fixedData = UnsafeUtils.getInt(newBase, newOff + 12 + i * 4)
       val newData = if (fixedData < 0) {
         if (fixedData == NABlob) {
           NABlob
@@ -338,7 +339,7 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
       } else {
         fixedData + delta
       }
-      UnsafeUtils.setInt(newAcc, newOff + 12 + i * 4, newData)
+      UnsafeUtils.setInt(newBase, newOff + 12 + i * 4, newData)
     }
   }
 
@@ -384,9 +385,11 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
 object UTF8ConstVector extends ConstVector with UTF8VectorDataReader {
   override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = numElements(acc, vector)
   // TODO: return just a pointer (NativePointer) or a UTF8StringMedium value class
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String =
-    new ZeroCopyUTF8String(acc, vector + 14,
-                           acc.getShort(vector + 12) & 0x0ffff)
+  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String = {
+    // FIXME translation from acc to base
+    new ZeroCopyUTF8String(UnsafeUtils.ZeroPointer, vector + 14,
+      UnsafeUtils.getShort(vector + 12) & 0x0ffff)
+  }
   def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
     def next: ZeroCopyUTF8String = apply(acc, vector, 0)
   }

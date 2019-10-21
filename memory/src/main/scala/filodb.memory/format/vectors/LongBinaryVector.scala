@@ -298,10 +298,10 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
-  private final val readVect = LongBinaryVector(MemoryAccessor.rawPointer, addr)
-  final def apply(index: Int): Long = readVect.apply(MemoryAccessor.rawPointer, addr, index)
+  private final val readVect = LongBinaryVector(MemoryAccessor.nativePointer, addr)
+  final def apply(index: Int): Long = readVect.apply(MemoryAccessor.nativePointer, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64
-  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(MemoryAccessor.rawPointer, addr)
+  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -343,7 +343,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   def nbits: Short = 64
 
   val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(MemoryAccessor.rawPointer, addr)
+  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue

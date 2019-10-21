@@ -312,7 +312,7 @@ class DeltaDeltaAppendingVector(val addr: BinaryRegion.NativePointer,
   final def apply(index: Int): Long = initValue + slope.toLong * index + deltas(index)
   final def numBytes: Int = 20 + deltas.numBytes
   final def reader: VectorDataReader = DeltaDeltaDataReader
-  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(MemoryAccessor.rawPointer, addr)
+  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
   final def addData(data: Long): AddResponse = {

@@ -56,15 +56,15 @@ object ChunkSet {
   */
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
-  def id: ChunkID = ChunkSetInfo.getChunkID(MemoryAccessor.rawPointer, infoAddr)
+  def id: ChunkID = ChunkSetInfo.getChunkID(MemoryAccessor.nativePointer, infoAddr)
   // ingestion time as milliseconds from 1970
-  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(MemoryAccessor.rawPointer, infoAddr)
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(MemoryAccessor.nativePointer, infoAddr)
   // number of rows encoded by this chunkset
-  def numRows: Int = ChunkSetInfo.getNumRows(MemoryAccessor.rawPointer, infoAddr)
+  def numRows: Int = ChunkSetInfo.getNumRows(MemoryAccessor.nativePointer, infoAddr)
   // the starting timestamp of this chunkset
-  def startTime: Long = ChunkSetInfo.getStartTime(MemoryAccessor.rawPointer, infoAddr)
+  def startTime: Long = ChunkSetInfo.getStartTime(MemoryAccessor.nativePointer, infoAddr)
   // The ending timestamp of this chunkset
-  def endTime: Long = ChunkSetInfo.getEndTime(MemoryAccessor.rawPointer, infoAddr)
+  def endTime: Long = ChunkSetInfo.getEndTime(MemoryAccessor.nativePointer, infoAddr)
 
   /**
    * Returns the vector pointer for a particular column
@@ -441,7 +441,7 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getBoolean(columnNo: Int): Boolean = ???
   def getInt(columnNo: Int): Int = columnNo match {
     case 1 => info.numRows
-    case 4 => BinaryVector.totalBytes(MemoryAccessor.rawPointer, info.vectorPtr(column.id))
+    case 4 => BinaryVector.totalBytes(MemoryAccessor.nativePointer, info.vectorPtr(column.id))
   }
   def getLong(columnNo: Int): Long = columnNo match {
     case 0 => info.id
@@ -452,12 +452,12 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getDouble(columnNo: Int): Double = ???
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
-    case IntColumn    => vectors.IntBinaryVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
-    case TimestampColumn => vectors.LongBinaryVector(MemoryAccessor.rawPointer,
+    case IntColumn    => vectors.IntBinaryVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(MemoryAccessor.nativePointer,
                                     info.vectorPtr(column.id)).getClass.getName
-    case DoubleColumn => vectors.DoubleVector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
-    case StringColumn => vectors.UTF8Vector(MemoryAccessor.rawPointer, info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
     case o: Any       => "nananana, heyheyhey, goodbye"
   }
 
