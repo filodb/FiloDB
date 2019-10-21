@@ -135,10 +135,7 @@ object IntBinaryVector {
     }
   }
 
-  def apply(buffer: ByteBuffer): IntVectorDataReader = {
-    require(buffer.isDirect)
-    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
-  }
+  def apply(buffer: ByteBuffer): IntVectorDataReader = apply(MemoryAccessor.fromByteBuffer(buffer), 0)
 
   import WireFormat._
 

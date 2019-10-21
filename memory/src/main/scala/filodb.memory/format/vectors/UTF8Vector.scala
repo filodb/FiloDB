@@ -47,10 +47,7 @@ object UTF8Vector {
   /**
    * Parses the type of vector from a DirectByteBuffer (offheap) and returns a UTF8VectorDataReader
    */
-  def apply(buffer: ByteBuffer): UTF8VectorDataReader = {
-    require(buffer.isDirect)
-    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
-  }
+  def apply(buffer: ByteBuffer): UTF8VectorDataReader = apply(MemoryAccessor.fromByteBuffer(buffer), 0)
 
   import WireFormat._
 

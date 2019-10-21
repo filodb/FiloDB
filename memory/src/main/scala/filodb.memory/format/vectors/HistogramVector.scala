@@ -181,6 +181,7 @@ object HistogramVector {
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryAccessor, addr: Ptr.U8): Boolean =
     (hist.formatCode == formatCode(acc, addr)) &&
     (hist.bucketDefNumBytes == bucketDefNumBytes(acc, addr)) && {
+      // TODO support on-heap
       UnsafeUtils.equate(UnsafeUtils.ZeroPointer, bucketDefAddr(acc, addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
@@ -200,10 +201,7 @@ object HistogramVector {
     new AppendableSectDeltaHistVector(factory, Ptr.U8(addr), maxBytes)
   }
 
-  def apply(buffer: ByteBuffer): HistogramReader = {
-    require(buffer.isDirect)
-    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
-  }
+  def apply(buffer: ByteBuffer): HistogramReader = apply(MemoryAccessor.fromByteBuffer(buffer), 0)
 
   import WireFormat._
 

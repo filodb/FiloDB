@@ -49,7 +49,7 @@ object DoubleVector {
 
   def apply(buffer: ByteBuffer): DoubleVectorDataReader = {
     require(buffer.isDirect)
-    apply(MemoryAccessor.fromDirectBuffer(buffer), 0)
+    apply(MemoryAccessor.fromByteBuffer(buffer), 0)
   }
 
   import WireFormat._

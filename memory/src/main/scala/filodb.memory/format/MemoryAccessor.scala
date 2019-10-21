@@ -6,6 +6,16 @@ import com.kenai.jffi.MemoryIO
 
 import filodb.memory.format.UnsafeUtils._
 
+object MemoryAccessor {
+
+  def fromArray(array: Array[Byte]): MemoryAccessor = ByteArrayAccessor(array)
+  def nativePointer: MemoryAccessor = NativePointerAccessor
+  def fromByteBuffer(buf: ByteBuffer): MemoryAccessor = {
+    if (buf.isDirect) DirectBufferAccessor(buf)
+    else OnHeapByteBufferAccessor(buf)
+  }
+}
+
 trait MemoryAccessor {
 
   def base: Any
@@ -75,7 +85,7 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   var length: Int = _
 
   // TODO check bounds of array before accessing
-  if (!buf.isDirect) throw new IllegalArgumentException("Needs to be direct buffer")
+  require (!buf.isDirect, "buf arg needs to be a DirectBuffer")
   val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
   base = UnsafeUtils.ZeroPointer
   baseOffset = address + buf.position()
@@ -83,11 +93,3 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 
 }
 
-object MemoryAccessor {
-
-  def fromArray(array: Array[Byte]): MemoryAccessor = ByteArrayAccessor(array)
-  def nativePointer: MemoryAccessor = NativePointerAccessor
-  def fromDirectBuffer(buf: ByteBuffer): MemoryAccessor = DirectBufferAccessor(buf)
-  def fromOnHeapByteBuffer(buf: ByteBuffer): MemoryAccessor = OnHeapByteBufferAccessor(buf)
-
-}

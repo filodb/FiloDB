@@ -46,8 +46,8 @@ trait ChunkSetInfoT {
 }
 
 final case class ChunkSetInfoOnHeap(bytes: ByteBuffer, vectors: Seq[ByteBuffer]) extends ChunkSetInfoT {
-  val bytesAcc = MemoryAccessor.fromOnHeapByteBuffer(bytes)
-  val vectorsAcc = vectors.map(MemoryAccessor.fromOnHeapByteBuffer)
+  val bytesAcc = MemoryAccessor.fromByteBuffer(bytes)
+  val vectorsAcc = vectors.map(MemoryAccessor.fromByteBuffer)
 
   def id: ChunkID = ChunkSetInfo.getChunkID(bytesAcc, 0)
   def ingestionTime: Long = ChunkSetInfo.getIngestionTime(bytesAcc, 0)
