@@ -7,8 +7,8 @@ import scala.language.postfixOps
 import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
-import filodb.memory.format._
 import filodb.memory.NativeMemoryManager
+import filodb.memory.format._
 
 /**
  * Measures read speed for a dictionary-encoded string Filo column.

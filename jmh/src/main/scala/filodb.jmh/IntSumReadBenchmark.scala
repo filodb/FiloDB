@@ -11,7 +11,7 @@ import scalaxy.loops._
 import filodb.core.{NamesTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.store.ChunkSet
-import filodb.memory.format.{MemoryAccessor, TupleRowReader, UnsafeUtils, vectors => bv}
+import filodb.memory.format.{vectors => bv, MemoryAccessor, TupleRowReader, UnsafeUtils}
 
 object IntSumReadBenchmark {
   val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), DatasetOptions.DefaultOptions)
