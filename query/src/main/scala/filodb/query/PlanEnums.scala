@@ -244,7 +244,20 @@ object ScalarFunctionId extends Enum[ScalarFunctionId] {
   val values = findValues
 
   case object Scalar extends ScalarFunctionId("scalar")
-  // case object Time extends ScalarFunctionId("time")
+  case object Time extends ScalarFunctionId("time")
+  case object DaysInMonth extends ScalarFunctionId("days_in_month")
+
+  case object DayOfMonth extends ScalarFunctionId("day_of_month")
+
+  case object DayOfWeek extends ScalarFunctionId("day_of_week")
+
+  case object Hour extends ScalarFunctionId("hour")
+
+  case object Minute extends ScalarFunctionId("minute")
+
+  case object Month extends ScalarFunctionId("month")
+
+  case object Year extends ScalarFunctionId("year")
 
 }
 

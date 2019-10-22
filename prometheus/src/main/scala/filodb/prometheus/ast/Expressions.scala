@@ -1,5 +1,6 @@
 package filodb.prometheus.ast
 
+import filodb.core.query.RangeParams
 import filodb.query._
 
 
@@ -36,21 +37,22 @@ trait Expressions extends Aggregates with Functions {
 
       lhs match {
         case expression: ScalarExpression if rhs.isInstanceOf[PeriodicSeries] =>
-          val scalar = ScalarFixedDoublePlan(expression.toScalar, filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
+          val scalar = ScalarFixedDoublePlan(expression.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
         case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
-          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
+          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
         case function: Function if function.name.equalsIgnoreCase("scalar")  && rhs.isInstanceOf[PeriodicSeries] =>
           val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
-        case series: PeriodicSeries if rhs.isInstanceOf[Function] && rhs.asInstanceOf[Function].name.equalsIgnoreCase("scalar") =>
+        case series: PeriodicSeries if rhs.isInstanceOf[Function] && (rhs.asInstanceOf[Function].name.equalsIgnoreCase("scalar") ||
+          rhs.asInstanceOf[Function].name.equalsIgnoreCase("time"))=>
           val scalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
-          val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = false)
+          val seriesPlanlhs = lhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
         case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>
           val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)

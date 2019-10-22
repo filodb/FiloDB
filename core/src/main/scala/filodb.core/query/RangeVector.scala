@@ -1,7 +1,7 @@
 package filodb.core.query
 
 
-import java.time.{LocalTime, ZoneId}
+import java.time.{LocalDateTime, ZoneOffset}
 
 import com.typesafe.scalalogging.StrictLogging
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
@@ -121,32 +121,32 @@ case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) exte
   override def numRowsInt: Int = timeValueMap.size
 }
 
+final case class RangeParams(start: Long, step: Long, end: Long)
 trait ScalarSingleValue extends ScalarVector {
-  def start: Long
-  def end: Long
-  def step: Long
+  def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
   override def rows: Iterator[RowReader] = {
     val rowList = new ListBuffer[TransientRow]()
-    for (i <- start to end by step) {
-      rowList += new TransientRow(i, getValue(i))
-      numRowsInt= numRowsInt + 1
+    for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+      println(" rows i:"+i)
+      rowList += new TransientRow(i*1000, getValue(i*1000))
+      numRowsInt = numRowsInt + 1
     }
     rowList.iterator
   }
 }
 
 
-case class ScalarFixedDouble(start: Long, end: Long, step: Long, value: Double) extends ScalarSingleValue {
+case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
   def getValue(time: Long): Double = value
 }
-case class TimeScalar(start: Long, end: Long, step:Long) extends ScalarSingleValue  {
-  override def getValue(time: Long): Double = time
+case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue  {
+  override def getValue(time: Long): Double = time.toDouble / 1000
 }
-case class HourScalar(start: Long, end: Long, step:Long) extends ScalarSingleValue
+case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue
 {
-  def value: Double = LocalTime.now(ZoneId.of("GMT")).getHour
+  def value: Double =  LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour()
   override def getValue(time: Long): Double = value
 }
 // First column of columnIDs should be the timestamp column

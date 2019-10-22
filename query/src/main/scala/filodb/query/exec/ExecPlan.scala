@@ -3,7 +3,7 @@ package filodb.query.exec
 import filodb.core.DatasetRef
 import filodb.core.memstore.FiloSchedulers
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.query.{RangeVector, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, ScalarVector, SerializableRangeVector, SerializedRangeVector}
+import filodb.core.query.{RangeParams, RangeVector, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, ScalarVector, SerializableRangeVector, SerializedRangeVector, TimeScalar}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query.Query.qLogger
@@ -106,7 +106,7 @@ trait ExecPlan extends QueryCommand  {
     */
   // scalastyle:off method.length
   def execute(source: ChunkSource, queryConfig: QueryConfig)
-             (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+             (implicit sched1: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
@@ -118,7 +118,7 @@ trait ExecPlan extends QueryCommand  {
       val resSchema = schemaOfDoExecute()
       val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector :Observable[ScalarVector] = if(transf.funcParams.isEmpty){
+        val paramRangeVector: Observable[ScalarVector] = if(transf.funcParams.isEmpty){
            Observable.empty
         } else {
           transf.funcParams.head.getResult
@@ -276,10 +276,17 @@ case class ExecPlanFuncArgs(execPlan: ExecPlan) extends FuncArgs {
   }
 }
 
-case class StaticFuncArgs(scalar: Double, timeStepParams: TimeStepParams = TimeStepParams(0,0,0)) extends FuncArgs {
+case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
     Observable.now(
-     new ScalarFixedDouble(timeStepParams.start, timeStepParams.end, timeStepParams.step, scalar))
+     new ScalarFixedDouble(timeStepParams, scalar))
+  }
+}
+
+case class TimeFuncArgs( timeStepParams: RangeParams) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
+    Observable.now(
+      new TimeScalar(timeStepParams))
   }
 }
 

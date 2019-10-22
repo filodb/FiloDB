@@ -1,6 +1,6 @@
 package filodb.query
 
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, RangeParams}
 
 sealed trait LogicalPlan
 
@@ -33,7 +33,7 @@ case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Long, to: Long) extends RangeSelector
 
 
-final case class TimeStepParams(start: Long, step: Long, end: Long) //to do consolidate is in ast also
+//final case class RangeParams(start: Long, step: Long, end: Long)
 /**
   * Concrete logical plan to query for raw data in a given range
   * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
@@ -164,16 +164,16 @@ trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPl
 //extends PeriodicSeriesPla
 case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
                       function: ScalarFunctionId,
-                      timeStepParams: TimeStepParams,
+                      timeStepParams: RangeParams,
                       functionArgs: Seq[FunctionArgsPlan] = Nil)  extends ScalarPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
 
-case class ScalarTimeBasedPlan(function: ScalarFunctionId) extends ScalarPlan  {
+case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan  {
 }
 
-case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: TimeStepParams) extends ScalarPlan with FunctionArgsPlan  {
+case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: RangeParams) extends ScalarPlan with FunctionArgsPlan  {
 }
 
 case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {

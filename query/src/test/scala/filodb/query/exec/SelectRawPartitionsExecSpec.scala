@@ -260,7 +260,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
 
     // Add the histogram_max_quantile function to ExecPlan and make sure results are OK
     execPlan.addRangeVectorTransformer(
-      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(StaticFuncArgs(0.99))))
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(StaticFuncArgs(0.99, RangeParams(0,0,0)))))
     val resp2 = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result2 = resp2.asInstanceOf[QueryResult]
     result2.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)

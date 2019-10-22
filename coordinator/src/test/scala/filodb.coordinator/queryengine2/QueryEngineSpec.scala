@@ -5,18 +5,18 @@ import akka.testkit.TestProbe
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
+
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.ConfigFactory
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query
+import filodb.query.ScalarFunctionId.Time
 import filodb.query._
 import filodb.query.exec._
 
@@ -582,7 +582,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
   }
 
   it ("should generate Scalar exec plan") {
-    val logicalPlan = ScalarVaryingDoublePlan(summed1,ScalarFunctionId.withName("scalar"), filodb.query.TimeStepParams(100,2,300) )
+    val logicalPlan = ScalarVaryingDoublePlan(summed1,ScalarFunctionId.withName("scalar"), RangeParams(100,2,300) )
 
     // materialized exec plan
     val execPlan = engine.materialize(logicalPlan,
@@ -591,5 +591,12 @@ class QueryEngineSpec extends FunSpec with Matchers {
 //    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
 
   // TO do add asserts
+  }
+
+  it ("should generate scalar time based plan") {
+    val logicalPlan = ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524858988))
+    val execPlan = engine.materialize(logicalPlan,
+      QueryOptions(), promQlQueryParams)
+    execPlan.printTree()
   }
 }

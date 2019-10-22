@@ -1,19 +1,41 @@
 package filodb.query.exec.rangefn
 
+import java.util.concurrent.TimeUnit
+
 import com.typesafe.config.{Config, ConfigFactory}
 import filodb.core.MetricsTestData
-import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, TransientRow}
+import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
+import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.query.{CustomRangeVectorKey, HourScalar, RangeParams, RangeVector, RangeVectorKey, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, TimeScalar, TransientRow}
+import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.{QueryConfig, ScalarFunctionId, TimeStepParams, exec}
+import filodb.query.exec.{ExecPlan, PlanDispatcher, ScalarTimeBasedExec}
+import filodb.query.{QueryConfig, QueryResponse, QueryResult, ScalarFunctionId, exec}
+import monix.eval.Task
+import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{FunSpec, Matchers}
 
+import scala.concurrent.duration.FiniteDuration
+
 class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
+  val timeseriesDataset = Dataset.make("timeseries",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "value:double:detectDrops=true"),
+    options = DatasetOptions(Seq("__name__", "job"), "__name__")).get
+
+  val dummyDispatcher = new PlanDispatcher {
+    override def dispatch(plan: ExecPlan)
+                         (implicit sched: Scheduler,
+                          timeout: FiniteDuration): Task[QueryResponse] = ???
+  }
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val policy = new FixedMaxPartitionsEvictionPolicy(20)
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val ignoreKey = CustomRangeVectorKey(
     Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
@@ -85,7 +107,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
 
   it("should generate scalar") {
-    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, TimeStepParams(1,1,1) )
+    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
     val resultRangeVectors = resultObs.toListL.runAsync.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
@@ -95,12 +117,46 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should generate scalar values when there is one range vector") {
-    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, TimeStepParams(1,1,1) )
+    val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), queryConfig, 1000, resultSchema)
     val resultRangeVectors = resultObs.toListL.runAsync.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarVaryingDouble]) shouldEqual (true)
     //resultRangeVectors.foreach(_.asInstanceOf[ScalarVaryingDouble]) shouldEqual(true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(1, 10, 30))
+  }
+
+  it("should generate time scalar") {
+    val execPlan = ScalarTimeBasedExec("test", timeseriesDataset.ref, RangeParams(10, 10, 100), ScalarFunctionId.Time, 0)
+    implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
+    import monix.execution.Scheduler.Implicits.global
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val result = resp match {
+      case QueryResult(id, _, response) => {
+        val rv = response(0)
+        rv.isInstanceOf[TimeScalar] shouldEqual(true)
+        //rv.rows.size shouldEqual 1
+        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        List((10000,10.0), (20000,20.0), (30000,30.0), (40000,40.0), (50000,50.0), (60000,60.0),
+          (70000,70.0), (80000,80.0), (90000,90.0), (100000,100.0)).sameElements(res) shouldEqual(true)
+      }
+    }
+  }
+  it("should generate hour scalar") {
+    val execPlan = ScalarTimeBasedExec("test", timeseriesDataset.ref, RangeParams(1565627710, 10, 1565627790), ScalarFunctionId.Hour, 0)
+    implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
+    import monix.execution.Scheduler.Implicits.global
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val result = resp match {
+      case QueryResult(id, _, response) => {
+        val rv = response(0)
+        rv.isInstanceOf[HourScalar] shouldEqual(true)
+        //rv.rows.size shouldEqual 1
+        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        List((1565627710000L,16.0), (1565627720000L,16.0), (1565627730000L,16.0), (1565627740000L,16.0),
+          (1565627750000L,16.0), (1565627760000L,16.0), (1565627770000L,16.0), (1565627780000L,16.0), (1565627790000L,16.0))
+          .sameElements(res) shouldEqual(true)
+      }
+    }
   }
 }

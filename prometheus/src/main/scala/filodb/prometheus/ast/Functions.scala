@@ -1,5 +1,6 @@
 package filodb.prometheus.ast
 
+import filodb.core.query.RangeParams
 import filodb.query._
 
 trait Functions extends Base with Operators with Vectors {
@@ -24,19 +25,25 @@ trait Functions extends Base with Operators with Vectors {
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
       val vectorFn = VectorFunctionId.withNameInsensitiveOption(name)
+      val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
+      val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
+      val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
+      val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
+      val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
+
       if (vectorFn.isDefined) {
         allParams.head match {
-          case num: ScalarExpression => VectorPlan(ScalarFixedDoublePlan(num.toScalar, filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end)))
+          case num: ScalarExpression => VectorPlan(ScalarFixedDoublePlan(num.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end)))
           case function: Function => val nestedPlan = function.toPeriodicSeriesPlan(timeParams)
             nestedPlan match {
               case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
               case _ => throw new UnsupportedOperationException()
             }
-
         }
 
       } else if (allParams.isEmpty) {
-        ScalarTimeBasedPlan(ScalarFunctionId.withNameInsensitive(name))
+        ScalarTimeBasedPlan(scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end) )
+
       }    else {
 //      }  else if (allParams.head.isInstanceOf[Scalar]){
 //       val scalar = allParams.head.asInstanceOf[Scalar].toScalar
@@ -55,18 +62,12 @@ trait Functions extends Base with Operators with Vectors {
 
 
         val otherParams : Seq[FunctionArgsPlan] = allParams.filter(!_.equals(seriesParam)).filter(!_.isInstanceOf[InstantExpression]).map {
-          case num: ScalarExpression => ScalarFixedDoublePlan(num.toScalar, filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
+          case num: ScalarExpression => ScalarFixedDoublePlan(num.toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))
           case function: Function  if (function.name.equalsIgnoreCase("scalar")) =>
             function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]
           case _ => throw new IllegalArgumentException("Parameters can be a string, number or scalar function")
         }
 
-
-        val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
-        val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
-        val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
-        val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
-        val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
 
         if (instantFunctionIdOpt.isDefined) {
           val instantFunctionId = instantFunctionIdOpt.get
@@ -92,7 +93,7 @@ trait Functions extends Base with Operators with Vectors {
           ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
         } else if (scalarFunctionIdOpt.isDefined) {
           val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-          ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, filodb.query.TimeStepParams(timeParams.start, timeParams.step, timeParams.end))
+          ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end))
         }
         else if (sortFunctionIdOpt.isDefined) {
           val sortFunctionId = sortFunctionIdOpt.get

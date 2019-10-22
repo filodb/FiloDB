@@ -14,8 +14,8 @@ import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.core.{SpreadProvider, Types}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
-import filodb.query.exec._
 import filodb.query.{exec, _}
+import filodb.query.exec._
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -114,7 +114,8 @@ class QueryEngine(dataset: Dataset,
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
         !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
       // failure routing
-      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan)) // Sub queries have different time ranges (unusual)
+      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan) || // Sub queries have different time ranges (unusual)
+       rootLogicalPlan.isInstanceOf[ScalarTimeBasedPlan]) //No need to route since there is no metric
       {
        generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
       } else {
@@ -217,6 +218,7 @@ class QueryEngine(dataset: Dataset,
 
   //ef materializeScalarPlan(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarPlan, spreadProvider: SpreadProvider): PlanResult = ???
 
+
   /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
     *
@@ -246,9 +248,9 @@ class QueryEngine(dataset: Dataset,
                                               spreadProvider)
       case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
-
       case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(queryId, submitTime, options, lp, spreadProvider)
       case _                               => throw new BadQueryException("Invalid logical plan")
 
     }
@@ -261,8 +263,9 @@ class QueryEngine(dataset: Dataset,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
     val funcArg = lp.scalar match {
-      case num: ScalarFixedDoublePlan => Seq(StaticFuncArgs(num.scalar))
+      case num: ScalarFixedDoublePlan => Seq(StaticFuncArgs(num.scalar, num.timeStepParams))
       case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider)))
+      case  t: ScalarTimeBasedPlan     => Seq(TimeFuncArgs(t.rangeParams))
       case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
     }
 
@@ -479,7 +482,7 @@ class QueryEngine(dataset: Dataset,
                                          spreadProvider: SpreadProvider): Seq[FuncArgs] = {
     functionParams.map { param =>
         param match {
-        case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar)
+        case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
         case  s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider))
         case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
       }
@@ -519,7 +522,13 @@ class QueryEngine(dataset: Dataset,
     }
   }
 
-  /**
+  private def materializeScalarTimeBased(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarTimeBasedPlan, spreadProvider: SpreadProvider): PlanResult = {
+    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
+    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId,dataset.ref,lp.rangeParams, lp.function)
+    PlanResult(Seq(scalarTimeBasedExec), false)
+  }
+
+    /**
    * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
    * if it is not the prometheus standard
    */

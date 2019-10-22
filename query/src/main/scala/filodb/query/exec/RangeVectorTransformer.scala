@@ -183,67 +183,45 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty) : Observable[RangeVector] = {
-
-    //    val paramsList = new mutable.ArrayBuffer[RowReader]()
-    //    paramRangeVector.foreach(x => paramsList ++ x.head.asInstanceOf[ScalarVaryingDouble].getRowsList)
-//   funcParams.head.getResult
-//
-//    if (paramResponse.isEmpty) {
-//      source.map { rv =>
-//        val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
-//
-//          private val rows = rv.rows
-//          private val result = new TransientRow()
-//          private val sclrVal = funcParams.head.asInstanceOf[ScalarFixedDoubleParamExec].value
-//          // to DO sclVal for time function
-//
-//          override def hasNext: Boolean = rows.hasNext
-//
-//          override def next(): RowReader = {
-//            val next = rows.next()
-//            val nextVal = next.getDouble(1)
-//            val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
-//            else  operatorFunction.calculate(nextVal, sclrVal)
-//            result.setValues(next.getLong(0), newValue)
-//            result
-//          }
-//        }
-//        IteratorBackedRangeVector(rv.key, resultIterator)
-//      }
-//
-//    } else {
-      paramResponse.map { param =>
-        println("rows size:" + param.rows.size)
-      //  val rowMap = param.getRowMap
-        source.map { rv =>
-          val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
-            var paramIndex = 0
-            private val rows = rv.rows
-            private val result = new TransientRow()
-
-            override def hasNext: Boolean = rows.hasNext
-
-            override def next(): RowReader = {
-              val next = rows.next()
-              val nextVal = next.getDouble(1)
-              val timestamp = next.getLong(0)
-             // println("rowMap:" + rowMap)
-              val sclrVal = param.getValue(timestamp)
-              println("sclrVal:" +sclrVal)
-              val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
-              else operatorFunction.calculate(nextVal, sclrVal)
-              result.setValues(timestamp, newValue)
-              paramIndex += 1
-              result
-            }
-          }
-          IteratorBackedRangeVector(rv.key, resultIterator)
-        }
-      }.flatten
+            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty) :
+  Observable[RangeVector] = {
+    funcParams.head match {
+    case s: StaticFuncArgs   => evaluate(source,ScalarFixedDouble(s.timeStepParams, s.scalar))
+    case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams))
+    case e: ExecPlanFuncArgs => paramResponse.map(param => evaluate(source, param)).flatten
+   }
   }
   // TODO all operation defs go here and get invoked from mapRangeVector
   //override def = Nil
+
+  private def evaluate(source: Observable[RangeVector], scalarVector: ScalarVector) ={
+    source.map { rv =>
+      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
+        var paramIndex = 0
+        private val rows = rv.rows
+        private val result = new TransientRow()
+
+        override def hasNext: Boolean = rows.hasNext
+
+        override def next(): RowReader = {
+          val next = rows.next()
+          val nextVal = next.getDouble(1)
+          val timestamp = next.getLong(0) // in millisecond mostly
+          // println("rowMap:" + rowMap)
+          val sclrVal = scalarVector.getValue(timestamp)
+          println("sclrVal:" +sclrVal)
+          println("nextVal:" +nextVal)
+          val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
+          else operatorFunction.calculate(nextVal, sclrVal)
+          println("newValue:" + newValue)
+          result.setValues(timestamp, newValue)
+          paramIndex += 1
+          result
+        }
+      }
+      IteratorBackedRangeVector(rv.key, resultIterator)
+    }
+  }
 }
 
 final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, funcStringParam: Seq[String] = Nil, funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
@@ -308,7 +286,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 }
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,
-                                      timeStepParams: TimeStepParams) extends RangeVectorTransformer {
+                                      timeStepParams: RangeParams) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
@@ -325,7 +303,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
     val resultRv = source.toListL.map { rvs =>
       println("rvs size in scalar function:" + rvs.size)
       if (rvs.size > 1) {
-        Seq(ScalarFixedDouble(timeStepParams.start, timeStepParams.end, timeStepParams.step, Double.NaN))
+        Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
         Seq(ScalarVaryingDouble(rvs.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toMap))
       }
