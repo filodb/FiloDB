@@ -115,7 +115,9 @@ trait SectionWriter {
   // Appends a blob, forcing creation of a new section too
   protected def newSectionWithBlob(base: Any, offset: Long, numBytes: Int, sectType: SectionType): AddResponse = {
     if (bytesLeft >= (4 + numBytes)) {
-      curSection = Section.init(MemoryAccessor.nativePointer, curSection.endAddr(MemoryAccessor.nativePointer), sectType)
+      curSection = Section.init(MemoryAccessor.nativePointer,
+                                curSection.endAddr(MemoryAccessor.nativePointer),
+                                sectType)
       bytesLeft -= 4
     } else return VectorTooSmall(4 + numBytes, bytesLeft)
     addBlobInner(base, offset, numBytes)
