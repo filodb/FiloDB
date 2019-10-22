@@ -237,10 +237,12 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
     case other: AddResponse => other
   }
 
-  final def apply(n: Int): ZeroCopyUTF8String = UTF8FlexibleVectorDataReader.apply(MemoryAccessor.nativePointer, addr, n)
+  final def apply(n: Int): ZeroCopyUTF8String =
+    UTF8FlexibleVectorDataReader.apply(MemoryAccessor.nativePointer, addr, n)
   final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
-  def copyToBuffer: Buffer[ZeroCopyUTF8String] = UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
+  def copyToBuffer: Buffer[ZeroCopyUTF8String] =
+    UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 

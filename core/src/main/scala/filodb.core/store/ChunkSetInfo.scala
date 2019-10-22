@@ -464,8 +464,10 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getDouble(columnNo: Int): Double = ???
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
-    case IntColumn    => vectors.IntBinaryVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName
+    case IntColumn    => vectors.IntBinaryVector(MemoryAccessor.nativePointer,
+                                    info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(MemoryAccessor.nativePointer,
+                                    info.vectorPtr(column.id)).getClass.getName
     case TimestampColumn => vectors.LongBinaryVector(MemoryAccessor.nativePointer,
                                     info.vectorPtr(column.id)).getClass.getName
     case DoubleColumn => vectors.DoubleVector(MemoryAccessor.nativePointer, info.vectorPtr(column.id)).getClass.getName

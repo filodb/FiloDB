@@ -107,7 +107,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 }
 
 /**
-  * Implementation used to access a bytes within an off-heap, direct byte buffer. The `addr` parameter
+  * Implementation used to access bytes within an off-heap, direct byte buffer. The `addr` parameter
   * in methods refers to memory positions relative to the current position of the byte buffer.
   */
 case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
