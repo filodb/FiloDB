@@ -153,8 +153,7 @@ object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
     if (fixedData != NABlob) {
       val utf8addr = vector + (if (fixedData < 0) smallOff(fixedData) else (fixedData))
       val utf8len = if (fixedData < 0) fixedData & MaxSmallLen else acc.getInt(vector + fixedData)
-      // FIXME translation from acc to base
-      new ZeroCopyUTF8String(UnsafeUtils.ZeroPointer, utf8addr, utf8len)
+      new ZeroCopyUTF8String(acc.base, acc.baseOffset + utf8addr, utf8len)
     } else {
       ZeroCopyUTF8String.NA
     }
@@ -383,8 +382,7 @@ object UTF8ConstVector extends ConstVector with UTF8VectorDataReader {
   override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = numElements(acc, vector)
   // TODO: return just a pointer (NativePointer) or a UTF8StringMedium value class
   def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String = {
-    // FIXME translation from acc to base
-    new ZeroCopyUTF8String(UnsafeUtils.ZeroPointer, vector + 14,
+    new ZeroCopyUTF8String(acc.base, acc.baseOffset +  vector + 14,
       UnsafeUtils.getShort(vector + 12) & 0x0ffff)
   }
   def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {

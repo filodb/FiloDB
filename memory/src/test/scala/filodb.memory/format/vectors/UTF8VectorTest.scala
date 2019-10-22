@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import debox.Buffer
 
 import filodb.memory.format._
@@ -68,6 +70,23 @@ class UTF8VectorTest extends NativeVectorTest {
       UTF8Vector(acc, frozen).length(acc, frozen) shouldEqual 3
       UTF8Vector(acc, frozen).toBuffer(acc, frozen).toList shouldEqual strs
       BinaryVector.totalBytes(acc, frozen) should equal (12 + 12 + 5 + 3 + 7)
+    }
+
+
+    it("should be able to read from on-heap IntBinaryVector") {
+      val strs = Seq("apple", "zoe", "bananas").map(ZeroCopyUTF8String.apply)
+      val utf8vect = UTF8Vector.appendingVector(memFactory, 10, 1024)
+      strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
+      val frozen = utf8vect.freeze(memFactory)
+      val bytes = UTF8Vector(acc, frozen).toBytes(acc, frozen)
+
+      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
+        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(frozen)),
+        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+      onHeapAcc.foreach { a =>
+        UTF8Vector(a, 0).toBuffer(a, 0).toList shouldEqual strs
+      }
     }
 
     it("should be able to parse with UTF8Vector() a DirectBuffer") {

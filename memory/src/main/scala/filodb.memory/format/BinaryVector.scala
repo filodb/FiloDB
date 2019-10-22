@@ -127,6 +127,13 @@ trait VectorDataReader extends AvailableReader {
    */
   def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
 
+  def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
+    val numByts = numBytes(acc, vector) + 4
+    val bytes = new Array[Byte](numByts)
+    UnsafeUtils.copy(acc.base, acc.baseOffset + vector, bytes, UnsafeUtils.arayOffset, numByts)
+    bytes
+  }
+
   def asIntReader: vectors.IntVectorDataReader = this.asInstanceOf[vectors.IntVectorDataReader]
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
   def asDoubleReader: vectors.DoubleVectorDataReader = this.asInstanceOf[vectors.DoubleVectorDataReader]

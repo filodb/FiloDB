@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import debox.Buffer
 
 import filodb.memory.format._
@@ -82,6 +84,21 @@ class DoubleVectorTest extends NativeVectorTest {
       DoubleVector(acc, optimized)(acc, optimized, 2) shouldEqual 2.0
       // Const DeltaDeltaVector (since this is linearly increasing)
       BinaryVector.totalBytes(acc, optimized) shouldEqual 24
+    }
+
+    it("should be able to read from on-heap DeltaDeltaVector") {
+      val orig = (0 to 9).map(_.toDouble)
+      val builder = DoubleVector(memFactory, orig)
+      val optimized = builder.optimize(memFactory)
+      val bytes = DoubleVector(acc, optimized).toBytes(acc, optimized)
+
+      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
+        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+      onHeapAcc.foreach { a =>
+        DoubleVector(a, 0).toBuffer(a, 0).toList shouldEqual orig
+      }
     }
 
     it("should encode some edge cases correctly to DDV") {

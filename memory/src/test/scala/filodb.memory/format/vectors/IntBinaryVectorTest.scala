@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import debox.Buffer
 
 import filodb.memory.{BlockMemFactory, MemoryStats, PageAlignedBlockManager}
@@ -31,6 +33,22 @@ class IntBinaryVectorTest extends NativeVectorTest {
       builder.length should equal (4)
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(acc, frozen).toBuffer(acc, frozen).toList should equal (orig)
+    }
+
+    it("should be able to read from on-heap IntBinaryVector") {
+      val builder = IntBinaryVector.appendingVectorNoNA(memFactory, 4)
+      val orig = Seq(1, 0, -128, 127)
+      orig.foreach(x => builder.addData(x) shouldEqual Ack)
+      val optimized = builder.optimize(memFactory)
+      val bytes = IntBinaryVector(acc, optimized).toBytes(acc, optimized)
+
+      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
+        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+      onHeapAcc.foreach { a =>
+        IntBinaryVector(a, 0).toBuffer(a, 0).toList shouldEqual orig
+      }
     }
 
     it("should iterate with startElement > 0") {

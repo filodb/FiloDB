@@ -1,9 +1,11 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import debox.Buffer
 import org.scalatest.prop.PropertyChecks
 
-import filodb.memory.format.{BinaryVector, GrowableVector, WireFormat}
+import filodb.memory.format.{BinaryVector, GrowableVector, MemoryAccessor, WireFormat}
 
 class LongVectorTest extends NativeVectorTest with PropertyChecks {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i
@@ -51,6 +53,23 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
 
       val optimized = builder.optimize(memFactory)
       LongBinaryVector(acc, optimized).sum(acc, optimized, 0, numInts - 1) shouldEqual (0 until numInts).sum.toDouble
+    }
+
+    it("should be able to read from on-heap array or byte buffer based Long Binary Vector") {
+      val numInts = 1000
+      val builder = LongBinaryVector.appendingVector(memFactory, numInts / 2)
+      (0 until numInts).map(_.toLong).foreach(builder.addData)
+      builder.length should equal (numInts)
+      val optimized = builder.optimize(memFactory)
+      val bytes = LongBinaryVector(acc, optimized).toBytes(acc, optimized)
+
+      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
+        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+      onHeapAcc.foreach { a =>
+        LongBinaryVector(a, 0).sum(a, 0, 0, numInts - 1) shouldEqual (0 until numInts).sum.toDouble
+      }
     }
 
     it("should be able to return minMax accurately with NAs") {
