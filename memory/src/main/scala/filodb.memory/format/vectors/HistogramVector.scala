@@ -461,7 +461,7 @@ class RowHistogramReader(val acc: MemoryAccessor, histVect: Ptr.U8) extends Hist
     val histPtr = locate(index)
     val histLen = histPtr.asU16.getU16(acc)
     val buf = BinaryHistogram.valuesBuf
-    buf.wrap(histPtr.add(2).addr, histLen)
+    acc.wrapInto(buf, histPtr.add(2).addr, histLen)
     dSink.reset()
     NibblePack.unpackToSink(buf, dSink, numBuckets)
     returnHist
@@ -501,7 +501,7 @@ class SectDeltaHistogramReader(acc2: MemoryAccessor, histVect: Ptr.U8)
     // unpack to baseHist
     baseSink.reset()
     val buf = BinaryHistogram.valuesBuf
-    buf.wrap(curHist.add(2).addr, curHist.asU16.getU16(acc))
+    acc.wrapInto(buf, curHist.add(2).addr, curHist.asU16.getU16(acc))
     NibblePack.unpackToSink(buf, baseSink, numBuckets)
   }
 
@@ -514,7 +514,7 @@ class SectDeltaHistogramReader(acc2: MemoryAccessor, histVect: Ptr.U8)
     else {
       val histLen = histPtr.asU16.getU16(acc)
       val buf = BinaryHistogram.valuesBuf
-      buf.wrap(histPtr.add(2).addr, histLen)
+      acc.wrapInto(buf, histPtr.add(2).addr, histLen)
       dSink.reset()
       NibblePack.unpackToSink(buf, dSink, numBuckets)
 

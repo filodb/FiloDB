@@ -3,6 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
+import org.agrona.DirectBuffer
 
 import filodb.memory.format.UnsafeUtils._
 
@@ -30,6 +31,7 @@ sealed trait MemoryAccessor {
 
   def base: Any
   def baseOffset: Long
+  def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit
 
   final def getByte(addr: Long): Byte = unsafe.getByte(base, baseOffset + addr)
   final def getShort(addr: Long): Short = unsafe.getShort(base, baseOffset + addr)
@@ -71,6 +73,10 @@ object NativePointerAccessor extends MemoryAccessor {
   // TODO check bounds of array before accessing
   val base = ZeroPointer
   val baseOffset: Long = 0
+
+  override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
+    buf.wrap(addr, length)
+  }
 }
 
 /**
@@ -80,6 +86,11 @@ object NativePointerAccessor extends MemoryAccessor {
 class ByteArrayAccessor(val base: Array[Byte]) extends MemoryAccessor {
   // TODO check bounds of array before accessing
   val baseOffset: Long = UnsafeUtils.arayOffset
+
+  override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
+    buf.wrap(base, addr.toInt, length)
+  }
+
 }
 
 /**
@@ -100,10 +111,15 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
     length = buf.limit() - buf.position()
   } else {
     assert(buf.isReadOnly)
-    base = unsafe.getObject(buf, byteBufArrayField).asInstanceOf[Array[Byte]]
+    base = unsafe.getObject(buf, byteBufArrayField)
     baseOffset = unsafe.getInt(buf, byteBufOffsetField) + arayOffset.toLong
     length = buf.limit() - buf.position()
   }
+
+  override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
+    dBuf.wrap(buf, addr.toInt, length)
+  }
+
 }
 
 /**
@@ -122,6 +138,10 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   base = UnsafeUtils.ZeroPointer
   baseOffset = address + buf.position()
   length = buf.limit() - buf.position()
+
+  override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
+    dBuf.wrap(buf, addr.toInt, length)
+  }
 
 }
 
