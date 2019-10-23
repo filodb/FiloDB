@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.memory.format._
@@ -99,6 +101,43 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.reset()
     appender.length shouldEqual 0
   }
+
+
+  it("should be able to read from on-heap Histogram Vector") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual rawHistBuckets.length
+
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual rawHistBuckets.length
+
+    (0 until rawHistBuckets.length).foreach { i =>
+      val h = reader(i)
+      verifyHistogram(h, i)
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+
+    val bytes = optReader.toBytes(acc, optimized)
+
+    val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
+      MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+      MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+    onHeapAcc.foreach { a =>
+      val readerH = HistogramVector(a, 0)
+      (0 until rawHistBuckets.length).foreach { i =>
+        val h = readerH(i)
+        verifyHistogram(h, i)
+      }
+    }
+  }
+
 
   val lastIncrHist = LongHistogram(bucketScheme, incrHistBuckets.last.map(_.toLong))
 

@@ -130,7 +130,7 @@ trait VectorDataReader extends AvailableReader {
   def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
     val numByts = numBytes(acc, vector) + 4
     val bytes = new Array[Byte](numByts)
-    UnsafeUtils.copy(acc.base, acc.baseOffset + vector, bytes, UnsafeUtils.arayOffset, numByts)
+    acc.copy(vector, MemoryAccessor.fromArray(bytes), 0, numByts)
     bytes
   }
 
