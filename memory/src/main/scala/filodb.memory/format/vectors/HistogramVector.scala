@@ -175,14 +175,13 @@ object HistogramVector {
     addr + OffsetBucketDef + bucketDefNumBytes(acc, addr)
   final def bucketDefNumBytes(acc: MemoryAccessor, addr: Ptr.U8): Int =
     addr.add(OffsetBucketDefSize).asU16.getU16(acc)
-  final def bucketDefAddr(acc: MemoryAccessor, addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
+  final def bucketDefAddr(addr: Ptr.U8): Ptr.U8 = addr + OffsetBucketDef
 
   // Matches the bucket definition whose # bytes is at (base, offset)
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryAccessor, addr: Ptr.U8): Boolean =
     (hist.formatCode == formatCode(acc, addr)) &&
     (hist.bucketDefNumBytes == bucketDefNumBytes(acc, addr)) && {
-      // TODO support on-heap
-      UnsafeUtils.equate(UnsafeUtils.ZeroPointer, bucketDefAddr(acc, addr).addr,
+      UnsafeUtils.equate(acc.base, bucketDefAddr(addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
 
@@ -277,7 +276,8 @@ class AppendableHistogramVector(factory: MemFactory,
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
-        MemoryAccessor.nativePointer, bucketDefAddr(MemoryAccessor.nativePointer, vectPtr).addr, h.bucketDefNumBytes)
+                                    UnsafeUtils.ZeroPointer, bucketDefAddr(vectPtr).addr,
+                                    h.bucketDefNumBytes)
       UnsafeUtils.setShort(addr + OffsetBucketDefSize, h.bucketDefNumBytes.toShort)
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
@@ -430,7 +430,7 @@ class RowHistogramReader(val acc: MemoryAccessor, histVect: Ptr.U8) extends Hist
   final def length: Int = getNumHistograms(acc, histVect)
   val numBuckets = if (length > 0) getNumBuckets(acc, histVect) else 0
 
-  val buckets = HistogramBuckets(bucketDefAddr(acc, histVect).add(-2), formatCode(acc, histVect))
+  val buckets = HistogramBuckets(acc, bucketDefAddr(histVect).add(-2), formatCode(acc, histVect))
   val returnHist = LongHistogram(buckets, new Array[Long](buckets.numBuckets))
   val endAddr = histVect + histVect.asI32.getI32(acc) + 4
 
