@@ -673,12 +673,14 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
 abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
                                           var b0: Double = Double.NaN,
                                           var s0: Double = Double.NaN,
-                                          var nextvalue: Double = Double.NaN)
+                                          var nextvalue: Double = Double.NaN,
+                                          var smoothedResult: Double = Double.NaN)
   extends ChunkedRangeFunction[TransientRow] {
 
   override final def reset(): Unit = { s0 = Double.NaN
                                        b0 = Double.NaN
-                                       nextvalue = Double.NaN }
+                                       nextvalue = Double.NaN
+                                       smoothedResult = Double.NaN }
 
   def parseParameters(funcParams: Seq[Any]): (Double, Double) = {
     require(funcParams.size == 2, "Holt winters needs 2 parameters")
@@ -692,7 +694,7 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
   }
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, s0)
+    sampleToEmit.setValues(endTimestamp, smoothedResult)
   }
 }
 
@@ -726,7 +728,7 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
                                 endRowNum: Int): Unit = {
     val it = doubleReader.iterate(doubleVect, startRowNum)
     var rowNum = startRowNum
-    if (JLDouble.isNaN(b0)) {
+    if (JLDouble.isNaN(s0) && JLDouble.isNaN(b0)) {
       // not continuation of a chunk
       val (_s0, firstrow) = getNextValue(startRowNum, endRowNum, it)
       var (_b0, currRow) = getNextValue(firstrow, endRowNum, it)
@@ -734,20 +736,28 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
       b0 = _b0 - _s0
       rowNum = currRow - 1
       s0 = _s0
-    } else {
+      if (!JLDouble.isNaN(b0)) smoothedResult = s0
+    } else if (JLDouble.isNaN(b0)) {
+      var (_b0, currRow) = getNextValue(startRowNum, endRowNum, it)
+      nextvalue = _b0
+      b0 = _b0 - s0
+      rowNum = currRow - 1
+    }
+    else {
       it.next
     }
     if (!JLDouble.isNaN(b0)) {
       while (rowNum <= endRowNum) {
         // There are many possible values of NaN.  Use a function to ignore them reliably.
         if (!JLDouble.isNaN(nextvalue)) {
-          val smoothedResult  = sf*nextvalue + (1-sf)*(s0 + b0)
-          b0 = tf*(smoothedResult - s0) + (1-tf)*b0
-          s0 = smoothedResult
+          val _s0  = sf*nextvalue + (1-sf)*(s0 + b0)
+          b0 = tf*(_s0 - s0) + (1-tf)*b0
+          s0 = _s0
         }
         nextvalue = it.next
         rowNum += 1
       }
+      smoothedResult = s0
     }
   }
 }
