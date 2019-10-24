@@ -7,10 +7,16 @@ import net.ceedubs.ficus.Ficus._
 
 final case class DownsampleConfig(config: Config) {
   val enabled = config.hasPath("enabled") && config.getBoolean("enabled")
-  val resolutions = config.as[Seq[FiniteDuration]]("resolutions")
-  val ttls = config.as[Array[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
+
+  val resolutions = if (config.hasPath ("resolutions")) config.as[Seq[FiniteDuration]]("resolutions")
+                    else Seq.empty
+
+  val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
+             else Seq.empty
   require(resolutions.length == ttls.length)
-  val schemas = config.as[Seq[String]]("raw-schema-names")
+
+  val schemas = if (config.hasPath ("raw-schema-names")) config.as[Seq[String]]("raw-schema-names")
+                else Seq.empty
 
   def makePublisher(): DownsamplePublisher = {
     if (!enabled) {
