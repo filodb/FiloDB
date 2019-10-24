@@ -24,6 +24,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              failureRetries: Int,
+                             maxChunkTime: FiniteDuration,
                              retryDelay: FiniteDuration,
                              partIndexFlushMaxDelaySeconds: Int,
                              partIndexFlushMinDelaySeconds: Int,
@@ -46,6 +47,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
                                "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
+                               "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
                                "num-block-pages" -> numPagesPerBlock,
                                "failure-retries" -> failureRetries,
                                "retry-delay" -> (retryDelay.toSeconds + "s"),
@@ -86,7 +88,10 @@ object StoreConfig {
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
     val config = storeConfig.withFallback(defaults)
-    StoreConfig(config.as[FiniteDuration]("flush-interval"),
+    val flushInterval = config.as[FiniteDuration]("flush-interval")
+    val fallbackMaxChunkTime = (flushInterval.toMillis * 1.1).toLong.millis
+    val maxChunkTime = config.as[Option[FiniteDuration]]("max-chunk-time").getOrElse(fallbackMaxChunkTime)
+    StoreConfig(flushInterval,
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
@@ -98,6 +103,7 @@ object StoreConfig {
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
                 config.getInt("failure-retries"),
+                maxChunkTime,
                 config.as[FiniteDuration]("retry-delay"),
                 config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,
                 config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,

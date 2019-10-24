@@ -116,7 +116,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
    * @param ingestionTime time (as milliseconds from 1970) at the data source
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory,
+             maxChunkTime: Long = Long.MaxValue): Unit = {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
     if (ts < timestampOfLatestSample) {
@@ -127,16 +128,15 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     val newChunk = currentChunks == nullChunks
     if (newChunk) initNewChunk(ts, ingestionTime)
 
+    if (ts - currentInfo.startTime > maxChunkTime) {
+      _log.info(s"Switching buffers since chunk max time reached")
+      switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+    }
+
     for { col <- 0 until schema.numDataColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
-          // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
-          // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
-          // So we do not call ingest again unless switcing buffers succeeds.
-          // re-ingest every element, allocating new WriteBuffers
-          if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder) }
-          else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
-                           s"Part=$stringPartition ts=$ts col=$col numRows=${currentInfo.numRows}") }
+          switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
           return
         case other: AddResponse =>
       }
@@ -150,6 +150,21 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // Publish it now that it has something.
       infoPut(currentInfo)
     }
+  }
+
+  private def switchBuffersAndIngest(ingestionTime: Long,
+                                     userTime: Long,
+                                     row: RowReader,
+                                     blockHolder: BlockMemFactory,
+                                     maxChunkTime: Long): Unit = {
+    // NOTE: a very bad infinite loop is possible if switching buffers fails (if the # rows is 0) but one of the
+    // vectors fills up.  This is possible if one vector fills up but the other one does not for some reason.
+    // So we do not call ingest again unless switcing buffers succeeds.
+    // re-ingest every element, allocating new WriteBuffers
+    if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder, maxChunkTime) }
+    else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
+      s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}") }
+
   }
 
   protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
@@ -432,12 +447,12 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 
   _log.debug(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
 
-  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory): Unit = {
+  override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory, maxChunkTime: Long): Unit = {
     val ts = row.getLong(0)
     _log.debug(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
                s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
-    super.ingest(ingestionTime, row, blockHolder)
+    super.ingest(ingestionTime, row, blockHolder, maxChunkTime)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
