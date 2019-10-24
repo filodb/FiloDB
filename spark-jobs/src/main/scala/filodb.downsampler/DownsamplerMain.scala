@@ -74,7 +74,7 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
         import filodb.core.Iterators._
         val rawDataSource = cassandraColStore
         rawDataSource.getChunksByIngestionTimeRange(rawDatasetRef, splitIter,
-          ingestionTimeStart, ingestionTimeEnd,
+          ingestionTimeStart, ingestionTimeEnd, rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
           userTimeStart, userTimeEnd, batchSize, batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>

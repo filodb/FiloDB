@@ -927,8 +927,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     // This initializes the containers for the downsample records. Yes, we create new containers
     // and not reuse them at the moment and there is allocation for every call of this method
     // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
-    val downsampleRecords = ShardDownsampler.newEmptyDownsampleRecords(downsampleConfig.resolutions,
-                                                                       downsampleConfig.enabled)
+    val downsampleRecords = ShardDownsampler
+                               .newEmptyDownsampleRecords(downsampleConfig.resolutions.map(_.toMillis.toInt),
+                                                          downsampleConfig.enabled)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
