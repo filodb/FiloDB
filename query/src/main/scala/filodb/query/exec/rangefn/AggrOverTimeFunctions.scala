@@ -729,21 +729,22 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
     val it = doubleReader.iterate(doubleVect, startRowNum)
     var rowNum = startRowNum
     if (JLDouble.isNaN(s0) && JLDouble.isNaN(b0)) {
-      // not continuation of a chunk
+      // check if it is a new chunk
       val (_s0, firstrow) = getNextValue(startRowNum, endRowNum, it)
-      var (_b0, currRow) = getNextValue(firstrow, endRowNum, it)
+      val (_b0, currRow) = getNextValue(firstrow, endRowNum, it)
       nextvalue = _b0
       b0 = _b0 - _s0
       rowNum = currRow - 1
       s0 = _s0
-      if (!JLDouble.isNaN(b0)) smoothedResult = s0
     } else if (JLDouble.isNaN(b0)) {
-      var (_b0, currRow) = getNextValue(startRowNum, endRowNum, it)
+      // check if the previous chunk had only one element
+      val (_b0, currRow) = getNextValue(startRowNum, endRowNum, it)
       nextvalue = _b0
       b0 = _b0 - s0
       rowNum = currRow - 1
     }
     else {
+      // continuation of a previous chunk
       it.next
     }
     if (!JLDouble.isNaN(b0)) {

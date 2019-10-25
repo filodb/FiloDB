@@ -459,7 +459,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
       for (i <- res.indices) {
         if (res(i).isNaN) {
-          aggregated2(i).isNaN shouldBe res(i).isNaN
+          println("Inside Nan")
+          aggregated2(i).isNaN shouldEqual true
         } else {
           aggregated2(i) shouldBe (res(i) +- 0.0000000001)
         }
