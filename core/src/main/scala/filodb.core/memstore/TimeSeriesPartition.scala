@@ -129,26 +129,26 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (newChunk) initNewChunk(ts, ingestionTime)
 
     if (ts - currentInfo.startTime > maxChunkTime) {
-      _log.info(s"Switching buffers since chunk max time reached")
       switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
-    }
+    } else {
 
-    for { col <- 0 until schema.numDataColumns optimized } {
-      currentChunks(col).addFromReaderNoNA(row, col) match {
-        case r: VectorTooSmall =>
-          switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
-          return
-        case other: AddResponse =>
+      for {col <- 0 until schema.numDataColumns optimized} {
+        currentChunks(col).addFromReaderNoNA(row, col) match {
+          case r: VectorTooSmall =>
+            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+            return
+          case other: AddResponse =>
+        }
       }
-    }
-    ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+      ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
 
-    // Update the end time as well.  For now assume everything arrives in increasing order
-    ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
+      // Update the end time as well.  For now assume everything arrives in increasing order
+      ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
 
-    if (newChunk) {
-      // Publish it now that it has something.
-      infoPut(currentInfo)
+      if (newChunk) {
+        // Publish it now that it has something.
+        infoPut(currentInfo)
+      }
     }
   }
 
