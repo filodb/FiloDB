@@ -126,6 +126,22 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     Observable.fromFuture(futRawParts).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) }
   }
 
+  def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
+    def cql(start: String, end: String): String =
+      s"SELECT partition, info, chunks FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end "
+    val it = Observable.fromIterable(tokens).map { case (start, end) =>
+      session.executeAsync(cql(start, end)).toIterator.handleErrors
+              .map { rowIt =>
+                rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
+                  .sortedGroupBy(_._1)
+                  .map { case (partKeyBuffer, chunkSetIt) =>
+                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+                  }
+              }
+    }
+    it.flatMap{ f => Observable.fromFuture(f).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) } }
+  }
+
 
   private def compressChunk(orig: ByteBuffer): ByteBuffer =
     if (compressChunks) compress(orig) else orig

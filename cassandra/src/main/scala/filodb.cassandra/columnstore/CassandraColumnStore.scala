@@ -295,14 +295,19 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                         maxChunkTime: Long,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val partitions = partMethod match {
-      case MultiPartitionScan(p, _) => p
-      case SinglePartitionScan(p, _) => Seq(p)
-      case p => throw new UnsupportedOperationException(s"PartitionScan $p to be implemented later")
-    }
     val chunkTable = getOrCreateChunkTable(ref)
-    val startTime = if (chunkMethod == AllChunkScan) Long.MinValue else chunkMethod.startTime - maxChunkTime
-    chunkTable.readRawPartitionRange(partitions, startTime, chunkMethod.endTime)
+    partMethod match {
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), Nil)  =>
+        chunkTable.scanPartitionsBySplit(tokens)
+      case _ =>
+        val partitions = partMethod match {
+          case MultiPartitionScan(p, _) => p
+          case SinglePartitionScan(p, _) => Seq(p)
+          case p => throw new UnsupportedOperationException(s"PartitionScan $p to be implemented later")
+        }
+        val startTime = if (chunkMethod == AllChunkScan) Long.MinValue else chunkMethod.startTime - maxChunkTime
+        chunkTable.readRawPartitionRange(partitions, startTime, chunkMethod.endTime)
+    }
   }
 
   def getOrCreateChunkTable(dataset: DatasetRef): TimeSeriesChunksTable = {
