@@ -305,8 +305,9 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
           case SinglePartitionScan(p, _) => Seq(p)
           case p => throw new UnsupportedOperationException(s"PartitionScan $p to be implemented later")
         }
-        val startTime = if (chunkMethod == AllChunkScan) Long.MinValue else chunkMethod.startTime - maxChunkTime
-        chunkTable.readRawPartitionRange(partitions, startTime, chunkMethod.endTime)
+        val (start, end) = if (chunkMethod == AllChunkScan) (minChunkUserTime, maxChunkUserTime)
+                           else (chunkMethod.startTime - maxChunkTime, chunkMethod.endTime)
+        chunkTable.readRawPartitionRange(partitions, start, end)
     }
   }
 

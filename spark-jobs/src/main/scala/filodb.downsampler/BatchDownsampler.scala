@@ -98,6 +98,7 @@ object BatchDownsampler extends StrictLogging with Instance {
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
 
+    val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>
       downsampledChunksToPersist(res) = Iterator.empty
@@ -105,15 +106,16 @@ object BatchDownsampler extends StrictLogging with Instance {
     val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
     val offHeapMem = new OffHeapMemory(rawSchemas, kamonTags, maxMetaSize)
+    var numDsChunks = 0
     try {
       rawPartsBatch.foreach { rawPart =>
         downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
           downsampledChunksToPersist, userTimeStart, userTimeEnd)
       }
-      persistDownsampledChunks(downsampledChunksToPersist)
-    } catch {
-      case ex: Exception => logger.error(s"Encountered exception when processing batchSize=${rawPartsBatch.size}" +
-        s" partitions. Moving on", ex)
+      numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
+    } catch { case ex: Exception =>
+      logger.error(s"Encountered exception when " +
+        s"processing batchSize=${rawPartsBatch.size} partitions. Moving on", ex)
     } finally {
       // free off-heap memory
       offHeapMem.free()
@@ -121,8 +123,9 @@ object BatchDownsampler extends StrictLogging with Instance {
       downsampledPartsToFree.clear()
     }
 
+    val endedAt = System.currentTimeMillis()
     logger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
-      s"partitions in current executor")
+      s"partitions in current executor timeTakenMs=${(endedAt-startedAt)} numDsChunks=$numDsChunks")
   }
 
   /**
@@ -249,13 +252,18 @@ object BatchDownsampler extends StrictLogging with Instance {
     * Persist chunks in `downsampledChunksToPersist` to Cassandra.
     */
   private def persistDownsampledChunks(
-                                    downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Unit = {
+                                    downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]]): Int = {
+    @volatile
+    var numChunks = 0
     // write all chunks to cassandra
     val writeFut = downsampledChunksToPersist.map { case (res, chunks) =>
       // FIXME if listener in chunkset below is not copied + overridden to no-op, we get a SEGV because
       // of a bug in either monix's mapAsync or cassandra driver where the future is completed prematurely.
       // This causes a race condition between free memory and chunkInfo.id access in updateFlushedId.
-      val chunksToPersist = chunks.map(_.copy(listener = _ => {}))
+      val chunksToPersist = chunks.map { c =>
+        numChunks += 1
+        c.copy(listener = _ => {})
+      }
       cassandraColStore.write(downsampleDatasetRefs(res),
         Observable.fromIterator(chunksToPersist), settings.ttlByResolution(res))
     }
@@ -266,6 +274,7 @@ object BatchDownsampler extends StrictLogging with Instance {
       if (response.isInstanceOf[ErrorResponse])
         logger.error(s"Got response $response when writing to Cassandra")
     }
+    numChunks
   }
 
 }
