@@ -406,9 +406,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val tf = 0.1
       var smoothedResult = Double.NaN
       var s0 = arr(0)
-      var b0 = arr(1) - arr(0)
       val n = arr.length
+      var b0 = Double.NaN
       if (n >= 2) {
+        b0 = arr(1) - arr(0)
         for (i <- 1 until n) {
           smoothedResult  = sf*arr(i) + (1-sf)*(s0 + b0)
           b0 = tf*(smoothedResult - s0) + (1-tf)*b0
@@ -457,7 +458,12 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
       val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
       for (i <- res.indices) {
-        aggregated2(i) shouldBe (res(i) +- 0.0000000001)
+        if (res(i).isNaN) {
+          println("Inside Nan")
+          aggregated2(i).isNaN shouldEqual true
+        } else {
+          aggregated2(i) shouldBe (res(i) +- 0.0000000001)
+        }
       }
     }
   }
