@@ -2,19 +2,18 @@ package filodb.query.exec
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, HourScalar, RangeParams, RangeVector, ResultSchema, ScalarVector, SerializedRangeVector, TimeScalar}
+import filodb.core.query.{ColumnInfo, RangeParams, RangeVector, ResultSchema, ScalarFixedDouble, ScalarVector, SerializedRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.query.Query.qLogger
-import filodb.query.ScalarFunctionId.{Hour, Time}
-import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
+import filodb.query.{QueryConfig, QueryResponse, QueryResult}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import scala.concurrent.duration.FiniteDuration
-case class ScalarTimeBasedExec(id: String,
+case class ScalarFixedDoubleExec(id: String,
                                dataset: DatasetRef, params: RangeParams,
-                               function: ScalarFunctionId,
+                                 value: Double,
                                limit: Int,
                                submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
 
@@ -36,7 +35,7 @@ case class ScalarTimeBasedExec(id: String,
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
-  override protected def args: String =  s"params=$params, function=$function"
+  override protected def args: String =  s"params=$params, value=$value"
 
 
   override def execute(source: ChunkSource,
@@ -47,11 +46,7 @@ case class ScalarTimeBasedExec(id: String,
       ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(columns)
     val resultSchema = ResultSchema(columns, 1)
-    val rangeVectors : Seq[RangeVector] = function match {
-      case Time => Seq(TimeScalar (params))
-      case Hour => Seq(HourScalar(params))
-      case _    => throw new BadQueryException("Invalid Function")
-    }
+    val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
 
     Task {
       rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
@@ -66,8 +61,6 @@ case class ScalarTimeBasedExec(id: String,
       }._1.toListL.map(QueryResult(id, resultSchema, _))
     }.flatten
 
-    //finalRes
-    // Task(QueryResult(id, resultSchema, rangeVectors))
   }
 
   /**
@@ -76,5 +69,5 @@ case class ScalarTimeBasedExec(id: String,
     * will supply this parameter
     */
   override def dispatcher: PlanDispatcher = InProcessPlanDispatcher()
-    //InProcessPlanDispatcher()
+
 }

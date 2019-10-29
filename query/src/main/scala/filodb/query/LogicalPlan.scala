@@ -180,12 +180,25 @@ case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLe
   override def children: Seq[LogicalPlan] = Seq(scalars)
 }
 
+case class TimeFixedScalarBinaryOperation(operator: BinaryOperator,
+                                          timeScalar: ScalarTimeBasedPlan,
+                                          fixedScalar: ScalarFixedDoublePlan,
+                                          scalarIsLhs: Boolean) extends PeriodicSeriesPlan with LogicalPlan {
+}
+
 /**
   * Apply Sort Function to a collection of RangeVectors
   */
 case class ApplySortFunction(vectors: PeriodicSeriesPlan,
-                             function: SortFunctionId) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                             function: SortFunctionId,
+                             functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+case class ScalarScalarBinaryOperation(operator: BinaryOperator,
+                                       lhs: ScalarPlan,
+                                       rhs: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(lhs,rhs)
 }
 
 object LogicalPlan {

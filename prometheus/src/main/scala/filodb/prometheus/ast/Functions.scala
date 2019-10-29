@@ -21,6 +21,11 @@ trait Functions extends Base with Operators with Vectors {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
+    def isScalarFunction() = {
+       name.equalsIgnoreCase("scalar") ||
+        name.equalsIgnoreCase("time")
+    }
+
     // scalastyle:off
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 

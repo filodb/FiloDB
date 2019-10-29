@@ -274,6 +274,8 @@ case class ExecPlanFuncArgs(execPlan: ExecPlan) extends FuncArgs {
       case (QueryError(_, ex)) => throw ex
     }
   }
+
+  override def toString: String = execPlan.printTree() + "\n"
 }
 
 case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
@@ -283,7 +285,7 @@ case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends F
   }
 }
 
-case class TimeFuncArgs( timeStepParams: RangeParams) extends FuncArgs {
+case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
     Observable.now(
       new TimeScalar(timeStepParams))

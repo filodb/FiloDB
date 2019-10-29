@@ -258,6 +258,7 @@ object ScalarFunctionId extends Enum[ScalarFunctionId] {
   case object Month extends ScalarFunctionId("month")
 
   case object Year extends ScalarFunctionId("year")
+  //case object FixedScalar extends ScalarFunctionId("fixed_scalar")
 
 }
 

@@ -216,9 +216,6 @@ class QueryEngine(dataset: Dataset,
     ActorPlanDispatcher(targetActor)
   }
 
-  //ef materializeScalarPlan(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarPlan, spreadProvider: SpreadProvider): PlanResult = ???
-
-
   /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
     *
@@ -244,14 +241,17 @@ class QueryEngine(dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
                                               spreadProvider)
       case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+      case lp: SeriesKeysByFilters            => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+      case lp: ApplyMiscellaneousFunction     => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(queryId, submitTime, options, lp, spreadProvider)
-      case _                               => throw new BadQueryException("Invalid logical plan")
+      case lp: ApplySortFunction              => materializeApplySortFunction(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarVaryingDoublePlan        => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarTimeBasedPlan            => materializeScalarTimeBased(queryId, submitTime, options, lp, spreadProvider)
+      case lp: VectorPlan            =>       materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarFixedDoublePlan          => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
+     //case lp: TimeFixedScalarBinaryOperation => materializeTimeFixedScalarBinaryOperation (queryId, submitTime, options, lp, spreadProvider)
+      case _                                  => throw new BadQueryException("Invalid logical plan")
 
     }
   }
@@ -476,10 +476,10 @@ class QueryEngine(dataset: Dataset,
     vectors
   }
 
-  private def materializeFunctionArgs( functionParams: Seq[FunctionArgsPlan],queryId: String,
-                                         submitTime: Long,
-                                         options: QueryOptions,
-                                         spreadProvider: SpreadProvider): Seq[FuncArgs] = {
+  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],queryId: String,
+                                      submitTime: Long,
+                                      options: QueryOptions,
+                                      spreadProvider: SpreadProvider): Seq[FuncArgs] = {
     functionParams.map { param =>
         param match {
         case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
@@ -524,9 +524,32 @@ class QueryEngine(dataset: Dataset,
 
   private def materializeScalarTimeBased(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarTimeBasedPlan, spreadProvider: SpreadProvider): PlanResult = {
     //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
-    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId,dataset.ref,lp.rangeParams, lp.function)
+    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId,dataset.ref,lp.rangeParams, lp.function, options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
+
+  private def materializeVectorPlan(queryId: String,
+                                   submitTime: Long,
+                                   options: QueryOptions,
+                                   lp: VectorPlan, spreadProvider : SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.scalars, queryId, submitTime, options, spreadProvider)
+    vectors.plans.foreach(_.addRangeVectorTransformer(VectorFunctionMapper()))
+    vectors
+  }
+
+  private def materializeFixedScalar(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarFixedDoublePlan, spreadProvider: SpreadProvider): PlanResult = {
+    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
+    val scalarTimeBasedExec = ScalarFixedDoubleExec(queryId,dataset.ref,lp.timeStepParams,lp.scalar, options.sampleLimit)
+    PlanResult(Seq(scalarTimeBasedExec), false)
+  }
+
+//  private def materializeTimeFixedScalarBinaryOperation(queryId: String, submitTime: Long, options: QueryOptions, lp: TimeFixedScalarBinaryOperation, spreadProvider: SpreadProvider): PlanResult = {
+//    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
+//    val scalarTimeBasedExec = walkLogicalPlanTree(lp.timeScalar, queryId, submitTime, options, spreadProvider)
+//    lp.
+//
+//    PlanResult(Seq(scalarTimeBasedExec), false)
+//  }
 
     /**
    * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,

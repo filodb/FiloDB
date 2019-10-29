@@ -139,10 +139,20 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * Check whether logical plan has a PeriodicSeriesPlan
     */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan]) {
+    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan] ||
+      logicalPlan.isInstanceOf[ScalarFixedDoublePlan] || logicalPlan.isInstanceOf[ScalarTimeBasedPlan]) {
       false
-    } else
-    true
+    } else if (logicalPlan.isInstanceOf[ScalarVectorBinaryOperation]) {
+      return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ScalarVectorBinaryOperation].vector))
+    } else if (logicalPlan.isInstanceOf[VectorPlan]){
+      return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[VectorPlan].scalars))
+    } else if(logicalPlan.isInstanceOf[ApplyInstantFunction]){
+      isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ApplyInstantFunction].vectors)
+    }   else if(logicalPlan.isInstanceOf[BinaryJoin]){
+    isPeriodicSeriesPlan(logicalPlan.asInstanceOf[BinaryJoin].lhs)
+    } else {
+      true
+    }
   }
 
   /**
@@ -174,7 +184,8 @@ object QueryRoutingPlanner extends RoutingPlanner {
       case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarVaryingDoublePlan => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarTimeBasedPlan => TimeRange(lp.rangeParams.start, lp.rangeParams.end)
-      case _ => throw new BadQueryException("Invalid logical plan")
+      case lp: VectorPlan => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
+      case _ => throw new BadQueryException(s"Invalid logical plan")
     }
   }
 
@@ -227,7 +238,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
         case rs: IntervalSelector => Some(rs.from)
         case _ => None
       }
-      case _                      => throw new BadQueryException("Invalid logical plan")
+      case _                      => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
     }
   }
 }
