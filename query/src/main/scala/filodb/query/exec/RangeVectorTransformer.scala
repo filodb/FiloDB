@@ -89,7 +89,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
           if (function == HistogramQuantile) {
             // Special mapper to pull all buckets together from different Prom-schema time series
             val mapper = HistogramQuantileMapper(funcParams)
-            mapper.apply(source, queryConfig, limit, sourceSchema)
+            mapper.apply(source, queryConfig, limit, sourceSchema, Observable.empty)
           } else {
             val instantFunction = InstantFunction.double(function)
             source.map { rv =>

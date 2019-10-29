@@ -24,7 +24,7 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
   import HistogramQuantileMapper._
   require(funcParams.size == 1, "histogram_quantile function needs a single quantile argument")
 
-  private val quantile = funcParams.head.asInstanceOf[Number].doubleValue()
+  private val quantile = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
 
   /**
     * Represents a prometheus histogram bucket for quantile calculation purposes.
@@ -35,12 +35,6 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
     override def toString: String = s"$le->$rate"
   }
 
-  override def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
-            limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] ={
-    apply(source, queryConfig, limit, sourceSchema)
-  }
   /**
     * Groups incoming buckt range vectors by histogram name. It then calculates quantile for each histogram
     * using the buckets supplied for it. It is assumed that each bucket value contains rate of increase for that
@@ -52,7 +46,8 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
     */
    def apply(source: Observable[RangeVector],
                      queryConfig: QueryConfig, limit: Int,
-                     sourceSchema: ResultSchema): Observable[RangeVector] = {
+                     sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] = {
+
     val res = source.toListL.map { rvs =>
 
       // first group the buckets by histogram

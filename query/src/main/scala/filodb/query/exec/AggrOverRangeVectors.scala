@@ -102,18 +102,9 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] ={
-    apply(source, queryConfig, limit, sourceSchema)
-  }
-
-  def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
-            limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }
-
-
 
   override def schema(source: ResultSchema): ResultSchema = {
     val aggregator = RowAggregator(aggrOp, aggrParams, source)

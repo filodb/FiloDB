@@ -264,8 +264,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
 
-  it ("should test") {
-    // ceil
+  it ("should work with Func Args") {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
