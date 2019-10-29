@@ -258,7 +258,6 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
   it("should join one-to-one when metric name is not _name_") {
 
-
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
