@@ -1,10 +1,9 @@
 package filodb.query.exec.rangefn
 
-//import filodb.core.query.DoubleScalar
 import java.time.{Instant, LocalDateTime, YearMonth, ZoneId, ZoneOffset}
 
-//import filodb.core.query.ScalarVector
 import scalaxy.loops._
+
 import filodb.memory.format.vectors.{Histogram, MaxHistogram, MutableHistogram}
 import filodb.query.InstantFunctionId
 import filodb.query.InstantFunctionId.{Log2, Sqrt, _}
@@ -81,7 +80,6 @@ object InstantFunction {
     * Returns the DoubleInstantFunction given the function ID and parameters.
     *
     * @param function to be invoked
-    * @param funcParams - Additional required function parameters
     * @return the function
     */
   def double(function: InstantFunctionId): DoubleInstantFunction = {
@@ -203,7 +201,7 @@ case class Log10Impl() extends EmptyParamsInstantFunction {
   * logarithm for all elements in v.
   */
 case class Log2Impl() extends EmptyParamsInstantFunction {
-  override def apply(value: Double,  scalarParam: Seq[Double] = Nil): Double =
+  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double =
     scala.math.log10(value)/scala.math.log10(2.0)
 }
 

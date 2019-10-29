@@ -1,17 +1,18 @@
 package filodb.query.exec
 
+import monix.reactive.Observable
+
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.RowReader
-import filodb.query.ScalarFunctionId.Scalar
+import filodb.query._
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
+import filodb.query.ScalarFunctionId.Scalar
 import filodb.query.SortFunctionId.{Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
-import filodb.query._
-import monix.reactive.Observable
 
 private case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false)
 
@@ -105,22 +106,13 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
       evaluate(source, Nil)
     } else {
       funcParams.head match {
-        case s: StaticFuncArgs   => evaluate(source,funcParams.map(x => x.asInstanceOf[StaticFuncArgs]).
+        case s: StaticFuncArgs   => evaluate(source, funcParams.map(x => x.asInstanceOf[StaticFuncArgs]).
           map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)))
-        case t: TimeFuncArgs     => evaluate(source,funcParams.map(x => x.asInstanceOf[TimeFuncArgs]).
+        case t: TimeFuncArgs     => evaluate(source, funcParams.map(x => x.asInstanceOf[TimeFuncArgs]).
           map(x => TimeScalar(x.timeStepParams)))
         case e: ExecPlanFuncArgs => paramResponse.map(param => evaluate(source, Seq(param))).flatten
         case _                   => throw new IllegalArgumentException(s"Invalid function param")
       }
-
-//      import scala.reflect.runtime.universe._
-//
-//     funcParams match {
-//        case FuncArgs(value: Seq[StaticFuncArgs] ) => evaluate(source, s.map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)))
-//        case t: Seq[TimeFuncArgs]      => evaluate(source, t.map(x => TimeScalar(x.timeStepParams)))
-//        case e: Seq[ExecPlanFuncArgs]  => paramResponse.map(param => evaluate(source, Seq(param))).flatten
-//        case _                         => throw new IllegalArgumentException(s"Invalid function param")
-//      }
     }
   }
 
@@ -177,7 +169,8 @@ private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
   final def next(): RowReader = {
     val next = rows.next()
     val timestamp = next.getLong(0)
-    val newValue = instantFunction(next.getHistogram(1), next.getDouble(2), scalar.map(_.getValue(timestamp)))
+    val newValue = instantFunction(next.getHistogram(1),
+      next.getDouble(2), scalar.map(_.getValue(timestamp)))
     result.setValues(timestamp, newValue)
     result
   }
@@ -207,7 +200,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
    }
   }
 
-  private def evaluate(source: Observable[RangeVector], scalarVector: ScalarVector) ={
+  private def evaluate(source: Observable[RangeVector], scalarVector: ScalarVector) = {
     source.map { rv =>
       val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
         private val rows = rv.rows
@@ -219,13 +212,9 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           val next = rows.next()
           val nextVal = next.getDouble(1)
           val timestamp = next.getLong(0)
-          // println("rowMap:" + rowMap)
           val sclrVal = scalarVector.getValue(timestamp)
-          println("sclrVal:" +sclrVal)
-          println("nextVal:" +nextVal)
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
           else operatorFunction.calculate(nextVal, sclrVal)
-          println("newValue:" + newValue)
           result.setValues(timestamp, newValue)
           result
         }
@@ -235,7 +224,8 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   }
 }
 
-final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, funcStringParam: Seq[String] = Nil, funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
+final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, funcStringParam: Seq[String] = Nil,
+                                             funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams funcStringParam=$funcStringParam"
 
@@ -250,7 +240,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
     miscFunction.execute(source)
   }
 }
@@ -262,7 +253,8 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
     if (sourceSchema.columns(1).colType == ColumnType.DoubleColumn) {
 
       val ordering: Ordering[Double] = function match {
@@ -307,7 +299,6 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 
     val resultRv = source.toListL.map { rvs =>
-      println("rvs size in scalar function:" + rvs.size)
       if (rvs.size > 1) {
         Seq(ScalarFixedDouble(timeStepParams, Double.NaN))
       } else {
@@ -319,7 +310,8 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
 
     function match {
       case Scalar => scalarImpl(source)
@@ -337,7 +329,8 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
     val resultRv = source.toListL.map { rvs =>
         rvs.map { rv =>
           new RangeVector {

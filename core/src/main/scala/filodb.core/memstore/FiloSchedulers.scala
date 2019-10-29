@@ -13,8 +13,6 @@ object FiloSchedulers {
 
   def assertThreadName(name: String): Unit = {
     if (assertEnabled) {
-      println("Thread.currentThread().getName" + Thread.currentThread().getName)
-      println("name:" + name)
       require(Thread.currentThread().getName.startsWith(name),
         s"Current thread expected to startWith $name but was ${Thread.currentThread().getName}")
     }

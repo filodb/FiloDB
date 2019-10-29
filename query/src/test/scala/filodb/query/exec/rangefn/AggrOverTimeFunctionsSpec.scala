@@ -1,45 +1,41 @@
 package filodb.query.exec.rangefn
 
+import scala.util.Random
 import com.typesafe.config.ConfigFactory
+import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.query.{RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.core.query.{RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.AllChunkScan
 import filodb.core.{MetricsTestData, TestData, MachineMetricsData => MMD}
 import filodb.memory._
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.query.QueryConfig
 import filodb.query.exec._
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-
-import scala.util.Random
 
 /**
-  * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
-  */
+ * A common trait for windowing query tests which uses real chunks and real RawDataRangeVectors
+ */
 trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll {
-
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test" -> "test")), null, 16)
+    new MemoryStats(Map("test"-> "test")), null, 16)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesSchema.data.blockMetaSize,
-    MMD.dummyContext, true)
+                                      MMD.dummyContext, true)
   protected val tsBufferPool = new WriteBufferPool(TestData.nativeMem, timeseriesSchema.data, storeConf)
 
   protected val ingestBlockHolder2 = new BlockMemFactory(blockStore, None, downsampleSchema.data.blockMetaSize,
-    MMD.dummyContext, true)
+                                      MMD.dummyContext, true)
   protected val tsBufferPool2 = new WriteBufferPool(TestData.nativeMem, downsampleSchema.data, storeConf)
 
   override def afterAll(): Unit = {
     blockStore.releaseBlocks()
   }
 
-  def sumSquares(nn: Seq[Double]): Double = nn.map(n => n * n).sum.toDouble
-
+  def sumSquares(nn: Seq[Double]): Double = nn.map(n => n*n).sum.toDouble
   def avg(nn: Seq[Double]): Double = nn.sum.toDouble / nn.length
-
-  def stdVar(nn: Seq[Double]): Double = sumSquares(nn) / nn.length - avg(nn) * avg(nn)
+  def stdVar(nn: Seq[Double]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
 
   val defaultStartTS = 100000L
   val pubFreq = 10000L
@@ -109,17 +105,17 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   }
 
   def chunkedWindowItHist[R <: TransientHistRow](data: Seq[Seq[Any]],
-                                                 rv: RawDataRangeVector,
-                                                 func: ChunkedRangeFunction[R],
-                                                 windowSize: Int,
-                                                 step: Int,
-                                                 row: R): ChunkedWindowIteratorH = {
+                          rv: RawDataRangeVector,
+                          func: ChunkedRangeFunction[R],
+                          windowSize: Int,
+                          step: Int,
+                          row: R): ChunkedWindowIteratorH = {
     val windowTime = (windowSize.toLong - 1) * pubFreq
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
     new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
-      func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
+                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
   }
 
   def chunkedWindowItHist(data: Seq[Seq[Any]],
@@ -316,8 +312,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val twoSampleData = Seq(0.0, 1.0)
     val threeSampleData = Seq(1.0, 0.0, 2.0)
     val unevenSampleData = Seq(0.0, 1.0, 4.0)
+    val  rangeParams = RangeParams(100,20, 500)
 
-    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2)
+    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2).map(x => StaticFuncArgs(x, rangeParams))
     val twoSampleDataResponses = Seq(0, 0.5, 0.75, 0.8, 1, Double.NegativeInfinity, Double.PositiveInfinity)
     val threeSampleDataResponses = Seq(0, 1, 1.5, 1.6, 2, Double.NegativeInfinity, Double.PositiveInfinity)
     val unevenSampleDataResponses = Seq(0, 1, 2.5, 2.8, 4, Double.NegativeInfinity, Double.PositiveInfinity)
@@ -345,15 +342,33 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val emptyData = Seq()
     var rv = timeValueRV(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
-      new QuantileOverTimeChunkedFunctionD(Seq(0.5)), queryConfig)
+      new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), queryConfig)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
     aggregatedEmpty(0) isNaN
+
+    def median(s: Seq[Double]): Double = {
+      val (lower, upper) = s.sortWith(_<_).splitAt(s.size / 2)
+      if (s.size % 2 == 0) (lower.last + upper.head) / 2.0 else upper.head
+    }
+
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"  iteration $x  windowSize=$windowSize step=$step")
+
+      val minChunkedIt = chunkedWindowIt(data, rv2,  new QuantileOverTimeChunkedFunctionD
+      (Seq(StaticFuncArgs(0.5, rangeParams))), windowSize, step)
+      val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
+    }
   }
   
   it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
     "than one chunks") {
-    val data1 = (1 to 240).map(_.toDouble)
-    val data2: Seq[Double] = Seq[Double](1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
+    val data1= (1 to 240).map(_.toDouble)
+    val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
 
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10

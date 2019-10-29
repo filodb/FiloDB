@@ -78,14 +78,8 @@ final case class BinaryJoinExec(id: String,
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
-        println("rv key:" + rv.key)
-        println("rv labelValues:" + rv.key.labelValues)
-        println("jk:" + jk)
-        if (oneSideMap.contains(jk)) {
-          println("Error many found")
-          println("oneSideMap keys:" + oneSideMap.keySet)
+        if (oneSideMap.contains(jk))
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
-        }
         oneSideMap.put(jk, rv)
       }
 

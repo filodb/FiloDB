@@ -1,7 +1,5 @@
 package filodb.core.query
 
-
-
 import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 
 trait MutableRowReader extends RowReader {

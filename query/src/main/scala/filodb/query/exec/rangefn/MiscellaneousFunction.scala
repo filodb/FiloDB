@@ -3,6 +3,7 @@ package filodb.query.exec.rangefn
 import java.util.regex.{Pattern, PatternSyntaxException}
 
 import monix.reactive.Observable
+
 import filodb.core.query.{CustomRangeVectorKey, IteratorBackedRangeVector, RangeVector, RangeVectorKey}
 import filodb.memory.format.ZeroCopyUTF8String
 

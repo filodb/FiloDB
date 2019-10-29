@@ -1,17 +1,19 @@
 package filodb.query.exec
 
-import filodb.core.DatasetRef
-import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, HourScalar, RangeParams, RangeVector, ResultSchema, ScalarVector, SerializedRangeVector, TimeScalar}
-import filodb.core.store.ChunkSource
-import filodb.query.Query.qLogger
-import filodb.query.ScalarFunctionId.{Hour, Time}
-import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
+import scala.concurrent.duration.FiniteDuration
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import scala.concurrent.duration.FiniteDuration
+import filodb.core.DatasetRef
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query._
+import filodb.core.store.ChunkSource
+import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
+import filodb.query.Query.qLogger
+import filodb.query.ScalarFunctionId.{Hour, Time}
+
 case class ScalarTimeBasedExec(id: String,
                                dataset: DatasetRef, params: RangeParams,
                                function: ScalarFunctionId,
@@ -24,7 +26,8 @@ case class ScalarTimeBasedExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)(implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
+  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
 
   /**
     * Sub classes should implement this with schema of RangeVectors returned
@@ -36,8 +39,7 @@ case class ScalarTimeBasedExec(id: String,
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
-  override protected def args: String =  s"params=$params, function=$function"
-
+  override protected def args: String = s"params = $params, function = $function"
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
@@ -65,9 +67,6 @@ case class ScalarTimeBasedExec(id: String,
         (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
       }._1.toListL.map(QueryResult(id, resultSchema, _))
     }.flatten
-
-    //finalRes
-    // Task(QueryResult(id, resultSchema, rangeVectors))
   }
 
   /**

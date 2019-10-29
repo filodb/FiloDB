@@ -21,7 +21,11 @@ trait Functions extends Base with Operators with Vectors {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
-    def isScalarFunction() = {
+    /**
+      *
+      * @return true when function is scalar or time
+      */
+    def isScalarFunction(): Boolean = {
        name.equalsIgnoreCase("scalar") ||
         name.equalsIgnoreCase("time")
     }

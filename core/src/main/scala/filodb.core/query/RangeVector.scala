@@ -1,9 +1,13 @@
 package filodb.core.query
-
-
+//scalastyle:off
 import java.time.{LocalDateTime, ZoneOffset}
 
+import scala.collection.mutable.ListBuffer
+
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import org.joda.time.DateTime
+
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -11,10 +15,7 @@ import filodb.core.store._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
-import kamon.Kamon
-import org.joda.time.DateTime
-
-import scala.collection.mutable.ListBuffer
+//scalastyle:on
 
 /**
   * Identifier for a single RangeVector.
@@ -73,8 +74,8 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
 
 object CustomRangeVectorKey {
   def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
-    CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
-      UTF8Str(lv(0)) -> UTF8Str(lv(1))
+    CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).
+      map { lv => UTF8Str(lv(0)) -> UTF8Str(lv(1))
     }.toMap)
   }
 
@@ -97,13 +98,6 @@ object CustomRangeVectorKey {
   def rows: Iterator[RowReader]
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
-
-//  def getRowMap = {
-//    val timeValueMap = new mutable.HashMap[Long, Double]()
-//    rows.foreach(x=>timeValueMap.put(x.getLong(0), x.getDouble(1)))
-//    println("timeValueMap:" + timeValueMap)
-//    timeValueMap
-//  }
 }
 trait SerializableRangeVector extends RangeVector {
   def numRowsInt: Int
@@ -115,7 +109,8 @@ trait ScalarVector extends SerializableRangeVector {
 }
 
 case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarVector {
-  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).map{x=> new TransientRow(x._1, x._2)}.iterator
+  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
+    map{ x=> new TransientRow(x._1, x._2)}.iterator
   def getValue(time: Long): Double = timeValueMap.get(time).get
 
   override def numRowsInt: Int = timeValueMap.size
@@ -129,7 +124,6 @@ trait ScalarSingleValue extends ScalarVector {
   override def rows: Iterator[RowReader] = {
     val rowList = new ListBuffer[TransientRow]()
     for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
-      println(" rows i:"+i)
       rowList += new TransientRow(i*1000, getValue(i*1000))
       numRowsInt = numRowsInt + 1
     }
@@ -146,7 +140,7 @@ case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue  {
 }
 case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue
 {
-  def value: Double =  LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour()
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour()
   override def getValue(time: Long): Double = value
 }
 // First column of columnIDs should be the timestamp column
@@ -214,7 +208,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
             s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             schema.columnTypes(0) match {
-              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0),
+                reader.getBlobOffset(0))
               case _ => reader.getAny(0).toString
             }
           }

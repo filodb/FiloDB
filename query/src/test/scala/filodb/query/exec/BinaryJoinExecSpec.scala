@@ -33,7 +33,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)
 
-  val samplesLhs: Array[RangeVector] = Array.tabulate(3) { i =>
+  val samplesLhs: Array[RangeVector] = Array.tabulate(200) { i =>
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricLhs".utf8,
@@ -43,7 +43,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
-  val samplesRhs: Array[RangeVector] = Array.tabulate(3) { i =>
+  val samplesRhs: Array[RangeVector] = Array.tabulate(200) { i =>
     new RangeVector {
       val key: RangeVectorKey = CustomRangeVectorKey(
         Map("__name__".utf8 -> s"someMetricRhs".utf8,
@@ -150,13 +150,12 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
-//Binar
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
       Cardinality.OneToOne,
-      Nil, Nil, Nil)
+      Nil,  Seq("tag1"), Nil)
 
     val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
       ColumnInfo("value", ColumnType.DoubleColumn))
@@ -169,7 +168,6 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     val fut = execPlan.compose(Observable.fromIterable(Seq((lhs, 0), (rhs, 1))), queryConfig)
                       .toListL.runAsync
     ScalaFutures.whenReady(fut.failed) { e =>
-      e.printStackTrace()
       e shouldBe a[BadQueryException]
     }
   }

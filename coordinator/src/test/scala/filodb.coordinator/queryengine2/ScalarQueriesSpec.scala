@@ -93,7 +93,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val scalarTimeBasedExec = execPlan.asInstanceOf[ScalarTimeBasedExec]
     scalarTimeBasedExec.function.shouldEqual(ScalarFunctionId.Time)
     scalarTimeBasedExec.params shouldEqual(RangeParams(1524855988,1000,1524858988))
-    execPlan.printTree() shouldEqual(expected)
+    maskDispatcher(execPlan.printTree()) shouldEqual maskDispatcher(expected)
 
   }
 

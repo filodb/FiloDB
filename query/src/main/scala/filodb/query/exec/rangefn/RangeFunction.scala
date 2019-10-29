@@ -1,8 +1,8 @@
 package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{MutableRowReader, ResultSchema, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.metadata.Schema
+import filodb.core.query.{MutableRowReader, ResultSchema, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
@@ -265,7 +265,7 @@ object RangeFunction {
             func: Option[InternalRangeFunction],
             columnType: ColumnType,
             config: QueryConfig,
-            funcParams: Seq[Any] = Nil,
+            funcParams: Seq[FuncArgs] = Nil,
             maxCol: Option[Int] = None,
             useChunked: Boolean): BaseRangeFunction =
     generatorFor(schema, func, columnType, config, funcParams, maxCol, useChunked)()
@@ -277,7 +277,7 @@ object RangeFunction {
                    func: Option[InternalRangeFunction],
                    columnType: ColumnType,
                    config: QueryConfig,
-                   funcParams: Seq[Any] = Nil,
+                   funcParams: Seq[FuncArgs] = Nil,
                    maxCol: Option[Int] = None,
                    useChunked: Boolean = true): RangeFunctionGenerator = {
     if (useChunked) columnType match {
@@ -296,7 +296,7 @@ object RangeFunction {
    */
   def longChunkedFunction(schema: ResultSchema,
                           func: Option[InternalRangeFunction],
-                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+                          funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionL
       case Some(CountOverTime)    => () => new CountOverTimeChunkedFunction()
@@ -320,7 +320,7 @@ object RangeFunction {
   def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[InternalRangeFunction],
                             config: QueryConfig,
-                            funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+                            funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
@@ -342,7 +342,7 @@ object RangeFunction {
   }
 
   def histChunkedFunction(func: Option[InternalRangeFunction],
-                          funcParams: Seq[Any] = Nil,
+                          funcParams: Seq[FuncArgs] = Nil,
                           maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
     case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
     case None                 => () => new LastSampleChunkedFunctionH

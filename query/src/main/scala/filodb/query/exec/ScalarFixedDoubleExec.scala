@@ -1,21 +1,24 @@
 package filodb.query.exec
 
-import filodb.core.DatasetRef
-import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, RangeParams, RangeVector, ResultSchema, ScalarFixedDouble, ScalarVector, SerializedRangeVector}
-import filodb.core.store.ChunkSource
-import filodb.query.Query.qLogger
-import filodb.query.{QueryConfig, QueryResponse, QueryResult}
+import scala.concurrent.duration.FiniteDuration
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import scala.concurrent.duration.FiniteDuration
+import filodb.core.DatasetRef
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query._
+import filodb.core.store.ChunkSource
+import filodb.query.{QueryConfig, QueryResponse, QueryResult}
+import filodb.query.Query.qLogger
+
 case class ScalarFixedDoubleExec(id: String,
-                               dataset: DatasetRef, params: RangeParams,
+                                 dataset: DatasetRef,
+                                 params: RangeParams,
                                  value: Double,
-                               limit: Int,
-                               submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+                                 limit: Int,
+                                 submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
 
 
   /**
@@ -23,7 +26,8 @@ case class ScalarFixedDoubleExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)(implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
+  override protected def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
 
   /**
     * Sub classes should implement this with schema of RangeVectors returned
@@ -35,7 +39,7 @@ case class ScalarFixedDoubleExec(id: String,
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
-  override protected def args: String =  s"params=$params, value=$value"
+  override protected def args: String = s"params = $params, value = $value"
 
 
   override def execute(source: ChunkSource,

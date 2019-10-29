@@ -1,11 +1,17 @@
 package filodb.coordinator.queryengine2
-
+//scalastyle:off
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
+
+import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import monix.eval.Task
+import monix.execution.Scheduler
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
@@ -16,12 +22,7 @@ import filodb.core.{SpreadProvider, Types}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
-import kamon.Kamon
-import monix.eval.Task
-import monix.execution.Scheduler
-
-import scala.concurrent.duration._
-
+//scalastyle:on
 
 trait TsdbQueryParams
 case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
@@ -241,16 +242,17 @@ class QueryEngine(dataset: Dataset,
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
                                               spreadProvider)
       case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp, spreadProvider)
-      case lp: SeriesKeysByFilters            => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
+      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplyMiscellaneousFunction     => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
-      case lp: ApplySortFunction              => materializeApplySortFunction(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ScalarVaryingDoublePlan        => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ScalarTimeBasedPlan            => materializeScalarTimeBased(queryId, submitTime, options, lp, spreadProvider)
-      case lp: VectorPlan            =>       materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ScalarFixedDoublePlan          => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
-     //case lp: TimeFixedScalarBinaryOperation => materializeTimeFixedScalarBinaryOperation (queryId, submitTime, options, lp, spreadProvider)
+      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
+                                              spreadProvider)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(queryId, submitTime, options, lp,
+                                              spreadProvider)
+      case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
       case _                                  => throw new BadQueryException("Invalid logical plan")
 
     }
@@ -264,7 +266,8 @@ class QueryEngine(dataset: Dataset,
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
     val funcArg = lp.scalar match {
       case num: ScalarFixedDoublePlan => Seq(StaticFuncArgs(num.scalar, num.timeStepParams))
-      case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider)))
+      case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
+        spreadProvider)))
       case  t: ScalarTimeBasedPlan     => Seq(TimeFuncArgs(t.rangeParams))
       case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
     }
@@ -472,18 +475,20 @@ class QueryEngine(dataset: Dataset,
                                                     lp: ApplyMiscellaneousFunction,
                                                     spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function,lp.stringArgs)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
     vectors
   }
 
-  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],queryId: String,
+  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
+                                      queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       spreadProvider: SpreadProvider): Seq[FuncArgs] = {
     functionParams.map { param =>
         param match {
         case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-        case  s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options, spreadProvider))
+        case  s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
+          spreadProvider))
         case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
       }
     }
@@ -522,9 +527,13 @@ class QueryEngine(dataset: Dataset,
     }
   }
 
-  private def materializeScalarTimeBased(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarTimeBasedPlan, spreadProvider: SpreadProvider): PlanResult = {
-    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
-    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId,dataset.ref,lp.rangeParams, lp.function, options.sampleLimit)
+  private def materializeScalarTimeBased(queryId: String,
+                                         submitTime: Long,
+                                         options: QueryOptions,
+                                         lp: ScalarTimeBasedPlan,
+                                         spreadProvider: SpreadProvider): PlanResult = {
+    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId, dataset.ref, lp.rangeParams, lp.function,
+      options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
 
@@ -537,18 +546,15 @@ class QueryEngine(dataset: Dataset,
     vectors
   }
 
-  private def materializeFixedScalar(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarFixedDoublePlan, spreadProvider: SpreadProvider): PlanResult = {
-    val scalarTimeBasedExec = ScalarFixedDoubleExec(queryId,dataset.ref,lp.timeStepParams,lp.scalar, options.sampleLimit)
+  private def materializeFixedScalar(queryId: String,
+                                     submitTime: Long,
+                                     options: QueryOptions,
+                                     lp: ScalarFixedDoublePlan,
+                                     spreadProvider: SpreadProvider): PlanResult = {
+    val scalarTimeBasedExec = ScalarFixedDoubleExec(queryId, dataset.ref, lp.timeStepParams, lp.scalar,
+      options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
-
-//  private def materializeTimeFixedScalarBinaryOperation(queryId: String, submitTime: Long, options: QueryOptions, lp: TimeFixedScalarBinaryOperation, spreadProvider: SpreadProvider): PlanResult = {
-//    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
-//    val scalarTimeBasedExec = walkLogicalPlanTree(lp.timeScalar, queryId, submitTime, options, spreadProvider)
-//    lp.
-//
-//    PlanResult(Seq(scalarTimeBasedExec), false)
-//  }
 
     /**
    * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,

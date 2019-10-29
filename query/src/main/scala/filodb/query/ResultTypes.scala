@@ -1,9 +1,9 @@
 package filodb.query
 
 import enumeratum.{Enum, EnumEntry}
+
 import filodb.core.{DatasetRef, NodeCommand, NodeResponse}
 import filodb.core.query.{RangeVector, ResultSchema}
-
 
 trait QueryCommand extends NodeCommand with java.io.Serializable {
   def submitTime: Long
@@ -36,42 +36,13 @@ object QueryResultType extends Enum[QueryResultType] {
 final case class QueryResult(id: String,
                              resultSchema: ResultSchema,
                              result: Seq[RangeVector]) extends QueryResponse {
-//  def resultType: QueryResultType = {
-////    result match {
-////      case Nil => QueryResultType.RangeVectors
-////      //case Seq[ScalarSample] => if one.key.labelValues.isEmpty && one.numRows.contains(1) => QueryResultType.Scalar
-////      case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
-////                                      else QueryResultType.RangeVectors
-// //   }
-//    import filodb.core.query.{ ScalarSample}
-//    if(result.head.isInstanceOf[ScalarSample])
-//      QueryResultType.Scalar
-//    else
-//      {
-////        result match {
-////                case Nil => QueryResultType.RangeVectors
-////                //case Seq[ScalarSample] => if one.key.labelValues.isEmpty && one.numRows.contains(1) => QueryResultType.Scalar
-////                case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
-////                else QueryResultType.RangeVectors
-////             }
-//        QueryResultType.RangeVectors
-//      }
-
-//    result.head match {
-//      case filodb.core.query.Sa => QueryResultType.Scalar
-//      case RangeVector =>   QueryResultType.RangeVectors
-//      case _ =>QueryResultType.InstantVector //to do cheange
-//    }
-
   def resultType: QueryResultType = {
     result match {
-
       case Nil => QueryResultType.RangeVectors
       case Seq(one)  if one.key.labelValues.isEmpty && one.numRows.contains(1) => QueryResultType.Scalar
       case many: Seq[RangeVector] => if (many.forall(_.numRows.contains(1))) QueryResultType.InstantVector
-      else QueryResultType.RangeVectors
+                                      else QueryResultType.RangeVectors
     }
   }
-
 }
 

@@ -146,10 +146,10 @@ object QueryRoutingPlanner extends RoutingPlanner {
       return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ScalarVectorBinaryOperation].vector))
     } else if (logicalPlan.isInstanceOf[VectorPlan]){
       return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[VectorPlan].scalars))
-    } else if(logicalPlan.isInstanceOf[ApplyInstantFunction]){
+    } else if (logicalPlan.isInstanceOf[ApplyInstantFunction]) {
       isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ApplyInstantFunction].vectors)
-    }   else if(logicalPlan.isInstanceOf[BinaryJoin]){
-    isPeriodicSeriesPlan(logicalPlan.asInstanceOf[BinaryJoin].lhs)
+    }   else if (logicalPlan.isInstanceOf[BinaryJoin]){
+      isPeriodicSeriesPlan(logicalPlan.asInstanceOf[BinaryJoin].lhs)
     } else {
       true
     }

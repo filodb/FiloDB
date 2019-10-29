@@ -1,21 +1,22 @@
 package filodb.query.exec
 
-import filodb.core.DatasetRef
-import filodb.core.memstore.FiloSchedulers
-import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.query.{RangeParams, RangeVector, ResultSchema, ScalarFixedDouble, ScalarVaryingDouble, ScalarVector, SerializableRangeVector, SerializedRangeVector, TimeScalar}
-import filodb.core.store.ChunkSource
-import filodb.memory.format.RowReader
-import filodb.query.Query.qLogger
-import filodb.query._
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.FiniteDuration
+import scala.util.control.NonFatal
+
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
-import scala.util.control.NonFatal
+import filodb.core.DatasetRef
+import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.FiloSchedulers.QuerySchedName
+import filodb.core.query._
+import filodb.core.store.ChunkSource
+import filodb.memory.format.RowReader
+import filodb.query._
+import filodb.query.Query.qLogger
 
 /**
   * This is the Execution Plan tree node interface.
@@ -106,7 +107,7 @@ trait ExecPlan extends QueryCommand  {
     */
   // scalastyle:off method.length
   def execute(source: ChunkSource, queryConfig: QueryConfig)
-             (implicit sched1: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+             (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
@@ -118,7 +119,7 @@ trait ExecPlan extends QueryCommand  {
       val resSchema = schemaOfDoExecute()
       val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector: Observable[ScalarVector] = if(transf.funcParams.isEmpty){
+        val paramRangeVector: Observable[ScalarVector] = if (transf.funcParams.isEmpty){
            Observable.empty
         } else {
           transf.funcParams.head.getResult

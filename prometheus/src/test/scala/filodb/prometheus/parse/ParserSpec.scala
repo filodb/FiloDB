@@ -243,7 +243,6 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
-      "time() + 300" -> "TimeFixedScalarBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),ScalarFixedDoublePlan(300.0,RangeParams(1524855988,1000,1524855988)),false)",
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false)",
       "time()" -> "ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988))",
       "hour()" -> "ScalarTimeBasedPlan(Hour,RangeParams(1524855988,1000,1524855988))",
@@ -253,15 +252,13 @@ class ParserSpec extends FunSpec with Matchers {
       "10 + http_requests_total" -> "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true)",
       "vector(3)" -> "VectorPlan(ScalarFixedDoublePlan(3.0,RangeParams(1524855988,1000,1524855988)))",
       "vector(scalar(http_requests_total))" -> "VectorPlan(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List()))",
-
-            "scalar(http_requests_total)" -> "ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List())",
-      //to do change scalar to fixed double plan
-//      "10 + http_requests_total * 5" ->
-//        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
-//      "10 + (http_requests_total * 5)" ->
-//        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
-//      "(10 + http_requests_total) * 5" ->
-//        "ScalarVectorBinaryOperation(MUL,5.0,ScalarVectorBinaryOperation(ADD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+      "scalar(http_requests_total)" -> "ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List())",
+      "10 + http_requests_total * 5" ->
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
+      "10 + (http_requests_total * 5)" ->
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
+      "(10 + http_requests_total) * 5" ->
+        "ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -356,9 +353,6 @@ class ParserSpec extends FunSpec with Matchers {
     queryToLpString.foreach { case (q, e) =>
       info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts)
-      println("query:" + q)
-      println("lp:" + lp.toString)
-      println("expected:" + e)
       if (lp.isInstanceOf[BinaryJoin])
        printBinaryJoin(lp)
       lp.toString shouldEqual (e)

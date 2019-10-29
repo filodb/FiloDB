@@ -4,11 +4,12 @@ import java.lang.{Double => JLDouble}
 import java.util
 
 import debox.Buffer
+
 import filodb.core.query.{TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{BinaryVector, VectorDataReader, vectors => bv}
+import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
 import filodb.query.QueryConfig
-//import filodb.query.exec.TransientHistRow
+import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -594,7 +595,7 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
   }
 }
 
-abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
                                                var quantileResult: Double = Double.NaN)
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { quantileResult = Double.NaN }
@@ -610,14 +611,13 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
   }
 }
 
-class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOverTimeChunkedFunction(funcParams)
+class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
-    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     var counter = 0
 
     quantileResult = if (q < 0) Double.NegativeInfinity
@@ -647,14 +647,13 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
   }
 }
 
-class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
+class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
-    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     quantileResult = if (q < 0) Double.NegativeInfinity
     else if (q > 1) Double.PositiveInfinity
     else {

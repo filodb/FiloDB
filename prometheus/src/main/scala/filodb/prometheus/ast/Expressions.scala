@@ -29,25 +29,28 @@ trait Expressions extends Aggregates with Functions {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
 
+    //scalastyle:off
     override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
       }
-      //lhs = checkGenerateScalarPlan(lhs)
 
       lhs match {
-        case function: Function if rhs.isInstanceOf[Function] && function.isScalarFunction() && rhs.asInstanceOf[Function].isScalarFunction() =>
+        case function: Function if rhs.isInstanceOf[Function] && function.isScalarFunction() &&
+          rhs.asInstanceOf[Function].isScalarFunction() =>
           val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
 
         case expression: ScalarExpression if rhs.isInstanceOf[PeriodicSeries] =>
-          val scalar = ScalarFixedDoublePlan(expression.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
+          val scalar = ScalarFixedDoublePlan(expression.toScalar,
+            RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
 
         case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
-          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))
+          val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,
+            RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
 
