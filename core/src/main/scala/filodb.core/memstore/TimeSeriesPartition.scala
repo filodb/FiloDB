@@ -129,10 +129,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (newChunk) initNewChunk(ts, ingestionTime)
 
     if (ts - currentInfo.startTime > maxChunkTime) {
+      // we have reached maximum userTime in chunk. switch buffers, start a new chunk and ingest
       switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
     } else {
-
-      for {col <- 0 until schema.numDataColumns optimized} {
+      for { col <- 0 until schema.numDataColumns optimized} {
         currentChunks(col).addFromReaderNoNA(row, col) match {
           case r: VectorTooSmall =>
             switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
@@ -164,7 +164,6 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     if (switchBuffers(blockHolder, encode = true)) { ingest(ingestionTime, row, blockHolder, maxChunkTime) }
     else { _log.warn("EMPTY WRITEBUFFERS when switchBuffers called!  Likely a severe bug!!! " +
       s"Part=$stringPartition userTime=$userTime numRows=${currentInfo.numRows}") }
-
   }
 
   protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {

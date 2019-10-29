@@ -291,6 +291,26 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val partParallelism = 4
 
+  /**
+    * Read chunks from persistent store. Note the following constraints under which query is optimized:
+    *
+    * 1. Within a cassandra partition, chunks are ordered by chunkId. ChunkIds have this property:
+    * `chunkID(t1) > chunkId(t2) if and only if t1 > t2`.
+    *
+    * 2. All chunks have samples with a range of userTime. During ingestion, we restrict the maximum
+    * range for the userTime. This restriction makes it possible to issue single CQL query to fetch
+    * all relevant chunks from cassandra. We do this by searching for searching in cassandra for chunkIds
+    * between `chunkID(queryStartTime - maxChunkTime)` and `chunkID(queryEndTime)`. The reason we need to
+    * subtract maxChunkTime from queryStartTime is for the range to include the first chunk which may have
+    * relevant data but may have a startTime outside the query range.
+    *
+    * @param ref dataset ref
+    * @param maxChunkTime maximum userTime allowed in a single chunk. This restriction makes it
+    *                     possible to issue single CQL query to fetch all relevant chunks from cassandra
+    * @param partMethod selector for partitions
+    * @param chunkMethod selector for chunks
+    * @return Stored chunks and infos for each matching partition
+    */
   def readRawPartitions(ref: DatasetRef,
                         maxChunkTime: Long,
                         partMethod: PartitionScanMethod,

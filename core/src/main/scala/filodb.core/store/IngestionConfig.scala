@@ -89,6 +89,8 @@ object StoreConfig {
   def apply(storeConfig: Config): StoreConfig = {
     val config = storeConfig.withFallback(defaults)
     val flushInterval = config.as[FiniteDuration]("flush-interval")
+    // maxChunkTime should atleast be length of flush interval to accommodate all data within one chunk.
+    // better to be slightly greater so if more samples arrive within that flush period, two chunks are not created.
     val fallbackMaxChunkTime = (flushInterval.toMillis * 1.1).toLong.millis
     val maxChunkTime = config.as[Option[FiniteDuration]]("max-chunk-time").getOrElse(fallbackMaxChunkTime)
     StoreConfig(flushInterval,

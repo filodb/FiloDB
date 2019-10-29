@@ -129,7 +129,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
     def cql(start: String, end: String): String =
       s"SELECT partition, info, chunks FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end "
-    val it = Observable.fromIterable(tokens).map { case (start, end) =>
+    val res: Observable[Future[Iterator[RawPartData]]] = Observable.fromIterable(tokens).map { case (start, end) =>
       session.executeAsync(cql(start, end)).toIterator.handleErrors
               .map { rowIt =>
                 rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
@@ -139,7 +139,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                   }
               }
     }
-    it.flatMap{ f => Observable.fromFuture(f).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) } }
+    res.flatMap{ f => Observable.fromFuture(f).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) } }
   }
 
 
