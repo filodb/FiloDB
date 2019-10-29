@@ -32,7 +32,6 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
 
   import BatchDownsampler._
   import DownsamplerSettings._
-  import Utils._
 
   mainFunction()
 
@@ -57,11 +56,13 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
     val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
+    import java.time.Instant._
+
     logger.info(s"This is the Downsampling driver. Starting downsampling job " +
-      s"rawDataset=$rawDatasetName for userTimeInPeriod=${millisToString(userTimeInPeriod)} " +
-      s"ingestionTimeStart=${millisToString(ingestionTimeStart)} " +
-      s"ingestionTimeEnd=${millisToString(ingestionTimeEnd)} " +
-      s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
+      s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
+      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
+      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
 
     val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
     logger.info(s"Cassandra split size: ${splits.size}. We will have this may spark partitions. " +
