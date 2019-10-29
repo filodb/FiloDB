@@ -280,10 +280,10 @@ class QueryEngine(dsRef: DatasetRef,
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        lp.on, lp.ignoring))
+        lp.on, lp.ignoring, dsOptions.metricColumn))
     else
       Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        lp.on, lp.ignoring, lp.include))
+        lp.on, lp.ignoring, lp.include, dsOptions.metricColumn))
     PlanResult(joined, false)
   }
 

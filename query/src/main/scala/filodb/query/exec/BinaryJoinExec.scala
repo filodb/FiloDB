@@ -40,15 +40,16 @@ final case class BinaryJoinExec(id: String,
                                 cardinality: Cardinality,
                                 on: Seq[String],
                                 ignoring: Seq[String],
-                                include: Seq[String]) extends NonLeafExecPlan {
+                                include: Seq[String],
+                                metricColumn: String) extends NonLeafExecPlan {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains("__name__"), "On cannot contain metric name")
+  require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + "__name__".utf8
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
@@ -112,7 +113,7 @@ final case class BinaryJoinExec(id: String,
     var result = otherSideKey.labelValues
     // drop metric name if math operator
     // TODO use dataset's metricName column name here instead of hard-coding column
-    if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str("__name__")
+    if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str(metricColumn)
 
     if (cardinality == Cardinality.OneToOne) {
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list

@@ -34,12 +34,13 @@ final case class SetOperatorExec(id: String,
                                 rhs: Seq[ExecPlan],
                                 binaryOp: BinaryOperator,
                                 on: Seq[String],
-                                ignoring: Seq[String]) extends NonLeafExecPlan {
+                                ignoring: Seq[String],
+                                 metricColumn: String) extends NonLeafExecPlan {
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains("__name__"), "On cannot contain metric name")
+  require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + "__name__".utf8
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
