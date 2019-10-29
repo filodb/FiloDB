@@ -33,6 +33,8 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
   import BatchDownsampler._
   import DownsamplerSettings._
 
+  import java.time.Instant._
+
   mainFunction()
 
   private def mainFunction() = {
@@ -55,8 +57,6 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
     val userTimeEnd: Long = userTimeStart + chunkDuration
     val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
-
-    import java.time.Instant._
 
     logger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
