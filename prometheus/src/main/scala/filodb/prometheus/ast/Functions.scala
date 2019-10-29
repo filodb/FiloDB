@@ -49,24 +49,13 @@ trait Functions extends Base with Operators with Vectors {
       } else if (allParams.isEmpty) {
         ScalarTimeBasedPlan(scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end) )
 
-      }    else {
-//      }  else if (allParams.head.isInstanceOf[Scalar]){
-//       val scalar = allParams.head.asInstanceOf[Scalar].toScalar
-//        ScalarFixedDoublePlan(scalar, timeParams)
-//
-//      }
-//
+      }  else {
         val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
 
-//        val scalarExpression = allParams.filter(_.isInstanceOf[ScalarExpression])
-//
-//         // .head.asInstanceOf[ScalarExpression].toScalar
-//
-//        scalar
-       val stringParam = allParams.filter(!_.equals(seriesParam)).filter(_.isInstanceOf[InstantExpression]).map(_.asInstanceOf[InstantExpression].realMetricName)
-
-
-        val otherParams : Seq[FunctionArgsPlan] = allParams.filter(!_.equals(seriesParam)).filter(!_.isInstanceOf[InstantExpression]).map {
+       val stringParam = allParams.filter(!_.equals(seriesParam)).filter(_.isInstanceOf[InstantExpression]).
+         map(_.asInstanceOf[InstantExpression].realMetricName)
+        val otherParams : Seq[FunctionArgsPlan] = allParams.filter(!_.equals(seriesParam)).
+          filter(!_.isInstanceOf[InstantExpression]).map {
           case num: ScalarExpression => ScalarFixedDoublePlan(num.toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))
           case function: Function  if (function.name.equalsIgnoreCase("scalar")) =>
             function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]

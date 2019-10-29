@@ -29,17 +29,6 @@ trait Expressions extends Aggregates with Functions {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
 
-
-//    def checkGenerateScalarPlan(exp: Expression, timeParams: TimeRangeParams): Expression = {
-//      exp match {
-//        case f: Function => if(f.name.equalsIgnoreCase("scalar") ||
-//     f.name.equalsIgnoreCase("time"))
-//          f.toPeriodicSeriesPlan(timeParams)
-//          else
-//          f
-//      }
-//    }
-
     override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
@@ -47,29 +36,7 @@ trait Expressions extends Aggregates with Functions {
       //lhs = checkGenerateScalarPlan(lhs)
 
       lhs match {
-//        case expression: ScalarExpression if rhs.isInstanceOf[Function] && rhs.asInstanceOf[Function].name.equalsIgnoreCase("time") =>
-//          val timeScalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarTimeBasedPlan]
-//          val fixedScalar = ScalarFixedDoublePlan(expression.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
-//          //TimeFixedScalarBinaryOperation(operator.getPlanOperator, timeScalar, fixedScalar, true)
-//          ScalarVectorBinaryOperation(operator.getPlanOperator, fixedScalar, timeScalar, true)
-//        case function: Function if function.name.equalsIgnoreCase("time") && rhs.isInstanceOf[ScalarExpression] =>
-//          val timeScalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarTimeBasedPlan]
-//          val fixedScalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
-//          TimeFixedScalarBinaryOperation(operator.getPlanOperator, timeScalar, fixedScalar, false)
         case function: Function if rhs.isInstanceOf[Function] && function.isScalarFunction() && rhs.asInstanceOf[Function].isScalarFunction() =>
-//         if (function.name.equals("time")) {
-//           val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
-//           val seriesPlanRhs = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams)
-//           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
-//         } else if (rhs.asInstanceOf[Function].name.equals("time")) {
-//           val scalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
-//           val seriesPlanlhs = lhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-//           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
-//         } else {
-//           val lhsScalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
-//           val rhsScalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
-//           ScalarScalarBinaryOperation(operator.getPlanOperator, lhsScalar, rhsScalar)
-//         }
           val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
@@ -78,19 +45,22 @@ trait Expressions extends Aggregates with Functions {
           val scalar = ScalarFixedDoublePlan(expression.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
+
         case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
           val scalar = ScalarFixedDoublePlan(rhs.asInstanceOf[ScalarExpression].toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))
           val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
+
         case function: Function if function.isScalarFunction()  && rhs.isInstanceOf[PeriodicSeries] =>
           val scalar = function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
+
         case series: PeriodicSeries if rhs.isInstanceOf[Function] && rhs.asInstanceOf[Function].isScalarFunction =>
-        //  if (rhs.asInstanceOf[Function].name.equalsIgnoreCase("time"))
           val scalar = rhs.asInstanceOf[Function].toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanlhs = lhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
+
         case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>
           val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
           val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
@@ -109,6 +79,5 @@ trait Expressions extends Aggregates with Functions {
       }
     }
   }
-
 
 }

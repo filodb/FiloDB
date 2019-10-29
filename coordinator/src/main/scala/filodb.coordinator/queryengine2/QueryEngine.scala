@@ -538,7 +538,6 @@ class QueryEngine(dataset: Dataset,
   }
 
   private def materializeFixedScalar(queryId: String, submitTime: Long, options: QueryOptions, lp: ScalarFixedDoublePlan, spreadProvider: SpreadProvider): PlanResult = {
-    //PlanResult(Seq(ScalarTimeBasedExec(queryId,dataset.ref, lp.rangeParams)), false)
     val scalarTimeBasedExec = ScalarFixedDoubleExec(queryId,dataset.ref,lp.timeStepParams,lp.scalar, options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
