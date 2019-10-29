@@ -256,4 +256,53 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.map(_.key).toSet.size shouldEqual 2
   }
+  it("should join one-to-one when metric name is not _name_") {
+
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.ADD,
+      Cardinality.OneToOne,
+      Nil, Nil, Nil, "metric")
+
+    val samplesLhs: Array[RangeVector] = Array.tabulate(200) { i =>
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"someMetricLhs".utf8,
+            "tag1".utf8 -> s"tag1-$i".utf8,
+            "tag2".utf8 -> s"tag2-$i".utf8))
+        val rows: Iterator[RowReader] = data(i).iterator
+      }
+    }
+
+    val samplesRhs: Array[RangeVector] = Array.tabulate(200) { i =>
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"someMetricRhs".utf8,
+            "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
+            "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
+        val rows: Iterator[RowReader] = data(i).iterator
+      }
+    }
+
+    val samplesRhs2 = scala.util.Random.shuffle(samplesRhs.toList) // they may come out of order
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.foreach { rv =>
+      rv.key.labelValues.contains("metric".utf8) shouldEqual false
+      rv.key.labelValues.contains("tag1".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag2".utf8) shouldEqual true
+      val i = rv.key.labelValues("tag1".utf8).asNewString.split("-")(1)
+      rv.rows.map(_.getDouble(1)).foreach(_ shouldEqual i.toDouble * 2)
+    }
+
+    result.map(_.key).toSet.size shouldEqual 200
+  }
 }
