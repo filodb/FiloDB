@@ -133,10 +133,22 @@ kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partit
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
-Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
+Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
 
 ```
 bin/cassandra
+```
+
+You should install Cassandra using a tool which you're the most familiar with.
+
+For instance, one easy way to install it is via `brew`
+```
+brew install cassandra
+```
+
+Start Cassandra
+```
+brew services start cassandra
 ```
 
 Build the required projects
@@ -148,10 +160,11 @@ First initialize the keyspaces and tables in Cassandra.
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
+Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
 
 ```
 ./filodb-dev-start.sh
@@ -223,7 +236,27 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
-1a) Restart Kafka, this is sometimes necessary.
+
+- Before you remove a topic, update server.properties from configuration(conf) folder and have delete.topic.enable property set to true:
+`delete.topic.enable=true`
+- Run below kafka-topics.sh command with “–delete” option to remove “timeseries-dev” and "timeseries-dev-ds-1m":
+```sh
+ /usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev \
+                --delete  
+
+```
+```
+/usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev-ds-1m \
+                --delete
+```
+- You should see: 
+```
+Topic timeseries-dev is marked for deletion.
+Note: This will have no impact if delete.topic.enable is not set to true.
+```
+
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
 3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
@@ -374,7 +407,7 @@ For more information on memory configuration, please have a look at the [ingesti
 FiloDB is designed to efficiently ingest a huge number of individual time series - depending on available memory, one million or more time series per node is achievable.  Here are some pointers on choosing them:
 
 * It is better to have smaller time series, as the indexing and filtering operations are designed to work on units of time series, and not samples within each time series.
-* The most flexible partition key is just to use a `MapColumn` and insert tags.
+* The default partition key consists of a metric name, and tags represented as a  `MapColumn`.
 * Each time series does take up both heap and offheap memory, and memory is likely the main limiting factor.  The amount of configured memory limits the number of actively ingesting time series possible at any moment.
 
 ### Sharding
@@ -394,11 +427,11 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
-Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
+Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
     http_req_timer{_ws_="demo", _ns_="foo",__col__="min"}
 
-By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
+By default if `__col__` is not specified then the `value-column` option of each data schema is used.
 
 Some special functions exist to aid debugging and for other purposes:
 

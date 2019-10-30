@@ -12,8 +12,14 @@ package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()
   val decompressor = new ThreadLocal[LZ4FastDecompressor]()
 
-  val startTimeShift    = 22
-  val ingestionTimeMask = (1 << startTimeShift) - 1
+  private val startTimeShift    = 22
+  private val ingestionTimeMask = (1 << startTimeShift) - 1
+
+  // Inclusive minumum allowed user time for chunk ids.
+  val minChunkUserTime = 0 // 1970
+
+  // Inclusive maximum allowed user time for chunk ids.
+  val maxChunkUserTime = (java.lang.Long.MAX_VALUE << startTimeShift) >>> startTimeShift // 2109
 
   // Assume LZ4 compressor has state and is not thread safe.  Use ThreadLocals.
   private def getCompressor: LZ4Compressor = {
@@ -96,21 +102,30 @@ package object store {
    * bits 21-0 (22 bits): ingestion time, as seconds since Unix Epoch, modulo 48 days to ensure
    * no wraparound in the middle of the day (full binary encoding supports 48.545 days)
    *
+   * The upper bit of the chunk id is flipped, in order for signed conversions to work
+   * properly. Chunk ids will be negative until the year ~2039.
+   *
    * @param startTime milliseconds since 1970
    * @param ingestionTime seconds since 1970
    */
-  @inline final def chunkID(startTime: Long, ingestionTime: Long): Long =
-    (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60L))
+  final def chunkID(startTime: Long, ingestionTime: Long): Long = {
+    require(minChunkUserTime <= startTime && startTime <= maxChunkUserTime)
+    (1L << 63) ^ (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60L))
+  }
 
   /**
    * Returns the start time portion of the chunk ID, as milliseconds from 1970.
    */
-  @inline final def startTimeFromChunkID(chunkID: Long): Long = chunkID >>> startTimeShift
+  @inline final def startTimeFromChunkID(chunkID: Long): Long = {
+    ((1L << 63) ^ chunkID) >>> startTimeShift
+  }
 
   /**
    * Returns the ingestion time portion of the chunk ID, as seconds from 1970, modulo 48 days.
    */
-  @inline final def modIngestionTimeFromChunkID(chunkID: Long): Long = chunkID & ingestionTimeMask
+  @inline final def modIngestionTimeFromChunkID(chunkID: Long): Long = {
+   ((1L << 63) ^ chunkID) & ingestionTimeMask
+  }
 
   /**
    * Adds a few useful methods to ChunkSource

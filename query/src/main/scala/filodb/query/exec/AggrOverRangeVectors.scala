@@ -6,6 +6,7 @@ import scala.collection.mutable
 
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.reactive.Observable
 import scalaxy.loops._
 
@@ -30,18 +31,21 @@ final case class ReduceAggregateExec(id: String,
                                      aggrParams: Seq[Any]) extends NonLeafExecPlan {
   def children: Seq[ExecPlan] = childAggregates
 
-  protected def schemaOfCompose(): ResultSchema = childAggregates.head.schema()
-
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
+        case (QueryResult(_, schema, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
-    val aggregator = RowAggregator(aggrOp, aggrParams, schemaOfCompose())
-    RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
+    val task = for { schema <- firstSchema }
+               yield {
+                 val aggregator = RowAggregator(aggrOp, aggrParams, schema)
+                 RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = true, results, rv => rv.key)
+               }
+    Observable.fromTask(task).flatten
   }
 }
 
@@ -348,6 +352,7 @@ object RowAggregator {
       case TopK     => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, false)
       case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
+      case Stdvar   => StdvarRowAggregator
       case _     => ???
     }
   }
@@ -586,6 +591,83 @@ object AvgRowAggregator extends RowAggregator {
 }
 
 /**
+  * Map: Every sample is mapped to three values: (a) the stdvar value "0" and (b) the value itself
+  * (c) and its count value "1"
+  * ReduceAggregate: Accumulator maintains the (a) current stdvar and (b) current mean and (c) sum of counts.
+  *                  Reduction happens by:
+  *                  (a)recalculating mean as:
+  *                     (mean1*count1 + mean2*count1) / (count1+count2)
+  *                  (b)recalculating stdvar as:
+  *                     From:
+  *                     (1)stdvar1 = sumSquare1/count1 - mean1^2
+  *                     (2)stdvar2 = sumSquare2/count2 - mean2^2
+  *                     stdvar can be derived as:
+  *                     stdvar = sumSquare/count - mean^2 = (sumSquare1+sumSquare2)/(count1+count2)-mean^2,
+  *                     where,
+  *                     sumSquare1 = (stdvar1+mean1^2)*count1
+  *                     sumSquare2 = (stdvar2+mean2^2)*count2
+  *                     mean = (mean1*count1 + mean2*count2) / (count1+count2)
+  * ReduceMappedRow: Same as ReduceAggregate
+  * Present: The current stdvar is presented. Mean and Count value is dropped from presentation
+  */
+object StdvarRowAggregator extends RowAggregator {
+  class StdvarHolder(var timestamp: Long = 0L,
+                     var stdVar: Double = Double.NaN,
+                     var mean: Double = Double.NaN,
+                     var count: Long = 0) extends AggregateHolder {
+    val row = new StdvarAggTransientRow()
+    def toRowReader: MutableRowReader = {
+      row.setLong(0, timestamp)
+      row.setDouble(1, stdVar)
+      row.setDouble(2, mean)
+      row.setLong(3, count)
+      row
+    }
+    def resetToZero(): Unit = { count = 0; mean = Double.NaN; stdVar = Double.NaN }
+  }
+  type AggHolderType = StdvarHolder
+  def zero: StdvarHolder = new StdvarHolder()
+  def newRowToMapInto: MutableRowReader = new StdvarAggTransientRow()
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    mapInto.setLong(0, item.getLong(0))
+    mapInto.setDouble(1, 0L)
+    mapInto.setDouble(2, item.getDouble(1))
+    mapInto.setLong(3, if (item.getDouble(1).isNaN) 0L else 1L)
+    mapInto
+  }
+  def reduceAggregate(acc: StdvarHolder, aggRes: RowReader): StdvarHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    if (!aggRes.getDouble(1).isNaN) {
+      if (acc.mean.isNaN) acc.mean = 0d
+      if (acc.stdVar.isNaN) acc.stdVar = 0d
+
+      val aggStdvar = aggRes.getDouble(1)
+      val aggMean = aggRes.getDouble(2)
+      val aggCount = aggRes.getLong(3)
+
+      val newMean = (acc.mean * acc.count + aggMean * aggCount) / (acc.count + aggCount)
+      val accSquareSum = (acc.stdVar + math.pow(acc.mean, 2)) * acc.count
+      val aggSquareSum = (aggStdvar + math.pow(aggMean, 2)) * aggCount
+      val newStdVar = (accSquareSum + aggSquareSum) / (acc.count + aggCount) - math.pow(newMean, 2)
+      acc.stdVar = newStdVar
+      acc.mean = newMean
+      acc.count += aggCount
+    }
+    acc
+  }
+  // ignore last two column. we rely on schema change
+  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def reductionSchema(source: ResultSchema): ResultSchema = {
+    source.copy(source.columns :+ ColumnInfo("mean", ColumnType.DoubleColumn)
+      :+ ColumnInfo("count", ColumnType.LongColumn))
+  }
+  def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
+    // drop last two column with mean and count
+    reductionSchema.copy(reductionSchema.columns.dropRight(2))
+  }
+}
+
+/**
   * Map: Every sample is mapped to top/bottom-k aggregate by choosing itself: (a) The value  (b) and range vector key
   * ReduceMappedRow: Same as ReduceAggregate
   * ReduceAggregate: Accumulator maintains the top/bottom-k range vector keys and their corresponding values in a
@@ -706,6 +788,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   }
 }
 
+//scalastyle:off
 /**
   * We use the t-Digest data structure to map/reduce quantile calculation.
   * See https://github.com/tdunning/t-digest for more details.

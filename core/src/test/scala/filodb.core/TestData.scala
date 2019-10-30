@@ -233,7 +233,8 @@ object MachineMetricsData {
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
-  val dataset1 = Dataset("metrics1", Seq("series:string"), columns)
+  val options = DatasetOptions.DefaultOptions.copy(metricColumn = "series")
+  val dataset1 = Dataset("metrics1", Seq("series:string"), columns, options)
   val schema1 = dataset1.schema
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
@@ -371,8 +372,10 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
-                                                 dummyContext, true)
+  val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
+                                         dummyContext, true)
+  val histMaxBH = new BlockMemFactory(blockStore, None, histMaxDS.schema.data.blockMetaSize,
+                                      dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
@@ -396,9 +399,9 @@ object MachineMetricsData {
     val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH) }
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH) }
     // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histIngestBH, encode = true)
+    part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
   }

@@ -45,6 +45,10 @@ object InternalRangeFunction {
   // Used only for ds-gauge schema
   case object AvgWithSumAndCountOverTime extends InternalRangeFunction
 
+  // Used only for histogram schemas with max column
+  case object SumAndMaxOverTime extends InternalRangeFunction
+  case object LastSampleHistMax extends InternalRangeFunction
+
   def lpToInternalFunc(extFuncId: RangeFunctionId): InternalRangeFunction = extFuncId match {
     case RangeFunctionId.AvgOverTime   => AvgOverTime
     case RangeFunctionId.Changes       => Changes

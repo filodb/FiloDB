@@ -239,6 +239,14 @@ final case class Schemas(part: PartitionSchema,
    * Returns the Schema for a given schemaID, or UnknownSchema if not found
    */
   final def apply(id: Int): Schema = _schemas(id)
+
+  /**
+   * Returns the schema name for given schemaID, or "<unknown>"
+   */
+  final def schemaName(id: Int): String = {
+    val sch = apply(id)
+    if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
+  }
 }
 
 /**
@@ -339,5 +347,7 @@ object Schemas {
   val global = fromConfig(GlobalConfig.defaultFiloConfig).get
   val gauge = global.schemas("gauge")
   val promCounter = global.schemas("prom-counter")
+  val untyped = global.schemas("untyped")
+  val promHistogram = global.schemas("prom-histogram")
   val dsGauge = global.schemas("ds-gauge")
 }

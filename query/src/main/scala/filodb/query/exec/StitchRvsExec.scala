@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.collection.mutable
 
+import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core.query._
@@ -62,9 +63,8 @@ final case class StitchRvsExec(id: String,
 
   protected def args: String = ""
 
-  protected def schemaOfCompose(): ResultSchema = children.head.schema()
-
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {

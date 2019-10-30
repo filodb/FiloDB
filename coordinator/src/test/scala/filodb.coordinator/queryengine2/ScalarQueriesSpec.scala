@@ -9,7 +9,8 @@ import org.scalatest.{FunSpec, Matchers}
 import scala.concurrent.duration.FiniteDuration
 import com.typesafe.config.ConfigFactory
 import filodb.coordinator.ShardMapper
-import filodb.core.{MetricsTestData}
+import filodb.core.MetricsTestData
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query
@@ -19,7 +20,23 @@ import filodb.query.exec._
 
 class ScalarQueriesSpec extends FunSpec with Matchers {
 
-  implicit val system = ActorSystem()
+//  implicit val system = ActorSystem()
+//  val node = TestProbe().ref
+//
+//  val mapper = new ShardMapper(32)
+//  for { i <- 0 until 32 } mapper.registerNode(Seq(i), node)
+//
+//  private def mapperRef = mapper
+//
+//  val dataset = MetricsTestData.timeseriesDataset
+//
+//  val emptyDispatcher = new PlanDispatcher {
+//    override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
+//                                          timeout: FiniteDuration): Task[query.QueryResponse] = ???
+//  }
+//
+//  val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+implicit val system = ActorSystem()
   val node = TestProbe().ref
 
   val mapper = new ShardMapper(32)
@@ -28,13 +45,16 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   private def mapperRef = mapper
 
   val dataset = MetricsTestData.timeseriesDataset
+  val dsRef = dataset.ref
+  val schemas = Schemas(dataset.schema)
 
   val emptyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+  val engine = new QueryEngine(dsRef, schemas, mapperRef, EmptyFailureProvider)
+
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
@@ -72,15 +92,13 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     execPlan.printTree()
     println("execPlan:" + execPlan.toString)
     val expected = """T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                     |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#675877426])
+                     |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
                      |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=3, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#675877426])
+                     |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=3, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
+                     |+Inner: None
                      |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=19, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#675877426])""".stripMargin
-    println("expected:" +expected)
-    println("matches res:" + maskDispatcher(execPlan.printTree()).equals(maskDispatcher(expected)))
-    // execPlan.printTree() should fullyMatch regex (expected.r)
-    //matches(expected)
+                     |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=19, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(test))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1153666897])
+                     |+Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -104,13 +122,15 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
     execPlan.printTree()
-    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-954218812])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(TimeFuncArgs(RangeParams(1000,1000,1000))))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-954218812])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(TimeFuncArgs(RangeParams(1000,1000,1000))))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-954218812])""".stripMargin
+    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1758343691])
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(TimeFuncArgs(RangeParams(1000,1000,1000))))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1758343691])
+    +Inner: None
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(TimeFuncArgs(RangeParams(1000,1000,1000))))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1758343691])
+    +Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -125,25 +145,31 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlanFuncArg = scalarOperationMapper.funcParams.head.asInstanceOf[ExecPlanFuncArgs]
     execPlanFuncArg.execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper]
     println("execPlan is:" +  execPlan.printTree())
-    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                     |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=15, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                     |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])
-                     |))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=31, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1357837659])""".stripMargin
+    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+      -E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None
+    ))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+      -E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None
+    ))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#978556277])
+    +Inner: None""".stripMargin
 
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
@@ -154,13 +180,15 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
     execPlan.printTree()
-    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#610440026])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#610440026])
-                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
-                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                     |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#610440026])""".stripMargin
+    val expected = """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1235855442])
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1235855442])
+    +Inner: None
+    -T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
+    --T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
+    ---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1235855442])
+    +Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -181,13 +209,15 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
     execPlan.printTree()
-    val expected ="""E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-222306801])
+    val expected ="""E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-222306801])
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
+                    |+Inner: None
                     |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(StaticFuncArgs(10.0,RangeParams(1000,1000,1000))))
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-222306801])""".stripMargin
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
+                    |+Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -198,13 +228,15 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
    println("execPLan is:" +  execPlan.printTree())
     val expected ="""T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                    |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1890119985])
+                    |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1890119985])
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
+                    |+Inner: None
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1890119985])
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
+                    |+Inner: None
                     |))
-                    |-E~ScalarTimeBasedExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher()""".stripMargin
+                    |-E~ScalarTimeBasedExec(params = RangeParams(1000,1000,1000), function = Time) on InProcessPlanDispatcher()""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -215,18 +247,22 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
     println("execPLan is:" +  execPlan.printTree())
     val expected ="""T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true, scalar=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                    |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])
+                    |-E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
+                    |+Inner: None
                     |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |---E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])
+                    |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
+                    |+Inner: None
                     |))
                     |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                    |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])
+                    |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
                     |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |----E~SelectRawPartitionsExec(dataset=timeseries, shard=15, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])
+                    |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
+                    |+Inner: None
                     |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |----E~SelectRawPartitionsExec(dataset=timeseries, shard=31, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1383603791])""".stripMargin
+                    |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1032364329])
+                    |+Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
 
@@ -238,13 +274,16 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     println("execPLan is:" +  execPlan.printTree())
     val expected ="""T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false, scalar=List(StaticFuncArgs(3.0,RangeParams(1000,1000,1000))))
                     |-T~ScalarFunctionMapper(function=Scalar, funcParams=List())
-                    |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#730447375])
+                    |--E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2025632805])
                     |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |----E~SelectRawPartitionsExec(dataset=timeseries, shard=5, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#730447375])
+                    |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2025632805])
+                    |+Inner: None
                     |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, funcParams=List())
-                    |----E~SelectRawPartitionsExec(dataset=timeseries, shard=21, schema=timeseries, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colIDs=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#730447375])""".stripMargin
+                    |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2025632805])
+                    |+Inner: None""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual(maskDispatcher(expected))
   }
+
   it ("should generate vector plan for vector(2000)") {
     val lp = Parser.queryToLogicalPlan("vector(2000)", 1000)
     println("lp:" + lp)

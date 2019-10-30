@@ -225,8 +225,9 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val part = rv.partition.asInstanceOf[TimeSeriesPartition]
     val dropData = data.map(d => (d.head.asInstanceOf[Long] + 70000L) +: d.drop(1))
     val container = MachineMetricsData.records(promHistDS, dropData).records
-    container.iterate(promHistDS.ingestionSchema).foreach { row => part.ingest(0, row, ingestBlockHolder) }
-    part.switchBuffers(ingestBlockHolder, encode = true)
+    val bh = MachineMetricsData.histIngestBH
+    container.iterate(promHistDS.ingestionSchema).foreach { row => part.ingest(0, row, bh) }
+    part.switchBuffers(bh, encode = true)
 
 
     val startTs = 99500L

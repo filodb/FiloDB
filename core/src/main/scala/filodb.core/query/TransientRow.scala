@@ -131,6 +131,42 @@ final class AvgAggTransientRow extends MutableRowReader {
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
+final class StdvarAggTransientRow extends MutableRowReader {
+  var timestamp: Long = _
+  var stdVar: Double = _
+  var avg: Double = _
+  var count: Long = _
+
+  def setLong(columnNo: Int, valu: Long): Unit =
+    if (columnNo == 0) timestamp = valu
+    else if (columnNo == 3) count = valu
+    else throw new IllegalArgumentException()
+
+  def setDouble(columnNo: Int, valu: Double): Unit =
+    if (columnNo == 1) stdVar = valu
+    else if (columnNo == 2) avg = valu
+    else throw new IllegalArgumentException()
+
+  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
+
+  def notNull(columnNo: Int): Boolean = columnNo < 4
+  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
+  else if (columnNo == 3) count
+  else throw new IllegalArgumentException()
+  def getDouble(columnNo: Int): Double = if (columnNo == 1) stdVar
+  else if (columnNo == 2) avg
+  else throw new IllegalArgumentException()
+  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
+  def getString(columnNo: Int): String = throw new IllegalArgumentException()
+  def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+}
+
 final class QuantileAggTransientRow() extends MutableRowReader {
   var timestamp: Long = _
   var blobBase: Array[Byte] = _
@@ -206,4 +242,3 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
-

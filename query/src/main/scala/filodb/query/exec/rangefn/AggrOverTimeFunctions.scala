@@ -8,6 +8,7 @@ import debox.Buffer
 import filodb.core.query.{TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.QueryConfig
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
@@ -596,23 +597,34 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
 }
 
 abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
-                                               var quantileResult: Double = Double.NaN)
+                                               var quantileResult: Double = Double.NaN,
+                                               var values: Buffer[Double] = Buffer.empty[Double])
   extends ChunkedRangeFunction[TransientRow] {
-  override final def reset(): Unit = { quantileResult = Double.NaN }
+  override final def reset(): Unit = { quantileResult = Double.NaN; values = Buffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
+      val counter = values.length
+      values.sort(spire.algebra.Order.fromOrdering[Double])
+      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
+      if (counter > 0) {
+        quantileResult = values(lowerIndex)*(1-weight) + values(upperIndex)*weight
+      }
+    }
     sampleToEmit.setValues(endTimestamp, quantileResult)
   }
-  def calculateRank(q: Double, counter: Long): (Double, Double, Double) = {
+  def calculateRank(q: Double, counter: Int): (Double, Int, Int) = {
     val rank = q*(counter - 1)
     val lowerIndex = Math.max(0, Math.floor(rank))
     val upperIndex = Math.min(counter - 1, lowerIndex + 1)
     val weight = rank - math.floor(rank)
-    (weight, upperIndex, lowerIndex)
+    (weight, upperIndex.toInt, lowerIndex.toInt)
   }
 }
 
 class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
@@ -620,28 +632,18 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     var counter = 0
 
-    quantileResult = if (q < 0) Double.NegativeInfinity
-    else if (q > 1) Double.PositiveInfinity
+    if (q < 0) quantileResult = Double.NegativeInfinity
+    else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
       var rowNum = startRowNum
       val it = doubleReader.iterate(doubleVect, startRowNum)
-      var values = Buffer.empty[Double]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
         if (!JLDouble.isNaN(nextvalue)) {
           values += nextvalue
-          counter += 1
         }
         rowNum += 1
-      }
-
-      values.sort(spire.algebra.Order.fromOrdering[Double])
-      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
-      if (counter > 0) {
-        values(lowerIndex.toInt)*(1-weight) + values(upperIndex.toInt)*weight
-      } else {
-        quantileResult
       }
     }
   }
@@ -649,31 +651,152 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
 
 class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
+  require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
   final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
-    quantileResult = if (q < 0) Double.NegativeInfinity
-    else if (q > 1) Double.PositiveInfinity
+    if (q < 0) quantileResult = Double.NegativeInfinity
+    else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
       var rowNum = startRowNum
       val it = longReader.iterate(longVect, startRowNum)
-      var values = Buffer.empty[Long]
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         values += nextvalue
         rowNum += 1
       }
-      val counter = endRowNum - startRowNum + 1
-      values.sort(spire.algebra.Order.fromOrdering[Long])
-      val (weight, upperIndex, lowerIndex) = calculateRank(q, counter)
-      if (counter > 0) {
-        values(lowerIndex.toInt)*(1-weight) + values(upperIndex.toInt)*weight
-      } else {
-        quantileResult
-      }
     }
   }
 }
 
+abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
+                                          var b0: Double = Double.NaN,
+                                          var s0: Double = Double.NaN,
+                                          var nextvalue: Double = Double.NaN,
+                                          var smoothedResult: Double = Double.NaN)
+  extends ChunkedRangeFunction[TransientRow] {
+
+  override final def reset(): Unit = { s0 = Double.NaN
+                                       b0 = Double.NaN
+                                       nextvalue = Double.NaN
+                                       smoothedResult = Double.NaN }
+
+  def parseParameters(funcParams: Seq[Any]): (Double, Double) = {
+    require(funcParams.size == 2, "Holt winters needs 2 parameters")
+    require(funcParams.head.isInstanceOf[Number], "sf parameter must be a number")
+    require(funcParams(1).isInstanceOf[Number], "tf parameter must be a number")
+    val sf = funcParams.head.asInstanceOf[Number].doubleValue()
+    val tf = funcParams(1).asInstanceOf[Number].doubleValue()
+    require(sf >= 0 & sf <= 1, "Sf should be in between 0 and 1")
+    require(tf >= 0 & tf <= 1, "tf should be in between 0 and 1")
+    (sf, tf)
+  }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, smoothedResult)
+  }
+}
+
+/**
+  * @param funcParams - Additional required function parameters
+  * Refer https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing
+  */
+class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+  with ChunkedDoubleRangeFunction {
+
+  val (sf, tf) = parseParameters(funcParams)
+
+  // Returns the first non-Nan value encountered
+  def getNextValue(startRowNum: Int, endRowNum: Int, it: DoubleIterator): (Double, Int) = {
+    var res = Double.NaN
+    var currRowNum = startRowNum
+    while (currRowNum <= endRowNum && JLDouble.isNaN(res)) {
+      val nextvalue = it.next
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!JLDouble.isNaN(nextvalue)) {
+        res = nextvalue
+      }
+      currRowNum += 1
+    }
+    (res, currRowNum)
+  }
+
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    var rowNum = startRowNum
+    if (JLDouble.isNaN(s0) && JLDouble.isNaN(b0)) {
+      // check if it is a new chunk
+      val (_s0, firstrow) = getNextValue(startRowNum, endRowNum, it)
+      val (_b0, currRow) = getNextValue(firstrow, endRowNum, it)
+      nextvalue = _b0
+      b0 = _b0 - _s0
+      rowNum = currRow - 1
+      s0 = _s0
+    } else if (JLDouble.isNaN(b0)) {
+      // check if the previous chunk had only one element
+      val (_b0, currRow) = getNextValue(startRowNum, endRowNum, it)
+      nextvalue = _b0
+      b0 = _b0 - s0
+      rowNum = currRow - 1
+    }
+    else {
+      // continuation of a previous chunk
+      it.next
+    }
+    if (!JLDouble.isNaN(b0)) {
+      while (rowNum <= endRowNum) {
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        if (!JLDouble.isNaN(nextvalue)) {
+          val _s0  = sf*nextvalue + (1-sf)*(s0 + b0)
+          b0 = tf*(_s0 - s0) + (1-tf)*b0
+          s0 = _s0
+        }
+        nextvalue = it.next
+        rowNum += 1
+      }
+      smoothedResult = s0
+    }
+  }
+}
+
+class HoltWintersChunkedFunctionL(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+  with ChunkedLongRangeFunction {
+
+  val (sf, tf) = parseParameters(funcParams)
+
+  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+                              longReader: bv.LongVectorDataReader,
+                              startRowNum: Int,
+                              endRowNum: Int): Unit = {
+    val it = longReader.iterate(longVect, startRowNum)
+    var rowNum = startRowNum
+    if (JLDouble.isNaN(b0)) {
+      if (endRowNum - startRowNum >= 2) {
+        s0 = it.next.toDouble
+        b0 = it.next.toDouble
+        nextvalue = b0
+        b0 = b0 - s0
+        rowNum = startRowNum + 1
+      }
+    } else {
+      it.next
+    }
+    if (!JLDouble.isNaN(b0)) {
+      while (rowNum <= endRowNum) {
+        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        var nextvalue = it.next
+        val smoothedResult  = sf*nextvalue + (1-sf)*(s0 + b0)
+        b0 = tf*(smoothedResult - s0) + (1-tf)*b0
+        s0 = smoothedResult
+        nextvalue = it.next
+        rowNum += 1
+      }
+    }
+  }
+}

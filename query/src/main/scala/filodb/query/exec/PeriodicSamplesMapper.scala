@@ -29,14 +29,15 @@ final case class PeriodicSamplesMapper(start: Long,
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
-  if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
+  val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax)
+  if (!isLastFn) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
-
+  //scalastyle:off
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
@@ -46,21 +47,22 @@ final case class PeriodicSamplesMapper(start: Long,
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
-                   sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
-    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig, funcParams, maxCol)
+    // If a max column is present, the ExecPlan's job is to put it into column 2
+    val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
+                      sourceSchema.columns(2).name == "max"
+    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig, funcParams)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = window.getOrElse(if (functionId.isEmpty) queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = window.getOrElse(if (isLastFn) queryConfig.staleSampleAfterMs + 1 else 0L)
 
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
+          val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
                                        windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
@@ -88,6 +90,7 @@ final case class PeriodicSamplesMapper(start: Long,
         }
     }
   }
+  //scalastyle:on
 
   // Transform source double or long to double schema
   override def schema(source: ResultSchema): ResultSchema = {

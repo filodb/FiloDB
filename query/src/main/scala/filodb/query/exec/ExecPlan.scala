@@ -8,15 +8,21 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import monix.reactive.observables.ConnectableObservable
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.FiloSchedulers
+import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
+
+/**
+ * The observable of vectors and the schema that is returned by ExecPlan doExecute
+ */
+final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSchema])
 
 /**
   * This is the Execution Plan tree node interface.
@@ -78,19 +84,7 @@ trait ExecPlan extends QueryCommand  {
     rangeVectorTransformers += mapper
   }
 
-  final def replaceTransformers(newTransformers: Seq[RangeVectorTransformer]): Unit = {
-    qLogger.debug(s"Replacing $rangeVectorTransformers with $newTransformers")
-    rangeVectorTransformers.clear()
-    rangeVectorTransformers ++= newTransformers
-  }
-
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  final def schema(): ResultSchema = {
-    val source = schemaOfDoExecute()
-    rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(acc) }
-  }
+  protected def allTransformers: Seq[RangeVectorTransformer] = rangeVectorTransformers
 
   /**
     * Facade for the execution orchestration of the plan sub-tree
@@ -111,100 +105,107 @@ trait ExecPlan extends QueryCommand  {
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
-    Task {
+    // Step 1: initiate doExecute, get schema
+    lazy val step1 = Task {
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      val res = doExecute(source, queryConfig)
-     // val paramsRes = executeFunctionParams
-      val resSchema = schemaOfDoExecute()
-      val finalRes = rangeVectorTransformers.foldLeft((res, resSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector: Observable[ScalarVector] = if (transf.funcParams.isEmpty){
-           Observable.empty
-        } else {
-          transf.funcParams.head.getResult
-        }
+      doExecute(source, queryConfig)
+    }
 
-        (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }
-      val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-      val builder = SerializedRangeVector.newBuilder()
-      var numResultSamples = 0 // BEWARE - do not modify concurrently!!
-      finalRes._1
-        .map {
-
-          case srv: SerializedRangeVector  =>
-            numResultSamples += srv.numRowsInt
-            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (enforceLimit && numResultSamples > limit)
-              throw new BadQueryException(s"This query results in more than $limit samples. " +
-                s"Try applying more filters or reduce time range.")
-            srv
-
-          case srv: SerializableRangeVector  =>
-            numResultSamples += srv.numRowsInt
-            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (enforceLimit && numResultSamples > limit)
-              throw new BadQueryException(s"This query results in more than $limit samples. " +
-                s"Try applying more filters or reduce time range.")
-            srv
-
-          case rv: RangeVector =>
-            // materialize, and limit rows per RV
-            val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
-            numResultSamples += srv.numRowsInt
-            // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-            if (enforceLimit && numResultSamples > limit)
-              throw new BadQueryException(s"This query results in more than $limit samples. " +
-                s"Try applying more filters or reduce time range.")
-            srv
-        }
-        .take(limit)
-        .toListL
-        .map { r =>
-          val numBytes = builder.allContainers.map(_.numBytes).sum
-          SerializedRangeVector.queryResultBytes.record(numBytes)
-          if (numBytes > 5000000) {
-            // 5MB limit. Configure if necessary later.
-            // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
-            // is < 2MB
-            qLogger.warn(s"queryId: ${id} result was " +
-              s"large size ${numBytes}. May need to tweak limits. " +
-              s"ExecPlan was: ${printTree()} " +
-              s"Limit was: ${limit}")
+    // Step 2: Set up transformers and loop over all rangevectors, creating the result
+    def step2(res: ExecResult) = res.schema.map { resSchema =>
+      FiloSchedulers.assertThreadName(QuerySchedName)
+      // It is possible a null schema is returned (due to no time series). In that case just return empty results
+      val resultTask = if (resSchema == ResultSchema.empty) {
+        qLogger.debug(s"Empty plan $this, returning empty results")
+        Task.eval(QueryResult(id, resSchema, Nil))
+      } else {
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          val paramRangeVector: Observable[ScalarVector] = if (transf.funcParams.isEmpty){
+            Observable.empty
+          } else {
+            transf.funcParams.head.getResult
           }
-          qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
-          QueryResult(id, finalRes._2, r)
+
+          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
         }
-        .onErrorHandle { case ex: Throwable =>
-          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-            qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
-          QueryError(id, ex)
-        }
+        val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+        val builder = SerializedRangeVector.newBuilder()
+        var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        finalRes._1
+          .map {
+            case srv: SerializedRangeVector =>
+              numResultSamples += srv.numRowsInt
+              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+              if (enforceLimit && numResultSamples > limit)
+                throw new BadQueryException(s"This query results in more than $limit samples. " +
+                  s"Try applying more filters or reduce time range.")
+              srv
+            case srv: SerializableRangeVector  =>
+              numResultSamples += srv.numRowsInt
+              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+              if (enforceLimit && numResultSamples > limit)
+                throw new BadQueryException(s"This query results in more than $limit samples. " +
+                  s"Try applying more filters or reduce time range.")
+              srv
+            case rv: RangeVector =>
+              // materialize, and limit rows per RV
+              val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
+              numResultSamples += srv.numRowsInt
+              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
+              if (enforceLimit && numResultSamples > limit)
+                throw new BadQueryException(s"This query results in more than $limit samples. " +
+                  s"Try applying more filters or reduce time range.")
+              srv
+          }
+          .take(limit)
+          .toListL
+          .map { r =>
+            val numBytes = builder.allContainers.map(_.numBytes).sum
+            SerializedRangeVector.queryResultBytes.record(numBytes)
+            if (numBytes > 5000000) {
+              // 5MB limit. Configure if necessary later.
+              // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
+              // is < 2MB
+              qLogger.warn(s"queryId: ${id} result was " +
+                s"large size ${numBytes}. May need to tweak limits. " +
+                s"ExecPlan was: ${printTree()} " +
+                s"Limit was: ${limit}")
+            }
+            qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
+            QueryResult(id, finalRes._2, r)
+          }
+      }
+      resultTask.onErrorHandle { case ex: Throwable =>
+        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+        QueryError(id, ex)
+      }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
       if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
         qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
       QueryError(id, ex)
     }
+
+    for { res <- step1
+          qResult <- step2(res) }
+    yield { qResult }
   }
 
 
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
-    * node
+    * node.  It will transform or produce an Observable of RangeVectors, as well as output a ResultSchema
+    * that has the schema of the produced RangeVectors.
+    * Note that this should not include any operations done in the transformers.
     */
-  protected def doExecute(source: ChunkSource,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector]
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  protected def schemaOfDoExecute(): ResultSchema
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -221,10 +222,13 @@ trait ExecPlan extends QueryCommand  {
   final def printTree(useNewline: Boolean = true, level: Int = 0): String = {
     val transf = printRangeVectorTransformersForLevel(level)
     val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val curNode = curNodeText(nextLevel)
     val childr = children.map(_.printTree(useNewline, nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString(if (useNewline) "\n" else " @@@ ")
   }
+
+  def curNodeText(level: Int): String =
+    s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
     val transf = printRangeVectorTransformersForLevel(level)
@@ -304,36 +308,71 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   final def limit: Int = children.head.limit
 
+  private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
+
+  private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
+                                (implicit sched: Scheduler, timeout: FiniteDuration) =
+    Kamon.withSpan(span) {
+      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
+        QueryError(id, ex)
+      }
+    }
+
   /**
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
     * using the abstract method 'compose' to arrive at the higher level
-    * result
+    * result.
+    * The schema from all the tasks are checked; empty results are dropped and schema is determined
+    * from the non-empty results.
     */
-  final protected def doExecute(source: ChunkSource,
-                                queryConfig: QueryConfig)
-                               (implicit sched: Scheduler,
-                                timeout: FiniteDuration): Observable[RangeVector] = {
+  final def doExecute(source: ChunkSource,
+                      queryConfig: QueryConfig)
+                     (implicit sched: Scheduler,
+                      timeout: FiniteDuration): ExecResult = {
     val spanFromHelper = Kamon.currentSpan()
-    val childTasks  = Observable.fromIterable(children.zipWithIndex)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
-      Kamon.withSpan(spanFromHelper) {
-        plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-          QueryError(id, ex)
-        }.map((_, i))
-      }
-    }
-    compose(childTasks, queryConfig)
+    // Create tasks for all results
+    val childTasks = Observable.fromIterable(children)
+                               .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
+                                 dispatchRemotePlan(plan, spanFromHelper)
+                               }
 
+    // The first valid schema is returned as the Task.  If all results are empty, then return
+    // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
+    var sch = ResultSchema.empty
+    val processedTasks = childTasks.zipWithIndex.collect {
+      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
+        sch = reduceSchemas(sch, res, i.toInt)
+        (res, i.toInt)
+      case (e: QueryError, i) =>
+        (e, i.toInt)
+    // cache caches results so that multiple subscribers can process
+    }.cache
+
+    val outputSchema = processedTasks.collect {
+      case (QueryResult(_, schema, _), _) => schema
+    }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
+
+    val outputRvs = compose(processedTasks, outputSchema, queryConfig)
+    ExecResult(outputRvs, outputSchema)
   }
 
-  final protected def schemaOfDoExecute(): ResultSchema = schemaOfCompose()
-
   /**
-    * Schema of the RangeVectors returned by compose() method
-    */
-  protected def schemaOfCompose(): ResultSchema
+   * Reduces the different ResultSchemas coming from each child to a single one.
+   * The default one here takes the first schema response, and checks that subsequent ones match the first one.
+   * Can be overridden if needed.
+   * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
+   */
+  def reduceSchemas(rs: ResultSchema, resp: QueryResult, i: Int): ResultSchema = {
+    resp match {
+      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+        schema     /// First schema, take as is
+      case QueryResult(_, schema, _) =>
+        if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
+        else rs
+    }
+  }
 
   /**
     * Sub-class non-leaf nodes should provide their own implementation of how
@@ -342,8 +381,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * @param childResponses observable of a pair. First element of pair is the QueryResponse for
     *                       a child ExecPlan, the second element is the index of the child plan.
     *                       There is one response per child plan.
+    * @param firstSchema Task for the first schema coming in from the first child
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector]
 
 }

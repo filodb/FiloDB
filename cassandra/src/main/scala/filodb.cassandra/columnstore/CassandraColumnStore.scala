@@ -108,15 +108,16 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
                val future =
                  for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLive)
+                       if writeChunksResp == Success
                        writeIndicesResp  <- writeIndices(ref, partBytes, chunkset, diskTimeToLive)
-                                            if writeChunksResp == Success
+                       if writeIndicesResp == Success
                  } yield {
                    span.finish()
                    sinkStats.chunksetWrite()
                    writeIndicesResp
                  }
                Task.fromFuture(future)
-             }.takeWhile(_ == Success)
+             }
              .countL.runAsync
              .map { chunksWritten =>
                if (chunksWritten > 0) Success else NotApplied
@@ -158,7 +159,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                     ingestionTimeEnd: Long,
                                     userTimeStart: Long,
                                     userTimeEnd: Long,
-                                    batchSize: Int): Observable[Seq[RawPartData]] = {
+                                    batchSize: Int,
+                                    batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
     val partKeys = Observable.fromIterator(splits).flatMap {
       case split: CassandraTokenRangeSplit =>
         val indexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
@@ -171,7 +173,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     import filodb.core.Iterators._
 
     val chunksTable = getOrCreateChunkTable(datasetRef)
-    partKeys.bufferTimedAndCounted(1.second, batchSize).map { parts =>
+    partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
         s"userTimeEnd=$userTimeEnd")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable
