@@ -3,7 +3,7 @@ package filodb.core.query
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoT, ReadablePartition}
+import filodb.core.store.{ChunkInfoIterator, ChunkSetInfoReader, ReadablePartition}
 import filodb.memory.format.{vectors => bv, RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
@@ -43,7 +43,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     override def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
-  private def populateIterators(info: ChunkSetInfoT): Unit = {
+  private def populateIterators(info: ChunkSetInfoReader): Unit = {
     setChunkStartEnd(info)
     for { pos <- 0 until columnIDs.size optimized } {
       val colID = columnIDs(pos)
@@ -60,7 +60,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
     }
   }
 
-  private def setChunkStartEnd(info: ChunkSetInfoT): Unit = {
+  private def setChunkStartEnd(info: ChunkSetInfoReader): Unit = {
     // Get reader for timestamp vector
     val timeVector = info.vectorAddress(timestampCol)
     val timeAcc = info.vectorAccessor(timestampCol)
@@ -83,7 +83,7 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
       while (curChunkID == Long.MinValue || rowNo > endRowNo) {
         // No more chunksets
         if (!infos.hasNext) return false
-        val nextInfo = infos.nextInfoT
+        val nextInfo = infos.nextInfoReader
         curChunkID = nextInfo.id
         populateIterators(nextInfo)
       }

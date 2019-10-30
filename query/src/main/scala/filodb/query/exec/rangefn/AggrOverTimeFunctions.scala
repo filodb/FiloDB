@@ -5,7 +5,7 @@ import java.lang.{Double => JLDouble}
 import debox.Buffer
 import java.util
 
-import filodb.core.store.ChunkSetInfoT
+import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, MemoryAccessor, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
@@ -218,7 +218,7 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
@@ -257,7 +257,7 @@ class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunct
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
@@ -297,7 +297,7 @@ class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunct
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)

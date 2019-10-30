@@ -18,13 +18,14 @@ object MemoryAccessor {
 }
 
 /**
-  * Abstraction for reading and writing to memory. Clients can used this
+  * Abstraction for reading and writing to byte sequence memory. Clients can used this
   * abstraction without worrying whether underlying memory could be
   * on-heap or off-heap.
   *
   * The `addr` parameter in the methods below indicate the address of the
-  * memory position relative to a specific base address as indicated by the
-  * implementing class.
+  * memory position relative to the start of the byte sequence represented by the
+  * implementing class. IMPORTANT to note that this is NOT same as the unsafe
+  * offset for any given on-heap object.
   *
   */
 sealed trait MemoryAccessor {

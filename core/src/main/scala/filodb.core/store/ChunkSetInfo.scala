@@ -8,7 +8,7 @@ import debox.Buffer
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
-import filodb.core.query.{RangeVector, RawDataRangeVector}
+import filodb.core.query.RawDataRangeVector
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
@@ -149,28 +149,30 @@ object ChunkSetInfo extends StrictLogging {
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
 
-  def getChunkID(acc: MemoryAccessor, infoPointer: Long): ChunkID = acc.getLong(infoPointer + OffsetChunkID)
+  def getChunkID(acc: MemoryAccessor, infoPointer: NativePointer): ChunkID = acc.getLong(infoPointer + OffsetChunkID)
   def getChunkID(infoBytes: Array[Byte]): ChunkID =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
-  def getIngestionTime(acc: MemoryAccessor, infoPointer: Long): Long = acc.getLong(infoPointer + OffsetIngestionTime)
+  def getIngestionTime(acc: MemoryAccessor, infoPointer: NativePointer): Long =
+    acc.getLong(infoPointer + OffsetIngestionTime)
   def getIngestionTime(infoBytes: Array[Byte]): Long =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
   def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
 
-  def getNumRows(acc: MemoryAccessor, infoPointer: Long): Int = acc.getInt(infoPointer + OffsetNumRows)
+  def getNumRows(acc: MemoryAccessor, infoPointer: NativePointer): Int = acc.getInt(infoPointer + OffsetNumRows)
   def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(acc: MemoryAccessor, infoPointer: Long): Long = startTimeFromChunkID(getChunkID(acc, infoPointer))
+  def getStartTime(acc: MemoryAccessor, infoPointer: NativePointer): Long =
+    startTimeFromChunkID(getChunkID(acc, infoPointer))
   def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
 
-  def getEndTime(acc: MemoryAccessor, infoPointer: Long): Long = acc.getLong(infoPointer + OffsetEndTime)
+  def getEndTime(acc: MemoryAccessor, infoPointer: NativePointer): Long = acc.getLong(infoPointer + OffsetEndTime)
   def getEndTime(infoBytes: Array[Byte]): Long =
     UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
   def setEndTime(infoPointer: NativePointer, time: Long): Unit =
@@ -237,7 +239,7 @@ object ChunkSetInfo extends StrictLogging {
 trait ChunkInfoIterator { base: ChunkInfoIterator =>
   def close(): Unit
   def hasNext: Boolean
-  def nextInfoT: ChunkSetInfoT = ChunkSetInfoOffHeap(nextInfo)
+  def nextInfoReader: ChunkSetInfoReader = ChunkSetInfoOffHeap(nextInfo)
   def nextInfo: ChunkSetInfo
 
   /**
@@ -358,8 +360,8 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkSetInfoT] = Buffer.empty[ChunkSetInfoT])
-extends Iterator[ChunkSetInfoT] {
+                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader])
+extends Iterator[ChunkSetInfoReader] {
   private val infos = rv.chunkInfos(start - window, end)
 
   final def close(): Unit = infos.close()
@@ -392,14 +394,13 @@ extends Iterator[ChunkSetInfoT] {
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
-      val next = infos.nextInfoT
-      require(next != UnsafeUtils.ZeroPointer, s"NULL nextInfo; curWindowEnd=$curWindowEnd, windowInfos=$windowInfos")
+      val next = infos.nextInfoReader
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         windowInfos += next
-        next.tsVectorAddr = next.vectorAddress(RangeVector.timestampColID)
+        next.tsVectorAddr = next.vectorAddress(DataSchema.timestampColID)
         try {
-          next.tsVectorAccessor = next.vectorAccessor(RangeVector.timestampColID)
+          next.tsVectorAccessor = next.vectorAccessor(DataSchema.timestampColID)
           next.tsReader = vectors.LongBinaryVector(next.tsVectorAccessor, next.tsVectorAddr)
 
           next.valueVectorAccessor = next.vectorAccessor(rv.valueColID)
@@ -423,9 +424,8 @@ extends Iterator[ChunkSetInfoT] {
   /**
    * Returns the next ChunkSetInfo for the current window
    */
-  final def next: ChunkSetInfoT = {
+  final def next: ChunkSetInfoReader = {
     val next = windowInfos(readIndex)
-    require(next != UnsafeUtils.ZeroPointer, s"ERROR: info==null, windowInfos=$windowInfos readIndex=$readIndex")
     readIndex += 1
     next
   }

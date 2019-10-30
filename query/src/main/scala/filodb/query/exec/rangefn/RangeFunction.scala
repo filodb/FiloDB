@@ -3,7 +3,7 @@ package filodb.query.exec.rangefn
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schema
 import filodb.core.query.ResultSchema
-import filodb.core.store.ChunkSetInfoT
+import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
@@ -102,7 +102,7 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit
 
   /**
    * Return the computed result in sampleToEmit for the given window.
@@ -132,7 +132,7 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     val ccReader = valueReader.asInstanceOf[CounterVectorReader]
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
@@ -169,7 +169,7 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
@@ -424,7 +424,7 @@ extends ChunkedRangeFunction[R] {
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
@@ -480,7 +480,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
   // scalastyle:off parameter.number
   def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, info: ChunkSetInfoT, queryConfig: QueryConfig): Unit = {
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 

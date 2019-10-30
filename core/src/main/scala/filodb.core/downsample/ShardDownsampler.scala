@@ -85,7 +85,7 @@ class ShardDownsampler(datasetName: String,
         .withTag("dataset", datasetName)
         .withTag("shard", shardNum).start()
       while (chunksets.hasNext) {
-        val chunkset = chunksets.nextInfoT
+        val chunkset = chunksets.nextInfoReader
         val startTime = chunkset.startTime
         val endTime = chunkset.endTime
         val tsPtr = chunkset.vectorAddress(0)

@@ -202,7 +202,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     val downsampleRowReader = SeqRowReader(downsampleRow)
 
     while (rawChunksets.hasNext) {
-      val chunkset = rawChunksets.nextInfoT
+      val chunkset = rawChunksets.nextInfoReader
       val startTime = chunkset.startTime
       val endTime = chunkset.endTime
       val vecPtr = chunkset.vectorAddress(timestampCol)

@@ -4,11 +4,11 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
+import filodb.core.GlobalConfig
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
-import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.memory.BinaryRegion
 import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
@@ -29,7 +29,6 @@ final case class DataSchema private(name: String,
                                     valueColumn: ColumnId,
                                     downsampleSchema: Option[String] = None) {
   val timestampColumn  = columns.head
-  val timestampColID   = 0
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
   val readers          = columns.map(col => BinaryVector.defaultPtrToReader(col.columnType.clazz)).toArray
@@ -58,6 +57,8 @@ final case class PartitionSchema(columns: Seq[Column],
 
 object DataSchema {
   import Dataset._
+
+  val timestampColID = 0
 
   def validateValueColumn(dataColumns: Seq[Column], valueColName: String): ColumnId Or BadSchema = {
     val index = dataColumns.indexWhere(_.name == valueColName)

@@ -127,6 +127,10 @@ trait VectorDataReader extends AvailableReader {
    */
   def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
 
+  /**
+    * Used only for testing. When using in production be careful of unnecessary allocation
+    * when backing memory is already on heap.
+    */
   def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
     val numByts = numBytes(acc, vector) + 4
     val bytes = new Array[Byte](numByts)

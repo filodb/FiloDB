@@ -153,15 +153,15 @@ extends Iterator[R] with StrictLogging {
     while (wit.hasNext) {
       val nextInfo = wit.next
       try {
-        rangeFunction.addChunks(nextInfo.tsVectorAccessor, nextInfo.tsVectorAddr, nextInfo.tsReader,
-                                nextInfo.valueVectorAccessor, nextInfo.valueVectorAddr, nextInfo.valueReader,
+        rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
+                                nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
                                 wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
       } catch {
         case e: Exception =>
-          val tsReader = LongBinaryVector(nextInfo.tsVectorAccessor, nextInfo.tsVectorAddr)
+          val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-                       s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
-                       s"timestampVectorLength=${tsReader.length(nextInfo.tsVectorAccessor, nextInfo.tsVectorAddr)}")
+                    s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+                    s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)}")
           throw e
       }
     }
