@@ -625,10 +625,12 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
 class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
   final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    //Only support StaticFuncArgs for now as we don't have time to get value from scalar vector
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     var counter = 0
 
@@ -652,7 +654,7 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
 class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
-  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
   final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
@@ -672,7 +674,7 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   }
 }
 
-abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
+abstract class HoltWintersChunkedFunction(funcParams: Seq[FuncArgs],
                                           var b0: Double = Double.NaN,
                                           var s0: Double = Double.NaN,
                                           var nextvalue: Double = Double.NaN,
@@ -684,12 +686,12 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
                                        nextvalue = Double.NaN
                                        smoothedResult = Double.NaN }
 
-  def parseParameters(funcParams: Seq[Any]): (Double, Double) = {
+  def parseParameters(funcParams: Seq[FuncArgs]): (Double, Double) = {
     require(funcParams.size == 2, "Holt winters needs 2 parameters")
-    require(funcParams.head.isInstanceOf[Number], "sf parameter must be a number")
-    require(funcParams(1).isInstanceOf[Number], "tf parameter must be a number")
-    val sf = funcParams.head.asInstanceOf[Number].doubleValue()
-    val tf = funcParams(1).asInstanceOf[Number].doubleValue()
+    require(funcParams.head.isInstanceOf[StaticFuncArgs], "sf parameter must be a number")
+    require(funcParams(1).isInstanceOf[StaticFuncArgs], "tf parameter must be a number")
+    val sf = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    val tf = funcParams(1).asInstanceOf[StaticFuncArgs].scalar
     require(sf >= 0 & sf <= 1, "Sf should be in between 0 and 1")
     require(tf >= 0 & tf <= 1, "tf should be in between 0 and 1")
     (sf, tf)
@@ -704,7 +706,7 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
   * @param funcParams - Additional required function parameters
   * Refer https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing
   */
-class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+class HoltWintersChunkedFunctionD(funcParams: Seq[FuncArgs]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
 
   val (sf, tf) = parseParameters(funcParams)
@@ -751,7 +753,7 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
     }
     if (!JLDouble.isNaN(b0)) {
       while (rowNum <= endRowNum) {
-        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        // There are many possible values of NaN. Use a function to ignore them reliably.
         if (!JLDouble.isNaN(nextvalue)) {
           val _s0  = sf*nextvalue + (1-sf)*(s0 + b0)
           b0 = tf*(_s0 - s0) + (1-tf)*b0
@@ -765,7 +767,7 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
   }
 }
 
-class HoltWintersChunkedFunctionL(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+class HoltWintersChunkedFunctionL(funcParams: Seq[FuncArgs]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedLongRangeFunction {
 
   val (sf, tf) = parseParameters(funcParams)

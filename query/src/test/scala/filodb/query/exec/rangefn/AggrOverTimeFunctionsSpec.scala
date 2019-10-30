@@ -401,6 +401,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val positiveTrendData4 = Seq(31800.0, 31840.0, 31880.0, 31920.0, 31960.0, 32000.0)
 
     val negativeTrendData2 = Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0)
+    val params = Seq(StaticFuncArgs(0.01, RangeParams(100,20,500)), StaticFuncArgs(0.1, RangeParams(100,20,500)))
 
     def holt_winters(arr: Seq[Double]): Double = {
       val sf = 0.01
@@ -423,27 +424,28 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       }
     }
 
+
     var rv = timeValueRV(positiveTrendData2)
     val chunkedIt2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated2 = chunkedIt2.map(_.getDouble(1)).toBuffer
     aggregated2(0) shouldEqual holt_winters(positiveTrendData2)
 
     rv = timeValueRV(positiveTrendData3)
     val chunkedIt3 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated3 = chunkedIt3.map(_.getDouble(1)).toBuffer
     aggregated3(0) shouldEqual holt_winters(positiveTrendData3)
 
     rv = timeValueRV(positiveTrendData4)
     val chunkedIt4 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated4 = chunkedIt4.map(_.getDouble(1)).toBuffer
     aggregated4(0) shouldEqual holt_winters(positiveTrendData4)
 
     rv = timeValueRV(negativeTrendData2)
     val chunkedItNeg2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregatedNeg2 = chunkedItNeg2.map(_.getDouble(1)).toBuffer
     aggregatedNeg2(0) shouldEqual holt_winters(negativeTrendData2)
 
@@ -455,7 +457,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(75) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-      val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), windowSize, step)
+      val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(params), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
       val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
       for (i <- res.indices) {
