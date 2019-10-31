@@ -10,6 +10,7 @@ import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
+import filodb.query.Query.qLogger
 
 /**
   * Binary join operator between results of lhs and rhs plan.
@@ -65,7 +66,9 @@ final case class BinaryJoinExec(id: String,
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+      //       filter returns empty results.  The reason is that the schema will be undefined.
+      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
@@ -78,8 +81,11 @@ final case class BinaryJoinExec(id: String,
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
-        if (oneSideMap.contains(jk))
+        if (oneSideMap.contains(jk)) {
+          qLogger.info(s"BinaryJoinError: RV ${rv.key} produced $jk, but\nalready found in map: " +
+                      s"RV ${oneSideMap(jk).key}")
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+        }
         oneSideMap.put(jk, rv)
       }
 
