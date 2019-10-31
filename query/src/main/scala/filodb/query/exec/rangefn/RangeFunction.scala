@@ -100,8 +100,8 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
    * @param endTime ending timestamp in millis since Epoch for time window, inclusive
    */
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit
 
   /**
@@ -130,8 +130,8 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
   override def reset(): Unit = { correctionMeta = NoCorrection }
 
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     val ccReader = valueReader.asInstanceOf[CounterVectorReader]
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
@@ -156,7 +156,7 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
    * Implements the logic for processing chunked data given row numbers and times for the
    * start and end.
    */
-  def addTimeChunks(acc: MemoryAccessor, vector: BinaryVectorPtr, reader: CounterVectorReader,
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit
 }
@@ -167,8 +167,8 @@ trait CounterChunkedRangeFunction[R <: MutableRowReader] extends ChunkedRangeFun
  */
 trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // TODO: abstract this pattern of start/end row # out. Probably when cursors are implemented
     // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
@@ -180,7 +180,7 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
       addTimeChunks(valueVectorAcc, valueVector, valueReader, startRowNum, endRowNum)
   }
 
-  def addTimeChunks(vectAcc: MemoryAccessor,
+  def addTimeChunks(vectAcc: MemoryReader,
                     vectPtr: BinaryVector.BinaryVectorPtr,
                     reader: VectorDataReader,
                     startRowNum: Int,
@@ -192,7 +192,7 @@ trait TimeRangeFunction[R <: MutableRowReader] extends ChunkedRangeFunction[R] {
  * and returning the double value vector and reader with the row numbers
  */
 trait ChunkedDoubleRangeFunction extends TimeRangeFunction[TransientRow] {
-  final def addTimeChunks(vectAcc: MemoryAccessor,
+  final def addTimeChunks(vectAcc: MemoryReader,
                           vectPtr: BinaryVector.BinaryVectorPtr,
                           reader: VectorDataReader,
                           startRowNum: Int,
@@ -204,7 +204,7 @@ trait ChunkedDoubleRangeFunction extends TimeRangeFunction[TransientRow] {
    * @param startRowNum the row number for timestamp greater than or equal to startTime
    * @param endRowNum the row number with the timestamp <= endTime
    */
-  def addTimeDoubleChunks(doubleVectAcc: MemoryAccessor,
+  def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
                           doubleVect: BinaryVector.BinaryVectorPtr,
                           doubleReader: bv.DoubleVectorDataReader,
                           startRowNum: Int,
@@ -212,7 +212,7 @@ trait ChunkedDoubleRangeFunction extends TimeRangeFunction[TransientRow] {
 }
 
 trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
-  final def addTimeChunks(vectAcc: MemoryAccessor,
+  final def addTimeChunks(vectAcc: MemoryReader,
                           vectPtr: BinaryVector.BinaryVectorPtr,
                           reader: VectorDataReader,
                           startRowNum: Int,
@@ -224,7 +224,7 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
    * @param startRowNum the row number for timestamp greater than or equal to startTime
    * @param endRowNum the row number with the timestamp <= endTime
    */
-  def addTimeLongChunks(longVectAcc: MemoryAccessor,
+  def addTimeLongChunks(longVectAcc: MemoryReader,
                         longVect: BinaryVector.BinaryVectorPtr,
                         longReader: bv.LongVectorDataReader,
                         startRowNum: Int,
@@ -422,8 +422,8 @@ abstract class LastSampleChunkedFunction[R <: MutableRowReader](var timestamp: L
 extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
@@ -439,7 +439,7 @@ extends ChunkedRangeFunction[R] {
     }
   }
 
-  def updateValue(ts: Long, valAcc: MemoryAccessor, valVector: BinaryVectorPtr,
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
                   valReader: VectorDataReader, endRowNum: Int): Unit
 }
 
@@ -459,7 +459,7 @@ extends LastSampleChunkedFunction[TransientHistRow] {
   final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
     sampleToEmit.setValues(endTimestamp, value)
   }
-  def updateValue(ts: Long, valAcc: MemoryAccessor, valVector: BinaryVectorPtr,
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     timestamp = ts
     value = valReader.asHistReader(endRowNum)
@@ -478,8 +478,8 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
 
   // Add each chunk and update timestamp and value such that latest sample wins
   // scalastyle:off parameter.number
-  def addChunks(tsVectorAcc: MemoryAccessor, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVectorAcc: MemoryAccessor, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
@@ -502,7 +502,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
 }
 
 class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
-  def updateValue(ts: Long, valAcc: MemoryAccessor, valVector: BinaryVectorPtr,
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val dblReader = valReader.asDoubleReader
     val doubleVal = dblReader(valAcc, valVector, endRowNum)
@@ -523,7 +523,7 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
 }
 
 class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
-  def updateValue(ts: Long, valAcc: MemoryAccessor, valVector: BinaryVectorPtr,
+  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
                   valReader: VectorDataReader, endRowNum: Int): Unit = {
     val longReader = valReader.asLongReader
     timestamp = ts

@@ -9,7 +9,7 @@ import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
 
 class RowReaderTest extends FunSpec with Matchers {
   val memFactory = new NativeMemoryManager(100000)
-  val acc = MemoryAccessor.nativePointer
+  val acc = MemoryReader.nativePtrReader
   val rows = Seq(
     (Some("Matthew Perry"), Some(18), Some(new Timestamp(10000L))),
     (Some("Michelle Pfeiffer"), None, Some(new Timestamp(10010L))),
@@ -51,7 +51,7 @@ class RowReaderTest extends FunSpec with Matchers {
         case 1 => LongBinaryVector(acc, ptrs(1))
       }
       def vectAddr(columnNo: Int): BinaryVector.BinaryVectorPtr = ptrs(columnNo)
-      def vectAccessor(columnNo: Int): MemoryAccessor = acc
+      def vectAccessor(columnNo: Int): MemoryReader = acc
     }
 
     readValues(reader, 4)(_.getInt(0)) should equal(Seq(18, 0, 59, 26))

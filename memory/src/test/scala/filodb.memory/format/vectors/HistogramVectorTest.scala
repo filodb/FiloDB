@@ -125,9 +125,9 @@ class HistogramVectorTest extends NativeVectorTest {
 
     val bytes = optReader.toBytes(acc, optimized)
 
-    val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
-      MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
-      MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+    val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+      MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
     onHeapAcc.foreach { a =>
       val readerH = HistogramVector(a, 0)

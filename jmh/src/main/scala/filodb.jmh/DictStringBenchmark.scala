@@ -27,7 +27,7 @@ class DictStringBenchmark {
 
   val numValues = 10000
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val acc = MemoryAccessor.nativePointer
+  val acc = MemoryReader.nativePtrReader
   // NOTE: results show that time spent is heavily influenced by ratio of unique strings...
   val numUniqueStrings = 500
   val maxStringLength = 15

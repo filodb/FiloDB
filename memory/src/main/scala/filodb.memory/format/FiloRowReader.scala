@@ -16,7 +16,7 @@ abstract class MutableFiloRowReader extends RowReader {
 
   // These methods must be implemented
   def reader(columnNo: Int): VectorDataReader
-  def vectAccessor(columnNo: Int): MemoryAccessor
+  def vectAccessor(columnNo: Int): MemoryReader
   def vectAddr(columnNo: Int): BinaryVectorPtr
 
   final def notNull(columnNo: Int): Boolean = true   // TODO: fix this, but for now don't need null check

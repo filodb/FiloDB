@@ -35,5 +35,5 @@ object ConstVector {
 }
 
 trait ConstVector {
-  def numElements(acc: MemoryAccessor, addr: BinaryVectorPtr): Int = acc.getInt(addr + 8)
+  def numElements(acc: MemoryReader, addr: BinaryVectorPtr): Int = acc.getInt(addr + 8)
 }

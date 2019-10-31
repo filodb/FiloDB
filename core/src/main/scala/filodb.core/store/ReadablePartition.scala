@@ -3,7 +3,7 @@ package filodb.core.store
 import filodb.core.Types.{ChunkID, ColumnId}
 import filodb.core.metadata.Schema
 import filodb.core.query.PartitionTimeRangeReader
-import filodb.memory.format.{BinaryVector, MemoryAccessor, RowReader, UnsafeUtils, VectorDataReader}
+import filodb.memory.format.{BinaryVector, MemoryReader, RowReader, UnsafeUtils, VectorDataReader}
 
 
 trait FiloPartition {
@@ -80,7 +80,7 @@ trait ReadablePartition extends FiloPartition {
   /**
    * Obtains the correct VectorDataReader for the given column and pointer
    */
-  final def chunkReader(columnID: Int, acc: MemoryAccessor, vector: BinaryVector.BinaryVectorPtr): VectorDataReader = {
+  final def chunkReader(columnID: Int, acc: MemoryReader, vector: BinaryVector.BinaryVectorPtr): VectorDataReader = {
     require(columnID < schema.numDataColumns)
     schema.dataReaders(columnID)(acc, vector)
   }

@@ -80,9 +80,9 @@ class UTF8VectorTest extends NativeVectorTest {
       val frozen = utf8vect.freeze(memFactory)
       val bytes = UTF8Vector(acc, frozen).toBytes(acc, frozen)
 
-      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
-        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(frozen)),
-        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+      val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+        MemoryReader.fromByteBuffer(BinaryVector.asBuffer(frozen)),
+        MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
       onHeapAcc.foreach { a =>
         UTF8Vector(a, 0).toBuffer(a, 0).toList shouldEqual strs

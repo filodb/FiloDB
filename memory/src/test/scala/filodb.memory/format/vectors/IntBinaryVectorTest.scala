@@ -42,9 +42,9 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val optimized = builder.optimize(memFactory)
       val bytes = IntBinaryVector(acc, optimized).toBytes(acc, optimized)
 
-      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
-        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
-        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+      val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+        MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+        MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
       onHeapAcc.foreach { a =>
         IntBinaryVector(a, 0).toBuffer(a, 0).toList shouldEqual orig

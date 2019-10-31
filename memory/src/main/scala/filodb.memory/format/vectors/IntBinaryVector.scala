@@ -83,7 +83,7 @@ object IntBinaryVector {
     case 4 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = if (bitShift == 0) 0 else MemoryAccessor.nativePointer.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else MemoryReader.nativePtrReader.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
@@ -94,7 +94,7 @@ object IntBinaryVector {
     case 2 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = if (bitShift == 0) 0 else MemoryAccessor.nativePointer.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else MemoryReader.nativePtrReader.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
@@ -116,7 +116,7 @@ object IntBinaryVector {
   /**
    * Returns an IntVectorDataReader object for a simple (no mask) Int BinaryVector
    */
-  def simple(acc: MemoryAccessor, vector: BinaryVectorPtr): IntVectorDataReader = {
+  def simple(acc: MemoryReader, vector: BinaryVectorPtr): IntVectorDataReader = {
     // get nbits, etc and decide
     if (PrimitiveVectorReader.signed(acc, vector)) {
       PrimitiveVectorReader.nbits(acc, vector) match {
@@ -135,7 +135,7 @@ object IntBinaryVector {
     }
   }
 
-  def apply(buffer: ByteBuffer): IntVectorDataReader = apply(MemoryAccessor.fromByteBuffer(buffer), 0)
+  def apply(buffer: ByteBuffer): IntVectorDataReader = apply(MemoryReader.fromByteBuffer(buffer), 0)
 
   import WireFormat._
 
@@ -143,7 +143,7 @@ object IntBinaryVector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * IntVectorDataReader object for parsing it
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr): IntVectorDataReader = {
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr): IntVectorDataReader = {
     BinaryVector.vectorType(acc, vector) match {
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_INT)        => MaskedIntBinaryVector
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_INT_NOMASK) => simple(acc, vector)
@@ -228,7 +228,7 @@ trait IntVectorDataReader extends VectorDataReader {
   import PrimitiveVectorReader._
 
   // Iterator to go through bytes.  Put var in constructor for much faster access.
-  class GenericIntIterator(acc: MemoryAccessor, vector: BinaryVectorPtr, var n: Int) extends IntIterator {
+  class GenericIntIterator(acc: MemoryReader, vector: BinaryVectorPtr, var n: Int) extends IntIterator {
     final def next: Int = {
       val data = apply(acc, vector, n)
       n += 1
@@ -239,12 +239,12 @@ trait IntVectorDataReader extends VectorDataReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int
 
   /**
    * Returns the number of elements in this BinaryVector
    */
-  def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     ((numBytes(acc, vector) - HeaderLen) * 8 +
       (if (bitShift(acc, vector) != 0) bitShift(acc, vector) - 8 else 0)) / nbits(acc, vector)
 
@@ -255,9 +255,9 @@ trait IntVectorDataReader extends VectorDataReader {
    * @param end the ending element # in the vector to sum, inclusive
    * @return the Long sum, since Ints might possibly overflow
    */
-  def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long
+  def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long
 
-  private[memory] def defaultSum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  private[memory] def defaultSum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     var rowNo = start
     var sum = 0L
     while (rowNo <= end) {
@@ -276,14 +276,14 @@ trait IntVectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
     new GenericIntIterator(acc, vector, startElement)
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
-  def toBuffer(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Int] = {
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Int] = {
     val newBuf = Buffer.empty[Int]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
@@ -297,9 +297,9 @@ trait IntVectorDataReader extends VectorDataReader {
 }
 
 object OffheapSignedIntVector32 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     acc.getInt(vector + 8 + n * 4)
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is" +
       s"out of bounds, length=${length(acc, vector)}")
     var addr = vector + 8 + start * 4
@@ -314,9 +314,9 @@ object OffheapSignedIntVector32 extends IntVectorDataReader {
 }
 
 object OffheapSignedIntVector16 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     acc.getShort(vector + 8 + n * 2).toInt
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) " +
       s"is out of bounds, length=${length(acc, vector)}")
     var addr = vector + 8 + start * 2
@@ -331,9 +331,9 @@ object OffheapSignedIntVector16 extends IntVectorDataReader {
 }
 
 object OffheapSignedIntVector8 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     acc.getByte(vector + 8 + n).toInt
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out " +
       s"of bounds, length=${length(acc, vector)}")
     var addr = vector + 8 + start
@@ -348,9 +348,9 @@ object OffheapSignedIntVector8 extends IntVectorDataReader {
 }
 
 object OffheapUnsignedIntVector16 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     (acc.getShort(vector + 8 + n * 2) & 0x0ffff).toInt
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out " +
       s"of bounds, length=${length(acc, vector)}")
     val startRoundedUp = (start + 3) & ~3
@@ -372,9 +372,9 @@ object OffheapUnsignedIntVector16 extends IntVectorDataReader {
 }
 
 object OffheapUnsignedIntVector8 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     (acc.getByte(vector + 8 + n) & 0x00ff).toInt
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of " +
       s"bounds, length=${length(acc, vector)}")
     val startRoundedUp = (start + 7) & ~7
@@ -398,9 +398,9 @@ object OffheapUnsignedIntVector8 extends IntVectorDataReader {
 }
 
 object OffheapUnsignedIntVector4 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     (acc.getByte(vector + 8 + n/2) >> ((n & 0x01) * 4)).toInt & 0x0f
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) " +
       s"is out of bounds, length=${length(acc, vector)}")
     val startRoundedUp = (start + 7) & ~7
@@ -424,9 +424,9 @@ object OffheapUnsignedIntVector4 extends IntVectorDataReader {
 }
 
 object OffheapUnsignedIntVector2 extends IntVectorDataReader {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int =
     (acc.getByte(vector + 8 + n/4) >> ((n & 0x03) * 2)).toInt & 0x03
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is " +
       s"out of bounds, length=${length(acc, vector)}")
     val startRoundedUp = (start + 7) & ~7
@@ -451,17 +451,17 @@ object OffheapUnsignedIntVector2 extends IntVectorDataReader {
 
 
 object MaskedIntBinaryVector extends IntVectorDataReader with BitmapMaskVector {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Int = {
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Int = {
     val subvect = subvectAddr(acc, vector)
     IntBinaryVector.simple(acc, subvect).apply(acc, subvect, n)
   }
 
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = super.length(acc, subvectAddr(acc, vector))
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = super.length(acc, subvectAddr(acc, vector))
 
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long =
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long =
     IntBinaryVector.simple(acc, subvectAddr(acc, vector)).sum(acc, subvectAddr(acc, vector), start, end)
 
-  override def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
+  override def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
     IntBinaryVector.simple(acc, subvectAddr(acc, vector)).iterate(acc, subvectAddr(acc, vector), startElement)
 }
 
@@ -474,9 +474,9 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
   override def vectSubType: Int = WireFormat.SUBTYPE_INT_NOMASK
 
   final def addNA(): AddResponse = addData(0)
-  final def apply(index: Int): Int = reader.apply(MemoryAccessor.nativePointer, addr, index)
-  val reader = IntBinaryVector.simple(MemoryAccessor.nativePointer, addr)
-  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(MemoryAccessor.nativePointer, addr)
+  final def apply(index: Int): Int = reader.apply(MemoryReader.nativePtrReader, addr, index)
+  val reader = IntBinaryVector.simple(MemoryReader.nativePtrReader, addr)
+  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
@@ -484,7 +484,7 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
     var min = Int.MaxValue
     var max = Int.MinValue
     for { index <- 0 until length optimized } {
-      val data = reader.apply(MemoryAccessor.nativePointer, addr, index)
+      val data = reader.apply(MemoryReader.nativePtrReader, addr, index)
       if (data < min) min = data
       if (data > max) max = data
     }
@@ -511,7 +511,7 @@ BitmapMaskAppendableVector[Int](addr, maxElements) with OptimizingPrimitiveAppen
                                                     nbits, signed, dispose)
 
   def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
-  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(MemoryAccessor.nativePointer, addr)
+  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def minMax: (Int, Int) = {
     var min = Int.MaxValue
@@ -538,9 +538,9 @@ BitmapMaskAppendableVector[Int](addr, maxElements) with OptimizingPrimitiveAppen
 }
 
 object IntConstVector extends ConstVector with IntVectorDataReader {
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = numElements(acc, vector)
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): Int =
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = numElements(acc, vector)
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, i: Int): Int =
     acc.getInt(vector + ConstVector.DataOffset)
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Long =
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Long =
     (end - start + 1) * apply(acc, vector, 0)
 }

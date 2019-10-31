@@ -3,7 +3,7 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
-import filodb.memory.format.{BinaryVector, MemoryAccessor, VectorDataReader}
+import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
 import filodb.memory.format.vectors.LongVectorDataReader
 
 /**
@@ -41,7 +41,7 @@ trait ChunkSetInfoReader {
     *
     * Memory Accessor for vectors given columnId
     */
-  def vectorAccessor(colId: Int): MemoryAccessor
+  def vectorAccessor(colId: Int): MemoryReader
 
   /**
     *
@@ -50,17 +50,17 @@ trait ChunkSetInfoReader {
   def vectorAddress(colId: Int): Long
 
   /* Below vars are stateful fields set during query processing for query optimization */
-  private[store] var tsVectorAccessor: MemoryAccessor = _
+  private[store] var tsVectorAccessor: MemoryReader = _
   private[store] var tsVectorAddr: BinaryVector.BinaryVectorPtr = _
-  private[store] var valueVectorAccessor: MemoryAccessor = _
+  private[store] var valueVectorAccessor: MemoryReader = _
   private[store] var valueVectorAddr: BinaryVector.BinaryVectorPtr = _
   private[store] var tsReader: LongVectorDataReader = _
   private[store] var valueReader: VectorDataReader = _
 
 
-  def getTsVectorAccessor: MemoryAccessor = tsVectorAccessor
+  def getTsVectorAccessor: MemoryReader = tsVectorAccessor
   def getTsVectorAddr: BinaryVector.BinaryVectorPtr = tsVectorAddr
-  def getValueVectorAccessor: MemoryAccessor = valueVectorAccessor
+  def getValueVectorAccessor: MemoryReader = valueVectorAccessor
   def getValueVectorAddr: BinaryVector.BinaryVectorPtr = valueVectorAddr
   def getTsReader: LongVectorDataReader = tsReader
   def getValueReader: VectorDataReader = valueReader
@@ -72,15 +72,15 @@ trait ChunkSetInfoReader {
   * @param vectors serialized vectors
   */
 final case class ChunkSetInfoOnHeap(infoBytes: ByteBuffer, vectors: Seq[ByteBuffer]) extends ChunkSetInfoReader {
-  val bytesAcc = MemoryAccessor.fromByteBuffer(infoBytes)
-  val vectorsAcc = vectors.map(MemoryAccessor.fromByteBuffer)
+  val bytesAcc = MemoryReader.fromByteBuffer(infoBytes)
+  val vectorsAcc = vectors.map(MemoryReader.fromByteBuffer)
 
   def id: ChunkID = ChunkSetInfo.getChunkID(bytesAcc, 0)
   def ingestionTime: Long = ChunkSetInfo.getIngestionTime(bytesAcc, 0)
   def numRows: Int = ChunkSetInfo.getNumRows(bytesAcc, 0)
   def startTime: Long = ChunkSetInfo.getStartTime(bytesAcc, 0)
   def endTime: Long = ChunkSetInfo.getEndTime(bytesAcc, 0)
-  def vectorAccessor(colId: Int): MemoryAccessor = vectorsAcc(colId)
+  def vectorAccessor(colId: Int): MemoryReader = vectorsAcc(colId)
   def vectorAddress(colId: Int): Long = 0
 }
 
@@ -97,7 +97,7 @@ final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoRead
   def numRows: Int = csi.numRows
   def startTime: Long = csi.startTime
   def endTime: Long = csi.endTime
-  def vectorAccessor(colId: Int): MemoryAccessor = MemoryAccessor.nativePointer
+  def vectorAccessor(colId: Int): MemoryReader = MemoryReader.nativePtrReader
   def vectorAddress(colId: Int): Long = csi.vectorPtr(colId)
 }
 

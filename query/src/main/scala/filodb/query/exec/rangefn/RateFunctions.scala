@@ -2,7 +2,7 @@ package filodb.query.exec.rangefn
 
 import scalaxy.loops._
 
-import filodb.memory.format.{CounterVectorReader, MemoryAccessor}
+import filodb.memory.format.{CounterVectorReader, MemoryReader}
 import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
@@ -157,7 +157,7 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
     super.reset()
   }
 
-  def addTimeChunks(acc: MemoryAccessor, vector: BinaryVectorPtr, reader: CounterVectorReader,
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit = {
     val dblReader = reader.asDoubleReader
@@ -206,7 +206,7 @@ class ChunkedDeltaFunction extends ChunkedRateFunctionBase {
   def isRate: Boolean    = false
 
   // We have to override addTimeChunks as delta function does not care about corrections
-  override def addTimeChunks(acc: MemoryAccessor, vector: BinaryVectorPtr, reader: CounterVectorReader,
+  override def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                              startRowNum: Int, endRowNum: Int,
                              startTime: Long, endTime: Long): Unit = {
     val dblReader = reader.asDoubleReader
@@ -249,7 +249,7 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
     super.reset()
   }
 
-  def addTimeChunks(acc: MemoryAccessor, vector: BinaryVectorPtr, reader: CounterVectorReader,
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit = reader match {
     case histReader: bv.CounterHistogramReader =>

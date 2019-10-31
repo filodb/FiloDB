@@ -47,7 +47,7 @@ object UTF8Vector {
   /**
    * Parses the type of vector from a DirectByteBuffer (offheap) and returns a UTF8VectorDataReader
    */
-  def apply(buffer: ByteBuffer): UTF8VectorDataReader = apply(MemoryAccessor.fromByteBuffer(buffer), 0)
+  def apply(buffer: ByteBuffer): UTF8VectorDataReader = apply(MemoryReader.fromByteBuffer(buffer), 0)
 
   import WireFormat._
 
@@ -55,7 +55,7 @@ object UTF8Vector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * UTF8VectorDataReader object for parsing it
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr): UTF8VectorDataReader = {
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr): UTF8VectorDataReader = {
     BinaryVector.vectorType(acc, vector) match {
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_UTF8)     => UTF8FlexibleVectorDataReader
       case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_FIXEDMAXUTF8) => ???
@@ -103,7 +103,7 @@ trait UTF8VectorDataReader extends VectorDataReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String
 
   /**
    * Returns a UTF8Iterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -113,14 +113,14 @@ trait UTF8VectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[ZeroCopyUTF8String] = {
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[ZeroCopyUTF8String] = {
     val newBuf = Buffer.empty[ZeroCopyUTF8String]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
@@ -147,8 +147,8 @@ trait UTF8VectorDataReader extends VectorDataReader {
 object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
   import UTF8Vector._
 
-  final def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = acc.getInt(vector + 8)
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, index: Int): ZeroCopyUTF8String = {
+  final def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = acc.getInt(vector + 8)
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, index: Int): ZeroCopyUTF8String = {
     val fixedData = acc.getInt(vector + 12 + index * 4)
     if (fixedData != NABlob) {
       val utf8addr = vector + (if (fixedData < 0) smallOff(fixedData) else (fixedData))
@@ -159,7 +159,7 @@ object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
     }
   }
 
-  final def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr,
+  final def iterate(acc: MemoryReader, vector: BinaryVectorPtr,
                     startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
     private final var n = startElement
     final def next: ZeroCopyUTF8String = {
@@ -169,7 +169,7 @@ object UTF8FlexibleVectorDataReader extends UTF8VectorDataReader {
     }
   }
 
-  override def iterateAvailable(acc: MemoryAccessor, vector: BinaryVectorPtr,
+  override def iterateAvailable(acc: MemoryReader, vector: BinaryVectorPtr,
                                 startElement: Int = 0): BooleanIterator = new BooleanIterator {
     private final var fixedDataPtr = vector + 12 + startElement * 4
     final def next: Boolean = {
@@ -238,11 +238,11 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
   }
 
   final def apply(n: Int): ZeroCopyUTF8String =
-    UTF8FlexibleVectorDataReader.apply(MemoryAccessor.nativePointer, addr, n)
+    UTF8FlexibleVectorDataReader.apply(MemoryReader.nativePtrReader, addr, n)
   final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
   def copyToBuffer: Buffer[ZeroCopyUTF8String] =
-    UTF8FlexibleVectorDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
+    UTF8FlexibleVectorDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
@@ -381,13 +381,13 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
  * +0012 UTF8StringMedium (2 length bytes followed by UTF8 data)
  */
 object UTF8ConstVector extends ConstVector with UTF8VectorDataReader {
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = numElements(acc, vector)
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = numElements(acc, vector)
   // TODO: return just a pointer (NativePointer) or a UTF8StringMedium value class
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String = {
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, i: Int): ZeroCopyUTF8String = {
     new ZeroCopyUTF8String(acc.base, acc.baseOffset +  vector + 14,
       UnsafeUtils.getShort(vector + 12) & 0x0ffff)
   }
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
     def next: ZeroCopyUTF8String = apply(acc, vector, 0)
   }
 }

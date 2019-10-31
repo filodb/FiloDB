@@ -49,7 +49,7 @@ object DoubleVector {
 
   def apply(buffer: ByteBuffer): DoubleVectorDataReader = {
     require(buffer.isDirect)
-    apply(MemoryAccessor.fromByteBuffer(buffer), 0)
+    apply(MemoryReader.fromByteBuffer(buffer), 0)
   }
 
   import WireFormat._
@@ -58,7 +58,7 @@ object DoubleVector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * DoubleVectorDataReader object for parsing it
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr): DoubleVectorDataReader = {
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr): DoubleVectorDataReader = {
     val reader = BinaryVector.vectorType(acc, vector) match {
       case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK)    => DoubleLongWrapDataReader
       case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)      => DoubleLongWrapDataReader
@@ -117,10 +117,10 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Double
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Double
 
   // This length method works assuming nbits is divisible into 32
-  def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     (numBytes(acc, vector) - PrimitiveVector.HeaderLen) / 8
 
   /**
@@ -131,7 +131,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
 
   /**
    * Sums up the Double values in the vector from position start to position end.
@@ -140,14 +140,14 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * @param end the ending element # in the vector to sum, inclusive
    * @param ignoreNaN if true, ignore samples which have NaN value (sometimes used for special purposes)
    */
-  def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double
+  def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double
 
   /**
    * Counts the values excluding NaN / not available bits
    */
-  def count(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Int
+  def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int
 
-  def changes(acc: MemoryAccessor, vector: BinaryVectorPtr,
+  def changes(acc: MemoryReader, vector: BinaryVectorPtr,
               start: Int, end: Int, prev: Double, ignorePrev: Boolean = false): (Double, Double)
 
   /**
@@ -155,7 +155,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Double] = {
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Double] = {
     val newBuf = Buffer.empty[Double]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
@@ -167,7 +167,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
     newBuf
   }
 
-  def detectDropAndCorrection(acc: MemoryAccessor,
+  def detectDropAndCorrection(acc: MemoryReader,
                               vector: BinaryVectorPtr,
                               meta: CorrectionMeta): CorrectionMeta = meta match {
     case NoCorrection =>   meta    // No last value, cannot compare.  Just pass it on.
@@ -179,7 +179,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
   }
 
   // Default implementation for vectors with no correction
-  def updateCorrection(acc: MemoryAccessor, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta =
+  def updateCorrection(acc: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta =
     meta match {
       // Return the last value and simply pass on the previous correction value
       case DoubleCorrection(_, corr) => DoubleCorrection(apply(acc, vector, length(acc, vector) - 1), corr)
@@ -192,7 +192,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    * values starting no lower than the initial correction factor in correctionMeta.
    * NOTE: this is a default implementation for vectors having no correction
    */
-  def correctedValue(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int, meta: CorrectionMeta): Double = meta match {
+  def correctedValue(acc: MemoryReader, vector: BinaryVectorPtr, n: Int, meta: CorrectionMeta): Double = meta match {
     // Since this is a vector that needs no correction, simply add the correction amount to the original value
     case DoubleCorrection(_, corr) => apply(acc, vector, n) + corr
     case NoCorrection              => apply(acc, vector, n)
@@ -206,7 +206,7 @@ trait DoubleVectorDataReader extends CounterVectorReader {
 object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   import PrimitiveVector.OffsetData
 
-  class Double64Iterator(acc: MemoryAccessor, var addr: BinaryRegion.NativePointer) extends DoubleIterator {
+  class Double64Iterator(acc: MemoryReader, var addr: BinaryRegion.NativePointer) extends DoubleIterator {
     final def next: Double = {
       val data = acc.getDouble(addr)
       addr += 8
@@ -214,13 +214,13 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     }
   }
 
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Double =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Double =
     acc.getDouble(vector + OffsetData + n * 8)
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new Double64Iterator(acc, vector + OffsetData + startElement * 8)
 
   // end is inclusive
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr,
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr,
                 start: Int, end: Int, ignoreNaN: Boolean = true): Double = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
@@ -243,7 +243,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     sum
   }
 
-  final def count(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Int = {
+  final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     var addr = vector + OffsetData + start * 8
@@ -259,7 +259,7 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
     count
   }
 
-  final def changes(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int,
+  final def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
                     prev: Double, ignorePrev: Boolean = false):
   (Double, Double) = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
@@ -284,17 +284,17 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
 // Corrects and caches ONE underlying chunk.
 // The algorithm is naive - just go through and correct all values.  Total correction for whole vector is passed.
 // Works fine for randomly accessible vectors.
-class CorrectingDoubleVectorReader(inner: DoubleVectorDataReader, acc: MemoryAccessor, vect: BinaryVectorPtr)
+class CorrectingDoubleVectorReader(inner: DoubleVectorDataReader, acc: MemoryReader, vect: BinaryVectorPtr)
 extends DoubleVectorDataReader {
-  override def length(acc2: MemoryAccessor, vector: BinaryVectorPtr): Int = inner.length(acc2, vector)
-  def apply(acc2: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Double = inner(acc2, vector, n)
-  def iterate(acc2: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+  override def length(acc2: MemoryReader, vector: BinaryVectorPtr): Int = inner.length(acc2, vector)
+  def apply(acc2: MemoryReader, vector: BinaryVectorPtr, n: Int): Double = inner(acc2, vector, n)
+  def iterate(acc2: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     inner.iterate(acc2, vector, startElement)
-  def sum(acc2: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+  def sum(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     inner.sum(acc2, vector, start, end, ignoreNaN)
-  def count(acc2: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Int =
+  def count(acc2: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int =
     inner.count(acc2, vector, start, end)
-  def changes(acc2: MemoryAccessor, vector: BinaryVectorPtr,
+  def changes(acc2: MemoryReader, vector: BinaryVectorPtr,
               start: Int, end: Int, prev: Double, ignorePrev: Boolean = false): (Double, Double) =
     inner.changes(acc2, vector, start, end, prev)
 
@@ -316,7 +316,7 @@ extends DoubleVectorDataReader {
     _corrected
   }
 
-  override def correctedValue(acc2: MemoryAccessor, vector: BinaryVectorPtr,
+  override def correctedValue(acc2: MemoryReader, vector: BinaryVectorPtr,
                               n: Int, correctionMeta: CorrectionMeta): Double = {
     assert(vector == vect && acc == acc2)
     correctionMeta match {
@@ -326,7 +326,7 @@ extends DoubleVectorDataReader {
     }
   }
 
-  override def updateCorrection(acc2: MemoryAccessor, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
+  override def updateCorrection(acc2: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta = {
     assert(vector == vect && acc == acc2)
     val lastValue = apply(acc2, vector, length(acc2, vector) - 1)
     // Return the last (original) value and all corrections onward
@@ -341,23 +341,23 @@ extends DoubleVectorDataReader {
  * VectorDataReader for a masked (NA bit) Double BinaryVector, uses underlying DataReader for subvector
  */
 object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVector {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Double = {
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Double = {
     val subvect = subvectAddr(acc, vector)
     DoubleVector(acc, subvect).apply(acc, subvect, n)
   }
 
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int = super.length(acc, subvectAddr(acc, vector))
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = super.length(acc, subvectAddr(acc, vector))
 
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     DoubleVector(acc, subvectAddr(acc, vector)).sum(acc, subvectAddr(acc, vector), start, end, ignoreNaN)
 
-  final def count(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Int =
+  final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int =
     DoubleVector(acc, subvectAddr(acc, vector)).count(acc, subvectAddr(acc, vector), start, end)
 
-  override def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+  override def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     DoubleVector(acc, subvectAddr(acc, vector)).iterate(acc, subvectAddr(acc, vector), startElement)
 
-  override def changes(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int,
+  override def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
                        prev: Double, ignorePrev: Boolean = false): (Double, Double) =
     DoubleVector(acc, subvectAddr(acc, vector)).changes(acc, subvectAddr(acc, vector), start, end, prev)
 }
@@ -386,10 +386,10 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
     (min, max)
   }
 
-  private final val readVect = DoubleVector(MemoryAccessor.nativePointer, addr)
-  final def apply(index: Int): Double = readVect.apply(MemoryAccessor.nativePointer, addr, index)
+  private final val readVect = DoubleVector(MemoryReader.nativePtrReader, addr)
+  final def apply(index: Int): Double = readVect.apply(MemoryReader.nativePtrReader, addr, index)
   def reader: VectorDataReader = readVect
-  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(MemoryAccessor.nativePointer, addr)
+  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(MemoryReader.nativePtrReader, addr)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
@@ -404,19 +404,19 @@ class DoubleCounterAppender(addr: BinaryRegion.NativePointer, maxBytes: Int, dis
 extends DoubleAppendingVector(addr, maxBytes, dispose) {
   private var last = Double.MinValue
   override final def addData(data: Double): AddResponse = {
-    if (data < last) PrimitiveVectorReader.markDrop(MemoryAccessor.nativePointer, addr)
+    if (data < last) PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, addr)
     last = data
     super.addData(data)
   }
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
     val newChunk = DoubleVector.optimize(memFactory, this)
-    if (PrimitiveVectorReader.dropped(MemoryAccessor.nativePointer, addr))
-      PrimitiveVectorReader.markDrop(MemoryAccessor.nativePointer, newChunk)
+    if (PrimitiveVectorReader.dropped(MemoryReader.nativePtrReader, addr))
+      PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, newChunk)
     newChunk
   }
 
-  override def reader: VectorDataReader = DoubleVector(MemoryAccessor.nativePointer, addr)
+  override def reader: VectorDataReader = DoubleVector(MemoryReader.nativePtrReader, addr)
 }
 
 class MaskedDoubleAppendingVector(addr: BinaryRegion.NativePointer,
@@ -430,7 +430,7 @@ BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAp
   def nbits: Short = 64
 
   val subVect = new DoubleAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
+  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue
@@ -490,17 +490,17 @@ object DoubleLongWrapDataReader extends DoubleVectorDataReader {
     final def next: Double = innerIt.next.toDouble
   }
 
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     LongBinaryVector(acc, vector).length(acc, vector)
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Double =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Double =
     LongBinaryVector(acc, vector)(acc, vector, n).toDouble
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int, ignoreNaN: Boolean = true): Double =
     LongBinaryVector(acc, vector).sum(acc, vector, start, end)   // Long vectors cannot contain NaN, ignore it
-  final def count(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
-  final def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+  final def count(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Int = end - start + 1
+  final def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
     new DoubleLongWrapIterator(LongBinaryVector(acc, vector).iterate(acc, vector, startElement))
 
-  final def changes(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int,
+  final def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
                     prev: Double, ignorePrev: Boolean = false):
   (Double, Double) = {
     val ignorePrev = if (prev.isNaN) true

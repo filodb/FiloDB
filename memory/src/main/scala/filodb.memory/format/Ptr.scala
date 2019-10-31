@@ -19,7 +19,7 @@ object Ptr {
     //scalastyle:off method.name
     final def +(offset: Int): U8 = U8(addr + offset)
 
-    final def getU8(acc: MemoryAccessor): Int = acc.getByte(addr) & 0x00ff
+    final def getU8(acc: MemoryReader): Int = acc.getByte(addr) & 0x00ff
 
     final def asU16: U16 = U16(addr)
     final def asI32: I32 = I32(addr)
@@ -34,7 +34,7 @@ object Ptr {
     final def add(offset: Int): U16 = U16(addr + offset * 2)
     final def +(offset: Int): U16 = U16(addr + offset * 2)
 
-    final def getU16(acc: MemoryAccessor): Int = acc.getShort(addr) & 0x00ffff
+    final def getU16(acc: MemoryReader): Int = acc.getShort(addr) & 0x00ffff
 
     final def asMut: MutU16 = MutU16(addr)
   }
@@ -47,7 +47,7 @@ object Ptr {
     final def add(offset: Int): I32 = I32(addr + offset * 4)
     final def +(offset: Int): I32 = I32(addr + offset * 4)
 
-    final def getI32(acc: MemoryAccessor): Int = acc.getInt(addr)
+    final def getI32(acc: MemoryReader): Int = acc.getInt(addr)
 
     final def asMut: MutI32 = MutI32(addr)
   }

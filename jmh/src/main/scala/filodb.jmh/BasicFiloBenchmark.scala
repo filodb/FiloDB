@@ -8,7 +8,7 @@ import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.memory.NativeMemoryManager
-import filodb.memory.format.MemoryAccessor
+import filodb.memory.format.MemoryReader
 import filodb.memory.format.vectors._
 
 /**
@@ -26,7 +26,7 @@ class BasicFiloBenchmark {
   // Ok, create a LongColumn and benchmark it.
   val numValues = 1000
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val acc = MemoryAccessor.nativePointer
+  val acc = MemoryReader.nativePtrReader
 
   val randomLongs = (0 until numValues).map(i => util.Random.nextInt.toLong)
 

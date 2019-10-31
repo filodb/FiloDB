@@ -369,7 +369,7 @@ object HistogramBuckets {
   }
 
   // NOTE: must point to u16/Short length prefix bytes
-  def apply(acc: MemoryAccessor, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
+  def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
     case HistFormat_Custom_Delta     => custom(acc.base, bucketsDef.addr)

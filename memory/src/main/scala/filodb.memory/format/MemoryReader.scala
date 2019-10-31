@@ -7,33 +7,29 @@ import org.agrona.DirectBuffer
 
 import filodb.memory.format.UnsafeUtils._
 
-object MemoryAccessor {
-
-  def fromArray(array: Array[Byte]): MemoryAccessor = new ByteArrayAccessor(array)
-  def nativePointer: MemoryAccessor = NativePointerAccessor
-  def fromByteBuffer(buf: ByteBuffer): MemoryAccessor = {
-    if (buf.isDirect) DirectBufferAccessor(buf)
-    else new OnHeapByteBufferAccessor(buf)
-  }
+/**
+  * Factory methods for Memory Readers
+  */
+object MemoryReader {
+  def fromArray(array: Array[Byte]): MemoryReader = MemoryAccessor.fromArray(array)
+  def nativePtrReader: MemoryReader = MemoryAccessor.nativePtrAccessor
+  def fromByteBuffer(buf: ByteBuffer): MemoryReader = MemoryAccessor.fromByteBuffer(buf)
 }
 
 /**
-  * Abstraction for reading and writing to byte sequence memory. Clients can used this
+  * Abstraction for reading from memory byte sequence. Clients can used this
   * abstraction without worrying whether underlying memory could be
   * on-heap or off-heap.
   *
   * The `addr` parameter in the methods below indicate the address of the
   * memory position relative to the start of the byte sequence represented by the
-  * implementing class. IMPORTANT to note that this is NOT same as the unsafe
+  * implementing class. IMPORTANT to note that the addr parameter is NOT same as the unsafe
   * offset for any given on-heap object.
-  *
   */
-sealed trait MemoryAccessor {
-
+sealed trait MemoryReader {
   def base: Any
   def baseOffset: Long
   def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit
-
   final def getByte(addr: Long): Byte = unsafe.getByte(base, baseOffset + addr)
   final def getShort(addr: Long): Short = unsafe.getShort(base, baseOffset + addr)
   final def getInt(addr: Long): Int = unsafe.getInt(base, baseOffset + addr)
@@ -42,7 +38,31 @@ sealed trait MemoryAccessor {
   final def getLongVolatile(addr: Long): Long = unsafe.getLongVolatile(base, baseOffset + addr)
   final def getDouble(addr: Long): Double = unsafe.getDouble(base, baseOffset + addr)
   final def getFloat(addr: Long): Double = unsafe.getFloat(base, baseOffset + addr)
+}
 
+/**
+  * Factory methods for Memory Accessors
+  */
+object MemoryAccessor {
+  def fromArray(array: Array[Byte]): MemoryAccessor = new ByteArrayAccessor(array)
+  def nativePtrAccessor: MemoryAccessor = NativePointerAccessor
+  def fromByteBuffer(buf: ByteBuffer): MemoryAccessor = {
+    if (buf.isDirect) DirectBufferAccessor(buf)
+    else new OnHeapByteBufferAccessor(buf)
+  }
+}
+
+/**
+  * Abstraction for reading and writing to memory byte sequence. Clients can used this
+  * abstraction without worrying whether underlying memory could be
+  * on-heap or off-heap.
+  *
+  * The `addr` parameter in the methods below indicate the address of the
+  * memory position relative to the start of the byte sequence represented by the
+  * implementing class. IMPORTANT to note that the addr parameter is NOT same as the unsafe
+  * offset for any given on-heap object.
+  */
+sealed trait MemoryAccessor extends MemoryReader {
   final def setByte(addr: Long, byt: Byte): Unit = unsafe.putByte(base, baseOffset + addr, byt)
   final def setShort(addr: Long, s: Short): Unit = unsafe.putShort(base, baseOffset + addr, s)
   final def setInt(addr: Long, i: Int): Unit = unsafe.putInt(base, baseOffset + addr, i)
@@ -50,19 +70,17 @@ sealed trait MemoryAccessor {
   final def setLong(addr: Long, l: Long): Unit = unsafe.putLong(base, baseOffset + addr, l)
   final def setDouble(addr: Long, d: Double): Unit = unsafe.putDouble(base, baseOffset + addr, d)
   final def setFloat(addr: Long, f: Float): Unit = unsafe.putFloat(base, baseOffset + addr, f)
-  final def copy(fromAddr: Long, toAcc: MemoryAccessor, toAddr: Long, numBytes: Int): Unit =
+  final def copy(fromAddr: Long, toAcc: MemoryReader, toAddr: Long, numBytes: Int): Unit =
     UnsafeUtils.copy(base, baseOffset + fromAddr, toAcc.base, toAcc.baseOffset + toAddr, numBytes)
-
   //  def wordCompare(thisOffset: Long, destObj: MemoryBase, destOffset: Long, n: Int): Int
   //  def compareTo(offset1: Long, numBytes1: Int, base2: MemoryBase, offset2: Long, numBytes2: Int): Int
-
 }
 
 /**
   * Implementation used to access a native pointer. The `addr` parameter in methods imply
   * a raw native pointer.
   *
-  * This is a static implementation of MemoryAccessor to avoid allocation
+  * This is a static implementation of MemoryReader to avoid allocation
   * per pointer.
   *
   * One could envision an alternate implementation which pays the cost of an on-heap
@@ -89,7 +107,6 @@ class ByteArrayAccessor(val base: Array[Byte]) extends MemoryAccessor {
   override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
     buf.wrap(base, addr.toInt, length)
   }
-
 }
 
 /**

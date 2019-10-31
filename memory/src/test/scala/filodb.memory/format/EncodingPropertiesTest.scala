@@ -12,7 +12,7 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
 
   import filodb.memory.format.Encodings._
 
-  val acc = MemoryAccessor.nativePointer
+  val acc = MemoryReader.nativePtrReader
   // Generate a list of bounded integers, every time bound it slightly differently
   // (to test different int compression techniques)
   def boundedIntList: Gen[Seq[Option[Int]]] =

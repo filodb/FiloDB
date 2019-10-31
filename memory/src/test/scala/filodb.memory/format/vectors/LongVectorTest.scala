@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import debox.Buffer
 import org.scalatest.prop.PropertyChecks
 
-import filodb.memory.format.{BinaryVector, GrowableVector, MemoryAccessor, WireFormat}
+import filodb.memory.format.{BinaryVector, GrowableVector, MemoryReader, WireFormat}
 
 class LongVectorTest extends NativeVectorTest with PropertyChecks {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i
@@ -63,9 +63,9 @@ class LongVectorTest extends NativeVectorTest with PropertyChecks {
       val optimized = builder.optimize(memFactory)
       val bytes = LongBinaryVector(acc, optimized).toBytes(acc, optimized)
 
-      val onHeapAcc = Seq(MemoryAccessor.fromArray(bytes),
-        MemoryAccessor.fromByteBuffer(BinaryVector.asBuffer(optimized)),
-        MemoryAccessor.fromByteBuffer(ByteBuffer.wrap(bytes)))
+      val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+        MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+        MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
 
       onHeapAcc.foreach { a =>
         LongBinaryVector(a, 0).sum(a, 0, 0, numInts - 1) shouldEqual (0 until numInts).sum.toDouble

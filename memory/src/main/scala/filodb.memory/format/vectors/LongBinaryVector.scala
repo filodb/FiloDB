@@ -46,7 +46,7 @@ object LongBinaryVector {
   }
 
   def apply(buffer: ByteBuffer): LongVectorDataReader = {
-    apply(MemoryAccessor.fromByteBuffer(buffer), 0)
+    apply(MemoryReader.fromByteBuffer(buffer), 0)
   }
 
   import WireFormat._
@@ -55,7 +55,7 @@ object LongBinaryVector {
    * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
    * LongVectorDataReader object for parsing it
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr): LongVectorDataReader = {
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr): LongVectorDataReader = {
     BinaryVector.vectorType(acc, vector) match {
       case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_INT_NOMASK) => DeltaDeltaDataReader
       case x if x == WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED)   => DeltaDeltaConstDataReader
@@ -106,12 +106,12 @@ trait LongVectorDataReader extends VectorDataReader {
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
-  def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Long
+  def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Long
 
   /**
    * Returns the number of elements in this vector
    */
-  def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     (numBytes(acc, vector) - PrimitiveVector.HeaderLen) / 8
 
   /**
@@ -122,7 +122,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
 
   /**
    * Sums up the Long values in the vector from position start to position end.
@@ -131,7 +131,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * @param end the ending element # in the vector to sum, inclusive
    * @return a Double, since Longs might possibly overflow
    */
-  def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Double
+  def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double
 
   /**
    * Efficiently searches for the first element # where the vector element is greater than or equal to item.
@@ -141,9 +141,9 @@ trait LongVectorDataReader extends VectorDataReader {
    *           If all the elements in vector are less than item, then the vector length is returned.
    *         bit 31   : set if element did not match exactly / no match
    */
-  def binarySearch(acc: MemoryAccessor, vector: BinaryVectorPtr, item: Long): Int
+  def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int
 
-  def changes(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int,
+  def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
               prev: Long, ignorePrev: Boolean = false): (Long, Long)
   /**
    * Searches for the last element # whose element is <= the item, assuming all elements are increasing.
@@ -151,7 +151,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * Uses binarySearch.  TODO: maybe optimize by comparing item to first item.
    * @return integer row or element #.  -1 means item is less than the first item in vector.
    */
-  final def ceilingIndex(acc: MemoryAccessor, vector: BinaryVectorPtr, item: Long): Int =
+  final def ceilingIndex(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int =
     binarySearch(acc, vector, item) match {
       // if endTime does not match, we want last row such that timestamp < endTime
       // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
@@ -165,7 +165,7 @@ trait LongVectorDataReader extends VectorDataReader {
    * Only returns elements that are "available".
    */
   // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
-  def toBuffer(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
+  def toBuffer(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
     val newBuf = Buffer.empty[Long]
     val dataIt = iterate(acc, vector, startElement)
     val availIt = iterateAvailable(acc, vector, startElement)
@@ -185,7 +185,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
   import PrimitiveVector.OffsetData
 
   // Put addr in constructor to make accesses much faster
-  class Long64Iterator(acc: MemoryAccessor, var addr: Long) extends LongIterator {
+  class Long64Iterator(acc: MemoryReader, var addr: Long) extends LongIterator {
     final def next: Long = {
       val data = acc.getLong(addr)
       addr += 8
@@ -193,13 +193,13 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     }
   }
 
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Long =
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Long =
     acc.getLong(vector + OffsetData + n * 8)
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
     new Long64Iterator(acc, vector + OffsetData + startElement * 8)
 
   // end is inclusive
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
       s"length=${length(acc, vector)}")
     var addr = vector + OffsetData + start * 8
@@ -216,7 +216,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
    * Default O(log n) binary search implementation assuming fast random access, which is true here.
    * Everything should be intrinsic and registers so should be super fast
    */
-  def binarySearch(acc: MemoryAccessor, vector: BinaryVectorPtr, item: Long): Int = {
+  def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int = {
     var len = length(acc, vector)
     if (len == 0) return 0x80000000
     var first = 0
@@ -237,7 +237,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     if (element == item) first else first | 0x80000000
   }
 
-  final def changes(acc: MemoryAccessor, vector: BinaryVectorPtr,
+  final def changes(acc: MemoryReader, vector: BinaryVectorPtr,
                     start: Int, end: Int, prev: Long, ignorePrev: Boolean = false):
   (Long, Long) = {
     require(start >= 0 && end < length(acc, vector), s"($start, $end) is out of bounds, " +
@@ -262,24 +262,24 @@ object LongVectorDataReader64 extends LongVectorDataReader {
  * VectorDataReader for a masked (NA bit) Long BinaryVector, uses underlying DataReader for subvector
  */
 object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): Long = {
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Long = {
     val subvect = subvectAddr(acc, vector)
     LongBinaryVector(acc, subvect).apply(acc, subvect, n)
   }
 
-  override def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     LongBinaryVector(acc, subvectAddr(acc, vector)).length(acc, subvectAddr(acc, vector))
 
-  override def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+  override def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
     LongBinaryVector(acc, subvectAddr(acc, vector)).iterate(acc, subvectAddr(acc, vector), startElement)
 
-  final def sum(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int): Double =
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double =
     LongBinaryVector(acc, subvectAddr(acc, vector)).sum(acc, subvectAddr(acc, vector), start, end)
 
-  def binarySearch(acc: MemoryAccessor, vector: BinaryVectorPtr, item: Long): Int =
+  def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int =
     LongBinaryVector(acc, subvectAddr(acc, vector)).binarySearch(acc, subvectAddr(acc, vector), item)
 
-   def changes(acc: MemoryAccessor, vector: BinaryVectorPtr, start: Int, end: Int,
+   def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
                prev: Long, ignorePrev: Boolean = false): (Long, Long) =
      LongBinaryVector(acc, subvectAddr(acc, vector)).changes(acc, subvectAddr(acc, vector), start, end, prev)
 }
@@ -297,10 +297,10 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
-  private final val readVect = LongBinaryVector(MemoryAccessor.nativePointer, addr)
-  final def apply(index: Int): Long = readVect.apply(MemoryAccessor.nativePointer, addr, index)
+  private final val readVect = LongBinaryVector(MemoryReader.nativePtrReader, addr)
+  final def apply(index: Int): Long = readVect.apply(MemoryReader.nativePtrReader, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64
-  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(MemoryAccessor.nativePointer, addr)
+  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -342,7 +342,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   def nbits: Short = 64
 
   val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(MemoryAccessor.nativePointer, addr)
+  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue

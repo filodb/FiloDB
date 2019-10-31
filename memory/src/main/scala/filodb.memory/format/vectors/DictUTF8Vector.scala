@@ -109,22 +109,22 @@ object DictUTF8Vector {
  */
 object UTF8DictVectorDataReader extends UTF8VectorDataReader {
   // FIXME vector + ??
-  final def codeVectAddr(acc: MemoryAccessor, vector: BinaryVectorPtr): BinaryVectorPtr =
+  final def codeVectAddr(acc: MemoryReader, vector: BinaryVectorPtr): BinaryVectorPtr =
     vector + acc.getInt(vector + 8)
-  final def length(acc: MemoryAccessor, vector: BinaryVectorPtr): Int =
+  final def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
     IntBinaryVector(acc, codeVectAddr(acc, vector)).length(acc, codeVectAddr(acc, vector))
-  final def apply(acc: MemoryAccessor, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
     val code = IntBinaryVector(acc, codeVectAddr(acc, vector))(acc, codeVectAddr(acc, vector), n)
     UTF8FlexibleVectorDataReader(acc, vector + 12, code)
   }
 
-  def iterate(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
     private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
                         .iterate(acc, codeVectAddr(acc, vector), startElement)
     def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(acc, vector + 12, codeIt.next)
   }
 
-  override def iterateAvailable(acc: MemoryAccessor, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+  override def iterateAvailable(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
     new BooleanIterator {
       private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
         .iterate(acc, codeVectAddr(acc, vector), startElement)

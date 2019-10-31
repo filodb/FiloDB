@@ -23,19 +23,19 @@ final private[format] case class SectionType(n: Int) extends AnyVal
  */
 final case class Section private(addr: Long) extends AnyVal {
   // not including length bytes
-  final def sectionNumBytes(acc: MemoryAccessor): Int = Ptr.U16(addr).getU16(acc)
+  final def sectionNumBytes(acc: MemoryReader): Int = Ptr.U16(addr).getU16(acc)
 
-  final def numElements(acc: MemoryAccessor): Int = Ptr.U8(addr).add(2).getU8(acc)
+  final def numElements(acc: MemoryReader): Int = Ptr.U8(addr).add(2).getU8(acc)
 
-  final def sectionType(acc: MemoryAccessor): SectionType = SectionType(Ptr.U8(addr).add(3).getU8(acc))
+  final def sectionType(acc: MemoryReader): SectionType = SectionType(Ptr.U8(addr).add(3).getU8(acc))
 
   // Ptr to first record of section
   final def firstElem: Ptr.U8 = Ptr.U8(addr) + 4
 
   // The address at the end of this section's elements, based on current num bytes
-  final def endAddr(acc: MemoryAccessor): Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes(acc))
+  final def endAddr(acc: MemoryReader): Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes(acc))
 
-  final def isComplete(acc: MemoryAccessor): Boolean = numElements(acc) > 0
+  final def isComplete(acc: MemoryReader): Boolean = numElements(acc) > 0
 
   /**
    * Updates the number of bytes and elements atomically.
@@ -58,12 +58,12 @@ final case class Section private(addr: Long) extends AnyVal {
     Ptr.U8(addr).add(3).asMut.set(acc, typ.n)
   }
 
-  def debugString(acc: MemoryAccessor): String = s"Section@$addr: {numBytes=${sectionNumBytes(acc)}, " +
+  def debugString(acc: MemoryReader): String = s"Section@$addr: {numBytes=${sectionNumBytes(acc)}, " +
     s"len=${numElements(acc)}, type=${sectionType(acc)}"
 }
 
 object Section {
-  def fromPtr(acc: MemoryAccessor, addr: Ptr.U8): Section = Section(addr.addr)
+  def fromPtr(acc: MemoryReader, addr: Ptr.U8): Section = Section(addr.addr)
 
   def init(acc: MemoryAccessor, sectionAddr: Ptr.U8, typ: SectionType = TypeNormal): Section = {
     val newSect = Section(sectionAddr.addr)
@@ -87,7 +87,7 @@ trait SectionWriter {
 
   // Call to initialize the section writer with the address of the first section and how many bytes left
   def initSectionWriter(firstSectionAddr: Ptr.U8, remainingBytes: Int): Unit = {
-    curSection = Section.init(MemoryAccessor.nativePointer, firstSectionAddr)
+    curSection = Section.init(MemoryAccessor.nativePtrAccessor, firstSectionAddr)
     bytesLeft = remainingBytes - 4    // account for initial section header bytes
   }
 
@@ -97,15 +97,15 @@ trait SectionWriter {
   // Returns true if appending numBytes will start a new section
   protected def needNewSection(numBytes: Int): Boolean = {
     // Check remaining length/space.  A section must be less than 2^16 bytes long. Create new section if needed
-    val newNumBytes = curSection.sectionNumBytes(MemoryAccessor.nativePointer) + numBytes
-    curSection.numElements(MemoryAccessor.nativePointer) >= maxElementsPerSection.n || newNumBytes >= 65536
+    val newNumBytes = curSection.sectionNumBytes(MemoryReader.nativePtrReader) + numBytes
+    curSection.numElements(MemoryReader.nativePtrReader) >= maxElementsPerSection.n || newNumBytes >= 65536
   }
 
   // Appends a blob, writing a 2-byte length prefix before it.
   protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
     if (needNewSection(numBytes)) {
       if (bytesLeft >= (4 + numBytes)) {
-        curSection = Section.init(MemoryAccessor.nativePointer, curSection.endAddr(MemoryAccessor.nativePointer))
+        curSection = Section.init(MemoryAccessor.nativePtrAccessor, curSection.endAddr(MemoryReader.nativePtrReader))
         bytesLeft -= 4
       } else return VectorTooSmall(4 + numBytes, bytesLeft)
     }
@@ -115,8 +115,8 @@ trait SectionWriter {
   // Appends a blob, forcing creation of a new section too
   protected def newSectionWithBlob(base: Any, offset: Long, numBytes: Int, sectType: SectionType): AddResponse = {
     if (bytesLeft >= (4 + numBytes)) {
-      curSection = Section.init(MemoryAccessor.nativePointer,
-                                curSection.endAddr(MemoryAccessor.nativePointer),
+      curSection = Section.init(MemoryAccessor.nativePtrAccessor,
+                                curSection.endAddr(MemoryReader.nativePtrReader),
                                 sectType)
       bytesLeft -= 4
     } else return VectorTooSmall(4 + numBytes, bytesLeft)
@@ -126,11 +126,11 @@ trait SectionWriter {
   private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse =
     // Copy bytes to end address, update variables
     if (bytesLeft >= (numBytes + 2)) {
-      val writeAddr = curSection.endAddr(MemoryAccessor.nativePointer)
-      writeAddr.asU16.asMut.set(MemoryAccessor.nativePointer, numBytes)
+      val writeAddr = curSection.endAddr(MemoryReader.nativePtrReader)
+      writeAddr.asU16.asMut.set(MemoryAccessor.nativePtrAccessor, numBytes)
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
-      curSection.update(MemoryAccessor.nativePointer, numBytes + 2, 1)
+      curSection.update(MemoryAccessor.nativePtrAccessor, numBytes + 2, 1)
       Ack
     } else VectorTooSmall(numBytes + 2, bytesLeft)
 }
