@@ -56,7 +56,9 @@ final case class SetOperatorExec(id: String,
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+      //       filter returns empty results.  The reason is that the schema will be undefined.
+      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
