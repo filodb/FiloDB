@@ -82,8 +82,8 @@ final case class BinaryJoinExec(id: String,
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
         if (oneSideMap.contains(jk)) {
-          qLogger.info(s"BinaryJoinError: RV ${rv.key} produced $jk, but\nalready found in map: " +
-                      s"RV ${oneSideMap(jk).key}")
+          qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
+                      s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
         }
         oneSideMap.put(jk, rv)
