@@ -37,7 +37,7 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
   }
 
   /**
-    * Groups incoming buckt range vectors by histogram name. It then calculates quantile for each histogram
+    * Groups incoming bucket range vectors by histogram name. It then calculates quantile for each histogram
     * using the buckets supplied for it. It is assumed that each bucket value contains rate of increase for that
     * bucket.
     *
@@ -45,7 +45,7 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
     * but should be the rate of increase for that bucket counter. The histogram_quantile function should always
     * be preceded by a rate function or a sum-of-rate function.
     */
-   def apply(source: Observable[RangeVector],
+  override def apply(source: Observable[RangeVector],
                      queryConfig: QueryConfig, limit: Int,
                      sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] = {
 

@@ -1,13 +1,11 @@
 package filodb.core.query
 //scalastyle:off
-import java.time.{LocalDateTime, ZoneOffset}
+import java.time.{LocalDateTime, ZoneOffset, YearMonth}
 
 import scala.collection.mutable.ListBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
-
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
@@ -89,11 +87,10 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
-
 /*
   * Represents a single result of any FiloDB Query.
   */
- trait RangeVector {
+trait RangeVector {
   def key: RangeVectorKey
   def rows: Iterator[RowReader]
   def numRows: Option[Int] = None
@@ -135,12 +132,54 @@ trait ScalarSingleValue extends ScalarVector {
 case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
   def getValue(time: Long): Double = value
 }
+
 case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue  {
   override def getValue(time: Long): Double = time.toDouble / 1000
 }
-case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue
-{
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour()
+
+case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour
+  override def getValue(time: Long): Double = value
+}
+
+case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMinute
+  override def getValue(time: Long): Double = value
+}
+
+case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMonthValue
+  override def getValue(time: Long): Double = value
+}
+
+case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getYear
+  override def getValue(time: Long): Double = value
+}
+
+case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfMonth
+  override def getValue(time: Long): Double = value
+}
+
+case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = {
+    val dayOfWeek = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfWeek
+    if (dayOfWeek == 7) {
+      0
+    }
+    else {
+      dayOfWeek.getValue
+    }
+  }
+  override def getValue(time: Long): Double = value
+}
+
+case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  def value: Double = {
+    val ldt = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC)
+    YearMonth.from(ldt).lengthOfMonth()
+  }
   override def getValue(time: Long): Double = value
 }
 // First column of columnIDs should be the timestamp column
@@ -184,10 +223,10 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   * only serialized once as a single instance.
   */
 final class SerializedRangeVector(val key: RangeVectorKey,
-                                    val numRowsInt: Int,
-                                    containers: Seq[RecordContainer],
-                                    val schema: RecordSchema,
-                                    startRecordNo: Int) extends RangeVector with java.io.Serializable {
+                                  val numRowsInt: Int,
+                                  containers: Seq[RecordContainer],
+                                  val schema: RecordSchema,
+                                  startRecordNo: Int) extends RangeVector with java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
 

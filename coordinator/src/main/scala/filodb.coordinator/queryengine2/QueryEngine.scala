@@ -256,7 +256,7 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
-      case _                                  => throw new BadQueryException("Invalid logical plan")
+      case _                               => throw new BadQueryException("Invalid logical plan")
 
     }
   }
@@ -268,11 +268,11 @@ class QueryEngine(dsRef: DatasetRef,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
     val funcArg = lp.scalar match {
-      case num: ScalarFixedDoublePlan => Seq(StaticFuncArgs(num.scalar, num.timeStepParams))
+      case num: ScalarFixedDoublePlan  => Seq(StaticFuncArgs(num.scalar, num.timeStepParams))
       case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
         spreadProvider)))
       case  t: ScalarTimeBasedPlan     => Seq(TimeFuncArgs(t.rangeParams))
-      case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
+      case  _                          =>  throw new UnsupportedOperationException("Invalid logical plan")
     }
 
     if (vectors.plans.length > 1 && funcArg.isInstanceOf[ExecPlanFuncArgs]) {
@@ -284,8 +284,6 @@ class QueryEngine(dsRef: DatasetRef,
       vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
       vectors
     }
-//    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, scalarExec)))
-//    vectors
   }
 
   private def materializeBinaryJoin(queryId: String,

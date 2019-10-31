@@ -115,7 +115,7 @@ final case class PeriodicSamplesMapper(start: Long,
  * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
  * to compute each window as fast as possible on multiple rows at a time.
  */
-abstract class ChunkedWindowIterator[R <: filodb.core.query.MutableRowReader](
+abstract class ChunkedWindowIterator[R <: MutableRowReader](
     rv: RawDataRangeVector,
     start: Long,
     step: Long,

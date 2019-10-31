@@ -141,8 +141,8 @@ private class DoubleInstantFuncIterator(rows: Iterator[RowReader],
     val next = rows.next()
     val nextVal = next.getDouble(1)
     val timestamp = next.getLong(0)
-    val newValue = instantFunction(next.getDouble(1), scalar.map(_.getValue(timestamp)))
-    result.setValues(next.getLong(0), newValue)
+    val newValue = instantFunction(nextVal, scalar.map(_.getValue(timestamp)))
+    result.setValues(timestamp, newValue)
     result
   }
 }

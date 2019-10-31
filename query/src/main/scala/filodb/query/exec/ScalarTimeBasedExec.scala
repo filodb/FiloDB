@@ -1,18 +1,16 @@
 package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
 import filodb.query.Query.qLogger
-import filodb.query.ScalarFunctionId.{Hour, Time}
+import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Time, Year}
 
 case class ScalarTimeBasedExec(id: String,
                                dataset: DatasetRef, params: RangeParams,
@@ -30,12 +28,6 @@ case class ScalarTimeBasedExec(id: String,
                                   (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  //override protected def schemaOfDoExecute(): ResultSchema = ???
-
-  /**
     * Args to use for the ExecPlan for printTree purposes only.
     * DO NOT change to a val. Increases heap usage.
     */
@@ -50,9 +42,14 @@ case class ScalarTimeBasedExec(id: String,
     val recSchema = SerializedRangeVector.toSchema(columns)
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = function match {
-      case Time => Seq(TimeScalar (params))
-      case Hour => Seq(HourScalar(params))
-      case _    => throw new BadQueryException("Invalid Function")
+      case Time        => Seq(TimeScalar (params))
+      case Hour        => Seq(HourScalar(params))
+      case Minute      => Seq(MinuteScalar(params))
+      case Year        => Seq(YearScalar(params))
+      case DayOfMonth  => Seq(DayOfMonthScalar(params))
+      case DayOfWeek   => Seq(DayOfWeekScalar(params))
+      case DaysInMonth => Seq(DaysInMonthScalar(params))
+      case _           => throw new BadQueryException("Invalid Function")
     }
 
     Task {
@@ -75,5 +72,4 @@ case class ScalarTimeBasedExec(id: String,
     * will supply this parameter
     */
   override def dispatcher: PlanDispatcher = InProcessPlanDispatcher()
-    //InProcessPlanDispatcher()
 }

@@ -21,13 +21,7 @@ trait DoubleInstantFunction {
   def apply(value: Double, scalarParam: Seq[Double] = Nil): Double
 }
 
-trait EmptyParamsInstantFunction extends DoubleInstantFunction {
-  /**
-    * Validate the function before invoking the function.
-    */
-  //require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
-}
-
+trait EmptyParamsInstantFunction extends DoubleInstantFunction
 sealed trait HistogramInstantFunction {
   def isHToDoubleFunc: Boolean = this.isInstanceOf[HistToDoubleIFunction]
   def isHistDoubleToDoubleFunc: Boolean = this.isInstanceOf[HDToDoubleIFunction]

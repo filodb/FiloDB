@@ -27,13 +27,7 @@ case class ScalarFixedDoubleExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
-
-//  /**
-//    * Sub classes should implement this with schema of RangeVectors returned
-//    * from doExecute() abstract method.
-//    */
-//  override protected def schemaOfDoExecute(): ResultSchema = ???
+                        (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.

@@ -13,9 +13,7 @@ trait Functions extends Base with Operators with Vectors {
       RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
-
       ScalarFunctionId.withNameInsensitiveOption(name.toLowerCase).isEmpty &&
-
       SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
 
       throw new IllegalArgumentException(s"Invalid function name [$name]")
@@ -87,7 +85,6 @@ trait Functions extends Base with Operators with Vectors {
         } else if (miscellaneousFunctionIdOpt.isDefined) {
           val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
           val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-
           ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
         } else if (scalarFunctionIdOpt.isDefined) {
           val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
@@ -96,7 +93,6 @@ trait Functions extends Base with Operators with Vectors {
         else if (sortFunctionIdOpt.isDefined) {
           val sortFunctionId = sortFunctionIdOpt.get
           val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
-
           ApplySortFunction(periodicSeriesPlan, sortFunctionId)
         } else {
           val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get

@@ -16,7 +16,6 @@ import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 import filodb.prometheus.ast.TimeStepParams
-//import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig

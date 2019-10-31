@@ -507,8 +507,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child.params.processFailure shouldEqual(false)
   }
 
-
-
   it("should not do routing for InstantQueries when there are local and remote failures") {
     val to = 900
     val from = 900
