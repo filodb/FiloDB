@@ -15,10 +15,6 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
-  lazy val string: PackratParser[Identifier] = {
-    "[a-zA-Z_][a-zA-Z0-9_:|`~!@$#%^&*()s+=?><:;{}-]*".r ^^ { str => Identifier(str) }
-  }
-
   protected lazy val quotedSeries: PackratParser[Identifier] =
     "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
 
