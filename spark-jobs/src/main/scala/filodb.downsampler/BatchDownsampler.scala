@@ -35,8 +35,6 @@ import filodb.memory.format.{SeqRowReader, UnsafeUtils}
   */
 object BatchDownsampler extends StrictLogging with Instance {
 
-  import Utils._
-
   val settings = DownsamplerSettings
 
   private val readSched = Scheduler.io("cass-read-sched")
@@ -94,9 +92,11 @@ object BatchDownsampler extends StrictLogging with Instance {
                       userTimeStart: Long,
                       userTimeEnd: Long): Unit = {
 
+    import java.time.Instant._
+
     logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
 
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
     settings.downsampleResolutions.foreach { res =>

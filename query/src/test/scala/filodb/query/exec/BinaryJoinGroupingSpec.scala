@@ -118,7 +118,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Seq("role"))
+      Seq("instance"), Nil, Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
@@ -153,7 +153,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Nil,  Seq("role", "mode"), Seq("role"))
+      Nil,  Seq("role", "mode"), Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
@@ -193,7 +193,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Nil)
+      Seq("instance"), Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
@@ -238,7 +238,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       BinaryOperator.MUL,
       Cardinality.OneToMany,
       Nil, Seq("role"),
-      Seq("role"))
+      Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializedRangeVector(rv, schema)))
@@ -272,7 +272,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne, Nil,
-      Seq("mode"), Seq("dummy"))
+      Seq("mode"), Seq("dummy"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))

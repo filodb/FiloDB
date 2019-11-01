@@ -332,16 +332,17 @@ abstract class NonLeafExecPlan extends ExecPlan {
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
     val spanFromHelper = Kamon.currentSpan()
-    // Create tasks for all results
-    val childTasks = Observable.fromIterable(children)
-                               .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-                                 dispatchRemotePlan(plan, spanFromHelper)
+    // Create tasks for all results.
+    // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
+    val childTasks = Observable.fromIterable(children.zipWithIndex)
+                               .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
+                                 dispatchRemotePlan(plan, spanFromHelper).map((_, i))
                                }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
-    val processedTasks = childTasks.zipWithIndex.collect {
+    val processedTasks = childTasks.collect {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
         sch = reduceSchemas(sch, res, i.toInt)
         (res, i.toInt)

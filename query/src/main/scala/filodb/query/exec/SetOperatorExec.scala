@@ -34,12 +34,13 @@ final case class SetOperatorExec(id: String,
                                 rhs: Seq[ExecPlan],
                                 binaryOp: BinaryOperator,
                                 on: Seq[String],
-                                ignoring: Seq[String]) extends NonLeafExecPlan {
+                                ignoring: Seq[String],
+                                 metricColumn: String) extends NonLeafExecPlan {
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains("__name__"), "On cannot contain metric name")
+  require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + "__name__".utf8
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
@@ -55,7 +56,9 @@ final case class SetOperatorExec(id: String,
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+      //       filter returns empty results.  The reason is that the schema will be undefined.
+      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
