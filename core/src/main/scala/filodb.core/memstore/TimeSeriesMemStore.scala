@@ -116,7 +116,8 @@ extends MemStore with StrictLogging {
       }
     }
     .mapAsync(numParallelFlushes) {
-      tasks => tasks
+      // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+      task => task.executeOn(flushSched).asyncBoundary
     }
     .completedL
     .doOnCancel(cancelTask)
