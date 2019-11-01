@@ -817,7 +817,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     val tasks = new ArrayBuffer[Task[Response]]()
 
     var oldTimestamp = lastIngestionTime
-    var newTimestamp = Math.max(oldTimestamp, container.timestamp) // monotonic clock
+    val ingestionTime = Math.max(oldTimestamp, container.timestamp) // monotonic clock
+    var newTimestamp = ingestionTime
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
       var tsAdjust = 0L
@@ -832,7 +833,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
 
     // Only update if no exception was thrown.
-    lastIngestionTime = newTimestamp
+    lastIngestionTime = ingestionTime
 
     tasks
   }
