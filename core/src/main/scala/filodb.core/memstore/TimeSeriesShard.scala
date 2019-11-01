@@ -1,7 +1,9 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -368,6 +370,21 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
+
+  /**
+    * Highest ingestion timestamp observed.
+    */
+  private var lastIngestionTime = Long.MinValue
+
+  // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
+  // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
+  // without concern that they may overlap in time.
+  private val flushBoundaryMillis = storeConfig.flushInterval.toUnit(TimeUnit.MILLISECONDS).toLong
+
+  // Defines the group-specific flush offset, to distribute the flushes around such they don't
+  // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
+  // scheduled once a minute.
+  private val flushOffsetMillis = flushBoundaryMillis / numGroups
 
   /**
     * Helper for downsampling ingested data for long term retention.
@@ -741,23 +758,23 @@ class TimeSeriesShard(val ref: DatasetRef,
   def setGroupWatermarks(watermarks: Map[Int, Long]): Unit =
     watermarks.foreach { case (group, mark) => groupWatermark(group) = mark }
 
-  // Rapidly switch all of the input buffers for a particular group
-  // This MUST be done in the same thread/stream as input records to avoid concurrency issues
-  // and ensure that all the partitions in a group are switched at the same watermark
-  def switchGroupBuffers(groupNum: Int): Unit = {
+  /**
+    * Prepares the given group for flushing.  This MUST be done in the same thread/stream as
+    * input records to avoid concurrency issues, and to ensure that all the partitions in a
+    * group are switched at the same watermark. Also required because this method removes
+    * entries from the partition data structures.
+    */
+  def prepareFlushGroup(groupNum: Int): FlushGroup = {
+    assertThreadName(IngestSchedName)
+
+    // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
-  }
 
-  /**
-    * Prepare to flush current index records, switch current currentIndexTimeBucket partId bitmap with new one.
-    * Return Some if part keys need to be flushed (happens for last flush group). Otherwise, None.
-    *
-    * NEEDS TO RUN ON INGESTION THREAD since it removes entries from the partition data structures.
-    */
-  def prepareIndexTimeBucketForFlush(group: Int): Option[FlushIndexTimeBuckets] = {
-    assertThreadName(IngestSchedName)
-    if (group == indexTimeBucketFlushGroup) {
+    // Prepare to flush current index records, switch current currentIndexTimeBucket partId
+    // bitmap with new one.  Return Some if part keys need to be flushed (happens for last
+    // flush group). Otherwise, None.
+    val flushTimeBucket = if (groupNum == indexTimeBucketFlushGroup) {
       logger.debug(s"Switching timebucket=$currentIndexTimeBucket in dataset=$ref" +
         s"shard=$shardNum out for flush. ")
       currentIndexTimeBucket += 1
@@ -768,6 +785,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     } else {
       None
     }
+
+    FlushGroup(shardNum, groupNum, latestOffset, flushTimeBucket)
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
@@ -790,7 +809,35 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.purgedPartitions.increment(numDeleted)
   }
 
-  def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
+  /**
+    * Creates zero or more flush tasks (up to the number of flush groups) based on examination
+    * of the record container's ingestion time. This should be called before ingesting the container.
+    */
+  def createFlushTasks(container: RecordContainer): Seq[Task[Response]] = {
+    val tasks = new ArrayBuffer[Task[Response]]()
+
+    var oldTimestamp = lastIngestionTime
+    var newTimestamp = Math.max(oldTimestamp, container.timestamp) // monotonic clock
+
+    if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
+      var tsAdjust = 0L
+      for (group <- 0 until numGroups optimized) {
+        if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
+          // Flush out the group before ingesting records for a new hour (by group offset).
+          tasks += createFlushTask(prepareFlushGroup(group))
+        }
+        oldTimestamp -= flushOffsetMillis
+        newTimestamp -= flushOffsetMillis
+      }
+    }
+
+    // Only update if no exception was thrown.
+    lastIngestionTime = newTimestamp
+
+    tasks
+  }
+
+  private def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
     assertThreadName(IngestSchedName)
     // clone the bitmap so that reads on the flush thread do not conflict with writes on ingestion thread
     val partitionIt = InMemPartitionIterator(partitionGroups(flushGroup.groupNum).clone().intIterator)

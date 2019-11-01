@@ -208,34 +208,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg2 shouldEqual (3 + 9 + 15)
   }
 
-  it("should ingestStream into multiple shards and not flush with empty flush stream") {
-    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
-    memStore.setup(dataset1.ref, schemas1, 1, TestData.storeConf)
-    memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
-
-    val initChunksWritten = chunksetsWritten
-
-    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
-    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)
-    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)
-    // Allow both futures to run first before waiting for completion
-    fut1.futureValue
-    fut2.futureValue
-
-    memStore.refreshIndexForTesting(dataset1.ref)
-    val splits = memStore.getScanSplits(dataset1.ref, 1)
-    val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
-                       .map(_.getDouble(0)).sum
-    agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
-
-    val agg2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.last))
-                       .map(_.getDouble(0)).sum
-    agg2 shouldEqual ((1 to 100).map(_.toDouble).sum)
-
-    // should not have increased
-    chunksetsWritten shouldEqual initChunksWritten
-  }
-
   it("should handle errors from ingestStream") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
@@ -250,13 +222,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
     val initChunksWritten = chunksetsWritten
 
-    // Flush every 50 records.
-    // NOTE: due to the batched ExecutionModel of fromIterable, it is hard to determine exactly when the FlushCommand
-    // gets mixed in.  The custom BatchedExecution reduces batch size and causes better interleaving though.
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                            .executeWithModel(BatchedExecution(5))
-    val flushStream = FlushStream.everyN(4, 50, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
 
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
@@ -273,20 +241,28 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
+    Thread sleep 1000
+
     val initTimeBuckets = timebucketsWritten
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.timeBucketBitmaps.keySet.asScala shouldEqual Set(0)
 
-    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
+    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(),
+      n = 500, groupSize = 10, ingestionTimeAdjust = 310000))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
-    val flushStream = FlushStream.everyN(2, 10, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
+
+    Thread sleep 1000
 
     // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
-    timebucketsWritten shouldEqual initTimeBuckets + 25
+    // Due to race conditions with background flushes, this can vary a bit sometimes.
+    val delta = (initTimeBuckets + 25) - timebucketsWritten
+    delta should be >= 0
+    delta should be <= 1
 
     // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
-    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
+    // 6 buckets retained + one for current
+    tsShard.timeBucketBitmaps.keySet.asScala.toSeq.sorted shouldEqual (19 - delta).to(25 - delta)
   }
 
   it("should lookupPartitions and return correct PartLookupResult") {

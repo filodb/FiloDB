@@ -3,7 +3,7 @@ package filodb.cassandra
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.memstore.{FlushStream, TimeSeriesMemStore}
+import filodb.core.memstore.{TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{FilteredPartitionScan, InMemoryChunkScan}
 import filodb.memory.format.UnsafeUtils
@@ -30,18 +30,16 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     metaStore.clearAllData().futureValue
   }
 
-
   it("should flush MemStore data to C*, and be able to read back data from C* directly") {
     memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, TestData.storeConf)
     memStore.store.sinkStats.chunksetsWritten shouldEqual 0
 
-    // Flush every 50 records
-    // NOTE: Observable.merge(...) cannot interleave records from observables created using fromIterable...
-    // thus this is not really interleaved flushing
+    // Flush every ~50 records
     val start = System.currentTimeMillis
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(startTs=start)))
-    val flushStream = FlushStream.everyN(4, 50, stream.share)
-    memStore.ingestStream(dataset1.ref, 0, stream, scheduler, flushStream).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, scheduler).futureValue
+
+    Thread sleep 1000
 
     // Two flushes and 3 chunksets have been flushed
     memStore.store.sinkStats.chunksetsWritten should be >= 3
@@ -72,7 +70,9 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     memStore.getShardE(dataset1.ref, 0).reclaimAllBlocksTestOnly()
     val data1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head), InMemoryChunkScan)
                        .map(_.getDouble(0)).toSeq
-    data1 should have length (60)  // 4 partitions were flushed and not in memory anymore
+    // 4 partitions were flushed and not in memory anymore (should be at least 60, but
+    // ingestion-based flushing can flush a bit more)
+    data1 should have length (62)
 
     // Re-read data in memstore.  Verify that on-demand paging will bring data back
     val agg2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
