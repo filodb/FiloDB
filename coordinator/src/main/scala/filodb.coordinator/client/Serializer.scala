@@ -151,13 +151,13 @@ class PartSchemaSerializer extends KryoSerializer[PartitionSchema] {
   override def read(kryo: Kryo, input: Input, typ: Class[PartitionSchema]): PartitionSchema = {
     // We have to dynamically obtain the global schemas as we don't know when they will be initialized
     // but for sure when the serialization needs to happen, Akka is up already
-    val schemas = FilodbSettings.global().get.schemas
+    val schemas = FilodbSettings.globalOrDefault.schemas
 
     schemas.part
   }
 
   override def write(kryo: Kryo, output: Output, schema: PartitionSchema): Unit = {
-    val schemas = FilodbSettings.global().get.schemas
+    val schemas = FilodbSettings.globalOrDefault.schemas
     require(schema == schemas.part)
   }
 }
