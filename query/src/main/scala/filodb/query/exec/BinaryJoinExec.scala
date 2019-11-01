@@ -10,6 +10,7 @@ import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
+import filodb.query.Query.qLogger
 
 /**
   * Binary join operator between results of lhs and rhs plan.
@@ -40,15 +41,16 @@ final case class BinaryJoinExec(id: String,
                                 cardinality: Cardinality,
                                 on: Seq[String],
                                 ignoring: Seq[String],
-                                include: Seq[String]) extends NonLeafExecPlan {
+                                include: Seq[String],
+                                metricColumn: String) extends NonLeafExecPlan {
 
   require(cardinality != Cardinality.ManyToMany,
     "Many To Many cardinality is not supported for BinaryJoinExec")
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
-  require(!on.contains("__name__"), "On cannot contain metric name")
+  require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + "__name__".utf8
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
@@ -64,7 +66,9 @@ final case class BinaryJoinExec(id: String,
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex
     }.toListL.map { resp =>
-      require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
+      // NOTE: We can't require this any more, as multischema queries may result in not a QueryResult if the
+      //       filter returns empty results.  The reason is that the schema will be undefined.
+      // require(resp.size == lhs.size + rhs.size, "Did not get sufficient responses for LHS and RHS")
       val lhsRvs = resp.filter(_._2 < lhs.size).flatMap(_._1)
       val rhsRvs = resp.filter(_._2 >= lhs.size).flatMap(_._1)
 
@@ -77,8 +81,11 @@ final case class BinaryJoinExec(id: String,
       val oneSideMap = new mutable.HashMap[Map[Utf8Str, Utf8Str], RangeVector]()
       oneSide.foreach { rv =>
         val jk = joinKeys(rv.key)
-        if (oneSideMap.contains(jk))
+        if (oneSideMap.contains(jk)) {
+          qLogger.info(s"BinaryJoinError: RV ${rv.key} (IDs ${rv.key.partIds}) produced $jk, but already in map: " +
+                      s"RV ${oneSideMap(jk).key} (IDs ${oneSideMap(jk).key.partIds})")
           throw new BadQueryException(s"Cardinality $cardinality was used, but many found instead of one for $jk")
+        }
         oneSideMap.put(jk, rv)
       }
 
@@ -112,7 +119,7 @@ final case class BinaryJoinExec(id: String,
     var result = otherSideKey.labelValues
     // drop metric name if math operator
     // TODO use dataset's metricName column name here instead of hard-coding column
-    if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str("__name__")
+    if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str(metricColumn)
 
     if (cardinality == Cardinality.OneToOne) {
       result = if (onLabels.nonEmpty) result.filter(lv => onLabels.contains(lv._1)) // retain what is in onLabel list
