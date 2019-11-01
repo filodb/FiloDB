@@ -15,7 +15,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
-  protected lazy val quotedSeries: PackratParser[Identifier] =
+  protected lazy val labelValueIdentifier: PackratParser[Identifier] =
     "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
 
   protected val OFFSET = Keyword("OFFSET")
@@ -65,7 +65,7 @@ trait Operator extends BaseParser {
 
   lazy val comparisionOp = gte | lte | notEqual | gt | lt | equal
 
-  lazy val labelMatch: PackratParser[LabelMatch] = labelNameIdentifier ~ labelMatchOp ~ quotedSeries ^^ {
+  lazy val labelMatch: PackratParser[LabelMatch] = labelNameIdentifier ~ labelMatchOp ~ labelValueIdentifier ^^ {
     case label ~ op ~ value => LabelMatch(label.str, op, value.str)
   }
 
