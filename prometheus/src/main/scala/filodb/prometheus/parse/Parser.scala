@@ -7,12 +7,12 @@ import filodb.query._
 
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
-  lazy val identifier: PackratParser[Identifier] = {
+  lazy val labelNameIdentifier: PackratParser[Identifier] = {
     "[a-zA-Z_][a-zA-Z0-9_]*".r ^^ { str => Identifier(str) }
   }
 
-  lazy val labelIdentifier: PackratParser[Identifier] = {
-    "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
+  lazy val metricNameIdentifier: PackratParser[Identifier] = {
+    "[a-zA-Z_:][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
   lazy val string: PackratParser[Identifier] = {
@@ -69,7 +69,7 @@ trait Operator extends BaseParser {
 
   lazy val comparisionOp = gte | lte | notEqual | gt | lt | equal
 
-  lazy val labelMatch: PackratParser[LabelMatch] = identifier ~ labelMatchOp ~ quotedSeries ^^ {
+  lazy val labelMatch: PackratParser[LabelMatch] = labelNameIdentifier ~ labelMatchOp ~ quotedSeries ^^ {
     case label ~ op ~ value => LabelMatch(label.str, op, value.str)
   }
 
@@ -78,7 +78,7 @@ trait Operator extends BaseParser {
       Seq() ++ _
     }
 
-  lazy val labels: PackratParser[Seq[Identifier]] = "(" ~> repsep(identifier, ",") <~ ")" ^^ {
+  lazy val labels: PackratParser[Seq[Identifier]] = "(" ~> repsep(labelNameIdentifier, ",") <~ ")" ^^ {
     Seq() ++ _
   }
 
@@ -198,7 +198,7 @@ trait Selector extends Operator with Unit with BaseParser {
 
 
   lazy val instantVectorSelector: PackratParser[InstantExpression]
-  = labelIdentifier ~ labelSelection.? ~ offset.? ^^ {
+  = metricNameIdentifier ~ labelSelection.? ~ offset.? ^^ {
     case metricName ~ ls ~ opt =>
       InstantExpression(Some(metricName.str), ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
@@ -210,7 +210,7 @@ trait Selector extends Operator with Unit with BaseParser {
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
-    labelIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
+    metricNameIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
       case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
         RangeExpression(Some(metricName.str), ls.getOrElse(Seq.empty), td, opt.map(_.duration))
     }
@@ -293,7 +293,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
       Seq() ++ _
     }
 
-  lazy val function: PackratParser[Function] = identifier ~ functionParams ^^ {
+  lazy val function: PackratParser[Function] = labelNameIdentifier ~ functionParams ^^ {
     case name ~ params => Function(name.str, params)
   }
 

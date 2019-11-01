@@ -134,7 +134,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("foo:bar{a=\"bc\"}")
     parseSuccessfully("foo{NaN='bc'}")
     parseSuccessfully("foo{a=\"b\", foo!=\"bar\", test=~\"test\", bar!~\"baz\"}")
-
+    parseSuccessfully(":node_memory_utilisation:{_ns=\"piepubliccloud\"}")
 
     parseError("{")
     parseError("}")
