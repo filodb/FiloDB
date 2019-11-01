@@ -1,9 +1,11 @@
 package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
+
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
+
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
