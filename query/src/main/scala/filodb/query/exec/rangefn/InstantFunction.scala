@@ -164,7 +164,10 @@ case class ExpImpl() extends EmptyParamsInstantFunction {
   * elements in v down to the nearest integer.
   */
 case class FloorImpl() extends EmptyParamsInstantFunction {
-  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = scala.math.floor(value)
+  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
+    scala.math.floor(value)
+  }
 }
 
 /**
@@ -172,7 +175,10 @@ case class FloorImpl() extends EmptyParamsInstantFunction {
   * logarithm for all elements in v
   */
 case class LnImpl() extends EmptyParamsInstantFunction {
-  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = scala.math.log(value)
+  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
+    scala.math.log(value)
+  }
 }
 
 /**
@@ -195,8 +201,10 @@ case class Log10Impl() extends EmptyParamsInstantFunction {
   * logarithm for all elements in v.
   */
 case class Log2Impl() extends EmptyParamsInstantFunction {
-  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double =
-    scala.math.log10(value)/scala.math.log10(2.0)
+  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
+    scala.math.log10(value) / scala.math.log10(2.0)
+  }
 }
 
 /**
@@ -222,12 +230,10 @@ case class RoundImpl() extends DoubleInstantFunction {
         1.0
       }
 
-
     if (value.isNaN || value.isInfinite)
       value
     else
       scala.math.floor(value * toNearestInverse + 0.5) / toNearestInverse
-
   }
 }
 
@@ -235,11 +241,15 @@ case class RoundImpl() extends DoubleInstantFunction {
   * sqrt(v instant-vector) calculates the square root of all elements in v.
   */
 case class SqrtImpl() extends EmptyParamsInstantFunction {
-  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = scala.math.sqrt(value)
+  override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
+    scala.math.sqrt(value)
+  }
 }
 
 case class MonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -252,6 +262,7 @@ case class MonthImpl() extends EmptyParamsInstantFunction {
 
 case class YearImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -262,6 +273,7 @@ case class YearImpl() extends EmptyParamsInstantFunction {
 
 case class HourImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -272,6 +284,7 @@ case class HourImpl() extends EmptyParamsInstantFunction {
 
 case class MinuteImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -282,6 +295,7 @@ case class MinuteImpl() extends EmptyParamsInstantFunction {
 
 case class DayOfWeekImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -299,6 +313,7 @@ case class DayOfWeekImpl() extends EmptyParamsInstantFunction {
 
 case class DayOfMonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {
@@ -309,6 +324,7 @@ case class DayOfMonthImpl() extends EmptyParamsInstantFunction {
 
 case class DaysInMonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
+    require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
       value
     } else {

@@ -11,7 +11,6 @@ import filodb.core.query.{CustomRangeVectorKey, RangeParams, RangeVector, RangeV
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.{StaticFuncArgs, TimeFuncArgs}
-//import filodb.query.TransientRow
 
 class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
@@ -251,7 +250,6 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(TimeFuncArgs(RangeParams(1,1,4))))
     val resultObs = binaryOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
-    println("result size:" + result.size)
     result.foreach(x=> println(x.toList))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {

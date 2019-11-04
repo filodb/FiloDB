@@ -121,7 +121,6 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), queryConfig, 1000, resultSchema)
     val resultRangeVectors = resultObs.toListL.runAsync.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarVaryingDouble]) shouldEqual (true)
-    //resultRangeVectors.foreach(_.asInstanceOf[ScalarVaryingDouble]) shouldEqual(true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(1, 10, 30))
   }
@@ -135,7 +134,6 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       case QueryResult(id, _, response) => {
         val rv = response(0)
         rv.isInstanceOf[TimeScalar] shouldEqual(true)
-        //rv.rows.size shouldEqual 1
         val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
         List((10000,10.0), (20000,20.0), (30000,30.0), (40000,40.0), (50000,50.0), (60000,60.0),
           (70000,70.0), (80000,80.0), (90000,90.0), (100000,100.0)).sameElements(res) shouldEqual(true)
@@ -151,7 +149,6 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       case QueryResult(id, _, response) => {
         val rv = response(0)
         rv.isInstanceOf[HourScalar] shouldEqual(true)
-        //rv.rows.size shouldEqual 1
         val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
         List((1565627710000L,16.0), (1565627720000L,16.0), (1565627730000L,16.0), (1565627740000L,16.0),
           (1565627750000L,16.0), (1565627760000L,16.0), (1565627770000L,16.0), (1565627780000L,16.0), (1565627790000L,16.0))

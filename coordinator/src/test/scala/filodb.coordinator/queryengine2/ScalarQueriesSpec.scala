@@ -324,7 +324,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate InstantFunctionMapper when parameter is scalar function") {
     val lp = Parser.queryToLogicalPlan("clamp_max(node_info{job = \"app\"},scalar(http_requests_total{job = \"app\"}))", 1000)
     val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
-    println("execPlan is:" + execPlan.printTree())
     val expected =
       """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#821082591])
         |-T~InstantVectorFunctionMapper(function=ClampMax, funcParams=List(T~ScalarFunctionMapper(function=Scalar, funcParams=List())

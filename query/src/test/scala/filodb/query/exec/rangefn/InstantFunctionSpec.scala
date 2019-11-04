@@ -158,36 +158,25 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
 
   it ("should validate invalid function params") {
     // clamp_max
-//    the[IllegalArgumentException] thrownBy {
-//      val instantVectorFnMapper1 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax)
-//      val resultObs = instantVectorFnMapper1(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
-//      val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
-//    } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max."
-////    the[IllegalArgumentException] thrownBy {
-////      val instantVectorFnMapper2 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax, Seq("hi"))
-////      instantVectorFnMapper2(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
-////    } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max as a Number."
-//
-//    // clamp_min
-//    the[IllegalArgumentException] thrownBy {
-//      val instantVectorFnMapper3 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin)
-//      val resultObs = instantVectorFnMapper3(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
-//      resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
-//    } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min."
-//    the[IllegalArgumentException] thrownBy {
-//      val instantVectorFnMapper4 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin, Seq("hi"))
-//      instantVectorFnMapper4(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
-//    } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min as a Number."
+    the[IllegalArgumentException] thrownBy {
+      val instantVectorFnMapper1 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax)
+      val resultObs = instantVectorFnMapper1(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
+      val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+    } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max."
 
-//    the[IllegalArgumentException] thrownBy {
-//      val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sqrt, Seq(1))
-//      instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
-//    } should have message "requirement failed: No additional parameters required for the instant function."
-//
-//    the[IllegalArgumentException] thrownBy {
-//      val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round, Seq("hi"))
-//      instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
-//    } should have message "requirement failed: to_nearest optional parameter should be a Number."
+   // clamp_min
+    the[IllegalArgumentException] thrownBy {
+      val instantVectorFnMapper3 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin)
+      val resultObs = instantVectorFnMapper3(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
+      resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+    } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min."
+
+    the[IllegalArgumentException] thrownBy {
+      val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sqrt,
+        Seq(StaticFuncArgs(1, rangeParams)))
+      val resultObs = instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema, Observable.empty)
+      resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
+    } should have message "requirement failed: No additional parameters required for the instant function."
 
     the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round,
@@ -204,11 +193,6 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
     } should have message "requirement failed: Quantile (between 0 and 1) required for histogram quantile"
 
-//    the[IllegalArgumentException] thrownBy {
-//      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramQuantile, Seq("b012"))
-//      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
-//    } should have message "requirement failed: histogram_quantile parameter must be a number"
-
     // histogram bucket
     the[IllegalArgumentException] thrownBy {
       val (data, histRV) = histogramRV(numSamples = 10)
@@ -216,11 +200,6 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       val resultObs = ivMapper(Observable.fromIterable(Array(histRV)), queryConfig, 1000, histSchema, Observable.empty)
       resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)).toList)
     } should have message "requirement failed: Bucket/le required for histogram bucket"
-//
-//    the[IllegalArgumentException] thrownBy {
-//      val ivMapper = exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramBucket, Seq("b012"))
-//      ivMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, histSchema)
-//    } should have message "requirement failed: histogram_bucket parameter must be a number"
   }
 
   it ("should fail with wrong calculation") {
