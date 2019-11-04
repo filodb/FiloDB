@@ -275,6 +275,7 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
+  require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
   val maxChunkTime = storeConfig.maxChunkTime.toMillis
 
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed

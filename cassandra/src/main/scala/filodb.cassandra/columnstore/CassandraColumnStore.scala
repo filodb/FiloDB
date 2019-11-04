@@ -305,7 +305,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     * relevant data but may have a startTime outside the query range.
     *
     * @param ref dataset ref
-    * @param maxChunkTime maximum userTime allowed in a single chunk. This restriction makes it
+    * @param maxChunkTime maximum userTime (in millis) allowed in a single chunk. This restriction makes it
     *                     possible to issue single CQL query to fetch all relevant chunks from cassandra
     * @param partMethod selector for partitions
     * @param chunkMethod selector for chunks

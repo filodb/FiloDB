@@ -114,7 +114,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
                                         .setLong(1, chunkID(startTime, 0))
                                         .setLong(2, chunkID(endTimeExclusive, 0))
-    val futRawParts = session.executeAsync(query)
+    val futRawParts: Future[Iterator[RawPartData]] = session.executeAsync(query)
                              .toIterator.handleErrors
                              .map { rowIt =>
                                rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
@@ -123,7 +123,10 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
                                  }
                              }
-    Observable.fromFuture(futRawParts).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) }
+    for {
+      it <- Observable.fromFuture(futRawParts)
+      rpd <- Observable.fromIterator(it)
+    } yield rpd
   }
 
   def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
@@ -139,7 +142,12 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                   }
               }
     }
-    res.flatMap{ f => Observable.fromFuture(f).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) } }
+
+    for {
+      fut <- res
+      it <- Observable.fromFuture(fut)
+      rpd <- Observable.fromIterator(it)
+    } yield rpd
   }
 
 
