@@ -304,4 +304,31 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.map(_.key).toSet.size shouldEqual 200
   }
+
+  it("should have metric name when operator is not MathOperator") {
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.LTE,
+      Cardinality.OneToOne,
+      Nil, Seq("tag2"), Nil, "__name__")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.foreach { rv =>
+      rv.key.labelValues.contains("__name__".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag1".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag2".utf8) shouldEqual false
+    }
+
+    result.map(_.key).toSet.size shouldEqual 2
+  }
 }

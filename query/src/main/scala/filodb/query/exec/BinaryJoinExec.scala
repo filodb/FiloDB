@@ -50,7 +50,8 @@ final case class BinaryJoinExec(id: String,
   require(!on.contains(metricColumn), "On cannot contain metric name")
 
   val onLabels = on.map(Utf8Str(_)).toSet
-  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
+  val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
+  val ignoringLabelsForJoin = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
@@ -111,7 +112,7 @@ final case class BinaryJoinExec(id: String,
 
   private def joinKeys(rvk: RangeVectorKey): Map[Utf8Str, Utf8Str] = {
     if (onLabels.nonEmpty) rvk.labelValues.filter(lv => onLabels.contains(lv._1))
-    else rvk.labelValues.filterNot(lv => ignoringLabels.contains(lv._1))
+    else rvk.labelValues.filterNot(lv => ignoringLabelsForJoin.contains(lv._1))
   }
 
   private def resultKeys(oneSideKey: RangeVectorKey, otherSideKey: RangeVectorKey): RangeVectorKey = {
