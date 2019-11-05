@@ -13,7 +13,8 @@ object DatasetCommands {
    * @param dataset the Dataset object
    * @param database optionally, the database/keyspace to create the dataset in
    */
-  final case class CreateDataset(dataset: Dataset,
+  final case class CreateDataset(numShards: Int,
+                                 dataset: Dataset,
                                  database: Option[String] = None) extends NodeCommand
 
   case object DatasetCreated extends Response with NodeResponse

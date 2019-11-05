@@ -6,6 +6,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -59,16 +60,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   val sinkStats = new ChunkSinkStats
 
-  def initialize(dataset: DatasetRef): Future[Response] = {
+  def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
-    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
+    val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
+      getOrCreatePartitionKeysTable(dataset, s)
+    }.mapAsync(t => Task.fromFuture(t.initialize())).toListL
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.initialize()
-          ixResp    <- indexTable.initialize()
-          pitResp   <- partIndexTable.initialize() } yield pitResp
+    for { ctResp    <- chunkTable.initialize() if ctResp == Success
+          ixResp    <- indexTable.initialize() if ixResp == Success
+          partKeyTablesResp <- partKeyTablesInit.runAsync if partKeyTablesResp.forall( _ == Success)
+        } yield {
+          Success
+        }
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
@@ -255,6 +261,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       response
     }
   }
+
+  def writePartKey(ref: DatasetRef, numShards: Int, shard: Int, partKey: Array[Byte],
+                   startTime: Long, endTime: Long, diskTTL: Int): Future[Response] = {
+    val table = getOrCreatePartitionKeysTable(ref, numShards)
+    table.writePartKey(shard, partKey, startTime, endTime, diskTTL)
+  }
+
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
@@ -281,6 +294,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
   val partitionIndexTableCache = concurrentCache[DatasetRef, PartitionIndexTable](tableCacheSize)
+  val partitionKeysTableCache = concurrentCache[DatasetRef,
+                                  ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -359,6 +374,15 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   def getOrCreatePartitionIndexTable(dataset: DatasetRef): PartitionIndexTable = {
     partitionIndexTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
       new PartitionIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc)
+    })
+  }
+
+  def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
+    val map = partitionKeysTableCache.getOrElseUpdate(dataset, { _ =>
+      concurrentCache[Int, PartitionKeysTable](tableCacheSize)
+    })
+    map.getOrElseUpdate(shard, { shard: Int =>
+      new PartitionKeysTable(dataset, shard, clusterConnector, ingestionConsistencyLevel)(readEc)
     })
   }
 

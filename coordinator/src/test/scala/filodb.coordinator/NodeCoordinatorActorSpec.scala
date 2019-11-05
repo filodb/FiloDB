@@ -112,7 +112,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   describe("NodeCoordinatorActor DatasetOps commands") {
     it("should be able to create new dataset (really for unit testing only)") {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
+      probe.send(coordinatorActor, CreateDataset(4, dataset1))
       probe.expectMsg(DatasetCreated)
     }
   }
@@ -125,7 +125,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     import MachineMetricsData._
 
     def setupTimeSeries(numShards: Int = 1): DatasetRef = {
-      probe.send(coordinatorActor, CreateDataset(dataset1))
+      probe.send(coordinatorActor, CreateDataset(numShards, dataset1))
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
@@ -357,7 +357,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   it("should be able to start ingestion, send rows, and get an ack back") {
     val ref = dataset6.ref
 
-    probe.send(coordinatorActor, CreateDataset(dataset6))
+    probe.send(coordinatorActor, CreateDataset(1, dataset6))
     probe.expectMsg(DatasetCreated)
     startIngestion(dataset6, 1)
     probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset6)))
@@ -395,11 +395,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   // TODO: need to find a new way to incur this error.   The problem is that when we create the BinaryRecords
   // the error occurs before we even send the IngestRows over.
   ignore("should stop datasetActor if error occurs and prevent further ingestion") {
-    probe.send(coordinatorActor, CreateDataset(dataset1))
+    val numShards = 1
+    probe.send(coordinatorActor, CreateDataset(numShards, dataset1))
     probe.expectMsg(DatasetCreated)
 
     val ref = dataset1.ref
-    startIngestion(dataset1, 1)
+    startIngestion(dataset1, numShards)
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, readers ++ Seq(badLine))))

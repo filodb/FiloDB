@@ -22,7 +22,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
-    columnStore.initialize(dataset1.ref).futureValue
+    columnStore.initialize(dataset1.ref, 4).futureValue
   }
 
   before {

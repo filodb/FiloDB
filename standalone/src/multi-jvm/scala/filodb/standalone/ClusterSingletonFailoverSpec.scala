@@ -87,11 +87,11 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       implicit val patienceConfig = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
       metaStore.initialize().futureValue shouldBe Success
       metaStore.clearAllData().futureValue shouldBe Success
-      colStore.initialize(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, 4).futureValue shouldBe Success
       colStore.truncate(dataset).futureValue shouldBe Success
 
       val datasetObj = TestTimeseriesProducer.dataset
-      colStore.initialize(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, 4).futureValue shouldBe Success
       logger.info("Dataset created")
     }
     enterBarrier("existing-data-cleared-and-dataset-created")

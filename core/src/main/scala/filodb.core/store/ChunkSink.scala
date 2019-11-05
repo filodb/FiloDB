@@ -37,7 +37,7 @@ trait ChunkSink {
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
-  def initialize(dataset: DatasetRef): Future[Response]
+  def initialize(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /**
    * Truncates/clears all data from the ChunkSink for that given dataset.
@@ -114,7 +114,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
     Future.successful(Success)
   }
 
-  def initialize(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+  def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = Future.successful(Success)
 
   def truncate(dataset: DatasetRef): Future[Response] = {
     partitionKeys -= dataset

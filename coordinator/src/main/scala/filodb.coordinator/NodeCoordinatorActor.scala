@@ -86,9 +86,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   // Used only for testing
   private def createDataset(originator: ActorRef,
-                            datasetObj: Dataset): Unit = {
+                            datasetObj: Dataset,
+                            numShards: Int): Unit = {
     (for {
-      resp2 <- memStore.store.initialize(datasetObj.ref) if resp2 == Success
+      resp2 <- memStore.store.initialize(datasetObj.ref, numShards) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
@@ -99,7 +100,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
-    memStore.store.initialize(dataset.ref)
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards)
     setupDataset( dataset,
                   ingestConfig.storeConfig,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
@@ -160,9 +161,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def datasetHandlers: Receive = LoggingReceive {
-    case CreateDataset(datasetObj, db) =>
+    case CreateDataset(numShards, datasetObj, db) =>
       // used only for unit testing now
-      createDataset(sender(), datasetObj)
+      createDataset(sender(), datasetObj, numShards)
 
     case TruncateDataset(ref) =>
       truncateDataset(sender(), ref)
