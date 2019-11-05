@@ -1,7 +1,6 @@
 package filodb.cassandra.columnstore
 
 import java.lang.{Integer => JInt, Long => JLong}
-import java.nio.ByteBuffer
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
@@ -11,8 +10,7 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.{DatasetRef, Response}
-
-case class PartKeyIndexRecord(partKey: ByteBuffer, startTime: Long, endTime: Long)
+import filodb.core.store.PartKeyRecord
 
 sealed class PartitionKeysTable(val dataset: DatasetRef,
                                 val shard: Int,
@@ -40,19 +38,28 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?) USING TTL ?")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  def writePartKey(shard: Int, partKey: Array[Byte],
-                   startTime: Long, endTime: Long, diskTimeToLive: Int): Future[Response] = {
-    connector.execStmtWithRetries(writePartitionCql.bind(
-      partKey, startTime: JLong, endTime: JLong, diskTimeToLive: JInt))
+  lazy val writePartitionCqlNoTtl =
+    session.prepare(
+      s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?)")
+      .setConsistencyLevel(writeConsistencyLevel)
+
+  def writePartKey(shard: Int, pk: PartKeyRecord, diskTimeToLive: Int): Future[Response] = {
+    if (diskTimeToLive <= 0) {
+      connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
+        pk.partKey, pk.startTime: JLong, pk.endTime: JLong))
+    } else {
+      connector.execStmtWithRetries(writePartitionCql.bind(
+        pk.partKey, pk.startTime: JLong, pk.endTime: JLong, diskTimeToLive: JInt))
+    }
   }
 
-  def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyIndexRecord] = {
+  def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
     def cql(start: String, end: String): String =
       s"SELECT * FROM ${tableString}_$shard " +
         s"WHERE TOKEN(partKey) >= $start AND TOKEN(partKey) < $end "
     val it = tokens.iterator.flatMap { case (start, end) =>
       session.execute(cql(start, end)).iterator.asScala
-        .map { row => PartKeyIndexRecord(row.getBytes("partKey"),
+        .map { row => PartKeyRecord(row.getBytes("partKey").array(),
           row.getLong("startTime"), row.getLong("endTime")) }
     }
     Observable.fromIterator(it).handleObservableErrors

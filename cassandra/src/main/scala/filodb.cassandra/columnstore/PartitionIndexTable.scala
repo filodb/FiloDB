@@ -57,10 +57,10 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
   }
 
   def writePartKeySegments(shard: Int, timeBucket: Int,
-                          segments: Seq[ByteBuffer], diskTimeToLive: Int): Future[Response] = {
+                          segments: Seq[ByteBuffer], diskTimeToLiveSeconds: Int): Future[Response] = {
     val statements = segments.zipWithIndex.map { case (segment, segmentId) =>
       connector.execStmtWithRetries(writePartitionCql.bind(shard: JInt,
-        timeBucket: JInt, segmentId: JInt, segment, diskTimeToLive: JInt))
+        timeBucket: JInt, segmentId: JInt, segment, diskTimeToLiveSeconds: JInt))
     }
     Future.sequence(statements).map { responses =>
       responses.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)

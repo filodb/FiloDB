@@ -14,7 +14,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
+import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -248,24 +248,23 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     getOrCreatePartitionIndexTable(ref).getPartKeySegments(shardNum, timeBucket)
   }
 
-  def writePartKeyTimeBucket(ref: DatasetRef,
-                             shardNum: Int,
-                             timeBucket: Int,
-                             partitionIndex: Seq[Array[Byte]],
-                             diskTimeToLive: Int): Future[Response] = {
-
-    val table = getOrCreatePartitionIndexTable(ref)
-    val write = table.writePartKeySegments(shardNum, timeBucket, partitionIndex.map(Util.toBuffer(_)), diskTimeToLive)
-    write.map { response =>
-      sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)
-      response
+  def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
+    val table = getOrCreatePartitionKeysTable(ref, shard)
+    Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
+      table.scanPartKeys(tokenRange.asInstanceOf[CassandraTokenRangeSplit].tokens, shard)
     }
   }
 
-  def writePartKey(ref: DatasetRef, numShards: Int, shard: Int, partKey: Array[Byte],
-                   startTime: Long, endTime: Long, diskTTL: Int): Future[Response] = {
-    val table = getOrCreatePartitionKeysTable(ref, numShards)
-    table.writePartKey(shard, partKey, startTime, endTime, diskTTL)
+  def writePartKeys(ref: DatasetRef, shard: Int,
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] = {
+    val table = getOrCreatePartitionKeysTable(ref, shard)
+    val span = Kamon.buildSpan("write-part-keys").start()
+    val ret = partKeys.mapAsync(writeParallelism) { pk =>
+      val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
+      Task.fromFuture(table.writePartKey(shard, pk, ttl))
+    }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runAsync
+    ret.onComplete(_ => span.finish())
+    ret
   }
 
 }

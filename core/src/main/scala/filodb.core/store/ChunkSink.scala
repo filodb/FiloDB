@@ -12,6 +12,8 @@ import monix.reactive.Observable
 
 import filodb.core._
 
+case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
+
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
  */
@@ -28,12 +30,10 @@ trait ChunkSink {
    */
   def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
-  def writePartKeyTimeBucket(ref: DatasetRef,
-                             shardNum: Int,
-                             timeBucket: Int,
-                             partitionIndex: Seq[Array[Byte]],
-                             diskTimeToLive: Int): Future[Response]
+  def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord]
 
+  def writePartKeys(ref: DatasetRef, shard: Int,
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response]
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
@@ -68,7 +68,7 @@ class ChunkSinkStats {
 
   private val chunksetWrites     = Kamon.counter("chunkset-writes")
   var chunksetsWritten = 0
-  var timeBucketsWritten = 0
+  var partKeysWritten = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
@@ -86,8 +86,8 @@ class ChunkSinkStats {
     chunksetsWritten += 1
   }
 
-  def indexTimeBucketWritten(numBytes: Int): Unit = {
-    timeBucketsWritten += 1
+  def partKeysWritten(numKeys: Int): Unit = {
+    partKeysWritten += numKeys
   }
 }
 
@@ -135,17 +135,10 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 
-  private def createConcurrentSet[T]() = {
-    java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap[T, java.lang.Boolean]).asScala
-  }
+  override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
-  override def getPartKeyTimeBucket(ref: DatasetRef, shardNum: Int,
-                                    timeBucket: Int): Observable[PartKeyTimeBucketSegment] = Observable.empty
-
-  override def writePartKeyTimeBucket(ref: DatasetRef, shardNum: Int, timeBucket: Int,
-                                      partitionIndex: Seq[Array[Byte]],
-                                      diskTimeToLive: Int): Future[Response] = {
-    sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)
+  override def writePartKeys(ref: DatasetRef, shard: Int,
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] =
     Future.successful(Success)
-  }
+
 }
