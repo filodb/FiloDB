@@ -307,14 +307,14 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     result(3).rows.map(_.getDouble(1)).toList shouldEqual List(0.2)
   }
 
-  it("should return metric name when operator is not MathOperator") {
+  it("should have metric name when operator is not MathOperator") {
 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-      BinaryOperator.ADD,
+      BinaryOperator.LTE,
       Cardinality.ManyToOne,
       Seq("instance"), Nil, Seq("role"), "__name__")
 
