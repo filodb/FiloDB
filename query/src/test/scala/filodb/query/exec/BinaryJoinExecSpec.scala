@@ -316,7 +316,6 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, samplesLhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
-    // val lhs = QueryResult("someId", null, samplesLhs.filter(rv => rv.key.labelValues.get(ZeroCopyUTF8String("tag2")).get.equals("tag1-1")).map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhsGrouping.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
