@@ -72,35 +72,38 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     for { ctResp    <- chunkTable.initialize() if ctResp == Success
           ixResp    <- indexTable.initialize() if ixResp == Success
           partKeyTablesResp <- partKeyTablesInit.runAsync if partKeyTablesResp.forall( _ == Success)
-        } yield {
-          Success
-        }
+        } yield Success
   }
 
-  def truncate(dataset: DatasetRef): Future[Response] = {
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
+    val partKeyTablesTrunc = Observable.fromIterable(0.until(numShards)).map { s =>
+      getOrCreatePartitionKeysTable(dataset, s)
+    }.mapAsync(t => Task.fromFuture(t.clearAll())).toListL
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
-    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.clearAll()
-          ixResp    <- indexTable.clearAll()
-          pitResp   <- partIndexTable.clearAll() } yield pitResp
+    for { ctResp    <- chunkTable.clearAll() if ctResp == Success
+          ixResp    <- indexTable.clearAll() if ixResp == Success
+          partKeyTablesResp <- partKeyTablesTrunc.runAsync if partKeyTablesResp.forall( _ == Success)
+    } yield Success
   }
 
-  def dropDataset(dataset: DatasetRef): Future[Response] = {
+  def dropDataset(dataset: DatasetRef, numShards: Int): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
-    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
+    val partKeyTablesDrop = Observable.fromIterable(0.until(numShards)).map { s =>
+      getOrCreatePartitionKeysTable(dataset, s)
+    }.mapAsync(t => Task.fromFuture(t.drop())).toListL
     clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.drop() if ctResp == Success
-          ixResp    <- indexTable.drop() if ixResp == Success
-          pitResp   <- partIndexTable.drop() if pitResp == Success }
-    yield {
+    for {ctResp <- chunkTable.drop() if ctResp == Success
+         ixResp <- indexTable.drop() if ixResp == Success
+         partKeyTablesResp <- partKeyTablesDrop.runAsync if partKeyTablesResp.forall(_ == Success)
+    } yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
-      partitionIndexTableCache.remove(dataset)
-      pitResp
+      partitionKeysTableCache.remove(dataset)
+      Success
     }
   }
 
@@ -244,10 +247,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 
-  def getPartKeyTimeBucket(ref: DatasetRef, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
-    getOrCreatePartitionIndexTable(ref).getPartKeySegments(shardNum, timeBucket)
-  }
-
   def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
     val table = getOrCreatePartitionKeysTable(ref, shard)
     Observable.fromIterable(getScanSplits(ref)).flatMap { tokenRange =>
@@ -292,7 +291,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IngestionTimeIndexTable](tableCacheSize)
-  val partitionIndexTableCache = concurrentCache[DatasetRef, PartitionIndexTable](tableCacheSize)
   val partitionKeysTableCache = concurrentCache[DatasetRef,
                                   ConcurrentLinkedHashMap[Int, PartitionKeysTable]](tableCacheSize)
 
@@ -370,11 +368,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                                       new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
   }
 
-  def getOrCreatePartitionIndexTable(dataset: DatasetRef): PartitionIndexTable = {
-    partitionIndexTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new PartitionIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc)
-    })
-  }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
     val map = partitionKeysTableCache.getOrElseUpdate(dataset, { _ =>

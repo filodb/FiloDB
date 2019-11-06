@@ -13,7 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
-import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize, PartKey}
+import filodb.core.memstore.TimeSeriesShard.{PartKey}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
@@ -33,8 +33,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   after {
-    // clear the highest time bucket from test runs
-    memStore.metastore.writeHighestIndexTimeBucket(dataset1.ref, 0, -1).futureValue
     memStore.reset()
     memStore.metastore.clearAllData()
   }
@@ -269,11 +267,11 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
   }
 
-  it("should flush index time buckets during one group of a flush interval") {
+  it("should flush dirty part keys during one group of a flush interval") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
-    val initTimeBuckets = timebucketsWritten
+    val initTimeBuckets = partKeysWritten
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.timeBucketBitmaps.keySet.asScala shouldEqual Set(0)
 
@@ -413,7 +411,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   private def chunksetsWritten = memStore.store.sinkStats.chunksetsWritten
-  private def timebucketsWritten = memStore.store.sinkStats.timeBucketsWritten
+  private def partKeysWritten = memStore.store.sinkStats.partKeysWritten
 
   // returns the "endTime" or last sample time of evicted partitions
   def markPartitionsForEviction(partIDs: Seq[Int]): Long = {

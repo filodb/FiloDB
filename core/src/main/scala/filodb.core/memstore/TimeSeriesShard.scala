@@ -24,8 +24,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnFilter, ColumnInfo, Filter}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -52,11 +51,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").refine(tags)
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").refine(tags)
 
-  val currentIndexTimeBucket = Kamon.gauge("memstore-index-timebucket-current").refine(tags)
-  val indexTimeBucketBytesWritten = Kamon.counter("memstore-index-timebucket-bytes-total").refine(tags)
-  val numKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-keys-total").refine(tags)
-  val numRolledKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-rolled-keys-total").refine(tags)
-  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-records-processed").refine(tags)
+  val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").refine(tags)
+  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").refine(tags)
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").refine(tags)
 
   /**
@@ -127,14 +123,6 @@ object TimeSeriesShard {
       ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
     }
   }
-
-  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
-    ColumnInfo("endTime", ColumnType.LongColumn),
-    ColumnInfo("partKey", ColumnType.StringColumn)))
-
-  // TODO make configurable if necessary
-  val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
-  val indexTimeBucketSegmentSize = 1024 * 1024 // 1MB
 
   // Initial size of partitionSet and partition map structures.  Make large enough to avoid too many resizes.
   val InitialNumPartitions = 128 * 1024
@@ -343,11 +331,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final var dirtyPartitionsForIndexFlush = new EWAHCompressedBitmap()
 
   /**
-    * This is the group during which this shard will flush time buckets. Randomized to
-    * ensure we dont flush time buckets across shards at same time
+    * This is the group during which this shard will flush dirty part keys. Randomized to
+    * ensure we dont flush across shards at same time
     */
-  private final val indexTimeBucketFlushGroup = Random.nextInt(numGroups)
-  logger.info(s"Index time buckets for shard=$shardNum will flush in group $indexTimeBucketFlushGroup")
+  private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
+  logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
 
   /**
     * The offset up to and including the last record in this group to be successfully persisted.
@@ -489,7 +477,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     val fut = colStore.scanPartKeys(ref, shardNum)
       .map { pk => addPartKey(pk) }
       .completedL.runAsync(ingestSched)
-    fut.onComplete(_ => tracer.finish())
+    fut.onComplete { _ =>
+      completeIndexRecovery()
+      tracer.finish()
+    }
     fut
   }
 
@@ -551,6 +542,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         else activelyIngesting.clear(partId)
       }
     }
+    shardStats.indexRecoveryNumRecordsProcessed.increment()
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -681,9 +673,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     *
     * NEEDS TO RUN ON INGESTION THREAD since it removes entries from the partition data structures.
     */
-  def prepareIndexTimeBucketForFlush(group: Int): Option[EWAHCompressedBitmap] = {
+  def prepareToFlushPartKeys(group: Int): Option[EWAHCompressedBitmap] = {
     assertThreadName(IngestSchedName)
-    if (group == indexTimeBucketFlushGroup) {
+    if (group == dirtyPartKeysFlushGroup) {
       logger.debug(s"Preparing to flush index partKey changes in dataset=$ref" +
         s"shard=$shardNum . ")
       purgeExpiredPartitions()
@@ -868,6 +860,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                              Observable.fromIterator(partKeyRecords),
                              storeConfig.diskTTLSeconds).map { case resp =>
         logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
+        shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
         resp
       }.recover { case e =>
         logger.error(s"Internal Error when persisting part keys in dataset=$ref shard=$shardNum - " +

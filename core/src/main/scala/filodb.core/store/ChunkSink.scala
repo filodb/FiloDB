@@ -43,13 +43,13 @@ trait ChunkSink {
    * Truncates/clears all data from the ChunkSink for that given dataset.
    * NOTE: please make sure there are no writes going on before calling this
    */
-  def truncate(dataset: DatasetRef): Future[Response]
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /**
    * Completely and permanently drops the dataset from the ChunkSink.
    * @param dataset the DatasetRef for the dataset to drop.
    */
-  def dropDataset(dataset: DatasetRef): Future[Response]
+  def dropDataset(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /** Resets state, whatever that means for the sink */
   def reset(): Unit
@@ -116,12 +116,12 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = Future.successful(Success)
 
-  def truncate(dataset: DatasetRef): Future[Response] = {
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
     partitionKeys -= dataset
     Future.successful(Success)
   }
 
-  def dropDataset(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+  def dropDataset(dataset: DatasetRef, numShards: Int): Future[Response] = Future.successful(Success)
 
   def reset(): Unit = {
     partitionKeys.clear()

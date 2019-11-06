@@ -14,10 +14,10 @@ trait DatasetOps extends ClientBase with StrictLogging {
    * Truncates the data for the given dataset, including all the data in the memstore and on disk.
    * @param dataset the dataset to truncate
    */
-  def truncateDataset(dataset: DatasetRef,
+  def truncateDataset(dataset: DatasetRef, numShards: Int,
                       timeout: FiniteDuration = 30.seconds): Unit = {
     logger.info(s"Truncating dataset $dataset...")
-    askCoordinator(TruncateDataset(dataset), timeout) {
+    askCoordinator(TruncateDataset(dataset, numShards), timeout) {
       case DatasetTruncated =>
     }
     sendAllIngestors(NodeCoordinatorActor.ClearState(dataset))

@@ -156,8 +156,6 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
   }
 }
 
-final case class PartKeyTimeBucketSegment(segmentId: Int, segment: ByteBuffer)
-
 /**
  * Responsible for uploading RawPartDatas to offheap memory and creating a queryable ReadablePartition
  */

@@ -132,10 +132,9 @@ extends MemStore with StrictLogging {
                     case FlushCommand(group) => assertThreadName(IngestSchedName)
                                                 shard.switchGroupBuffers(group)
                                                 // step below purges partitions and needs to run on ingestion thread
-                                                val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
+                                                val flushTimeBucket = shard.prepareToFlushPartKeys(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
                                                                 flushTimeBucket))
-                    case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
                            // asyncBoundary so subsequent computations in pipeline happen in default threadpool
@@ -263,9 +262,9 @@ extends MemStore with StrictLogging {
     store.reset()
   }
 
-  def truncate(dataset: DatasetRef): Future[Response] = {
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
     datasets.get(dataset).foreach(_.values.asScala.foreach(_.reset()))
-    store.truncate(dataset)
+    store.truncate(dataset, numShards)
   }
 
   def removeShard(dataset: DatasetRef, shardNum: Int, shard: TimeSeriesShard): Boolean = {

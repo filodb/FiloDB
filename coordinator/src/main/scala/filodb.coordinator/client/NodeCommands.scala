@@ -24,7 +24,7 @@ object DatasetCommands {
   /**
    * Truncates all data from the memStore and any underlying ChunkSink/persistent store for a dataset
    */
-  final case class TruncateDataset(dataset: DatasetRef) extends NodeCommand
+  final case class TruncateDataset(dataset: DatasetRef, numShards: Int) extends NodeCommand
   case object DatasetTruncated extends NodeResponse
   final case class ServerError(errorObject: Any) extends NodeResponse
 }
