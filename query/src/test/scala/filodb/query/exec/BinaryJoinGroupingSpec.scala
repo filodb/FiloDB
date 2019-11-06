@@ -308,9 +308,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should have metric name when operator is not MathOperator") {
-
-    val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
-
+    
     val sampleLhs: Array[RangeVector] = Array(
       new RangeVector {
         val key: RangeVectorKey = CustomRangeVectorKey(
@@ -348,7 +346,6 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
           new TransientRow(1L, 1)).iterator
       }
     )
-
 
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
