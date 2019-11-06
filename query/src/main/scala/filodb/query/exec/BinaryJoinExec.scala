@@ -51,7 +51,7 @@ final case class BinaryJoinExec(id: String,
 
   val onLabels = on.map(Utf8Str(_)).toSet
   val ignoringLabels = ignoring.map(Utf8Str(_)).toSet
-  val ignoringLabelsForJoin = ignoring.map(Utf8Str(_)).toSet + metricColumn.utf8
+  val ignoringLabelsForJoin = ignoringLabels + metricColumn.utf8
   // if onLabels is non-empty, we are doing matching based on on-label, otherwise we are
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
@@ -119,7 +119,6 @@ final case class BinaryJoinExec(id: String,
     // start from otherSideKey which could be many or one
     var result = otherSideKey.labelValues
     // drop metric name if math operator
-    // TODO use dataset's metricName column name here instead of hard-coding column
     if (binaryOp.isInstanceOf[MathOperator]) result = result - Utf8Str(metricColumn)
 
     if (cardinality == Cardinality.OneToOne) {

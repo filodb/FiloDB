@@ -311,16 +311,55 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
+    val sampleLhs: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"node_cpu".utf8,
+            "instance".utf8 -> "abc".utf8,
+            "job".utf8 -> s"node".utf8,
+            "mode".utf8 -> s"idle".utf8)
+        )
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 3)).iterator
+      },
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"node_cpu".utf8,
+            "instance".utf8 -> "abc".utf8,
+            "job".utf8 -> s"node".utf8,
+            "mode".utf8 -> s"user".utf8)
+        )
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 1)).iterator
+      })
+
+   val sampleRhs: Array[RangeVector] = Array(
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"node_role".utf8,
+            "instance".utf8 -> "abc".utf8,
+            "job".utf8 -> "node".utf8,
+            "role".utf8 -> s"prometheus".utf8)
+        )
+
+        override def rows: Iterator[RowReader] = Seq(
+          new TransientRow(1L, 1)).iterator
+      }
+    )
+
+
     val execPlan = BinaryJoinExec("someID", dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
-      BinaryOperator.LTE,
+      BinaryOperator.GTR,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Seq("role"), "__name__")
+      Seq("instance"), Nil, Seq("role"), "metric")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -329,13 +368,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
       ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("idle"),
       ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus"),
-      ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("node_cpu")
+      ZeroCopyUTF8String("metric") -> ZeroCopyUTF8String("node_cpu")
     ),
       Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
         ZeroCopyUTF8String("job") -> ZeroCopyUTF8String("node"),
         ZeroCopyUTF8String("mode") -> ZeroCopyUTF8String("user"),
         ZeroCopyUTF8String("role") -> ZeroCopyUTF8String("prometheus"),
-        ZeroCopyUTF8String("__name__") -> ZeroCopyUTF8String("node_cpu"))
+        ZeroCopyUTF8String("metric") -> ZeroCopyUTF8String("node_cpu"))
     )
 
     result.size shouldEqual 2
