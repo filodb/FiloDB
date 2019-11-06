@@ -11,7 +11,8 @@ import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.BinaryRegion
-import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
+import filodb.memory.format._
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 /**
  * A DataSchema describes the data columns within a time series - the actual data that would vary from sample to
@@ -30,8 +31,10 @@ final case class DataSchema private(name: String,
                                     downsampleSchema: Option[String] = None) {
   val timestampColumn  = columns.head
 
-  // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
-  val readers          = columns.map(col => BinaryVector.defaultPtrToReader(col.columnType.clazz)).toArray
+  // Used to create a `VectorDataReader` of correct type for a given data column ID
+  def readers(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
+    BinaryVector.reader(columns(colId).columnType.clazz, acc, addr)
+  }
 
   // The number of bytes of chunkset metadata including vector pointers in memory
   val chunkSetInfoSize = ChunkSetInfo.chunkSetInfoSize(columns.length)
@@ -161,7 +164,6 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val partKeySchema   = comparator.partitionKeySchema
   val options         = partition.options
 
-  val dataReaders     = data.readers
   val numDataColumns  = data.columns.length
   val partitionInfos  = partition.columns.map(ColumnInfo.apply)
   val dataInfos       = data.columns.map(ColumnInfo.apply)
@@ -170,6 +172,12 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   val schemaHash      = (partition.hash + 31 * data.hash) & 0x0ffff
 
   def name: String = data.name
+
+  /**
+    * Fetches reader for a binary vector
+    */
+  def dataReaders(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader =
+    data.readers(colId, acc, addr)
 
   import Column.ColumnType._
 
@@ -266,9 +274,11 @@ final case class Schemas(part: PartitionSchema,
  * }}}
  */
 object Schemas {
-  import Dataset._
-  import Accumulation._
   import java.nio.charset.StandardCharsets.UTF_8
+
+  import Accumulation._
+
+  import Dataset._
 
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
 

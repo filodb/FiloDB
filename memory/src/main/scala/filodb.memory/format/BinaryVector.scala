@@ -52,15 +52,14 @@ object BinaryVector {
     case Classes.Histogram => (b => vectors.HistogramVector(b))
   }
 
-  type PtrToDataReader = PartialFunction[Class[_], (MemoryReader, BinaryVectorPtr) => VectorDataReader]
-
-  // FIXME there is an allocation here
-  val defaultPtrToReader: PtrToDataReader = {
-    case Classes.Int    => (b, p) => vectors.IntBinaryVector(b, p)
-    case Classes.Long   => (b, p) => vectors.LongBinaryVector(b, p)
-    case Classes.Double => (b, p) => vectors.DoubleVector(b, p)
-    case Classes.UTF8   => (b, p) => vectors.UTF8Vector(b, p)
-    case Classes.Histogram => (b, p) => vectors.HistogramVector(b, p)
+  def reader(clazz: Class[_], acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
+    clazz match {
+      case Classes.Int => vectors.IntBinaryVector(acc, addr)
+      case Classes.Long => vectors.LongBinaryVector(acc, addr)
+      case Classes.Double => vectors.DoubleVector(acc, addr)
+      case Classes.UTF8 => vectors.UTF8Vector(acc, addr)
+      case Classes.Histogram => vectors.HistogramVector(acc, addr)
+    }
   }
 
   /**
