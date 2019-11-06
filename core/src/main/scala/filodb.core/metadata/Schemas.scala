@@ -5,11 +5,11 @@ import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
 import filodb.core.GlobalConfig
+import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.ChunkDownsampler
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
-import filodb.core.Types._
 import filodb.memory.BinaryRegion
 import filodb.memory.format.{BinaryVector, RowReader, TypedIterator, UnsafeUtils}
 

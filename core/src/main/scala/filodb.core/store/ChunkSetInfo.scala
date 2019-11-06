@@ -147,34 +147,32 @@ object ChunkSetInfo extends StrictLogging {
   val OffsetVectors       = 28
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
+
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
 
-  def getChunkID(acc: MemoryReader, infoPointer: NativePointer): ChunkID = acc.getLong(infoPointer + OffsetChunkID)
-  def getChunkID(infoBytes: Array[Byte]): ChunkID =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+  def getChunkID(infoAcc: MemoryReader, infoAddr: Long): ChunkID = infoAcc.getLong(infoAddr + OffsetChunkID)
+
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
-  def getIngestionTime(acc: MemoryReader, infoPointer: NativePointer): Long =
-    acc.getLong(infoPointer + OffsetIngestionTime)
-  def getIngestionTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+  def getIngestionTime(infoAcc: MemoryReader, infoAddr: Long): Long =
+    infoAcc.getLong(infoAddr + OffsetIngestionTime)
+
   def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
 
-  def getNumRows(acc: MemoryReader, infoPointer: NativePointer): Int = acc.getInt(infoPointer + OffsetNumRows)
-  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
+  def getNumRows(infoAcc: MemoryReader, infoAddr: Long): Int = infoAcc.getInt(infoAddr + OffsetNumRows)
+
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
+
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(acc: MemoryReader, infoPointer: NativePointer): Long =
-    startTimeFromChunkID(getChunkID(acc, infoPointer))
-  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
+  def getStartTime(infoAcc: MemoryReader, infoAddr: Long): Long =
+    startTimeFromChunkID(getChunkID(infoAcc, infoAddr))
 
-  def getEndTime(acc: MemoryReader, infoPointer: NativePointer): Long = acc.getLong(infoPointer + OffsetEndTime)
-  def getEndTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
+  def getEndTime(infoAcc: MemoryReader, infoAddr: Long): Long = infoAcc.getLong(infoAddr + OffsetEndTime)
+
   def setEndTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
 
@@ -182,8 +180,27 @@ object ChunkSetInfo extends StrictLogging {
     require(infoPointer != 0, s"ERROR: getVectorPtr on infoPointer==0")
     UnsafeUtils.getLong(infoPointer + OffsetVectors + 8 * colNo)
   }
+
   def setVectorPtr(infoPointer: NativePointer, colNo: Int, vector: BinaryVector.BinaryVectorPtr): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetVectors + 8 * colNo, vector)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getChunkID(infoBytes: Array[Byte]): ChunkID =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getEndTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
 
   /**
    * Copies the non-vector-pointer portion of ChunkSetInfo

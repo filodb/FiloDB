@@ -377,6 +377,7 @@ object HistogramBuckets {
   }
 
   // Create geometric buckets definition
+  // FIXME Use MemoryAccessor methods here instead of unsafe access.
   def geometric(bucketsDefBase: Any, bucketsDefOffset: Long, minusOne: Boolean): HistogramBuckets =
     GeometricBuckets(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
                      UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
