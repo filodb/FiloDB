@@ -100,10 +100,10 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * Difference between the local clock and the received ingestion timestamps, in milliseconds.
     * If this gauge is negative, then the received timestamps are ahead, and it will stay this
     * way for a bit, due to the monotonic adjustment. When the gauge value is positive (which is
-    * expected), then the skew reflects the delay between the generation of the samples and
+    * expected), then the delay reflects the delay between the generation of the samples and
     * receiving them, assuming that the clocks are in sync.
     */
-  val ingestionClockSkew = Kamon.gauge("ingestion-clock-skew").refine(tags)
+  val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -846,7 +846,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     if (ingestionTime != lastIngestionTime) {
         lastIngestionTime = ingestionTime
-        shardStats.ingestionClockSkew.set(System.currentTimeMillis() - ingestionTime)
+        shardStats.ingestionClockDelay.set(System.currentTimeMillis() - ingestionTime)
     }
 
     tasks
