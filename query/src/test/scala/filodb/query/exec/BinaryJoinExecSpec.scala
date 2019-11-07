@@ -304,4 +304,50 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     result.map(_.key).toSet.size shouldEqual 200
   }
+
+  it("should have metric name when operator is not MathOperator") {
+
+    val samplesLhs: Array[RangeVector] = Array.tabulate(200) { i =>
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"someMetricLhs".utf8,
+            "tag1".utf8 -> s"tag1-$i".utf8,
+            "tag2".utf8 -> s"tag2-$i".utf8))
+        val rows: Iterator[RowReader] = data(i).iterator
+      }
+    }
+
+    val samplesRhs: Array[RangeVector] = Array.tabulate(200) { i =>
+      new RangeVector {
+        val key: RangeVectorKey = CustomRangeVectorKey(
+          Map("metric".utf8 -> s"someMetricRhs".utf8,
+            "tag1".utf8 -> samplesLhs(i).key.labelValues("tag1".utf8),
+            "tag2".utf8 -> samplesLhs(i).key.labelValues("tag2".utf8)))
+        val rows: Iterator[RowReader] = data(i).iterator
+      }
+    }
+
+    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+      Array(dummyPlan), // cannot be empty as some compose's rely on the schema
+      new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
+      BinaryOperator.GTR,
+      Cardinality.OneToOne,
+      Nil, Seq("tag2"), Nil, "metric")
+
+    // scalastyle:off
+    val lhs = QueryResult("someId", null, samplesLhs.map(rv => SerializableRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    // scalastyle:on
+    // note below that order of lhs and rhs is reversed, but index is right. Join should take that into account
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
+      .toListL.runAsync.futureValue
+
+    result.foreach { rv =>
+      rv.key.labelValues.contains("metric".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag1".utf8) shouldEqual true
+      rv.key.labelValues.contains("tag2".utf8) shouldEqual false
+    }
+
+    result.map(_.key).toSet.size shouldEqual 200
+  }
 }
