@@ -119,6 +119,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
   val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("count", DoubleColumn)), 1)
+  val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("value", DoubleColumn)), 1)
   val qOpt = QueryOptions(shardOverrides = Some(Seq(0)))
 
   describe("QueryActor commands and responses") {
@@ -202,7 +203,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema.columns shouldEqual timeMinSchema.columns
+          schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
       }
@@ -216,7 +217,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema.columns shouldEqual countSchema.columns
+          schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(98.0, 108.0)
       }
@@ -256,7 +257,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       (0 until numQueries).foreach { _ =>
         probe.expectMsgPF() {
           case QueryResult(_, schema, vectors) =>
-            schema.columns shouldEqual timeMinSchema.columns
+            schema.columns shouldEqual valueSchema.columns
             vectors should have length (1)
             vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0)
         }
@@ -286,7 +287,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
-          schema.columns shouldEqual timeMinSchema.columns
+          schema.columns shouldEqual valueSchema.columns
           vectors should have length (1)
           vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(14.0, 24.0, 14.0)
       }
@@ -384,7 +385,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", LongColumn),
-                                       ColumnInfo("AvgTone", DoubleColumn))
+                                       ColumnInfo("value", DoubleColumn))
         vectors should have length (1)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
         // TODO:  verify if the expected results are right.  They are something....
