@@ -192,6 +192,8 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    // PSM should rename the double column to value always
+    result.resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
@@ -294,7 +296,6 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
     execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 4, 3)
-
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
     result.result.size shouldEqual 1
