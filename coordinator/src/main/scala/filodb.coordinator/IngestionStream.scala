@@ -4,7 +4,7 @@ import com.typesafe.config.Config
 import monix.reactive.Observable
 
 import filodb.core.memstore.SomeData
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas
 
 /**
  * Unlike the RowSource, an IngestionStream simply provides a stream of records, keeping things simple.
@@ -47,17 +47,17 @@ trait IngestionStreamFactory {
    * users to limit the number of shards.
    * @param config the configuration for the data source.  For an example see the sourceconfig {} in
    *               ingestion.md or `conf/timeseries-dev-source.conf`
-   * @param dataset the Dataset to ingest into
+   * @param schemas the Schemas that this StreamFactory must ingest
    * @param shard  the shard number
    * @param offset Some(offset) to rewind the source to a particular "offset" for recovery
    */
-  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream
+  def create(config: Config, schemas: Schemas, shard: Int, offset: Option[Long]): IngestionStream
 }
 
 /**
  * An IngestionStreamFactory to use when you want to just push manually to a coord.  Used for testing.
  */
 class NoOpStreamFactory extends IngestionStreamFactory {
-  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream =
+  def create(config: Config, schemas: Schemas, shard: Int, offset: Option[Long]): IngestionStream =
       IngestionStream.empty
 }

@@ -9,7 +9,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.SomeData
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas
 import filodb.memory.format.{ArrayStringRowReader, RoutingRowReader}
 import filodb.memory.MemFactory
 
@@ -56,7 +56,7 @@ object CsvStream extends StrictLogging {
 class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
-  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream = {
+  def create(config: Config, schemas: Schemas, shard: Int, offset: Option[Long]): IngestionStream = {
     require(shard >= 0, s"Shard on creation must be positive but was '$shard'.")
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
@@ -72,7 +72,7 @@ class CsvStreamFactory extends IngestionStreamFactory {
     } else {
       (config.as[Seq[String]]("column-names"), new CSVReader(reader, settings.separatorChar))
     }
-    new CsvStream(csvReader, dataset, columnNames, settings, offset)
+    new CsvStream(csvReader, schemas, columnNames, settings, offset)
   }
 }
 
@@ -84,11 +84,12 @@ class CsvStreamFactory extends IngestionStreamFactory {
  * @param offset the number of lines to skip; must be >=0 and <= Int.MaxValue or will reset to 0
  */
 private[filodb] class CsvStream(csvReader: CSVReader,
-                                dataset: Dataset,
+                                schemas: Schemas,
                                 columnNames: Seq[String],
                                 settings: CsvStream.CsvStreamSettings,
                                 offset: Option[Long]) extends IngestionStream with StrictLogging {
   import collection.JavaConverters._
+  require(schemas.schemas.nonEmpty, s"Schemas cannot be empty")
 
   val numLinesToSkip = offset.filter(n => n >= 0 && n <= Int.MaxValue).map(_.toInt)
                              .getOrElse {
@@ -96,8 +97,13 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                                0
                              }
 
-  val routing = dataset.ingestRouting(columnNames)
-  logger.info(s"CsvStream started with dataset ${dataset.ref}, columnNames $columnNames, routing $routing")
+  val schema = schemas.schemas.values.find { sch =>
+    val allCols = (sch.partition.columns ++ sch.data.columns).map(_.name).toSet
+    allCols.intersect(columnNames.toSet).size == columnNames.length
+  }.get
+
+  val routing = schema.ingestRouting(columnNames)
+  logger.info(s"CsvStream started with schema ${schema.data.name}, columnNames $columnNames, routing $routing")
   if (numLinesToSkip > 0) logger.info(s"Skipping initial $numLinesToSkip lines...")
 
   val batchIterator = csvReader.iterator.asScala
@@ -106,8 +112,8 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                         .grouped(settings.batchSize)
                         .zipWithIndex
                         .flatMap { case (readers, idx) =>
-                          val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
-                          readers.foreach(builder.addFromReader)
+                          val builder = new RecordBuilder(MemFactory.onHeapFactory)
+                          readers.foreach(builder.addFromReader(_, schema))
                           // Most likely to have only one container.  Just assign same offset.
                           builder.allContainers.map { c => SomeData(c, idx) }
                         }

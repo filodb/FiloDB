@@ -7,8 +7,9 @@ import com.typesafe.config.ConfigFactory
 import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.core.{MachineMetricsData, TestData}
-import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator}
 import filodb.core.memstore._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
 
@@ -32,16 +33,17 @@ class IngestionBenchmark {
   // # of records in a container to test ingestion speed
   val dataStream = withMap(linearMultiSeries(), extraTags = extraTags)
 
-  val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
-                                                    Seq("job", "instance"))
+  val predefKeySchema = dataset2.schema.copy(partition = dataset2.schema.partition.copy(
+                          predefinedKeys = Seq("job", "instance")))
+  val schemaWithPredefKeys = predefKeySchema.ingestionSchema
   // sized just big enough for a 1000 entries per container
-  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, schemaWithPredefKeys, 176064)
+  val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory, 176064)
   val comparator = new RecordComparator(schemaWithPredefKeys)
   //scalastyle:off
   println("Be patient, generating lots of containers of raw data....")
-  dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data) }
+  dataStream.take(1000*100).grouped(1000).foreach { data => addToBuilder(ingestBuilder, data, schema2) }
 
-  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, comparator.partitionKeySchema)
+  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
 
   val consumer = new BinaryRegionConsumer {
     def onNext(base: Any, offset: Long): Unit = comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
@@ -59,7 +61,7 @@ class IngestionBenchmark {
   val policy = new FixedMaxPartitionsEvictionPolicy(100)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)
-  memStore.setup(dataset1, 0, ingestConf)
+  memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, ingestConf)
 
   val shard = memStore.getShardE(dataset1.ref, 0)
 

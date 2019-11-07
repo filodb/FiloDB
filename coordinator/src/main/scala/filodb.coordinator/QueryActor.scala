@@ -14,8 +14,7 @@ import scala.util.control.NonFatal
 import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
-import filodb.core.metadata.Dataset
-import filodb.core.query.ColumnFilter
+import filodb.core.metadata.Schemas
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -40,8 +39,8 @@ object QueryActor {
 
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dataset: Dataset, shardMapFunc: => ShardMapper): Props =
-    Props(new QueryActor(memStore, dataset, shardMapFunc)).withMailbox("query-actor-mailbox")
+  def props(memStore: MemStore, dsRef: DatasetRef, schemas: Schemas, shardMapFunc: => ShardMapper): Props =
+    Props(new QueryActor(memStore, dsRef, schemas, shardMapFunc)).withMailbox("query-actor-mailbox")
 }
 
 /**
@@ -51,21 +50,23 @@ object QueryActor {
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
 final class QueryActor(memStore: MemStore,
-                       dataset: Dataset,
+                       dsRef: DatasetRef,
+                       schemas: Schemas,
                        shardMapFunc: => ShardMapper) extends BaseActor {
   import QueryActor._
   import client.QueryCommands._
   import filodb.core.memstore.FiloSchedulers._
 
   val config = context.system.settings.config
+  val dsOptions = schemas.part.options
 
   var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
-  val applicationShardKeyName = dataset.options.nonMetricShardColumns.headOption
+  val applicationShardKeyNames = dsOptions.nonMetricShardColumns
   val defaultSpread = config.getInt("filodb.spread-default")
 
   implicit val spreadOverrideReader: ValueReader[SpreadAssignment] = ValueReader.relative { spreadAssignmentConfig =>
     SpreadAssignment(
-    shardKeysMap = dataset.options.nonMetricShardColumns.map(x =>
+    shardKeysMap = dsOptions.nonMetricShardColumns.map(x =>
       (x, spreadAssignmentConfig.getString(x))).toMap[String, String],
       spread = spreadAssignmentConfig.getInt("_spread_")
     )
@@ -73,18 +74,17 @@ final class QueryActor(memStore: MemStore,
   val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
   spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
-  val spreadFunc = applicationShardKeyName.map { appKey =>
-                     QueryOptions.simpleMapSpreadFunc(appKey, filodbSpreadMap, defaultSpread)
-                   }.getOrElse { x: Seq[ColumnFilter] => Seq(SpreadChange(defaultSpread)) }
+  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyNames, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
-  val queryEngine2 = new QueryEngine(dataset, shardMapFunc,
+  logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
+  val queryEngine2 = new QueryEngine(dsRef, schemas, shardMapFunc,
     EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
-  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-${dataset.ref}", numSchedThreads.toInt)
+  val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
 
-  private val tags = Map("dataset" -> dataset.ref.toString)
+  private val tags = Map("dataset" -> dsRef.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
   private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
@@ -96,7 +96,7 @@ final class QueryActor(memStore: MemStore,
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
       .withTag("query-id", q.id)
       .start()
-    q.execute(memStore, dataset, queryConfig)(queryScheduler, queryConfig.askTimeout)
+    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
@@ -106,7 +106,7 @@ final class QueryActor(memStore: MemStore,
            queryErrors.increment
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
            e.t match {
-             case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dataset.ref, cve)
+             case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
              case t: Throwable =>
            }
        }

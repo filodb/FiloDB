@@ -187,9 +187,9 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
-  val promHistDS = Dataset("histogram", Seq("tags:map"),
+  val promHistDS = Dataset("histogram", Seq("metric:string", "tags:map"),
                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=true"))
-  val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS, TestData.storeConf)
+  val histBufferPool = new WriteBufferPool(TestData.nativeMem, promHistDS.schema.data, TestData.storeConf)
 
   it("should compute rate for Histogram RVs") {
     val (data, rv) = MachineMetricsData.histogramRV(100000L, numSamples=10, pool=histBufferPool, ds=promHistDS)
@@ -225,8 +225,9 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val part = rv.partition.asInstanceOf[TimeSeriesPartition]
     val dropData = data.map(d => (d.head.asInstanceOf[Long] + 70000L) +: d.drop(1))
     val container = MachineMetricsData.records(promHistDS, dropData).records
-    container.iterate(promHistDS.ingestionSchema).foreach { row => part.ingest(row, ingestBlockHolder) }
-    part.switchBuffers(ingestBlockHolder, encode = true)
+    val bh = MachineMetricsData.histIngestBH
+    container.iterate(promHistDS.ingestionSchema).foreach { row => part.ingest(0, row, bh) }
+    part.switchBuffers(bh, encode = true)
 
 
     val startTs = 99500L

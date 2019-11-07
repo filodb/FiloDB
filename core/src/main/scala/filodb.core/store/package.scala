@@ -12,8 +12,14 @@ package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()
   val decompressor = new ThreadLocal[LZ4FastDecompressor]()
 
-  val msBitOffset   = 21
-  val lowerBitsMask = Math.pow(2, msBitOffset).toInt - 1
+  private val startTimeShift    = 22
+  private val ingestionTimeMask = (1 << startTimeShift) - 1
+
+  // Inclusive minumum allowed user time for chunk ids.
+  val minChunkUserTime = 0 // 1970
+
+  // Inclusive maximum allowed user time for chunk ids.
+  val maxChunkUserTime = (java.lang.Long.MAX_VALUE << startTimeShift) >>> startTimeShift // 2109
 
   // Assume LZ4 compressor has state and is not thread safe.  Use ThreadLocals.
   private def getCompressor: LZ4Compressor = {
@@ -87,16 +93,39 @@ package object store {
   }
 
   /**
-   * Formulation for chunkID based on a combo of the start time for a chunk and the current time in the lower
-   * bits to disambiguate two chunks which have the same start time.
+   * Formulation for chunkID based on a combo of the start time for a chunk and the ingestion
+   * time in the lower bits to disambiguate two chunks which have the same start time, and to
+   * help with external downsampling based on when the data was ingested.
    *
-   * bits 63-21 (43 bits):  milliseconds since Unix Epoch (1/1/1970) - enough for 278.7 years or through 2248
-   * bits 20-0  (21 bits):  The lower 21 bits of nanotime for disambiguation
+   * bits 63-22 (42 bits): user data start time, as milliseconds since Unix Epoch (1/1/1970) -
+   * enough for 139 years or through the year 2109
+   * bits 21-0 (22 bits): ingestion time, as seconds since Unix Epoch, modulo 48 days to ensure
+   * no wraparound in the middle of the day (full binary encoding supports 48.545 days)
+   *
+   * The upper bit of the chunk id is flipped, in order for signed conversions to work
+   * properly. Chunk ids will be negative until the year ~2039.
+   *
+   * @param startTime milliseconds since 1970
+   * @param ingestionTime seconds since 1970
    */
-  @inline final def chunkID(startTime: Long): Long = chunkID(startTime, System.nanoTime)
+  final def chunkID(startTime: Long, ingestionTime: Long): Long = {
+    require(minChunkUserTime <= startTime && startTime <= maxChunkUserTime)
+    (1L << 63) ^ (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60L))
+  }
 
-  @inline final def chunkID(startTime: Long, currentTime: Long): Long =
-    (startTime << msBitOffset) | (currentTime & lowerBitsMask)
+  /**
+   * Returns the start time portion of the chunk ID, as milliseconds from 1970.
+   */
+  @inline final def startTimeFromChunkID(chunkID: Long): Long = {
+    ((1L << 63) ^ chunkID) >>> startTimeShift
+  }
+
+  /**
+   * Returns the ingestion time portion of the chunk ID, as seconds from 1970, modulo 48 days.
+   */
+  @inline final def modIngestionTimeFromChunkID(chunkID: Long): Long = {
+   ((1L << 63) ^ chunkID) & ingestionTimeMask
+  }
 
   /**
    * Adds a few useful methods to ChunkSource
@@ -116,7 +145,7 @@ package object store {
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[RowReader] =
-      source.scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
+      source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))
   }

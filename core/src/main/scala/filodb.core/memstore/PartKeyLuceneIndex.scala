@@ -24,11 +24,11 @@ import filodb.core.{concurrentCache, DatasetRef}
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
 import filodb.core.store.StoreConfig
-import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
+import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
@@ -53,9 +53,9 @@ object PartKeyLuceneIndex {
       BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
   }
 
-  private def createTempDir(dataset: Dataset, shardNum: Int): File = {
+  private def createTempDir(ref: DatasetRef, shardNum: Int): File = {
     val baseDir = new File(System.getProperty("java.io.tmpdir"))
-    val baseName = s"partKeyIndex-${dataset.name}-$shardNum-${System.currentTimeMillis()}-"
+    val baseName = s"partKeyIndex-$ref-$shardNum-${System.currentTimeMillis()}-"
     val tempDir = new File(baseDir, baseName)
     tempDir.mkdir()
     tempDir
@@ -64,22 +64,23 @@ object PartKeyLuceneIndex {
 
 final case class TermInfo(term: UTF8Str, freq: Int)
 
-class PartKeyLuceneIndex(dataset: Dataset,
+class PartKeyLuceneIndex(ref: DatasetRef,
+                         schema: PartitionSchema,
                          shardNum: Int,
                          storeConfig: StoreConfig,
                          diskLocation: Option[File] = None) extends StrictLogging {
 
   import PartKeyLuceneIndex._
 
-  private val numPartColumns = dataset.partitionColumns.length
-  private val indexDiskLocation = diskLocation.getOrElse(createTempDir(dataset, shardNum)).toPath
+  private val numPartColumns = schema.columns.length
+  private val indexDiskLocation = diskLocation.getOrElse(createTempDir(ref, shardNum)).toPath
   private val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
-  logger.info(s"Created lucene index for dataset=${dataset.ref} shard=$shardNum at $indexDiskLocation")
+  logger.info(s"Created lucene index for dataset=$ref shard=$shardNum at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
-  config.setInfoStream(new LuceneMetricsRouter(dataset.ref, shardNum))
+  config.setInfoStream(new LuceneMetricsRouter(ref, shardNum))
   config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND)
 
   private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
@@ -103,8 +104,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
   private val mapConsumer = new MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
       import filodb.core._
-      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 2,
-                                                           UTF8StringMedium.numBytes(keyBase, keyOffset)),
+      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 1,
+                                                           UTF8StringShort.numBytes(keyBase, keyOffset)),
                                                _.toString)
       val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
                                unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
@@ -117,13 +118,13 @@ class PartKeyLuceneIndex(dataset: Dataset,
     * Map of partKey column to the logic for indexing the column (aka Indexer).
     * Optimization to avoid match logic while iterating through each column of the partKey
     */
-  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
+  private final val indexers = schema.columns.zipWithIndex.map { case (c, pos) =>
     c.columnType match {
       case StringColumn => new Indexer {
         val colName = UTF8Str(c.name)
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          val strOffset = dataset.partKeySchema.blobOffset(base, offset, pos)
-          val numBytes = dataset.partKeySchema.blobNumBytes(base, offset, pos)
+          val strOffset = schema.binSchema.blobOffset(base, offset, pos)
+          val numBytes = schema.binSchema.blobNumBytes(base, offset, pos)
           val value = new BytesRef(base.asInstanceOf[Array[Byte]], strOffset.toInt - UnsafeUtils.arayOffset, numBytes)
           addIndexEntry(colName.toString, value, partIndex)
         }
@@ -131,7 +132,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
       }
       case MapColumn => new Indexer {
         def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          dataset.partKeySchema.consumeMapItems(base, offset, pos, mapConsumer)
+          schema.binSchema.consumeMapItems(base, offset, pos, mapConsumer)
         }
         def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
       }
@@ -148,7 +149,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
 
   def startFlushThread(): Unit = {
     flushThread.start()
-    logger.info(s"Started flush thread for lucene index on dataset=${dataset.ref} shard=$shardNum")
+    logger.info(s"Started flush thread for lucene index on dataset=$ref shard=$shardNum")
   }
 
   /**
@@ -198,7 +199,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
   def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc()
 
   def closeIndex(): Unit = {
-    logger.info(s"Closing index on dataset=${dataset.ref} shard=$shardNum")
+    logger.info(s"Closing index on dataset=$ref shard=$shardNum")
     flushThread.close()
     indexWriter.close()
   }
@@ -274,7 +275,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
                 (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Adding document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
-                 s"with startTime=$startTime endTime=$endTime into dataset=${dataset.ref} shard=$shardNum")
+                 s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     indexWriter.addDocument(document)
   }
 
@@ -286,7 +287,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
                    (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
-                 s"with startTime=$startTime endTime=$endTime into dataset=${dataset.ref} shard=$shardNum")
+                 s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     indexWriter.updateDocument(new Term(PART_ID, partId.toString), document)
   }
 
@@ -296,7 +297,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     //scalastyle:off
     s"shard=$shardNum partId=$partId [${
       TimeSeriesPartition
-        .partKeyString(dataset, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
+        .partKeyString(schema, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
     }]"
     //scalastyle:on
   }
@@ -355,7 +356,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
     val span = Kamon.buildSpan("index-startTimes-for-odp-lookup-latency")
-      .withTag("dataset", dataset.name)
+      .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
       .start()
     val collector = new PartIdStartTimeCollector()
@@ -407,13 +408,13 @@ class PartKeyLuceneIndex(dataset: Dataset,
     var startTime = startTimeFromPartId(partId) // look up index for old start time
     if (startTime == NOT_FOUND) {
       startTime = System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis
-      logger.warn(s"Could not find in Lucene startTime for partId=$partId in dataset=${dataset.ref}. Using " +
+      logger.warn(s"Could not find in Lucene startTime for partId=$partId in dataset=$ref. Using " +
         s"$startTime instead.", new IllegalStateException()) // assume this time series started retention period ago
     }
     val updatedDoc = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
       partId, startTime, endTime)
     logger.debug(s"Updating document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
-                 s"with startTime=$startTime endTime=$endTime into dataset=${dataset.ref} shard=$shardNum")
+                 s"with startTime=$startTime endTime=$endTime into dataset=$ref shard=$shardNum")
     indexWriter.updateDocument(new Term(PART_ID, partId.toString), updatedDoc)
   }
 
@@ -475,7 +476,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
                          startTime: Long,
                          endTime: Long): EWAHCompressedBitmap = {
     val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
-      .withTag("dataset", dataset.name)
+      .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
       .start()
     val booleanQuery = new BooleanQuery.Builder
@@ -486,7 +487,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
-    logger.debug(s"Querying dataset=${dataset.ref} shard=$shardNum partKeyIndex with: $query")
+    logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     val collector = new PartIdCollector() // passing zero for unlimited results
     withNewSearcher(s => s.search(query, collector))
     partKeySpan.finish()
@@ -695,9 +696,9 @@ class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
   def numHits: Int = counter
 }
 
-class LuceneMetricsRouter(dataset: DatasetRef, shard: Int) extends InfoStream with StrictLogging {
+class LuceneMetricsRouter(ref: DatasetRef, shard: Int) extends InfoStream with StrictLogging {
   override def message(component: String, message: String): Unit = {
-    logger.debug(s"dataset=$dataset shard=$shard component=$component $message")
+    logger.debug(s"dataset=$ref shard=$shard component=$component $message")
     // TODO parse string and report metrics to kamon
   }
   override def isEnabled(component: String): Boolean = true

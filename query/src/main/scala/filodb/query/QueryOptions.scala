@@ -22,26 +22,25 @@ object QueryOptions {
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
     * present in the spreadMap to specific spread values, with a default if the filter/value not present in the map
     */
-  def simpleMapSpreadFunc(keyName: String,
+  def simpleMapSpreadFunc(shardKeyNames: Seq[String],
                           spreadMap: collection.mutable.Map[collection.Map[String, String], Int],
                           defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
     filters: Seq[ColumnFilter] =>
-      filters.collectFirst {
-        case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
-      }.map { tagValue =>
-        Seq(SpreadChange(spread = spreadMap.getOrElse(collection.mutable.Map(keyName->tagValue), defaultSpread)))
-      }.getOrElse(Seq(SpreadChange(defaultSpread)))
+      val shardKeysInQuery = filters.collect {
+        case ColumnFilter(key, Filter.Equals(filtVal: String)) if shardKeyNames.contains(key) => key -> filtVal
+      }
+      Seq(SpreadChange(spread = spreadMap.getOrElse(shardKeysInQuery.toMap, defaultSpread)))
   }
 
   import collection.JavaConverters._
 
-  def simpleMapSpreadFunc(keyName: String,
+  def simpleMapSpreadFunc(shardKeyNames: java.util.List[String],
                           spreadMap: java.util.Map[java.util.Map[String, String], Integer],
                           defaultSpread: Int): Seq[ColumnFilter] => Seq[SpreadChange] = {
     val spreadAssignment: collection.mutable.Map[collection.Map[String, String], Int]= spreadMap.asScala.map {
       case (d, v) => d.asScala -> v.toInt
     }
 
-    simpleMapSpreadFunc(keyName, spreadAssignment, defaultSpread)
+    simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
   }
 }

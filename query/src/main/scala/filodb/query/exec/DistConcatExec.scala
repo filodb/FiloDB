@@ -1,8 +1,8 @@
 package filodb.query.exec
 
+import monix.eval.Task
 import monix.reactive.Observable
 
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.query._
 import filodb.query.Query.qLogger
@@ -17,10 +17,8 @@ final case class DistConcatExec(id: String,
 
   protected def args: String = ""
 
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
-
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[(QueryResponse, Int)],
+  protected def compose(childResponses: Observable[(QueryResponse, Int)],
+                        firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {

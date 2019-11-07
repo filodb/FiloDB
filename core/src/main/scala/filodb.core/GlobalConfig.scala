@@ -12,6 +12,8 @@ import com.typesafe.scalalogging.StrictLogging
   * - all other reference.conf's
   */
 object GlobalConfig extends StrictLogging {
+  val defaultsFromUrl = ConfigFactory.load("filodb-defaults")
+  val defaultFiloConfig = defaultsFromUrl.getConfig("filodb")
 
   val systemConfig: Config = {
     ConfigFactory.invalidateCaches()
@@ -22,7 +24,6 @@ object GlobalConfig extends StrictLogging {
     // ConfigFactory.parseResources() does NOT work in Spark 1.4.1 executors
     // and only the below works.
     // filodb-defaults.conf sets cluster.roles=["worker"] as the default
-    val defaultsFromUrl = ConfigFactory.load("filodb-defaults")
     ConfigFactory.defaultOverrides.withFallback(customConfig) // spark overrides cluster.roles, cli doesn't
                  .withFallback(defaultsFromUrl)
                  .withFallback(ConfigFactory.defaultReference())

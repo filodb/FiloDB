@@ -2,94 +2,139 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
+import filodb.core.memstore.PartLookupResult
+import filodb.core.metadata.{Column, Schema, Schemas}
+import filodb.core.query.ResultSchema
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
 import filodb.query.exec.rangefn.RangeFunction
+import filodb.query.Query.qLogger
 
-object SelectRawPartitionsExec {
+object SelectRawPartitionsExec extends  {
   import Column.ColumnType._
 
   // Returns Some(colID) the ID of a "max" column if one of given colIDs is a histogram.
-  def histMaxColumn(dataset: Dataset, colIDs: Seq[Types.ColumnId]): Option[Int] = {
-    colIDs.find { id => dataset.dataColumns(id).columnType == HistogramColumn }
+  def histMaxColumn(schema: Schema, colIDs: Seq[Types.ColumnId]): Option[Int] = {
+    colIDs.find { id => schema.data.columns(id).columnType == HistogramColumn }
           .flatMap { histColID =>
-            dataset.dataColumns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
+            schema.data.columns.find(c => c.name == "max"  && c.columnType == DoubleColumn).map(_.id)
           }
   }
+
+  def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
+    transformers.collect { case p: PeriodicSamplesMapper => p.functionId }.headOption.flatten
+
+  def replaceRangeFunction(transformers: Seq[RangeVectorTransformer],
+                           oldFunc: Option[InternalRangeFunction],
+                           newFunc: Option[InternalRangeFunction]): Seq[RangeVectorTransformer] =
+    transformers.map {
+      case p: PeriodicSamplesMapper if p.functionId == oldFunc => p.copy(functionId = newFunc)
+      case other: RangeVectorTransformer => other
+    }
+
+  // Transform transformers, replacing range functions for downsampled gauge queries if needed
+  def newXFormersForDownsample(schema: Schema,
+                               transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+    if (schema == Schemas.dsGauge) {
+      val origFunc = findFirstRangeFunction(transformers)
+      val newFunc = RangeFunction.downsampleRangeFunction(origFunc)
+      qLogger.debug(s"Replacing range function $origFunc with $newFunc...")
+      replaceRangeFunction(transformers, origFunc, newFunc)
+    } else {
+      transformers.toBuffer   // Produce an immutable copy, so the original one is not mutated by accident
+    }
+  }
+
+  def newXFormersForHistMax(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+    histMaxColumn(schema, schema.data.columns.map(_.id)).map { maxColID =>
+      // Histogram with max column present.  Check for range functions and change if needed
+      val origFunc = findFirstRangeFunction(transformers)
+      val newFunc = RangeFunction.histMaxRangeFunction(origFunc)
+      qLogger.debug(s"Replacing range function for histogram max $origFunc with $newFunc...")
+      replaceRangeFunction(transformers, origFunc, newFunc)
+    }.getOrElse(transformers)
+  }
+
+  // Given optional column names, find the column IDs, adjusting for the schema
+  def getColumnIDs(dataSchema: Schema,
+                   colNames: Seq[String],
+                   transformers: Seq[RangeVectorTransformer]): Seq[Types.ColumnId] = {
+    Schemas.rowKeyIDs ++ {
+      if (colNames.nonEmpty) {
+        // query is selecting specific columns
+        dataSchema.colIDs(colNames: _*).get
+      } else if (!(dataSchema == Schemas.dsGauge)) {
+        // needs to select raw data
+        dataSchema.colIDs(dataSchema.data.valueColName).get
+      } else {
+        // need to select column based on range function for gauge schema
+        val names = findFirstRangeFunction(transformers).map { func =>
+          RangeFunction.downsampleColsFromRangeFunction(dataSchema, Some(func))
+        }.getOrElse(Seq(dataSchema.data.valueColName))
+
+        dataSchema.colIDs(names: _*).get
+      }
+    }
+  }
+
+  // Automatically add column ID for max column if it exists and we picked histogram col already
+  // But make sure the max column isn't already included
+  def addIDsForHistMax(dataSchema: Schema, colIDs: Seq[Types.ColumnId]): Seq[Types.ColumnId] =
+    histMaxColumn(dataSchema, colIDs).filter { mId => !(colIDs contains mId) }
+      .map { maxColID =>
+        colIDs :+ maxColID
+      }.getOrElse(colIDs)
 }
 
 /**
-  * ExecPlan to select raw data from partitions that the given filter resolves to,
-  * in the given shard, for the given row key range
+  * ExecPlan to select raw data from partitions.  Specific to a particular schema.
+  * This plan should be created with transformers and column IDs exactly as needed to query data given the
+  * schema. It does not perform any magic to transform column IDs or range functions further.
+  * This plan and its transformers should know exactly what kind of data they are dealing with.
+  * Note that it needs to be a separate ExecPlan as its transformers might have been modified by the parent ExecPlan.
+  *
+  * @param dataSchema normally Some(schema), but may be None if schema cannot be discovered.
+  * @param filterSchemas if true, filter the partitions for the given schema.
+  *                      if false, the given schema is expected for all partitions, error will be thrown otherwise.
+  * @param colIds the exact column IDs that are needed for querying the raw data
   */
 final case class SelectRawPartitionsExec(id: String,
                                          submitTime: Long,
                                          limit: Int,
                                          dispatcher: PlanDispatcher,
-                                         dataset: DatasetRef,
-                                         shard: Int,
-                                         filters: Seq[ColumnFilter],
-                                         chunkMethod: ChunkScanMethod,
+                                         datasetRef: DatasetRef,
+                                         dataSchema: Option[Schema],
+                                         lookupRes: Option[PartLookupResult],
+                                         filterSchemas: Boolean,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
-  import SelectRawPartitionsExec._
+  def dataset: DatasetRef = datasetRef
 
-  protected[filodb] def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
-      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
-
-    val selectedColIds = selectColIds(dataset)
-    val numRowKeyCols = 1 // hardcoded since a future PR will indeed fix this to 1 timestamp column
-
-    // Add the max column to the schema together with Histograms for max computation -- just in case it's needed
-    // But make sure the max column isn't already included
-    histMaxColumn(dataset, selectedColIds).filter { mId => !(colIds contains mId) }
-                                  .map { maxColId =>
-      ResultSchema(dataset.infosFromIDs(selectedColIds :+ maxColId),
-        numRowKeyCols, colIDs = (selectedColIds :+ maxColId))
-    }.getOrElse {
-      ResultSchema(dataset.infosFromIDs(selectedColIds), numRowKeyCols, colIDs = selectedColIds)
-    }
+  private def schemaOfDoExecute(): ResultSchema = {
+    // If the data schema cannot be found, then return empty ResultSchema
+    dataSchema.map { sch =>
+      val numRowKeyCols = 1
+      ResultSchema(sch.infosFromIDs(colIds), numRowKeyCols, colIDs = colIds)
+    }.getOrElse(ResultSchema.empty)
   }
 
-  private def selectColIds(dataset: Dataset) = {
-    dataset.rowKeyIDs ++ {
-      if (colIds.nonEmpty) {
-        // query is selecting specific columns
-        colIds
-      } else if (!dataset.options.hasDownsampledData) {
-        // needs to select raw data
-        colIds ++ dataset.colIDs(dataset.options.valueColumn).get
-      } else {
-        // need to select column based on range function
-        val colNames = rangeVectorTransformers.find(_.isInstanceOf[PeriodicSamplesMapper]).map { p =>
-          RangeFunction.downsampleColsFromRangeFunction(dataset, p.asInstanceOf[PeriodicSamplesMapper].functionId)
-        }.getOrElse(Seq(dataset.options.valueColumn))
-        colIds ++ dataset.colIDs(colNames: _*).get
-      }
-    }
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler,
+                timeout: FiniteDuration): ExecResult = {
+    Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")}" +
+      s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
+    val rvs = dataSchema.map { sch =>
+      source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)
+    }.getOrElse(Observable.empty)
+    ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 
-  protected def doExecute(source: ChunkSource,
-                          dataset: Dataset,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
-    require(dataset.rowKeyIDs.forall(rk => !colIds.contains(rk)),
-      "User selected columns should not include timestamp (row-key); it will be auto-prepended")
-
-    val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    val selectCols = selectColIds(dataset)
-    Query.qLogger.debug(s"queryId=$id on dataset=${dataset.ref} shard=$shard" +
-      s" is configured to use column=$selectCols to serve downsampled results")
-    source.rangeVectors(dataset, selectCols, partMethod, chunkMethod)
-  }
-
-  protected def args: String = s"shard=$shard, chunkMethod=$chunkMethod, filters=$filters, colIDs=$colIds"
+  protected def args: String = s"dataset=$dataset, shard=${lookupRes.map(_.shard).getOrElse(-1)}, " +
+                               s"schema=${dataSchema.map(_.name)}, filterSchemas=$filterSchemas, " +
+                               s"chunkMethod=${lookupRes.map(_.chunkMethod).getOrElse("")}, colIDs=$colIds"
 }
-

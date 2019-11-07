@@ -8,7 +8,7 @@ import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContaine
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
-import filodb.memory.{MemFactory, UTF8StringMedium}
+import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
@@ -27,7 +27,7 @@ trait RangeVectorKey extends java.io.Serializable {
 class SeqMapConsumer extends MapItemConsumer {
   val pairs = new collection.mutable.ArrayBuffer[(UTF8Str, UTF8Str)]
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 1, UTF8StringShort.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
   }
@@ -105,7 +105,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
 
-  def timestampColID: Int = partition.dataset.timestampColID
+  val timestampColID = 0
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
 }
@@ -193,7 +193,7 @@ object SerializableRangeVector extends StrictLogging {
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
-        builder.addFromReader(rows.next)
+        builder.addFromReader(rows.next, schema, 0)
       }
     } finally {
       // clear exec plan
@@ -215,7 +215,7 @@ object SerializableRangeVector extends StrictLogging {
     */
   def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, toBuilder(schema), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema, "Test-Only-Plan")
   }
 
   // TODO: make this configurable....
@@ -225,13 +225,11 @@ object SerializableRangeVector extends StrictLogging {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
-    val brSchemas = brColInfos.mapValues(toSchema(_))
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(columns = cols, brSchema = brSchemas) })
-  }
+  def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
-  def toBuilder(schema: RecordSchema): RecordBuilder =
-    new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)
+  def newBuilder(): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, MaxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

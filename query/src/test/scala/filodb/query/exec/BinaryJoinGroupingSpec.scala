@@ -10,7 +10,6 @@ import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -19,7 +18,7 @@ import filodb.query._
 
 class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
-  import SelectRawPartitionsExecSpec._
+  import MultiSchemaPartitionsExecSpec._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
@@ -27,6 +26,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
+  val tvSchemaTask = Task.now(tvSchema)
 
   val rand = new Random()
 
@@ -118,13 +118,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Seq("role"))
+      Seq("instance"), Nil, Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -153,13 +153,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.MUL,
       Cardinality.ManyToOne,
-      Nil,  Seq("role", "mode"), Seq("role"))
+      Nil,  Seq("role", "mode"), Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -183,8 +183,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
-                      queryConfig, 1000, tvSchema)
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
@@ -194,13 +193,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne,
-      Seq("instance"), Nil, Nil)
+      Seq("instance"), Nil, Nil, "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -239,13 +238,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       BinaryOperator.MUL,
       Cardinality.OneToMany,
       Nil, Seq("role"),
-      Seq("role"))
+      Seq("role"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),
@@ -263,8 +262,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Sum, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Seq("instance", "job"))
-    val mapped = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(sampleNodeCpu),
-                 queryConfig, 1000, tvSchema)
+    val mapped = aggMR(Observable.fromIterable(sampleNodeCpu), queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
@@ -274,13 +272,13 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
       Cardinality.ManyToOne, Nil,
-      Seq("mode"), Seq("dummy"))
+      Seq("mode"), Seq("dummy"), "__name__")
 
     // scalastyle:off
     val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
     val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
     // scalastyle:on
-    val result = execPlan.compose(dataset, Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), queryConfig)
+    val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
     val expectedLabels = List(Map(ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("abc"),

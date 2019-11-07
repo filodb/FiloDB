@@ -17,6 +17,7 @@ import filodb.coordinator.queryengine2.{EmptyFailureProvider, UnavailablePromQlQ
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -102,7 +103,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
 
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset, shardMapper, EmptyFailureProvider)
+  val engine = new QueryEngine(dataset.ref, Schemas(dataset.schema), shardMapper, EmptyFailureProvider)
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
@@ -124,25 +125,25 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     cluster.shutdown()
   }
 
-  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumOfRate = toExecPlan("""sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumOfRate.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumOfRate.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 
-  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ns="App-2"}[5m]))""")
+  val scanSumSumOverTime = toExecPlan("""sum(sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))""")
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumSumOverTime.execute(store, dataset, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumSumOverTime.execute(store, queryConfig).runAsync, 60.seconds)
     }
   }
 

@@ -8,7 +8,7 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.{MetricsTestData, MachineMetricsData => MMD}
+import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
@@ -21,8 +21,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
-  val histSchema = ResultSchema(MMD.histDataset.infosFromIDs(Seq(0, 3)), 1)
-  val histMaxSchema = ResultSchema(MMD.histMaxDS.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
+  val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
+  val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
@@ -117,6 +117,24 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result7(0).rows.map(_.getDouble(1)), readyToAggr7.map { v =>
       quantile(0.70, v.map(_.getDouble(1)))
     }.iterator)
+
+    // Stdvar
+    val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key)
+    val result8 = resultObs8.toListL.runAsync.futureValue
+    result8.size shouldEqual 1
+    result8(0).key shouldEqual noKey
+
+    val readyToAggr8 = samples.toList.map(_.rows.toList).transpose
+    compareIter(result8(0).rows.map(_.getDouble(1)), readyToAggr8.map { v =>
+      stdvar(v.map(_.getDouble(1)))
+    }.iterator)
+  }
+
+  private def stdvar(items: List[Double]): Double = {
+    val mean = items.sum / items.size
+    items.map(i => math.pow((i-mean), 2)).sum / items.size
   }
 
   private def quantile(q: Double, items: List[Double]): Double = {
@@ -212,6 +230,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result7.size shouldEqual 1
     result7(0).key shouldEqual noKey
     compareIter(result7(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
+
+    // Stdvar
+    val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv=>rv.key)
+    val result8 = resultObs8.toListL.runAsync.futureValue
+    result8.size shouldEqual 1
+    result8(0).key shouldEqual noKey
+    compareIter(result8(0).rows.map(_.getDouble(1)), Seq(1.5625d, 0.27555555555556d).iterator)
   }
 
   it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
@@ -230,7 +257,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
-    val builder = SerializableRangeVector.toBuilder(recSchema)
+    val builder = SerializableRangeVector.newBuilder()
     val srv = SerializableRangeVector(result7(0), builder, recSchema, "Unit-Test")
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
@@ -254,10 +281,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
     val agg = RowAggregator(AggregationOperator.Avg, Nil, tvSchema)
     val aggMR = AggregateMapReduce(AggregationOperator.Avg, Nil, Nil, Nil)
-    val mapped1 = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(Seq(toRv(s1))),
-                        queryConfig, 1000, tvSchema)
-    val mapped2 = aggMR(MetricsTestData.timeseriesDataset, Observable.fromIterable(Seq(toRv(s2))),
-                        queryConfig, 1000, tvSchema)
+    val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), queryConfig, 1000, tvSchema)
+    val mapped2 = aggMR(Observable.fromIterable(Seq(toRv(s2))), queryConfig, 1000, tvSchema)
 
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped1 ++ mapped2, rv=>rv.key)
     val result4 = resultObs4.toListL.runAsync.futureValue
@@ -340,6 +365,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result6b.size shouldEqual 1
     result6b(0).key shouldEqual ignoreKey
     compareIter(result6b(0).rows.map(_.getDouble(1)), Seq(5.4d,5.6d).iterator)
+
+    // Stdvar
+    val agg8 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
+    val resultObs8a = RangeVectorAggregator.mapReduce(agg8, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs8 = RangeVectorAggregator.mapReduce(agg8, true, resultObs8a, rv => rv.key)
+    val result8 = resultObs8.toListL.runAsync.futureValue
+    result8.size shouldEqual 1
+    result8(0).key shouldEqual noKey
+    compareIter(result8(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 0.27555555555556d).iterator)
   }
 
   it("topK should not have any trailing value ") {
