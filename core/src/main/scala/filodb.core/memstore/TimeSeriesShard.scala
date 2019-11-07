@@ -1,6 +1,5 @@
 package filodb.core.memstore
 
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable.ArrayBuffer
@@ -379,7 +378,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
   // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
   // without concern that they may overlap in time.
-  private val flushBoundaryMillis = storeConfig.flushInterval.toUnit(TimeUnit.MILLISECONDS).toLong
+  private val flushBoundaryMillis = storeConfig.flushInterval.toMillis
 
   // Defines the group-specific flush offset, to distribute the flushes around such they don't
   // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
@@ -812,6 +811,9 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Creates zero or more flush tasks (up to the number of flush groups) based on examination
     * of the record container's ingestion time. This should be called before ingesting the container.
+    *
+    * Note that the tasks returned by this method aren't executed yet. The caller decides how
+    * to run the tasks, and by which threads.
     */
   def createFlushTasks(container: RecordContainer): Seq[Task[Response]] = {
     val tasks = new ArrayBuffer[Task[Response]]()
@@ -821,7 +823,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     var newTimestamp = ingestionTime
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
-      var tsAdjust = 0L
       for (group <- 0 until numGroups optimized) {
         if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
           // Flush out the group before ingesting records for a new hour (by group offset).

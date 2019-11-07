@@ -109,11 +109,14 @@ extends MemStore with StrictLogging {
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     stream.flatMap {
-      case d: SomeData => {
+      case d: SomeData =>
+        // The write buffers for all partitions in a group are switched here, in line with ingestion
+        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+        // at the same offset/watermark
         val tasks = shard.createFlushTasks(d.records)
+
         shard.ingest(d)
         Observable.fromIterable(tasks)
-      }
     }
     .mapAsync(numParallelFlushes) {
       // asyncBoundary so subsequent computations in pipeline happen in default threadpool

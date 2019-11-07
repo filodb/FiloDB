@@ -79,6 +79,12 @@ trait MemStore extends ChunkSource {
    * Sets up a shard of a dataset to continuously ingest new sets of records from a stream.
    * The records are immediately available for reads from that shard of the memstore.
    * Errors during ingestion are handled by the errHandler.
+   *
+   * Flushes to the ChunkSink are initiated at the discretion of the method implementation.
+   * The preferred strategy is to rely on the ingestion time obtained from the SomeData
+   * RecordContainers, but flushing can also be performed at regular intervals or based on
+   * resource limits.
+   *
    * NOTE: does not check that existing streams are not already writing to this store.  That needs to be
    * handled by an upper layer.  Multiple stream ingestion is not guaranteed to be thread safe, a single
    * stream is safe for now.
