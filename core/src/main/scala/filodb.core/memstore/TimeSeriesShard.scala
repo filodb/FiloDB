@@ -95,6 +95,15 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").refine(tags)
   val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").refine(tags)
   val evictedPartIdLookupMultiMatch = Kamon.counter("evicted-partId-lookup-multi-match").refine(tags)
+
+  /**
+    * Difference between the local clock and the received ingestion timestamps, in milliseconds.
+    * If this gauge is negative, then the received timestamps are ahead, and it will stay this
+    * way for a bit, due to the monotonic adjustment. When the gauge value is positive (which is
+    * expected), then the skew reflects the delay between the generation of the samples and
+    * receiving them, assuming that the clocks are in sync.
+    */
+  val ingestionClockSkew = Kamon.gauge("ingestion-clock-skew").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -833,8 +842,12 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
     }
 
-    // Only update if no exception was thrown.
-    lastIngestionTime = ingestionTime
+    // Only update stuff if no exception was thrown.
+
+    if (ingestionTime != lastIngestionTime) {
+        lastIngestionTime = ingestionTime
+        shardStats.ingestionClockSkew.set(System.currentTimeMillis() - ingestionTime)
+    }
 
     tasks
   }
