@@ -27,7 +27,6 @@ class TimeSeriesMemStore(config: Config,
                         (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
-  import FiloSchedulers._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
@@ -98,51 +97,38 @@ extends MemStore with StrictLogging {
   }
 
   def ingest(dataset: DatasetRef, shard: Int, data: SomeData): Unit =
-    getShardE(dataset, shard).ingest(data.records, data.offset)
-
-  // Should only be called once per dataset/shard
-  def ingestStream(dataset: DatasetRef,
-                   shard: Int,
-                   stream: Observable[SomeData],
-                   flushSched: Scheduler,
-                   flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
-    val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, cancelTask)
-  }
-
-  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
-    getShardE(dataset, shard).recoverIndex()
+    getShardE(dataset, shard).ingest(data)
 
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
   // If it turns out the batch size is small, consider using object pooling.
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
-                   combinedStream: Observable[DataOrCommand],
+                   stream: Observable[SomeData],
                    flushSched: Scheduler,
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
-    combinedStream.map {
-                    case d: SomeData =>       shard.ingest(d)
-                                              None
-                    // The write buffers for all partitions in a group are switched here, in line with ingestion
-                    // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
-                    // at the same offset/watermark
-                    case FlushCommand(group) => assertThreadName(IngestSchedName)
-                                                shard.switchGroupBuffers(group)
-                                                // step below purges partitions and needs to run on ingestion thread
-                                                val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
-                                                Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
-                                                                flushTimeBucket))
-                    case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
-                  }.collect { case Some(flushGroup) => flushGroup }
-                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
-                           // asyncBoundary so subsequent computations in pipeline happen in default threadpool
-                  .completedL
-                  .doOnCancel(cancelTask)
-                  .runAsync(shard.ingestSched)
+    stream.flatMap {
+      case d: SomeData =>
+        // The write buffers for all partitions in a group are switched here, in line with ingestion
+        // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+        // at the same offset/watermark
+        val tasks = shard.createFlushTasks(d.records)
+
+        shard.ingest(d)
+        Observable.fromIterable(tasks)
+    }
+    .mapAsync(numParallelFlushes) {
+      // asyncBoundary so subsequent computations in pipeline happen in default threadpool
+      task => task.executeOn(flushSched).asyncBoundary
+    }
+    .completedL
+    .doOnCancel(cancelTask)
+    .runAsync(shard.ingestSched)
   }
+
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
+    getShardE(dataset, shard).recoverIndex()
 
   // a more optimized ingest stream handler specifically for recovery
   // TODO: See if we can parallelize ingestion stream for even better throughput

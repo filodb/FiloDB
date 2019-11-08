@@ -94,8 +94,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
-    val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName, TestData.sourceConf)
-    val sd = SetupDataset(dataset, resources, noOpSource, TestData.storeConf)
+    val sd = SetupDataset(dataset, resources, NodeClusterActor.noOpSource, TestData.storeConf)
     coordinatorActor ! sd
     shardManager.addDataset(dataset, sd.config, sd.source, Some(self))
     shardManager.subscribe(probe.ref, dataset.ref)
@@ -105,6 +104,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
         shardMap = mapper
       }
     }
+    probe.ignoreMsg { case m: Any => m.isInstanceOf[CurrentShardSnapshot] }
   }
 
   def filters(keyValue: (String, String)*): Seq[ColumnFilter] =
@@ -239,7 +239,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should parse and execute concurrent LogicalPlan queries") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
@@ -266,11 +266,10 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
-      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
@@ -295,12 +294,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should concatenate raw series from multiple shards") {
       val ref = setupTimeSeries(2)
-      probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) => }
       // Same series is ingested into two shards.  I know, this should not happen in real life.
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
-      probe.expectMsg(Ack(0L))
+      probe.fishForSpecificMessage() {case Ack(0L) => }
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
