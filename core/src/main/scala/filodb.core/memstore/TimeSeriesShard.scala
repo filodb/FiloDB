@@ -833,6 +833,22 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
       for (group <- 0 until numGroups optimized) {
+        /* Logically, the task creation filter is as follows:
+
+           // Compute the time offset relative to the group number. 0 min, 1 min, 2 min, etc.
+           val timeOffset = group * flushOffsetMillis
+
+           // Adjust the timestamp relative to the offset such that the
+           // division rounds correctly.
+           val oldTimestampAdjusted = oldTimestamp - timeOffset
+           val newTimestampAdjusted = newTimestamp - timeOffset
+
+           if (oldTimstampAdjusted / flushBoundary != newTimestampAdjusted / flushBoundary) {
+             ...
+
+           As written the code the same thing but with fewer operations. It's also a bit
+           shorter, but you also had to read this comment...
+         */
         if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
           // Flush out the group before ingesting records for a new hour (by group offset).
           tasks += createFlushTask(prepareFlushGroup(group))
