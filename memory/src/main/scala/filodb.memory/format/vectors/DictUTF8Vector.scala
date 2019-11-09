@@ -108,7 +108,6 @@ object DictUTF8Vector {
  * string deserialization to be done, thus the code is much much simpler.
  */
 object UTF8DictVectorDataReader extends UTF8VectorDataReader {
-  // FIXME vector + ??
   final def codeVectAddr(acc: MemoryReader, vector: BinaryVectorPtr): BinaryVectorPtr =
     vector + acc.getInt(vector + 8)
   final def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =

@@ -9,6 +9,7 @@ import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
 
 object DoubleVector {
   /**
@@ -386,10 +387,10 @@ extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
     (min, max)
   }
 
-  private final val readVect = DoubleVector(MemoryReader.nativePtrReader, addr)
-  final def apply(index: Int): Double = readVect.apply(MemoryReader.nativePtrReader, addr, index)
+  private final val readVect = DoubleVector(nativePtrReader, addr)
+  final def apply(index: Int): Double = readVect.apply(nativePtrReader, addr, index)
   def reader: VectorDataReader = readVect
-  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(MemoryReader.nativePtrReader, addr)
+  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(nativePtrReader, addr)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
@@ -411,12 +412,12 @@ extends DoubleAppendingVector(addr, maxBytes, dispose) {
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = {
     val newChunk = DoubleVector.optimize(memFactory, this)
-    if (PrimitiveVectorReader.dropped(MemoryReader.nativePtrReader, addr))
+    if (PrimitiveVectorReader.dropped(nativePtrReader, addr))
       PrimitiveVectorReader.markDrop(MemoryAccessor.nativePtrAccessor, newChunk)
     newChunk
   }
 
-  override def reader: VectorDataReader = DoubleVector(MemoryReader.nativePtrReader, addr)
+  override def reader: VectorDataReader = DoubleVector(nativePtrReader, addr)
 }
 
 class MaskedDoubleAppendingVector(addr: BinaryRegion.NativePointer,
@@ -430,7 +431,7 @@ BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAp
   def nbits: Short = 64
 
   val subVect = new DoubleAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
+  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue

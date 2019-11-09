@@ -1,5 +1,6 @@
 package filodb.memory.format
 
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.HistogramReader
 
 // Value type for section type, must be a byte
@@ -97,15 +98,15 @@ trait SectionWriter {
   // Returns true if appending numBytes will start a new section
   protected def needNewSection(numBytes: Int): Boolean = {
     // Check remaining length/space.  A section must be less than 2^16 bytes long. Create new section if needed
-    val newNumBytes = curSection.sectionNumBytes(MemoryReader.nativePtrReader) + numBytes
-    curSection.numElements(MemoryReader.nativePtrReader) >= maxElementsPerSection.n || newNumBytes >= 65536
+    val newNumBytes = curSection.sectionNumBytes(nativePtrReader) + numBytes
+    curSection.numElements(nativePtrReader) >= maxElementsPerSection.n || newNumBytes >= 65536
   }
 
   // Appends a blob, writing a 2-byte length prefix before it.
   protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
     if (needNewSection(numBytes)) {
       if (bytesLeft >= (4 + numBytes)) {
-        curSection = Section.init(MemoryAccessor.nativePtrAccessor, curSection.endAddr(MemoryReader.nativePtrReader))
+        curSection = Section.init(MemoryAccessor.nativePtrAccessor, curSection.endAddr(nativePtrReader))
         bytesLeft -= 4
       } else return VectorTooSmall(4 + numBytes, bytesLeft)
     }
@@ -116,7 +117,7 @@ trait SectionWriter {
   protected def newSectionWithBlob(base: Any, offset: Long, numBytes: Int, sectType: SectionType): AddResponse = {
     if (bytesLeft >= (4 + numBytes)) {
       curSection = Section.init(MemoryAccessor.nativePtrAccessor,
-                                curSection.endAddr(MemoryReader.nativePtrReader),
+                                curSection.endAddr(nativePtrReader),
                                 sectType)
       bytesLeft -= 4
     } else return VectorTooSmall(4 + numBytes, bytesLeft)
@@ -126,7 +127,7 @@ trait SectionWriter {
   private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse =
     // Copy bytes to end address, update variables
     if (bytesLeft >= (numBytes + 2)) {
-      val writeAddr = curSection.endAddr(MemoryReader.nativePtrReader)
+      val writeAddr = curSection.endAddr(nativePtrReader)
       writeAddr.asU16.asMut.set(MemoryAccessor.nativePtrAccessor, numBytes)
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
@@ -202,7 +203,7 @@ trait SectionReader { self: HistogramReader =>
     var togo = numElems
     var ptr = startPtr
     while (togo > 0) {
-      ptr += ptr.asU16.getU16(acc) + 2 // FIXME huh? why +2 to value at ptr ?
+      ptr += ptr.asU16.getU16(acc) + 2 // add 2 to length of header
       togo -= 1
     }
     ptr

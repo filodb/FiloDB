@@ -13,6 +13,7 @@ import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
 import filodb.memory.format._
+import filodb.memory.format.MemoryReader._
 
 /**
   * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
@@ -56,15 +57,15 @@ object ChunkSet {
   */
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
-  def id: ChunkID = ChunkSetInfo.getChunkID(MemoryReader.nativePtrReader, infoAddr)
+  def id: ChunkID = ChunkSetInfo.getChunkID(nativePtrReader, infoAddr)
   // ingestion time as milliseconds from 1970
-  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(MemoryReader.nativePtrReader, infoAddr)
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(nativePtrReader, infoAddr)
   // number of rows encoded by this chunkset
-  def numRows: Int = ChunkSetInfo.getNumRows(MemoryReader.nativePtrReader, infoAddr)
+  def numRows: Int = ChunkSetInfo.getNumRows(nativePtrReader, infoAddr)
   // the starting timestamp of this chunkset
-  def startTime: Long = ChunkSetInfo.getStartTime(MemoryReader.nativePtrReader, infoAddr)
+  def startTime: Long = ChunkSetInfo.getStartTime(nativePtrReader, infoAddr)
   // The ending timestamp of this chunkset
-  def endTime: Long = ChunkSetInfo.getEndTime(MemoryReader.nativePtrReader, infoAddr)
+  def endTime: Long = ChunkSetInfo.getEndTime(nativePtrReader, infoAddr)
 
   /**
    * Returns the vector pointer for a particular column
@@ -470,7 +471,7 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getBoolean(columnNo: Int): Boolean = ???
   def getInt(columnNo: Int): Int = columnNo match {
     case 1 => info.numRows
-    case 4 => BinaryVector.totalBytes(MemoryReader.nativePtrReader, info.vectorPtr(column.id))
+    case 4 => BinaryVector.totalBytes(nativePtrReader, info.vectorPtr(column.id))
   }
   def getLong(columnNo: Int): Long = columnNo match {
     case 0 => info.id
@@ -481,14 +482,14 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getDouble(columnNo: Int): Double = ???
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
-    case IntColumn    => vectors.IntBinaryVector(MemoryReader.nativePtrReader,
+    case IntColumn    => vectors.IntBinaryVector(nativePtrReader,
                                     info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(MemoryReader.nativePtrReader,
+    case LongColumn   => vectors.LongBinaryVector(nativePtrReader,
                                     info.vectorPtr(column.id)).getClass.getName
-    case TimestampColumn => vectors.LongBinaryVector(MemoryReader.nativePtrReader,
+    case TimestampColumn => vectors.LongBinaryVector(nativePtrReader,
                                     info.vectorPtr(column.id)).getClass.getName
-    case DoubleColumn => vectors.DoubleVector(MemoryReader.nativePtrReader, info.vectorPtr(column.id)).getClass.getName
-    case StringColumn => vectors.UTF8Vector(MemoryReader.nativePtrReader, info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(nativePtrReader, info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(nativePtrReader, info.vectorPtr(column.id)).getClass.getName
     case o: Any       => "nananana, heyheyhey, goodbye"
   }
 

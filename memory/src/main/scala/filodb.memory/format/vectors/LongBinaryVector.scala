@@ -9,6 +9,8 @@ import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
+
 
 object LongBinaryVector {
   /**
@@ -297,10 +299,10 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
-  private final val readVect = LongBinaryVector(MemoryReader.nativePtrReader, addr)
-  final def apply(index: Int): Long = readVect.apply(MemoryReader.nativePtrReader, addr, index)
+  private final val readVect = LongBinaryVector(nativePtrReader, addr)
+  final def apply(index: Int): Long = readVect.apply(nativePtrReader, addr, index)
   final def reader: VectorDataReader = LongVectorDataReader64
-  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(MemoryReader.nativePtrReader, addr)
+  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -342,7 +344,7 @@ BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppe
   def nbits: Short = 64
 
   val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
-  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
+  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue

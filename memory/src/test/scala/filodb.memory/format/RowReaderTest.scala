@@ -5,11 +5,12 @@ import java.sql.Timestamp
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.memory.NativeMemoryManager
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
 
 class RowReaderTest extends FunSpec with Matchers {
   val memFactory = new NativeMemoryManager(100000)
-  val acc = MemoryReader.nativePtrReader
+  val acc = nativePtrReader
   val rows = Seq(
     (Some("Matthew Perry"), Some(18), Some(new Timestamp(10000L))),
     (Some("Michelle Pfeiffer"), None, Some(new Timestamp(10010L))),

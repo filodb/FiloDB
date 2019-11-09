@@ -9,6 +9,7 @@ import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
 
 /**
   * Constructor methods for UTF8 vector types, as well as UTF8/binary blob utilities
@@ -238,11 +239,11 @@ class UTF8AppendableVector(val addr: BinaryRegion.NativePointer,
   }
 
   final def apply(n: Int): ZeroCopyUTF8String =
-    UTF8FlexibleVectorDataReader.apply(MemoryReader.nativePtrReader, addr, n)
+    UTF8FlexibleVectorDataReader.apply(nativePtrReader, addr, n)
   final def isAvailable(n: Int): Boolean = UnsafeUtils.getInt(addr + 12 + n * 4) != NABlob
   final def reader: VectorDataReader = UTF8FlexibleVectorDataReader
   def copyToBuffer: Buffer[ZeroCopyUTF8String] =
-    UTF8FlexibleVectorDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
+    UTF8FlexibleVectorDataReader.toBuffer(nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 

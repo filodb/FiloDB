@@ -4,6 +4,7 @@ import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.prop.PropertyChecks
 
 import filodb.memory.NativeMemoryManager
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.UTF8Vector
 
 class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
@@ -12,7 +13,7 @@ class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
 
   import filodb.memory.format.Encodings._
 
-  val acc = MemoryReader.nativePtrReader
+  val acc = nativePtrReader
   // Generate a list of bounded integers, every time bound it slightly differently
   // (to test different int compression techniques)
   def boundedIntList: Gen[Seq[Option[Int]]] =

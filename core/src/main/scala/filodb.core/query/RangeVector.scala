@@ -84,7 +84,6 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
-
 /**
   * Represents a single result of any FiloDB Query.
   */

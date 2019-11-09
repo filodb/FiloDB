@@ -372,7 +372,7 @@ object HistogramBuckets {
   def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
     case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
     case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
-    case HistFormat_Custom_Delta     => custom(acc.base, bucketsDef.addr)
+    case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }
 

@@ -4,8 +4,8 @@ import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
 import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.LongVectorDataReader
-
 /**
   * Abstraction for reading byte sequence representing
   * ChunkSetInfo. This implementation is typically used in the query and
@@ -97,7 +97,7 @@ final case class ChunkSetInfoOffHeap(csi: ChunkSetInfo) extends ChunkSetInfoRead
   def numRows: Int = csi.numRows
   def startTime: Long = csi.startTime
   def endTime: Long = csi.endTime
-  def vectorAccessor(colId: Int): MemoryReader = MemoryReader.nativePtrReader
+  def vectorAccessor(colId: Int): MemoryReader = nativePtrReader
   def vectorAddress(colId: Int): Long = csi.vectorPtr(colId)
 }
 

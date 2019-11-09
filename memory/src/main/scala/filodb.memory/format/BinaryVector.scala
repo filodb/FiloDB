@@ -7,6 +7,7 @@ import scalaxy.loops._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
 
 /**
  * An offheap, immutable, zero deserialization, minimal/zero allocation, insanely fast binary sequence.
@@ -39,7 +40,7 @@ object BinaryVector {
   final def totalBytes(acc: MemoryReader, addr: BinaryVectorPtr): Int = acc.getInt(addr) + 4
 
   final def asBuffer(addr: BinaryVectorPtr): ByteBuffer = {
-    UnsafeUtils.asDirectBuffer(addr, totalBytes(MemoryReader.nativePtrReader, addr))
+    UnsafeUtils.asDirectBuffer(addr, totalBytes(nativePtrReader, addr))
   }
 
   type BufToDataReader = PartialFunction[Class[_], ByteBuffer => VectorDataReader]
@@ -533,7 +534,7 @@ extends OptimizingPrimitiveAppender[A] {
   BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePtrAccessor, addr, vectMajorType, vectSubType)
   UnsafeUtils.setShort(addr + OffsetNBits, ((nbits & NBitsMask) | (if (signed) SignMask else 0)).toShort)
 
-  def numBytes: Int = MemoryReader.nativePtrReader.getInt(addr) + 4
+  def numBytes: Int = nativePtrReader.getInt(addr) + 4
 
   private final val dangerZone = addr + maxBytes
   final def checkOffset(): AddResponse =
@@ -630,14 +631,14 @@ extends BinaryAppendableVector[A] {
 
   override final def length: Int = subVect.length
   final def numBytes: Int = 12 + bitmapMaskBufferSize + subVect.numBytes
-  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(MemoryReader.nativePtrReader, addr, index)
+  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(nativePtrReader, addr, index)
   final def apply(index: Int): A = subVect.apply(index)
 
   final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {
     case Ack =>
       val resp = subVect.addNA()
       if (resp == Ack) {
-        val maskVal = MemoryReader.nativePtrReader.getLong(bitmapOffset + curBitmapOffset)
+        val maskVal = nativePtrReader.getLong(bitmapOffset + curBitmapOffset)
         UnsafeUtils.setLong(bitmapOffset + curBitmapOffset, maskVal | curMask)
         nextMaskIndex()
       }
@@ -659,18 +660,18 @@ extends BinaryAppendableVector[A] {
 
   final def isAllNA: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (MemoryReader.nativePtrReader.getLong(bitmapOffset + word * 8) != -1L) return false
+      if (nativePtrReader.getLong(bitmapOffset + word * 8) != -1L) return false
     }
     val naMask = curMask - 1
-    (MemoryReader.nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
+    (nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
   }
 
   final def noNAs: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (MemoryReader.nativePtrReader.getLong(bitmapOffset + word * 8) != 0) return false
+      if (nativePtrReader.getLong(bitmapOffset + word * 8) != 0) return false
     }
     val naMask = curMask - 1
-    (MemoryReader.nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
+    (nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
   }
 
   def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {

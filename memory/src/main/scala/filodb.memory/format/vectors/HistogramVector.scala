@@ -11,6 +11,7 @@ import scalaxy.loops._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.MemoryReader._
 
 /**
  * BinaryHistogram is the binary format for a histogram binary blob included in BinaryRecords and sent over the wire.
@@ -181,7 +182,7 @@ object HistogramVector {
   final def matchBucketDef(hist: BinaryHistogram.BinHistogram, acc: MemoryReader, addr: Ptr.U8): Boolean =
     (hist.formatCode == formatCode(acc, addr)) &&
     (hist.bucketDefNumBytes == bucketDefNumBytes(acc, addr)) && {
-      UnsafeUtils.equate(acc.base, bucketDefAddr(addr).addr,
+      UnsafeUtils.equate(acc.base, acc.baseOffset + bucketDefAddr(addr).addr,
         hist.buf.byteArray, hist.bucketDefOffset, hist.bucketDefNumBytes)
     }
 
@@ -251,8 +252,8 @@ class AppendableHistogramVector(factory: MemFactory,
     factory.freeMemory(addr)
   }
 
-  final def numBytes: Int = vectPtr.asI32.getI32(MemoryReader.nativePtrReader) + 4
-  final def length: Int = getNumHistograms(MemoryReader.nativePtrReader, vectPtr)
+  final def numBytes: Int = vectPtr.asI32.getI32(nativePtrReader) + 4
+  final def length: Int = getNumHistograms(nativePtrReader, vectPtr)
   final def isAvailable(index: Int): Boolean = true
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
@@ -272,7 +273,7 @@ class AppendableHistogramVector(factory: MemFactory,
     }
     if (h.bucketDefNumBytes > h.totalLength) return InvalidHistogram
 
-    val numItems = getNumHistograms(MemoryReader.nativePtrReader, vectPtr)
+    val numItems = getNumHistograms(nativePtrReader, vectPtr)
     if (numItems == 0) {
       // Copy the bucket definition and set the bucket def size
       UnsafeUtils.unsafe.copyMemory(buf.byteArray, h.bucketDefOffset,
@@ -282,11 +283,11 @@ class AppendableHistogramVector(factory: MemFactory,
       UnsafeUtils.setByte(addr + OffsetFormatCode, h.formatCode)
 
       // Initialize the first section
-      val firstSectPtr = afterBucketDefAddr(MemoryReader.nativePtrReader, vectPtr)
+      val firstSectPtr = afterBucketDefAddr(nativePtrReader, vectPtr)
       initSectionWriter(firstSectPtr, ((vectPtr + maxBytes).addr - firstSectPtr.addr).toInt)
     } else {
       // check the bucket schema is identical.  If not, return BucketSchemaMismatch
-      if (!matchBucketDef(h, MemoryReader.nativePtrReader, vectPtr)) return BucketSchemaMismatch
+      if (!matchBucketDef(h, nativePtrReader, vectPtr)) return BucketSchemaMismatch
     }
 
     val res = appendHist(buf, h, numItems)
@@ -313,7 +314,7 @@ class AppendableHistogramVector(factory: MemFactory,
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   // NOTE: do not access reader below unless this vect is nonempty.  TODO: fix this, or don't if we don't use this class
-  lazy val reader: VectorDataReader = new RowHistogramReader(MemoryReader.nativePtrReader, vectPtr)
+  lazy val reader: VectorDataReader = new RowHistogramReader(nativePtrReader, vectPtr)
 
   def reset(): Unit = {
     resetNumHistograms(MemoryAccessor.nativePtrAccessor, vectPtr)
@@ -410,7 +411,7 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
     }
   }
 
-  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(MemoryReader.nativePtrReader, vectPtr)
+  override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(nativePtrReader, vectPtr)
 }
 
 trait HistogramReader extends VectorDataReader {

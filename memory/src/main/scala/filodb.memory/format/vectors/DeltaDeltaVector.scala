@@ -6,6 +6,7 @@ import scalaxy.loops._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.MemoryReader._
 
 final case class MinMax(min: Int, max: Int)
 
@@ -312,7 +313,7 @@ class DeltaDeltaAppendingVector(val addr: BinaryRegion.NativePointer,
   final def apply(index: Int): Long = initValue + slope.toLong * index + deltas(index)
   final def numBytes: Int = 20 + deltas.numBytes
   final def reader: VectorDataReader = DeltaDeltaDataReader
-  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(MemoryReader.nativePtrReader, addr)
+  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(nativePtrReader, addr)
 
   final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
   final def addData(data: Long): AddResponse = {

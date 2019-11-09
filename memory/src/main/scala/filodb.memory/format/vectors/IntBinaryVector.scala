@@ -9,6 +9,7 @@ import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.UnsafeUtils.ZeroPointer
 
 object IntBinaryVector {
@@ -83,7 +84,7 @@ object IntBinaryVector {
     case 4 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = if (bitShift == 0) 0 else MemoryReader.nativePtrReader.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else nativePtrReader.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
@@ -94,7 +95,7 @@ object IntBinaryVector {
     case 2 => new IntAppendingVector(addr, maxBytes, nbits, signed, dispose) {
       final def addData(v: Int): AddResponse = checkOffset() match {
         case Ack =>
-          val origByte = if (bitShift == 0) 0 else MemoryReader.nativePtrReader.getByte(writeOffset)
+          val origByte = if (bitShift == 0) 0 else nativePtrReader.getByte(writeOffset)
           val newByte = (origByte | (v << bitShift)).toByte
           UnsafeUtils.setByte(writeOffset, newByte)
           bumpBitShift()
@@ -474,9 +475,9 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
   override def vectSubType: Int = WireFormat.SUBTYPE_INT_NOMASK
 
   final def addNA(): AddResponse = addData(0)
-  final def apply(index: Int): Int = reader.apply(MemoryReader.nativePtrReader, addr, index)
-  val reader = IntBinaryVector.simple(MemoryReader.nativePtrReader, addr)
-  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(MemoryReader.nativePtrReader, addr)
+  final def apply(index: Int): Int = reader.apply(nativePtrReader, addr, index)
+  val reader = IntBinaryVector.simple(nativePtrReader, addr)
+  def copyToBuffer: Buffer[Int] = reader.asIntReader.toBuffer(nativePtrReader, addr)
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
@@ -484,7 +485,7 @@ extends PrimitiveAppendableVector[Int](addr, maxBytes, nbits, signed) {
     var min = Int.MaxValue
     var max = Int.MinValue
     for { index <- 0 until length optimized } {
-      val data = reader.apply(MemoryReader.nativePtrReader, addr, index)
+      val data = reader.apply(nativePtrReader, addr, index)
       if (data < min) min = data
       if (data > max) max = data
     }
@@ -511,7 +512,7 @@ BitmapMaskAppendableVector[Int](addr, maxElements) with OptimizingPrimitiveAppen
                                                     nbits, signed, dispose)
 
   def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
-  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(MemoryReader.nativePtrReader, addr)
+  def copyToBuffer: Buffer[Int] = MaskedIntBinaryVector.toBuffer(nativePtrReader, addr)
 
   final def minMax: (Int, Int) = {
     var min = Int.MaxValue

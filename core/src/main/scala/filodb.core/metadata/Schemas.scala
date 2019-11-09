@@ -32,7 +32,7 @@ final case class DataSchema private(name: String,
   val timestampColumn  = columns.head
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID
-  def readers(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
+  def reader(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
     BinaryVector.reader(columns(colId).columnType.clazz, acc, addr)
   }
 
@@ -176,8 +176,8 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   /**
     * Fetches reader for a binary vector
     */
-  def dataReaders(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader =
-    data.readers(colId, acc, addr)
+  def dataReader(colId: Int, acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader =
+    data.reader(colId, acc, addr)
 
   import Column.ColumnType._
 
@@ -275,9 +275,7 @@ final case class Schemas(part: PartitionSchema,
  */
 object Schemas {
   import java.nio.charset.StandardCharsets.UTF_8
-
   import Accumulation._
-
   import Dataset._
 
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
