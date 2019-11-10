@@ -10,8 +10,6 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object Abs extends InstantFunctionId("abs")
 
-  case object Absent extends InstantFunctionId("absent")
-
   case object Ceil extends InstantFunctionId("ceil")
 
   case object ClampMax extends InstantFunctionId("clamp_max")
@@ -236,6 +234,13 @@ object SortFunctionId extends Enum[SortFunctionId] {
   case object Sort extends SortFunctionId("sort")
 
   case object SortDesc extends SortFunctionId("sort_desc")
+}
+
+sealed abstract class AbsentFunctionId(override val entryName: String) extends EnumEntry
+
+object AbsentFunctionId extends Enum[AbsentFunctionId] {
+  val values = findValues
+  case object Absent extends AbsentFunctionId("absent")
 }
 
 

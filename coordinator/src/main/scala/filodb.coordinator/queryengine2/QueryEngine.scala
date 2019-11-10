@@ -248,6 +248,8 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
+      case lp: ApplyAbsentFunction         =>  materializeAbsentFunction(queryId, submitTime, options, lp,
+                                               spreadProvider)
     }
   }
 
@@ -463,6 +465,25 @@ class QueryEngine(dsRef: DatasetRef,
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(SortFunctionMapper(lp.function)))
+      vectors
+    }
+  }
+
+  private def materializeAbsentFunction(queryId: String,
+                                        submitTime: Long,
+                                        options: QueryOptions,
+                                        lp: ApplyAbsentFunction,
+                                        spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    if(vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer((AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
+        dsOptions.metricColumn)))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
+        dsOptions.metricColumn )))
       vectors
     }
   }

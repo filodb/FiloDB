@@ -1,5 +1,6 @@
 package filodb.prometheus.ast
 
+import filodb.core.query.RangeParams
 import filodb.query._
 
 trait Functions extends Base with Operators with Vectors {
@@ -12,7 +13,8 @@ trait Functions extends Base with Operators with Vectors {
       RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
-      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+       AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty){
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
@@ -29,6 +31,7 @@ trait Functions extends Base with Operators with Vectors {
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
       val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
       val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
+      val absentFunctionIdOpt = AbsentFunctionId.withNameInsensitiveOption(name)
 
       if (instantFunctionIdOpt.isDefined) {
         val instantFunctionId = instantFunctionIdOpt.get
@@ -57,8 +60,11 @@ trait Functions extends Base with Operators with Vectors {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
 
         ApplySortFunction(periodicSeriesPlan, sortFunctionId, otherParams)
-      }
-      else {
+      }  else if (absentFunctionIdOpt.isDefined) {
+        val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step, timeParams.end))
+      } else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
 

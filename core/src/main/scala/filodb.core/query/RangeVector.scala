@@ -234,3 +234,5 @@ object SerializableRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: Iterator[RowReader]) extends RangeVector
+
+final case class RangeParams(start: Long, step: Long, end: Long)

@@ -1,17 +1,18 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+import scala.collection.mutable.ListBuffer
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.RowReader
+import filodb.core.query.Filter.Equals
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
 import filodb.query.MiscellaneousFunctionId.{LabelJoin, LabelReplace}
 import filodb.query.SortFunctionId.{Sort, SortDesc}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn._
-
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -241,3 +242,46 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
     }
   }
 }
+
+final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangeParams: RangeParams, metricColumn: String)
+  extends RangeVectorTransformer {
+
+  protected[exec] def args: String =
+    s"columnFilter=$columnFilter rangeParams=$rangeParams metricColumn=$metricColumn"
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+
+      val resultRv = source.toListL.map { rvs =>
+       if (rvs.isEmpty) {
+         Seq(new RangeVector {
+            override def key: RangeVectorKey = {
+              val labelsFromFilter = columnFilter.filter(_.filter.isInstanceOf[Equals]).
+                  filterNot(_.column.equals(metricColumn)).map {
+                  c => {
+                    ZeroCopyUTF8String(c.column) -> ZeroCopyUTF8String(c.filter.valuesStrings.head.asInstanceOf[String])
+                  }
+                }.toMap
+                CustomRangeVectorKey(labelsFromFilter)
+              }
+
+            override def rows: Iterator[RowReader] = {
+              val rowList = new ListBuffer[TransientRow]()
+              for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+                rowList += new TransientRow(i*1000, 1)
+              }
+              rowList.iterator
+            }
+          })
+        }
+        else {
+         Seq.empty[RangeVector]
+        }
+      }.map(Observable.fromIterable)
+
+      Observable.fromTask(resultRv).flatten
+    }
+  }
+

@@ -13,7 +13,8 @@ import monix.reactive.observables.ConnectableObservable
 import filodb.core.DatasetRef
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query.{ColumnInfo, RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
@@ -114,13 +115,20 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
+
       FiloSchedulers.assertThreadName(QuerySchedName)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
-      val resultTask = if (resSchema == ResultSchema.empty) {
+      val resSchemaForTransformer = if ((allTransformers.size > 0 &&
+        allTransformers.head.isInstanceOf[AbsentFunctionMapper])) {
+         ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+          ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+      } else
+        resSchema
+      val resultTask = if (resSchemaForTransformer == ResultSchema.empty) {
         qLogger.debug(s"Empty plan $this, returning empty results")
-        Task.eval(QueryResult(id, resSchema, Nil))
+        Task.eval(QueryResult(id, resSchemaForTransformer, Nil))
       } else {
-        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchemaForTransformer)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
         }
