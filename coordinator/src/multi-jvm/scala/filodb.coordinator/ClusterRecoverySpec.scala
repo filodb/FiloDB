@@ -23,17 +23,23 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
   val ourConf = s"""
   filodb {
     memstore.groups-per-shard = 4
+    partition-schema {
+      columns = ["Actor2Code:string", "Actor2Name:string"]
+      predefined-keys = []
+      ${GdeltTestData.datasetOptionConfig}
+    }
+    schemas {
+      gdelt {
+        columns = ["GLOBALEVENTID:long", "SQLDATE:long", "MonthYear:int",
+                        "Year:int", "NumArticles:int", "AvgTone:double"]
+        value-column = "AvgTone"
+        downsamplers = []
+      }
+    }
     inline-dataset-configs = [
       {
         dataset = "gdelt"
-        definition {
-          partition-columns = ["Actor2Code:string", "Actor2Name:string"]
-          data-columns = ["GLOBALEVENTID:long", "SQLDATE:long", "MonthYear:int",
-                          "Year:int", "NumArticles:int", "AvgTone:double"]
-          row-key-columns = [ "GLOBALEVENTID" ]
-          downsamplers = []
-        }
-        ${GdeltTestData.datasetOptionConfig}
+        schema = "gdelt"
         num-shards = 2
         min-num-nodes = 2
         sourcefactory = "${classOf[sources.CsvStreamFactory].getName}"
@@ -53,6 +59,7 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
   val globalConfig = ConfigFactory.parseString(ourConf)
                        .withFallback(ConfigFactory.parseResources("application_test.conf"))
                        .withFallback(ConfigFactory.load("filodb-defaults.conf"))
+  FilodbSettings.initialize(globalConfig)
   commonConfig(globalConfig)
 }
 
@@ -148,7 +155,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, schema, vectors) =>
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn),
-                                       ColumnInfo("AvgTone", ColumnType.DoubleColumn))
+                                       ColumnInfo("value", ColumnType.DoubleColumn))
         // query is counting each partition....
         vectors should have length (59 * 2)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)

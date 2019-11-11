@@ -7,19 +7,17 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.Types.ColumnId
-import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkScanMethod, ChunkSource, ChunkSourceStats,
-  PartitionScanMethod, RawPartData, ReadablePartition, ScanSplit}
+import filodb.core.memstore.PartLookupResult
+import filodb.core.metadata.Schemas
+import filodb.core.store._
 import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
   * Goal is that Non-Leaf plans can be executed locally in JVM and make network
   * calls only for children.
-  * @param dataset to be used by ExecPlan#execute
   */
-case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
+case class InProcessPlanDispatcher() extends PlanDispatcher {
 
   // Empty query config, since its does not apply in case of non-leaf plans
   val queryConfig: QueryConfig = EmptyQueryConfig
@@ -29,7 +27,7 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
     // translate implicit ExecutionContext to monix.Scheduler
-    plan.execute(source, dataset, queryConfig)
+    plan.execute(source, queryConfig)
   }
 
 }
@@ -38,13 +36,19 @@ case class InProcessPlanDispatcher(dataset: Dataset) extends PlanDispatcher {
   * No-op chunk source which does nothing and throws exception for all functions.
   */
 case class UnsupportedChunkSource() extends ChunkSource {
-
-  override def scanPartitions(dataset: Dataset, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
-                              chunkMethod: ChunkScanMethod): Observable[ReadablePartition] =
+  def scanPartitions(ref: DatasetRef,
+                     iter: PartLookupResult): Observable[ReadablePartition] =
     throw new UnsupportedOperationException("This operation is not supported")
 
-  override def groupsInDataset(dataset: Dataset): Int =
+  def lookupPartitions(ref: DatasetRef,
+                       partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult =
     throw new UnsupportedOperationException("This operation is not supported")
+
+  override def groupsInDataset(dataset: DatasetRef): Int =
+    throw new UnsupportedOperationException("This operation is not supported")
+
+  def schemas(ref: DatasetRef): Option[Schemas] = None
 
   override def stats: ChunkSourceStats =
     throw new UnsupportedOperationException("This operation is not supported")
@@ -52,7 +56,7 @@ case class UnsupportedChunkSource() extends ChunkSource {
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] =
     throw new UnsupportedOperationException("This operation is not supported")
 
-  override def readRawPartitions(dataset: Dataset, columnIDs: Seq[ColumnId], partMethod: PartitionScanMethod,
+  override def readRawPartitions(ref: DatasetRef, partMethod: PartitionScanMethod,
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] =
     throw new UnsupportedOperationException("This operation is not supported")
 }

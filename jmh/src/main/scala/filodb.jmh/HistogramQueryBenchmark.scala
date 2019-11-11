@@ -18,6 +18,7 @@ import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, Unava
 import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
+import filodb.core.metadata.Schemas
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
@@ -47,10 +48,11 @@ class HistogramQueryBenchmark {
   // HistogramColumn data: 10 series, 180 samples per series = 1800 total
   println("Ingesting containers of histogram schema data....")
   val histSchemaData = linearHistSeries(numBuckets = 64).map(SeqRowReader)
-  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, histDataset.ingestionSchema, 230000)
-  histSchemaData.take(10 * 180).foreach(histSchemaBuilder.addFromReader)
+  val histSchemaBuilder = new RecordBuilder(MemFactory.onHeapFactory, 230000)
+  histSchemaData.take(10 * 180).foreach(histSchemaBuilder.addFromReader(_, histDataset.schema))
 
-  memStore.setup(histDataset, 0, ingestConf)
+  val histSchemas = Schemas(histDataset.schema)
+  memStore.setup(histDataset.ref, histSchemas, 0, ingestConf)
   val hShard = memStore.getShardE(histDataset.ref, 0)
   histSchemaBuilder.allContainers.foreach { c => hShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(histDataset.ref) // commit lucene index
@@ -58,11 +60,12 @@ class HistogramQueryBenchmark {
   // Prometheus hist data: 10 series * 66 = 660 series * 180 samples
   println("Ingesting containers of prometheus schema data....")
   val promDataset = MetricsTestData.timeseriesDataset
+  val promSchemas = Schemas(promDataset.schema)
   val promData = MetricsTestData.promHistSeries(numBuckets = 64).map(SeqRowReader)
-  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, promDataset.ingestionSchema, 4200000)
-  promData.take(10*66*180).foreach(promBuilder.addFromReader)
+  val promBuilder = new RecordBuilder(MemFactory.onHeapFactory, 4200000)
+  promData.take(10*66*180).foreach(promBuilder.addFromReader(_, promDataset.schema))
 
-  memStore.setup(promDataset, 0, ingestConf)
+  memStore.setup(promDataset.ref, promSchemas, 0, ingestConf)
   val pShard = memStore.getShardE(promDataset.ref, 0)
   promBuilder.allContainers.foreach { c => pShard.ingest(c, 0) }
   memStore.refreshIndexForTesting(promDataset.ref) // commit lucene index
@@ -76,8 +79,8 @@ class HistogramQueryBenchmark {
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
   // Query configuration
-  val hEngine = new QueryEngine(histDataset, shardMapper, EmptyFailureProvider)
-  val pEngine = new QueryEngine(promDataset, shardMapper, EmptyFailureProvider)
+  val hEngine = new QueryEngine(histDataset.ref, histSchemas, shardMapper, EmptyFailureProvider)
+  val pEngine = new QueryEngine(promDataset.ref, promSchemas, shardMapper, EmptyFailureProvider)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total{job="prometheus",__col__="h"}[30s]))"""
@@ -107,7 +110,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def histSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      hExecPlan.execute(memStore, histDataset, queryConfig)(querySched, 60.seconds)
+      hExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -119,7 +122,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def promSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      pExecPlan.execute(memStore, promDataset, queryConfig)(querySched, 60.seconds)
+      pExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

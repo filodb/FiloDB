@@ -10,16 +10,19 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response, Types}
+import filodb.core.{DatasetRef, Response}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.metadata.Dataset
+import filodb.core.memstore.TimeSeriesShard.PartKey
+import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
+class TimeSeriesMemStore(config: Config,
+                         val store: ColumnStore,
+                         val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
@@ -50,21 +53,21 @@ extends MemStore with StrictLogging {
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
-    val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
+    val shards = datasets.getOrElseUpdate(ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards.containsKey(shard)) {
-      throw ShardAlreadySetup(dataset.ref, shard)
+      throw ShardAlreadySetup(ref, shard)
     } else {
-      val memFactory = datasetMemFactories.getOrElseUpdate(dataset.ref, {
+      val memFactory = datasetMemFactories.getOrElseUpdate(ref, {
         val bufferMemorySize = storeConf.ingestionBufferMemSize
-        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${dataset.ref}")
-        val tags = Map("dataset" -> dataset.ref.toString)
+        logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for dataset=${ref}")
+        val tags = Map("dataset" -> ref.toString)
         new NativeMemoryManager(bufferMemorySize, tags)
       })
 
-      val publisher = downsamplePublishers.getOrElseUpdate(dataset.ref, makeAndStartPublisher(downsample))
-      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, memFactory, store, metastore,
+      val publisher = downsamplePublishers.getOrElseUpdate(ref, makeAndStartPublisher(downsample))
+      val tsdb = new OnDemandPagingShard(ref, schemas, storeConf, shard, memFactory, store, metastore,
                               partEvictionPolicy, downsample, publisher)
       shards.put(shard, tsdb)
     }
@@ -103,10 +106,9 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds, cancelTask)
+    ingestStream(dataset, shard, ingestCommands, flushSched, cancelTask)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -119,7 +121,6 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int,
                    cancelTask: Task[Unit]): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
@@ -133,7 +134,7 @@ extends MemStore with StrictLogging {
                                                 // step below purges partitions and needs to run on ingestion thread
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
-                                                                diskTimeToLiveSeconds, flushTimeBucket))
+                                                                flushTimeBucket))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched).asyncBoundary }
@@ -198,28 +199,37 @@ extends MemStore with StrictLogging {
         .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                             end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =
+                             end: Long, start: Long, limit: Int): Iterator[PartKey] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, end, start, limit)).getOrElse(Iterator.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
-  def readRawPartitions(dataset: Dataset,
-                        columnIDs: Seq[Types.ColumnId],
+  def readRawPartitions(ref: DatasetRef,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
-  def scanPartitions(dataset: Dataset,
-                     columnIDs: Seq[Types.ColumnId],
-                     partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    val shard = datasets(dataset.ref).get(partMethod.shard)
+  def scanPartitions(ref: DatasetRef,
+                     iter: PartLookupResult): Observable[ReadablePartition] = {
+    val shard = datasets(ref).get(iter.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
-      throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset ${dataset.ref} is not assigned to " +
+      throw new IllegalArgumentException(s"Shard ${iter.shard} of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.scanPartitions(columnIDs, partMethod, chunkMethod)
+    shard.scanPartitions(iter)
+  }
+
+  def lookupPartitions(ref: DatasetRef,
+                       partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+    val shard = datasets(ref).get(partMethod.shard)
+
+    if (shard == UnsafeUtils.ZeroPointer) {
+      throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset $ref is not assigned to " +
+        s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
+    }
+    shard.lookupPartitions(partMethod, chunkMethod)
   }
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
@@ -237,8 +247,11 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
-  def groupsInDataset(dataset: Dataset): Int =
-    datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+  def groupsInDataset(ref: DatasetRef): Int =
+    datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+
+  def schemas(ref: DatasetRef): Option[Schemas] =
+    datasets.get(ref).map(_.values.asScala.head.schemas)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     getShard(ref, cve.shard).get.analyzeAndLogCorruptPtr(cve)

@@ -75,7 +75,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
    * Reads and returns a single RawPartData, raw data for a single partition/time series
    */
   def readRawPartitionData(partKeyBytes: Array[Byte],
-                           columnIds: Array[Int],
                            chunkInfos: Seq[Array[Byte]]): Task[RawPartData] = {
     val query = readChunkInCql.bind().setBytes(0, toBuffer(partKeyBytes))
                                      .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
@@ -104,9 +103,15 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                               .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readRawPartitionRange(partitions: Seq[Array[Byte]],
-                            columnIds: Array[Int],
-                            startTime: Long, endTimeExclusive: Long): Observable[RawPartData] = {
-    val query = readChunkRangeCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
+                            startTime: Long,
+                            endTimeExclusive: Long): Observable[RawPartData] = {
+    readRawPartitionRangeBB(partitions.map(toBuffer), startTime, endTimeExclusive)
+  }
+
+  def readRawPartitionRangeBB(partitions: Seq[ByteBuffer],
+                              startTime: Long,
+                              endTimeExclusive: Long): Observable[RawPartData] = {
+    val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
                                         .setLong(1, chunkID(startTime, 0))
                                         .setLong(2, chunkID(endTimeExclusive, 0))
     val futRawParts = session.executeAsync(query)

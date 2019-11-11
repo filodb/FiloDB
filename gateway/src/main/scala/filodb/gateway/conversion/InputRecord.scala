@@ -1,13 +1,11 @@
 package filodb.gateway.conversion
 
-import scala.language.postfixOps
-
 import remote.RemoteStorage.TimeSeries
-import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{DatasetOptions, Schema}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String => ZCUTF8}
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 
 /**
  * An InputRecord represents one "record" of timeseries data for input to FiloDB system.
@@ -37,6 +35,94 @@ trait InputRecord {
   def addToBuilder(builder: RecordBuilder): Unit
 }
 
+// Utilities for adding data for standard schemas
+object InputRecord {
+  import filodb.core.metadata.Schemas._
+  import ZCUTF8._
+
+  /**
+   * Writes a BinaryRecord for the built-in gauge schema.  Note that tags are NOT manipulated at all.
+   */
+  def writeGaugeRecord(builder: RecordBuilder,
+                       metric: String,
+                       tags: Map[String, String],
+                       timestamp: Long,
+                       value: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, value, gauge)
+
+  private def writeKVRecord(builder: RecordBuilder,
+                            metric: String,
+                            tags: Map[String, String],
+                            timestamp: Long,
+                            value: Double,
+                            schema: Schema): Unit = {
+    builder.startNewRecord(schema)
+    builder.addLong(timestamp)
+    builder.addDouble(value)
+
+    builder.addString(metric)
+    builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+    builder.endRecord()
+  }
+
+  def writePromCounterRecord(builder: RecordBuilder,
+                             metric: String,
+                             tags: Map[String, String],
+                             timestamp: Long,
+                             count: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, count, promCounter)
+
+  def writeUntypedRecord(builder: RecordBuilder,
+                         metric: String,
+                         tags: Map[String, String],
+                         timestamp: Long,
+                         value: Double): Unit =
+    writeKVRecord(builder, metric, tags, timestamp, value, untyped)
+
+
+  /**
+   * Writes a Prometheus-style increasing histogram record, along with the sum and count,
+   * using the efficient prom-histogram schema, storing the entire histogram together for efficiency.
+   * The list of key-values should have "sum", "count", and bucket tops as keys, in any order.
+   * This code will sort and encode histograms correctly from those.
+   */
+  def writePromHistRecord(builder: RecordBuilder,
+                          metric: String,
+                          tags: Map[String, String],
+                          timestamp: Long,
+                          kvs: Seq[(String, Double)]): Unit = {
+    var sum = Double.NaN
+    var count = Double.NaN
+
+    // Filter out sum and count, then convert and sort buckets
+    val sortedBuckets = kvs.filter {
+      case ("sum", v) => sum = v
+                         false
+      case ("count", v) => count = v
+                           false
+      case other      => true
+    }.map {
+      case ("+Inf", v) => (Double.PositiveInfinity, v.toLong)
+      case (k, v) =>      (k.toDouble, v.toLong)
+    }.sorted
+
+    // Built up custom histogram objects and scheme, then encode
+    val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+    val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+
+    // Now, write out histogram
+    builder.startNewRecord(promHistogram)
+    builder.addLong(timestamp)
+    builder.addDouble(sum)
+    builder.addDouble(count)
+    builder.addBlob(hist.serialize())
+
+    builder.addString(metric)
+    builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+    builder.endRecord()
+  }
+}
+
 /**
  * A Prometheus-format time series input record.
  * Logic in here does the following conversions:
@@ -49,61 +135,52 @@ trait InputRecord {
  */
 case class PrometheusInputRecord(tags: Map[String, String],
                                  metric: String,
-                                 dataset: Dataset,
                                  timestamp: Long,
                                  value: Double) extends InputRecord {
+  import filodb.core.metadata.Schemas.promCounter
+  import PrometheusInputRecord._
   import collection.JavaConverters._
 
-  val trimmedMetric = RecordBuilder.trimShardColumn(dataset, dataset.options.metricColumn, metric)
+  val trimmedMetric = RecordBuilder.trimShardColumn(promCounter.options, metricCol, metric)
   val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
 
   // Get hashes and sort tags of the keys/values for shard calculation
   val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
 
   final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, trimmedMetric)
-  final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(javaTags, hashes,
-                                                    dataset.options.ignorePartKeyHashTags)
+  final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(javaTags, hashes, ignorePartKeyTags)
 
-  val nonMetricShardValues: Seq[String] = dataset.options.nonMetricShardColumns.flatMap(tags.get)
+  val nonMetricShardValues: Seq[String] = nonMetricShardCols.flatMap(tags.get)
   final def getMetric: String = metric
 
-  final def addToBuilder(builder: RecordBuilder): Unit = {
-    builder.startNewRecord()
-    builder.addLong(timestamp)
-    builder.addDouble(value)
-    builder.startMap()
-    val metricBytes = metric.getBytes
-    builder.addMapKeyValueHash(dataset.options.metricBytes, dataset.options.metricHash,
-                               metricBytes, 0, metricBytes.size)
-    for { i <- 0 until javaTags.size optimized } {
-      val (k, v) = javaTags.get(i)
-      builder.addMapKeyValue(k.getBytes, v.getBytes)
-      builder.updatePartitionHash(hashes(i))
-    }
-    builder.endMap(bulkHash = false)
-
-    builder.endRecord()
-  }
+  final def addToBuilder(builder: RecordBuilder): Unit =
+    InputRecord.writeUntypedRecord(builder, metric, tags, timestamp, value)
 }
 
 object PrometheusInputRecord {
   val DefaultShardHash = -1
 
+  import filodb.core.metadata.Schemas.promCounter
+  val metricCol = promCounter.options.metricColumn
+  val nonMetricShardCols = promCounter.options.nonMetricShardColumns
+  val ignorePartKeyTags = promCounter.options.ignorePartKeyHashTags
+
   // Create PrometheusInputRecords from a TimeSeries protobuf object
-  def apply(tsProto: TimeSeries, dataset: Dataset): Seq[PrometheusInputRecord] = {
+  def apply(tsProto: TimeSeries): Seq[PrometheusInputRecord] = {
     val tags = (0 until tsProto.getLabelsCount).map { i =>
       val labelPair = tsProto.getLabels(i)
       (labelPair.getName, labelPair.getValue)
     }
-    val metricTags = tags.filter(_._1 == dataset.options.metricColumn)
+    val metricTags = tags.filter { case (k, v) => k == "__name__" || k == metricCol }
     if (metricTags.isEmpty) {
       Nil
     } else {
       val metric = metricTags.head._2
-      val transformedTags = transformTags(tags.filterNot(_._1 == dataset.options.metricColumn), dataset)
+      val metricKey = metricTags.head._1
+      val transformedTags = transformTags(tags.filterNot(_._1 == metricKey), promCounter.options)
       (0 until tsProto.getSamplesCount).map { i =>
         val sample = tsProto.getSamples(i)
-        PrometheusInputRecord(transformedTags, metric, dataset, sample.getTimestampMs, sample.getValue)
+        PrometheusInputRecord(transformedTags, metric, sample.getTimestampMs, sample.getValue)
       }
     }
   }
@@ -113,10 +190,11 @@ object PrometheusInputRecord {
    * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
    * with the value from the source tag.
    */
-  def transformTags(tags: Seq[(String, String)], dataset: Dataset): Map[String, String] = {
+  def transformTags(tags: Seq[(String, String)],
+                    options: DatasetOptions): Map[String, String] = {
     val extraTags = new collection.mutable.HashMap[String, String]()
     val tagsMap = tags.toMap
-    for ((k, v) <- dataset.options.copyTags) {
+    for ((k, v) <- options.copyTags) {
       if (!extraTags.contains(v)
         && !tagsMap.contains(v)
         && tagsMap.contains(k)) {
@@ -140,19 +218,17 @@ object PrometheusInputRecord {
 class MetricTagInputRecord(values: Seq[Any],
                            metric: String,
                            tags: Map[ZCUTF8, ZCUTF8],
-                           dataset: Dataset) extends InputRecord {
+                           schema: Schema) extends InputRecord {
   final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, metric)
   // NOTE: this is probably not very performant right now.
   final def partitionKeyHash: Int = tags.hashCode
 
   val nonMetricShardValues: Seq[String] =
-    dataset.options.nonMetricShardKeyUTF8.flatMap(tags.get).map(_.toString).toSeq
+    schema.options.nonMetricShardKeyUTF8.flatMap(tags.get).map(_.toString).toSeq
   final def getMetric: String = metric
 
   def addToBuilder(builder: RecordBuilder): Unit = {
-    require(builder.schema == dataset.ingestionSchema)
-
     val reader = SeqRowReader(values :+ metric :+ tags)
-    builder.addFromReader(reader)
+    builder.addFromReader(reader, schema)
   }
 }

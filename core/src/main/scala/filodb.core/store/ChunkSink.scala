@@ -11,7 +11,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.metadata.Dataset
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
@@ -21,15 +20,15 @@ trait ChunkSink {
 
   /**
    * Writes the ChunkSets appearing in a stream/Observable to persistent storage, with backpressure
-   * @param dataset the Dataset to write to
+   * @param ref the DatasetRef for the chunks to write to
    * @param chunksets an Observable stream of chunksets to write
    * @param diskTimeToLive the time for chunksets to live on disk (Cassandra)
    * @return Success when the chunksets stream ends and is completely written.
    *         Future.failure(exception) if an exception occurs.
    */
-  def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
-  def writePartKeyTimeBucket(dataset: Dataset,
+  def writePartKeyTimeBucket(ref: DatasetRef,
                              shardNum: Int,
                              timeBucket: Int,
                              partitionIndex: Seq[Array[Byte]],
@@ -77,9 +76,9 @@ class ChunkSinkStats {
     chunkLenHist.record(chunkLen)
   }
 
-  def addIndexWriteStats(totalIndexBytes: Long): Unit = {
+  def addIndexWriteStats(indexBytes: Long): Unit = {
     numIndexWriteCalls.increment
-    indexBytesHist.record(totalIndexBytes)
+    indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {
@@ -103,7 +102,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   // in-memory store of partition keys
   val partitionKeys = new ConcurrentHashMap[DatasetRef, scala.collection.mutable.Set[Types.PartitionKey]]().asScala
 
-  def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
+  def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_.limit()).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
@@ -130,8 +129,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def shutdown(): Unit = {}
 
-  def readRawPartitions(dataset: Dataset,
-                        columnIDs: Seq[Types.ColumnId],
+  def readRawPartitions(ref: DatasetRef,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
@@ -141,10 +139,10 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
     java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap[T, java.lang.Boolean]).asScala
   }
 
-  override def getPartKeyTimeBucket(dataset: Dataset, shardNum: Int,
+  override def getPartKeyTimeBucket(ref: DatasetRef, shardNum: Int,
                                     timeBucket: Int): Observable[PartKeyTimeBucketSegment] = Observable.empty
 
-  override def writePartKeyTimeBucket(dataset: Dataset, shardNum: Int, timeBucket: Int,
+  override def writePartKeyTimeBucket(ref: DatasetRef, shardNum: Int, timeBucket: Int,
                                       partitionIndex: Seq[Array[Byte]],
                                       diskTimeToLive: Int): Future[Response] = {
     sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)

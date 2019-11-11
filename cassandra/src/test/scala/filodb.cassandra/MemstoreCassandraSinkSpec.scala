@@ -4,6 +4,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.memstore.{FlushStream, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.store.{FilteredPartitionScan, InMemoryChunkScan}
 import filodb.memory.format.UnsafeUtils
 
@@ -31,7 +32,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
 
 
   it("should flush MemStore data to C*, and be able to read back data from C* directly") {
-    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, TestData.storeConf)
     memStore.store.sinkStats.chunksetsWritten shouldEqual 0
 
     // Flush every 50 records
@@ -56,7 +57,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     // Verify data is in Cassandra ... but only groups 0, 1 which has following partitions:
     // Series 3, Series 4, Series 8, Series 9
     val splits2 = columnStore.getScanSplits(dataset1.ref, 1)
-    val rawParts = columnStore.readRawPartitions(dataset1, Seq(1), FilteredPartitionScan(splits2.head))
+    val rawParts = columnStore.readRawPartitions(dataset1.ref, FilteredPartitionScan(splits2.head))
                               .toListL.runAsync.futureValue
     val writtenNums = (5 to 95 by 10) ++ (6 to 96 by 10) ++ (8 to 98 by 10)
     // Cannot check the result, because FilteredPartitionScan() will be broken until indices are implemented

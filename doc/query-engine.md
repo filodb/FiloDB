@@ -133,6 +133,8 @@ Each `ExecPlan` node in the tree can be associated with zero or more of such tra
 method will first  perform its designated operation via the `doExecute` and `compose` methods and then
 apply the `RangeVectorTransformer` transformations one-by-one. 
 
+Note that, especially at the leaf level, `ExecPlan`s and their transformers may be further transformed via `transformPlan` before final execution.  This is to allow for leaf-level details, such as the exact data schema, to assist in fine tuning execution details such as column selection.
+
 ## Conversion of `LogicalPlan` to `ExecPlan`
 
 Conversion of `LogicalPlan` to `ExecPlan` is done by walking the logical plan tree in a depth first manner.

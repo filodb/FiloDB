@@ -10,7 +10,8 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.memstore.TimeSeriesShard.PartKey
+import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -27,7 +28,7 @@ final case class IndexData(timeBucket: Int, segment: Int, records: RecordContain
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
 final case class FlushIndexTimeBuckets(timeBucket: Int)
 
-final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLiveSeconds: Int,
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
                             flushTimeBuckets: Option[FlushIndexTimeBuckets])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
@@ -54,12 +55,13 @@ trait MemStore extends ChunkSource {
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
    * This method only succeeds if the dataset and shard has not already been setup.
+   * @param schemas the Schemas that the shards can ingest. Might vary depending on dataset.
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
    * @throws ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig,
             downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
 
@@ -100,7 +102,6 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
@@ -164,7 +165,7 @@ trait MemStore extends ChunkSource {
     * @return an Iterator for the TimeSeriesPartition
     */
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition]
+                          end: Long, start: Long, limit: Int): Iterator[PartKey]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard
@@ -224,10 +225,10 @@ object MemStore {
    * constant column for each partition.
    */
   def getAppendables(memFactory: MemFactory,
-                     dataset: Dataset,
+                     schema: DataSchema,
                      config: StoreConfig): Array[BinaryAppendableVector[_]] = {
     val maxElements = config.maxChunksSize
-    dataset.dataColumns.zipWithIndex.map { case (col, index) =>
+    schema.columns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
         // Time series data doesn't really need the NA/null functionality, so use more optimal vectors
         // to save memory and CPU

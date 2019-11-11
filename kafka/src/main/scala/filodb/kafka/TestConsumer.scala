@@ -8,7 +8,6 @@ import monix.execution.Scheduler
 
 import filodb.coordinator.{FilodbSettings, IngestionStreamFactory, StoreFactory}
 import filodb.core.memstore.SomeData
-import filodb.core.metadata.Dataset
 import filodb.core.store.IngestionConfig
 
 /**
@@ -39,7 +38,7 @@ object TestConsumer extends App {
   import monix.execution.Scheduler.Implicits.global
 
   val ingestConf = IngestionConfig(sourceConf, classOf[KafkaIngestionStreamFactory].getClass.getName).get
-  val dataset = Dataset.fromConfig(sourceConf)
+  val dataset = settings.datasetFromStream(sourceConf)
 
   val ctor = Class.forName(ingestConf.streamFactoryClass).getConstructors.head
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
@@ -57,7 +56,7 @@ object TestConsumer extends App {
       }
     }.getOrElse((-1, ""))
 
-  val stream = streamFactory.create(sourceConf, dataset, shard, offsetOpt)
+  val stream = streamFactory.create(sourceConf, settings.schemas, shard, offsetOpt)
   val fut = stream.get//.take(10)
                   .foreach { case SomeData(container, offset) =>
                     println(s"\n----- Offset $offset -----")

@@ -5,7 +5,7 @@ import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
 import filodb.memory.format.{vectors => bv, _}
@@ -24,12 +24,13 @@ final case class PeriodicSamplesMapper(start: Long,
                                        step: Long,
                                        end: Long,
                                        window: Option[Long],
-                                       functionId: Option[RangeFunctionId],
+                                       functionId: Option[InternalRangeFunction],
                                        funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
-  if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
+  val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax)
+  if (!isLastFn) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
@@ -37,8 +38,7 @@ final case class PeriodicSamplesMapper(start: Long,
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
 
 
-  def apply(dataset: Dataset,
-            source: Observable[RangeVector],
+  def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
@@ -46,21 +46,22 @@ final case class PeriodicSamplesMapper(start: Long,
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
-    val maxCol = if (valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2)
-                   sourceSchema.columns.zip(sourceSchema.colIDs).find(_._1.name == "max").map(_._2) else None
-    val rangeFuncGen = RangeFunction.generatorFor(dataset, functionId, valColType, queryConfig, funcParams, maxCol)
+    // If a max column is present, the ExecPlan's job is to put it into column 2
+    val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
+                      sourceSchema.columns(2).name == "max"
+    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig, funcParams)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = window.getOrElse(if (functionId.isEmpty) queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = window.getOrElse(if (isLastFn) queryConfig.staleSampleAfterMs + 1 else 0L)
 
     sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
-          val histRow = if (maxCol.isDefined) new TransientHistMaxRow() else new TransientHistRow()
+          val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
                                        windowLength, rangeFuncGen().asChunkedH, queryConfig, histRow))
@@ -90,19 +91,23 @@ final case class PeriodicSamplesMapper(start: Long,
   }
 
   // Transform source double or long to double schema
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-
-    if (dataset.options.hasDownsampledData) {
+  override def schema(source: ResultSchema): ResultSchema = {
+    // Special treatment for downsampled gauge schema - return regular timestamp/value
+    if (source.columns == Schemas.dsGauge.dataInfos) {
       source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
         ColumnInfo("value", ColumnType.DoubleColumn)))
-      // TODO need to alter for histograms and other schema types
     } else {
       source.copy(columns = source.columns.zipWithIndex.map {
         // Transform if its not a row key column
         case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
-          ColumnInfo(name, ColumnType.DoubleColumn)
+          ColumnInfo("value", ColumnType.DoubleColumn)
         case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
           ColumnInfo(name, ColumnType.DoubleColumn)
+        // For double columns, just rename the output so that it's the same no matter source schema.
+        // After all after applying a range function, source column doesn't matter anymore
+        // NOTE: we only rename if i is 1 or second column.  If its 2 it might be max which cannot be renamed
+        case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
+          ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
       }, fixedVectorLen = Some(((end - start) / step).toInt + 1))
     }

@@ -8,7 +8,6 @@ import org.jboss.netty.buffer.ChannelBuffer
 import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.metadata.DatasetOptions
 
 trait KVVisitor {
   def apply(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueIndex: Int, valueLen: Int): Unit
@@ -118,7 +117,7 @@ object InfluxProtocolParser extends StrictLogging {
   def keyLen(offsetInt: Int): Int = ((offsetInt >> 16) & 0x0ffff) - (offsetInt & 0x0ffff)
   def valOffset(offsetInt: Int): Int = ((offsetInt >> 16) & 0x0ffff) + 1
 
-  def parse(buffer: ChannelBuffer, dsOptions: DatasetOptions): Option[InfluxRecord] = {
+  def parse(buffer: ChannelBuffer): Option[InfluxRecord] = {
     val bytes = new Array[Byte](buffer.readableBytes)   // max parsed size is original bytes
     val tagOffsets = debox.Buffer.empty[Int]            // array indices of each tag k=v pair.
 
@@ -155,10 +154,10 @@ object InfluxProtocolParser extends StrictLogging {
     // Create the right InfluxRecord depending on # of fields
     if (fieldOffsets.length == 1) {
       Some(InfluxPromSingleRecord(bytes, measurementLen, tagOffsets,
-                                  fieldOffsets, timeIndex - 1, timestamp, dsOptions))
+                                  fieldOffsets, timeIndex - 1, timestamp))
     } else {
       Some(InfluxPromHistogramRecord(bytes, measurementLen, tagOffsets,
-                                     fieldOffsets, timeIndex - 1, timestamp, dsOptions))
+                                     fieldOffsets, timeIndex - 1, timestamp))
     }
   }
 
