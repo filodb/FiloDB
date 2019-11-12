@@ -7,6 +7,7 @@ import scalaxy.loops._
 
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.Encodings._
+import filodb.memory.format.MemoryReader._
 
 /**
  * An offheap, immutable, zero deserialization, minimal/zero allocation, insanely fast binary sequence.
@@ -25,18 +26,22 @@ object BinaryVector {
   /**
    * Returns the vector type and subtype from the WireFormat bytes of a BinaryVector
    */
-  def vectorType(addr: BinaryVectorPtr): Int = WireFormat.majorAndSubType(UnsafeUtils.getShort(addr + 4))
-  def majorVectorType(addr: BinaryVectorPtr): Int = WireFormat.majorVectorType(UnsafeUtils.getShort(addr + 4))
+  def vectorType(acc: MemoryReader, addr: BinaryVectorPtr): Int =
+    WireFormat.majorAndSubType(acc.getShort(addr + 4))
+  def majorVectorType(acc: MemoryReader, addr: BinaryVectorPtr): Int =
+    WireFormat.majorVectorType(acc.getShort(addr + 4))
 
-  def writeMajorAndSubType(addr: BinaryVectorPtr, majorType: Int, subType: Int): Unit =
-    UnsafeUtils.setShort(addr + 4, WireFormat(majorType, subType).toShort)
+  def writeMajorAndSubType(acc: MemoryAccessor, addr: BinaryVectorPtr, majorType: Int, subType: Int): Unit =
+    acc.setShort(addr + 4, WireFormat(majorType, subType).toShort)
 
   /**
    * Returns the total number of bytes of the BinaryVector at address
    */
-  final def totalBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(addr) + 4
+  final def totalBytes(acc: MemoryReader, addr: BinaryVectorPtr): Int = acc.getInt(addr) + 4
 
-  final def asBuffer(addr: BinaryVectorPtr): ByteBuffer = UnsafeUtils.asDirectBuffer(addr, totalBytes(addr))
+  final def asBuffer(addr: BinaryVectorPtr): ByteBuffer = {
+    UnsafeUtils.asDirectBuffer(addr, totalBytes(nativePtrReader, addr))
+  }
 
   type BufToDataReader = PartialFunction[Class[_], ByteBuffer => VectorDataReader]
 
@@ -48,14 +53,14 @@ object BinaryVector {
     case Classes.Histogram => (b => vectors.HistogramVector(b))
   }
 
-  type PtrToDataReader = PartialFunction[Class[_], BinaryVectorPtr => VectorDataReader]
-
-  val defaultPtrToReader: PtrToDataReader = {
-    case Classes.Int    => (p => vectors.IntBinaryVector(p))
-    case Classes.Long   => (p => vectors.LongBinaryVector(p))
-    case Classes.Double => (p => vectors.DoubleVector(p))
-    case Classes.UTF8   => (p => vectors.UTF8Vector(p))
-    case Classes.Histogram => (p => vectors.HistogramVector(p))
+  def reader(clazz: Class[_], acc: MemoryReader, addr: BinaryVectorPtr): VectorDataReader = {
+    clazz match {
+      case Classes.Int => vectors.IntBinaryVector(acc, addr)
+      case Classes.Long => vectors.LongBinaryVector(acc, addr)
+      case Classes.Double => vectors.DoubleVector(acc, addr)
+      case Classes.UTF8 => vectors.UTF8Vector(acc, addr)
+      case Classes.Histogram => vectors.HistogramVector(acc, addr)
+    }
   }
 
   /**
@@ -90,7 +95,8 @@ trait AvailableReader {
    * Returns a BooleanIterator returning true or false for each element's availability
    * By default returns one that says every element is available.  Override if this is not true.
    */
-  def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator = AlwaysAvailableIterator
+  def iterateAvailable(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    AlwaysAvailableIterator
 }
 
 /**
@@ -104,12 +110,12 @@ trait VectorDataReader extends AvailableReader {
   /**
    * Returns the number of bytes of the BinaryVector FOLLOWING the 4-byte length header.
    */
-  final def numBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(addr)
+  final def numBytes(acc: MemoryReader, addr: BinaryVectorPtr): Int = acc.getInt(addr)
 
   /**
    * Returns the number of eleemnts in the vector
    */
-  def length(addr: BinaryVectorPtr): Int
+  def length(acc: MemoryReader, addr: BinaryVectorPtr): Int
 
   /**
    * Returns a TypedIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -119,7 +125,18 @@ trait VectorDataReader extends AvailableReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
+
+  /**
+    * Used only for testing. When using in production be careful of unnecessary allocation
+    * when backing memory is already on heap.
+    */
+  def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
+    val numByts = numBytes(acc, vector) + 4
+    val bytes = new Array[Byte](numByts)
+    acc.copy(vector, MemoryAccessor.fromArray(bytes), 0, numByts)
+    bytes
+  }
 
   def asIntReader: vectors.IntVectorDataReader = this.asInstanceOf[vectors.IntVectorDataReader]
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
@@ -148,7 +165,7 @@ trait CounterVectorReader extends VectorDataReader {
    * @param meta CorrectionMeta obtained from updateCorrection()
    * @return a new CorrectionMeta with adjusted correction value if needed
    */
-  def detectDropAndCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+  def detectDropAndCorrection(acc: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 
   /**
    * Updates the CorrectionMeta from this vector,
@@ -158,17 +175,17 @@ trait CounterVectorReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
    */
-  def updateCorrection(vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+  def updateCorrection(acc: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go
-class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
+class BitmapMaskIterator(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
   var bitmapAddr: Long = vector + 12 + (startElement >> 6) * 8
   var bitMask: Long = 1L << (startElement & 0x3f)
 
   // Rotates mask and returns if next element is available or not
   final def next: Boolean = {
-    val avail = (UnsafeUtils.getLong(bitmapAddr) & bitMask) == 0
+    val avail = (acc.getLong(bitmapAddr) & bitMask) == 0
     bitMask <<= 1
     if (bitMask == 0) {
       bitmapAddr += 8
@@ -183,17 +200,18 @@ class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends Boo
  */
 trait BitmapMaskVector extends AvailableReader {
   // Returns the address of the subvector
-  final def subvectAddr(addr: BinaryVectorPtr): BinaryVectorPtr = addr + UnsafeUtils.getInt(addr + 8)
+  final def subvectAddr(acc: MemoryReader, addr: BinaryVectorPtr): BinaryVectorPtr =
+    addr + acc.getInt(addr + 8)
 
-  final def isAvailable(addr: BinaryVectorPtr, index: Int): Boolean = {
+  final def isAvailable(acc: MemoryReader, addr: BinaryVectorPtr, index: Int): Boolean = {
     // NOTE: length of bitMask may be less than (length / 64) longwords.
     val maskIndex = index >> 6
-    val maskVal = UnsafeUtils.getLong(addr + 12 + maskIndex * 8)
+    val maskVal = acc.getLong(addr + 12 + maskIndex * 8)
     (maskVal & (1L << (index & 63))) == 0
   }
 
-  override def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
-    new BitmapMaskIterator(vector, startElement)
+  override def iterateAvailable(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    new BitmapMaskIterator(acc, vector, startElement)
 }
 
 object BitmapMask extends BitmapMaskVector {
@@ -478,15 +496,17 @@ object PrimitiveVector {
 
 object PrimitiveVectorReader {
   import PrimitiveVector._
-  final def nbits(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetNBits) & NBitsMask
-  final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
-  final def signed(vector: BinaryVectorPtr): Boolean =
-    (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
-  final def dropped(vector: BinaryVectorPtr): Boolean =
-    (UnsafeUtils.getShort(vector + OffsetNBits) & DropMask) != 0
-
-  final def markDrop(vector: BinaryVectorPtr): Unit =
-    UnsafeUtils.setShort(vector + OffsetNBits, (UnsafeUtils.getShort(vector + OffsetNBits) | DropMask).toShort)
+  final def nbits(acc: MemoryReader, vector: BinaryVectorPtr): Int =
+    acc.getByte(vector + OffsetNBits) & NBitsMask
+  final def bitShift(acc: MemoryReader, vector: BinaryVectorPtr): Int =
+    acc.getByte(vector + OffsetBitShift) & 0x03f
+  final def signed(acc: MemoryReader, vector: BinaryVectorPtr): Boolean =
+    (acc.getByte(vector + OffsetNBits) & SignMask) != 0
+  final def dropped(acc: MemoryReader, vector: BinaryVectorPtr): Boolean =
+    (acc.getShort(vector + OffsetNBits) & DropMask) != 0
+  final def markDrop(acc: MemoryAccessor, vector: BinaryVectorPtr): Unit =
+    acc.setShort(vector + OffsetNBits,
+      (acc.getShort(vector + OffsetNBits) | DropMask).toShort)
 }
 
 /**
@@ -511,10 +531,10 @@ extends OptimizingPrimitiveAppender[A] {
   override final def length: Int = ((writeOffset - (addr + 8)).toInt * 8 + bitShift) / nbits
 
   UnsafeUtils.setInt(addr, HeaderLen)   // 4 bytes after this length word
-  BinaryVector.writeMajorAndSubType(addr, vectMajorType, vectSubType)
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePtrAccessor, addr, vectMajorType, vectSubType)
   UnsafeUtils.setShort(addr + OffsetNBits, ((nbits & NBitsMask) | (if (signed) SignMask else 0)).toShort)
 
-  def numBytes: Int = UnsafeUtils.getInt(addr) + 4
+  def numBytes: Int = nativePtrReader.getInt(addr) + 4
 
   private final val dangerZone = addr + maxBytes
   final def checkOffset(): AddResponse =
@@ -583,7 +603,7 @@ extends BinaryAppendableVector[A] {
   UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
 
   UnsafeUtils.setInt(addr, 8 + bitmapMaskBufferSize)
-  BinaryVector.writeMajorAndSubType(addr, vectMajorType, vectSubType)
+  BinaryVector.writeMajorAndSubType(MemoryAccessor.nativePtrAccessor, addr, vectMajorType, vectSubType)
   val subVectOffset = 12 + bitmapMaskBufferSize
   UnsafeUtils.setInt(addr + 8, subVectOffset)
 
@@ -611,14 +631,14 @@ extends BinaryAppendableVector[A] {
 
   override final def length: Int = subVect.length
   final def numBytes: Int = 12 + bitmapMaskBufferSize + subVect.numBytes
-  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(addr, index)
+  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(nativePtrReader, addr, index)
   final def apply(index: Int): A = subVect.apply(index)
 
   final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {
     case Ack =>
       val resp = subVect.addNA()
       if (resp == Ack) {
-        val maskVal = UnsafeUtils.getLong(bitmapOffset + curBitmapOffset)
+        val maskVal = nativePtrReader.getLong(bitmapOffset + curBitmapOffset)
         UnsafeUtils.setLong(bitmapOffset + curBitmapOffset, maskVal | curMask)
         nextMaskIndex()
       }
@@ -640,18 +660,18 @@ extends BinaryAppendableVector[A] {
 
   final def isAllNA: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (UnsafeUtils.getLong(bitmapOffset + word * 8) != -1L) return false
+      if (nativePtrReader.getLong(bitmapOffset + word * 8) != -1L) return false
     }
     val naMask = curMask - 1
-    (UnsafeUtils.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
+    (nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
   }
 
   final def noNAs: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (UnsafeUtils.getLong(bitmapOffset + word * 8) != 0) return false
+      if (nativePtrReader.getLong(bitmapOffset + word * 8) != 0) return false
     }
     val naMask = curMask - 1
-    (UnsafeUtils.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
+    (nativePtrReader.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
   }
 
   def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {

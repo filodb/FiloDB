@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import java.util.concurrent.locks.StampedLock
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -94,6 +95,15 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val evictedPartKeyBloomFilterFalsePositives = Kamon.counter("evicted-pk-bloom-filter-fp").refine(tags)
   val evictedPkBloomFilterSize = Kamon.gauge("evicted-pk-bloom-filter-approx-size").refine(tags)
   val evictedPartIdLookupMultiMatch = Kamon.counter("evicted-partId-lookup-multi-match").refine(tags)
+
+  /**
+    * Difference between the local clock and the received ingestion timestamps, in milliseconds.
+    * If this gauge is negative, then the received timestamps are ahead, and it will stay this
+    * way for a bit, due to the monotonic adjustment. When the gauge value is positive (which is
+    * expected), then the delay reflects the delay between the generation of the samples and
+    * receiving them, assuming that the clocks are in sync.
+    */
+  val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -265,6 +275,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
+  require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
+  val maxChunkTime = storeConfig.maxChunkTime.toMillis
+
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -368,6 +381,21 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
+
+  /**
+    * Highest ingestion timestamp observed.
+    */
+  private var lastIngestionTime = Long.MinValue
+
+  // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
+  // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
+  // without concern that they may overlap in time.
+  private val flushBoundaryMillis = storeConfig.flushInterval.toMillis
+
+  // Defines the group-specific flush offset, to distribute the flushes around such they don't
+  // all flush at the same time. With an hourly boundary and 60 flush groups, flushes are
+  // scheduled once a minute.
+  private val flushOffsetMillis = flushBoundaryMillis / numGroups
 
   /**
     * Helper for downsampling ingested data for long term retention.
@@ -741,23 +769,23 @@ class TimeSeriesShard(val ref: DatasetRef,
   def setGroupWatermarks(watermarks: Map[Int, Long]): Unit =
     watermarks.foreach { case (group, mark) => groupWatermark(group) = mark }
 
-  // Rapidly switch all of the input buffers for a particular group
-  // This MUST be done in the same thread/stream as input records to avoid concurrency issues
-  // and ensure that all the partitions in a group are switched at the same watermark
-  def switchGroupBuffers(groupNum: Int): Unit = {
+  /**
+    * Prepares the given group for flushing.  This MUST be done in the same thread/stream as
+    * input records to avoid concurrency issues, and to ensure that all the partitions in a
+    * group are switched at the same watermark. Also required because this method removes
+    * entries from the partition data structures.
+    */
+  def prepareFlushGroup(groupNum: Int): FlushGroup = {
+    assertThreadName(IngestSchedName)
+
+    // Rapidly switch all of the input buffers for a particular group
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
-  }
 
-  /**
-    * Prepare to flush current index records, switch current currentIndexTimeBucket partId bitmap with new one.
-    * Return Some if part keys need to be flushed (happens for last flush group). Otherwise, None.
-    *
-    * NEEDS TO RUN ON INGESTION THREAD since it removes entries from the partition data structures.
-    */
-  def prepareIndexTimeBucketForFlush(group: Int): Option[FlushIndexTimeBuckets] = {
-    assertThreadName(IngestSchedName)
-    if (group == indexTimeBucketFlushGroup) {
+    // Prepare to flush current index records, switch current currentIndexTimeBucket partId
+    // bitmap with new one.  Return Some if part keys need to be flushed (happens for last
+    // flush group). Otherwise, None.
+    val flushTimeBucket = if (groupNum == indexTimeBucketFlushGroup) {
       logger.debug(s"Switching timebucket=$currentIndexTimeBucket in dataset=$ref" +
         s"shard=$shardNum out for flush. ")
       currentIndexTimeBucket += 1
@@ -768,6 +796,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     } else {
       None
     }
+
+    FlushGroup(shardNum, groupNum, latestOffset, flushTimeBucket)
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
@@ -790,7 +820,58 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.purgedPartitions.increment(numDeleted)
   }
 
-  def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
+  /**
+    * Creates zero or more flush tasks (up to the number of flush groups) based on examination
+    * of the record container's ingestion time. This should be called before ingesting the container.
+    *
+    * Note that the tasks returned by this method aren't executed yet. The caller decides how
+    * to run the tasks, and by which threads.
+    */
+  def createFlushTasks(container: RecordContainer): Seq[Task[Response]] = {
+    val tasks = new ArrayBuffer[Task[Response]]()
+
+    var oldTimestamp = lastIngestionTime
+    val ingestionTime = Math.max(oldTimestamp, container.timestamp) // monotonic clock
+    var newTimestamp = ingestionTime
+
+    if (newTimestamp > oldTimestamp && oldTimestamp != Long.MinValue) {
+      for (group <- 0 until numGroups optimized) {
+        /* Logically, the task creation filter is as follows:
+
+           // Compute the time offset relative to the group number. 0 min, 1 min, 2 min, etc.
+           val timeOffset = group * flushOffsetMillis
+
+           // Adjust the timestamp relative to the offset such that the
+           // division rounds correctly.
+           val oldTimestampAdjusted = oldTimestamp - timeOffset
+           val newTimestampAdjusted = newTimestamp - timeOffset
+
+           if (oldTimstampAdjusted / flushBoundary != newTimestampAdjusted / flushBoundary) {
+             ...
+
+           As written the code the same thing but with fewer operations. It's also a bit
+           shorter, but you also had to read this comment...
+         */
+        if (oldTimestamp / flushBoundaryMillis != newTimestamp / flushBoundaryMillis) {
+          // Flush out the group before ingesting records for a new hour (by group offset).
+          tasks += createFlushTask(prepareFlushGroup(group))
+        }
+        oldTimestamp -= flushOffsetMillis
+        newTimestamp -= flushOffsetMillis
+      }
+    }
+
+    // Only update stuff if no exception was thrown.
+
+    if (ingestionTime != lastIngestionTime) {
+        lastIngestionTime = ingestionTime
+        shardStats.ingestionClockDelay.set(System.currentTimeMillis() - ingestionTime)
+    }
+
+    tasks
+  }
+
+  private def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
     assertThreadName(IngestSchedName)
     // clone the bitmap so that reads on the flush thread do not conflict with writes on ingestion thread
     val partitionIt = InMemPartitionIterator(partitionGroups(flushGroup.groupNum).clone().intIterator)
@@ -847,8 +928,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     // This initializes the containers for the downsample records. Yes, we create new containers
     // and not reuse them at the moment and there is allocation for every call of this method
     // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
-    val downsampleRecords = ShardDownsampler.newEmptyDownsampleRecords(downsampleConfig.resolutions,
-                                                                       downsampleConfig.enabled)
+    val downsampleRecords = ShardDownsampler
+                               .newEmptyDownsampleRecords(downsampleConfig.resolutions.map(_.toMillis.toInt),
+                                                          downsampleConfig.enabled)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
@@ -1215,7 +1297,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory)
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {

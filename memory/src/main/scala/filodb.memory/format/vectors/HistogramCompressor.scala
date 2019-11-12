@@ -8,6 +8,7 @@ import scalaxy.loops._
 
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format._
+import filodb.memory.format.MemoryReader._
 
 //scalastyle:off
 trait CompressorAnalyzer {
@@ -44,7 +45,7 @@ trait CompressorAnalyzer {
     }
     val writeBufSize = tsAppender.numBytes
     val optimized = tsAppender.optimize(memFactory)
-    val encodedSize = BinaryVector.totalBytes(optimized)
+    val encodedSize = BinaryVector.totalBytes(nativePtrReader, optimized)
     (writeBufSize, encodedSize)
   }
 
@@ -97,7 +98,7 @@ object HistogramCompressor extends App with CompressorAnalyzer {
         // Optimize and get optimized size, dump out, aggregate
         val writeBufSize = appender.numBytes
         val optimized = appender.optimize(memFactory)
-        val encodedSize = BinaryVector.totalBytes(optimized)
+        val encodedSize = BinaryVector.totalBytes(nativePtrReader, optimized)
         val (tsBufSize, tsEncodedSize) = timestampVector(appender.length, 10)
 
         encodedTotal += encodedSize + tsEncodedSize
@@ -195,7 +196,7 @@ object PromCompressor extends App with CompressorAnalyzer {
           // Optimize and get optimized size, dump out, aggregate
           val writeBufSize = appenders.map(_.numBytes).sum
           val optimized = appenders.map(_.optimize(memFactory))
-          val encodedSize = optimized.map(BinaryVector.totalBytes).sum
+          val encodedSize = optimized.map(v => BinaryVector.totalBytes(nativePtrReader, v)).sum
           println(s" WriteBuffer size: ${writeBufSize}\t\tEncoded size: $encodedSize")
           encodedTotal += encodedSize + bucketDef.numBuckets * tsEncodedSize
           writeBufferTotal += writeBufSize + bucketDef.numBuckets * tsBufSize

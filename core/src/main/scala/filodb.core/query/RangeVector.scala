@@ -105,7 +105,6 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
 
-  val timestampColID = 0
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
 }
