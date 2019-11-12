@@ -51,8 +51,9 @@ class IntSumReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def applyVectorScan(): Int = {
     var total = 0
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until NumRows optimized } {
-      total += intReader(acc, intVectAddr, i)
+      total += intReader(acc2, intVectAddr, i)
     }
     total
   }

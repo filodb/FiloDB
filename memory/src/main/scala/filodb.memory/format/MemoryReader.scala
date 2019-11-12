@@ -41,7 +41,7 @@ sealed trait MemoryReader {
     *
     * TODO in next iteration: make this protected
     */
-  def base: Any
+  def base: Array[Byte]
 
   /**
     * Offset to the start of the memory region represented by this accessor. Typically,
@@ -117,7 +117,7 @@ sealed trait MemoryAccessor extends MemoryReader {
   */
 object NativePointerAccessor extends MemoryAccessor {
   // TODO check bounds of array before accessing
-  val base = ZeroPointer
+  val base = ZeroArray
   val baseOffset: Long = 0
 
   override def wrapInto(buf: DirectBuffer, addr: Long, length: Int): Unit = {
@@ -145,7 +145,7 @@ class ByteArrayAccessor(val base: Array[Byte]) extends MemoryAccessor {
   */
 class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
 
-  var base: Any = _
+  var base: Array[Byte] = _
   var baseOffset: Long = _
   var length: Int = _
 
@@ -157,7 +157,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
     length = buf.limit() - buf.position()
   } else {
     assert(buf.isReadOnly)
-    base = unsafe.getObject(buf, byteBufArrayField)
+    base = unsafe.getObject(buf, byteBufArrayField).asInstanceOf[Array[Byte]]
     baseOffset = unsafe.getInt(buf, byteBufOffsetField) + arayOffset.toLong
     length = buf.limit() - buf.position()
   }
@@ -179,7 +179,7 @@ case class DirectBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   // TODO check bounds of array before accessing
   require (buf.isDirect, "buf arg needs to be a DirectBuffer")
   val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
-  val base: Any = UnsafeUtils.ZeroPointer
+  val base: Array[Byte] = UnsafeUtils.ZeroArray
   val baseOffset: Long = address + buf.position()
   val length: Int = buf.limit() - buf.position()
 

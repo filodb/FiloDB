@@ -61,8 +61,9 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumAllLongsApply(): Long = {
     var total = 0L
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until numValues optimized } {
-      total += ivReader(acc, iv, i)
+      total += ivReader(acc2, iv, i)
     }
     total
   }
@@ -105,8 +106,9 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesApply(): Long = {
     var total = 0L
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until numValues optimized } {
-      total += byteReader(acc, byteVect, i)
+      total += byteReader(acc2, byteVect, i)
     }
     total
   }
