@@ -16,7 +16,7 @@ package object store {
   private val ingestionTimeMask = (1 << startTimeShift) - 1
 
   // Inclusive minumum allowed user time for chunk ids.
-  val minChunkUserTime = 0 // 1970
+  val minChunkUserTime = 0L // 1970
 
   // Inclusive maximum allowed user time for chunk ids.
   val maxChunkUserTime = (java.lang.Long.MAX_VALUE << startTimeShift) >>> startTimeShift // 2109

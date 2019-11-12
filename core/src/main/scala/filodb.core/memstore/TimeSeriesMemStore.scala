@@ -191,7 +191,7 @@ extends MemStore with StrictLogging {
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
-  def readRawPartitions(ref: DatasetRef,
+  def readRawPartitions(ref: DatasetRef, maxChunkTime: Long,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 

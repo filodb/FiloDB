@@ -1,5 +1,6 @@
 package filodb.core
 
+import scala.concurrent.duration._
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
@@ -395,7 +396,7 @@ object MachineMetricsData {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH) }
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
@@ -409,7 +410,7 @@ object MachineMetricsData {
     val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH) }
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max

@@ -369,13 +369,15 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     // Extract out the numRows, startTime, endTIme and verify
     val infosRead = result.result(0).rows.map { r => (r.getInt(1), r.getLong(2), r.getLong(3), r.getString(5)) }.toList
     infosRead.foreach { i => info(s"  Infos read => $i") }
-    val numChunks = numRawSamples / TestData.storeConf.maxChunksSize
-    infosRead should have length (numChunks)
-    infosRead.map(_._1) shouldEqual Seq.fill(numChunks)(TestData.storeConf.maxChunksSize)
+    val expectedNumChunks = 15
+    // One would expect numChunks = numRawSamples / TestData.storeConf.maxChunksSize
+    // but we also break chunks when time duration in chunk reaches max.
+    infosRead should have length expectedNumChunks
+    infosRead.map(_._1) shouldEqual (Seq.fill(expectedNumChunks-1)(67) ++ Seq(62))
     // Last chunk is the writeBuffer which is not encoded
     infosRead.map(_._4).dropRight(1).foreach(_ should include ("DeltaDeltaConst"))
 
-    val startTimes = tuples.grouped(TestData.storeConf.maxChunksSize).map(_.head._1).toBuffer
+    val startTimes = tuples.grouped(67).map(_.head._1).toBuffer
     infosRead.map(_._2) shouldEqual startTimes
   }
 

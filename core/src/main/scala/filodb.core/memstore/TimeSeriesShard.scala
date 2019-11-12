@@ -275,6 +275,9 @@ class TimeSeriesShard(val ref: DatasetRef,
    */
   val maxMetaSize = schemas.schemas.values.map(_.data.blockMetaSize).max
 
+  require (storeConfig.maxChunkTime > storeConfig.flushInterval, "MaxChunkTime should be greater than FlushInterval")
+  val maxChunkTime = storeConfig.maxChunkTime.toMillis
+
   // Called to remove chunks from ChunkMap of a given partition, when an offheap block is reclaimed
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -925,8 +928,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     // This initializes the containers for the downsample records. Yes, we create new containers
     // and not reuse them at the moment and there is allocation for every call of this method
     // (once per minute). We can perhaps use a thread-local or a pool if necessary after testing.
-    val downsampleRecords = ShardDownsampler.newEmptyDownsampleRecords(downsampleConfig.resolutions,
-                                                                       downsampleConfig.enabled)
+    val downsampleRecords = ShardDownsampler
+                               .newEmptyDownsampleRecords(downsampleConfig.resolutions.map(_.toMillis.toInt),
+                                                          downsampleConfig.enabled)
 
     val chunkSetIter = partitionIt.flatMap { p =>
       // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
@@ -1293,7 +1297,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val tsp = part.asInstanceOf[TimeSeriesPartition]
         brRowReader.schema = schema.ingestionSchema
         brRowReader.recordOffset = recordOff
-        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory)
+        tsp.ingest(ingestionTime, brRowReader, overflowBlockFactory, maxChunkTime)
         // Below is coded to work concurrently with logic in updateIndexWithEndTime
         // where we try to de-activate an active time series
         if (!tsp.ingesting) {
