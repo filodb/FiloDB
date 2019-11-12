@@ -369,14 +369,15 @@ object HistogramBuckets {
   }
 
   // NOTE: must point to u16/Short length prefix bytes
-  def apply(bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
-    case HistFormat_Geometric_Delta  => geometric(UnsafeUtils.ZeroArray, bucketsDef.add(2).addr, false)
-    case HistFormat_Geometric1_Delta => geometric(UnsafeUtils.ZeroArray, bucketsDef.add(2).addr, true)
-    case HistFormat_Custom_Delta     => custom(UnsafeUtils.ZeroArray, bucketsDef.addr)
+  def apply(acc: MemoryReader, bucketsDef: Ptr.U8, formatCode: Byte): HistogramBuckets = formatCode match {
+    case HistFormat_Geometric_Delta  => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, false)
+    case HistFormat_Geometric1_Delta => geometric(acc.base, acc.baseOffset + bucketsDef.add(2).addr, true)
+    case HistFormat_Custom_Delta     => custom(acc.base, acc.baseOffset + bucketsDef.addr)
     case _                           => emptyBuckets
   }
 
   // Create geometric buckets definition
+  // FIXME Use MemoryAccessor methods here instead of unsafe access.
   def geometric(bucketsDefBase: Array[Byte], bucketsDefOffset: Long, minusOne: Boolean): HistogramBuckets =
     GeometricBuckets(UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails),
                      UnsafeUtils.getDouble(bucketsDefBase, bucketsDefOffset + OffsetBucketDetails + 8),
@@ -387,7 +388,7 @@ object HistogramBuckets {
    * Creates a CustomBuckets definition.
    * @param bucketsDefOffset must point to the 2-byte length prefix of the bucket definition
    */
-  def custom(bucketsDefBase: Array[Byte], bucketsDefOffset: Long): CustomBuckets = {
+  def custom(bucketsDefBase: Any, bucketsDefOffset: Long): CustomBuckets = {
     val numBuckets = UnsafeUtils.getShort(bucketsDefBase, bucketsDefOffset + 2) & 0x0ffff
     val les = new Array[Double](numBuckets)
     UnsafeUtils.wrapDirectBuf(bucketsDefBase,

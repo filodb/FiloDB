@@ -7,8 +7,9 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
-import filodb.memory.format.{vectors => bv, _}
+import filodb.core.store.WindowedChunkIterator
+import filodb.memory.format._
+import filodb.memory.format.vectors.LongBinaryVector
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn._
@@ -150,18 +151,17 @@ extends Iterator[R] with StrictLogging {
 
     wit.nextWindow()
     while (wit.hasNext) {
-      val queryInfo = wit.next
-      val nextInfo = ChunkSetInfo(queryInfo.infoPtr)
+      val nextInfo = wit.next
       try {
-        rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
+        rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
+                                nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
                                 wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
       } catch {
         case e: Exception =>
-          val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
-          val tsReader = bv.LongBinaryVector(timestampVector)
+          val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-                       s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} " +
-                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
+                    s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+                    s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)}")
           throw e
       }
     }

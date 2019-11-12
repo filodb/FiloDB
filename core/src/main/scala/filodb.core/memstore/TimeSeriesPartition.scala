@@ -11,6 +11,7 @@ import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory, MemFactory}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format._
+import filodb.memory.format.MemoryReader._
 
 object TimeSeriesPartition extends StrictLogging {
   type AppenderArray = Array[BinaryAppendableVector[_]]
@@ -216,9 +217,9 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
       require(blockHolder.blockAllocationSize() > appender.frozenSize)
       val optimized = appender.optimize(blockHolder)
-      shardStats.encodedBytes.increment(BinaryVector.totalBytes(optimized))
+      shardStats.encodedBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
       if (schema.data.columns(i).columnType == Column.ColumnType.HistogramColumn)
-        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(optimized))
+        shardStats.encodedHistBytes.increment(BinaryVector.totalBytes(nativePtrReader, optimized))
       optimized
     }
     shardStats.numSamplesEncoded.increment(info.numRows)
