@@ -10,7 +10,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
-import filodb.core.{DatasetRef, Types}
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
@@ -48,6 +48,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
     .withTag("dataset", ref.dataset)
     .withTag("shard", shardNum)
     .start()
+
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
   //  2. Determine, one at a time, what chunks are missing and could be fetched from disk
@@ -55,28 +56,23 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   //  4. upload to memory and return partition
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   //scalastyle:off
-  override def scanPartitions(columnIDs: Seq[Types.ColumnId],
-                              partMethod: PartitionScanMethod,
-                              chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
-    logger.debug(s"scanPartitions dataset=$ref shard=$shardNum " +
-      s"partMethod=$partMethod chunkMethod=$chunkMethod")
+  override def scanPartitions(partLookupRes: PartLookupResult): Observable[ReadablePartition] = {
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed
     // 3. We don't have a safe way to prevent JVM crashes if someone reads a column that wasn't paged in
 
     // 1. Fetch partitions from memstore
-    val iterResult = iteratePartitions(partMethod, chunkMethod)
-    val partIdsNotInMemory = iterResult.partIdsNotInMemory
+    val partIdsNotInMemory = partLookupRes.partIdsNotInMemory
     // 2. Now determine list of partitions to ODP and the time ranges to ODP
     val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
     val pagingMethods = new ArrayBuffer[ChunkScanMethod]
     val inMemOdp = debox.Set.empty[Int]
 
-    iterResult.partIdsInMemoryMayNeedOdp.foreach { case (pId, startTime) =>
+    partLookupRes.partIdsMemTimeGap.foreach { case (pId, startTime) =>
       val p = partitions.get(pId)
       if (p != null) {
-        val odpChunkScan = chunksToODP(p, chunkMethod, pagingEnabled, startTime)
+        val odpChunkScan = chunksToODP(p, partLookupRes.chunkMethod, pagingEnabled, startTime)
         odpChunkScan.foreach { rawChunkMethod =>
           pagingMethods += rawChunkMethod // TODO: really determine range for all partitions
           partKeyBytesToPage += p.partKeyBytes
@@ -90,21 +86,21 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       }
     }
     logger.debug(s"Query on dataset=$ref shard=$shardNum resulted in partial ODP of partIds ${inMemOdp}, " +
-      s"and full ODP of partIds ${iterResult.partIdsNotInMemory}")
+      s"and full ODP of partIds ${partLookupRes.partIdsNotInMemory}")
 
     // partitions that do not need ODP are those that are not in the inMemOdp collection
-    val noOdpPartitions = iterResult.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
+    val noOdpPartitions = partLookupRes.partsInMemoryIter.filterNot(p => inMemOdp(p.partID))
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
     val result = Observable.fromIterator(noOdpPartitions) ++ {
       if (storeConfig.multiPartitionODP) {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
-                                        chunkMethod)).flatMap { odpParts =>
+                                        partLookupRes.chunkMethod)).flatMap { odpParts =>
           val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
-            rawStore.readRawPartitions(ref, multiPart, computeBoundingMethod(pagingMethods))
+            rawStore.readRawPartitions(ref, maxChunkTime, multiPart, computeBoundingMethod(pagingMethods))
               // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
               // In the future optimize this if needed.
               .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
@@ -114,12 +110,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
         }
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
-                                        chunkMethod)).flatMap { odpParts =>
+                                        partLookupRes.chunkMethod)).flatMap { odpParts =>
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
-                rawStore.readRawPartitions(ref, SinglePartitionScan(partBytes, shardNum), method)
+                rawStore.readRawPartitions(ref, maxChunkTime, SinglePartitionScan(partBytes, shardNum), method)
                   .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
@@ -235,39 +231,6 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       }
     } else {
       None
-    }
-  }
-
-  override def iteratePartitions(partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod): IterationResult = {
-    partMethod match {
-      case SinglePartitionScan(partition, _) =>
-        IterationResult(ByteKeysPartitionIterator(Seq(partition)), debox.Map.empty, debox.Buffer.empty)
-      case MultiPartitionScan(partKeys, _)   =>
-        IterationResult(ByteKeysPartitionIterator(partKeys), debox.Map.empty, debox.Buffer.empty)
-      case FilteredPartitionScan(split, filters) =>
-        // TODO: There are other filters that need to be added and translated to Lucene queries
-        val coll = partKeyIndex.partIdsFromFilters2(filters, chunkMethod.startTime, chunkMethod.endTime)
-
-        // first find out which partitions are being queried for data not in memory
-        val it1 = InMemPartitionIterator(coll.intIterator())
-        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
-        val partIdsNotInMem = it1.skippedPartIDs
-        val startTimes = if (partIdsToPage.nonEmpty) {
-          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
-          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
-            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
-            s"resulted in startTimes=$st")
-          st
-        }
-        else {
-          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
-            s"shard=$shardNum are in memory")
-          debox.Map.empty[Int, Long]
-        }
-        // now provide an iterator that additionally supplies the startTimes for
-        // those partitions that may need to be paged
-        IterationResult(new InMemPartitionIterator(coll.intIterator()), startTimes, partIdsNotInMem)
     }
   }
 }

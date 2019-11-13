@@ -71,4 +71,33 @@ class ChunkSetInfoSpec extends NativeVectorTest {
       ingestionTime = ingestionTime.plus(1, ChronoUnit.DAYS)
     }
   }
+
+  it("should check min and max bounds") {
+    val minTime = startTimeFromChunkID(java.lang.Long.MIN_VALUE)
+    val maxTime = startTimeFromChunkID(java.lang.Long.MAX_VALUE)
+
+    assert(minTime == minChunkUserTime)
+    assert(maxTime == maxChunkUserTime)
+
+    // No exceptions thrown.
+    chunkID(minTime, 0)
+    chunkID(maxTime, 0)
+
+    // These are just out of bounds.
+    intercept[IllegalArgumentException] { chunkID(minTime - 1, 0) }
+    intercept[IllegalArgumentException] { chunkID(maxTime + 1, 0) }
+  }
+
+  it("should maintain proper chunk id order over the whole range") {
+    val minTime = startTimeFromChunkID(java.lang.Long.MIN_VALUE)
+    val maxTime = startTimeFromChunkID(java.lang.Long.MAX_VALUE)
+    val step = (maxTime - minTime) / 1000
+    var lastId = java.lang.Long.MIN_VALUE
+
+    for (time <- minTime + 1 to maxTime by step) {
+      val id = chunkID(time, 0)
+      assert(id > lastId)
+      lastId = id
+    }
+  }
 }

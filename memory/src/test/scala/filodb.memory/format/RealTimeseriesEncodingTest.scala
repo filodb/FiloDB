@@ -31,11 +31,11 @@ class RealTimeseriesEncodingTest extends NativeVectorTest {
     val targetNumBytes = samples.length * TargetBytesPerSample
     println(s"${samples.length} samples, target encoded size = $targetNumBytes bytes")
 
-    val timestampBytes = BinaryVector.totalBytes(timestampPtr)
-    val valuesBytes    = BinaryVector.totalBytes(valuesPtr)
+    val timestampBytes = BinaryVector.totalBytes(acc, timestampPtr)
+    val valuesBytes    = BinaryVector.totalBytes(acc, valuesPtr)
 
     println(s"timestamp bytes = $timestampBytes, values bytes = $valuesBytes")
-    println(s"ts reader = ${LongBinaryVector(timestampPtr)}  values reader = ${DoubleVector(valuesPtr)}")
+    println(s"ts reader = ${LongBinaryVector(acc, timestampPtr)}  values reader = ${DoubleVector(acc, valuesPtr)}")
 
     (timestampBytes + valuesBytes).toDouble should be < (targetNumBytes)
   }

@@ -6,8 +6,8 @@ import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 
-import filodb.coordinator.{FilodbSettings}
-import filodb.core.store.StoreConfig
+import filodb.coordinator.{FilodbSettings, NodeClusterActor}
+import filodb.core.store.{IngestionConfig, StoreConfig}
 
 /**
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
@@ -28,18 +28,25 @@ object DownsamplerSettings extends StrictLogging {
 
   val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
+  val rawDatasetIngestionConfig = filodbSettings.streamConfigs.map { config =>
+        IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
+      }.find(_.ref.toString == rawDatasetName).get
+
   val rawSchemaNames = downsamplerConfig.as[Seq[String]]("raw-schema-names")
 
-  val downsampleResolutions = downsamplerConfig.as[Array[FiniteDuration]]("resolutions")
+  val downsampleResolutions = rawDatasetIngestionConfig.downsampleConfig.resolutions
 
-  val downsampleTtls = downsamplerConfig.as[Array[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
-  require(downsampleResolutions.length == downsampleTtls.length)
+  val downsampleTtls = rawDatasetIngestionConfig.downsampleConfig.ttls
 
   val downsampleStoreConfig = StoreConfig(downsamplerConfig.getConfig("downsample-store-config"))
 
   val ttlByResolution = downsampleResolutions.zip(downsampleTtls).toMap
 
-  val batchSize = downsamplerConfig.getInt("num-partitions-per-cass-write")
+  val batchSize = downsamplerConfig.getInt("cass-write-batch-size")
+
+  val batchTime = downsamplerConfig.as[FiniteDuration]("cass-write-batch-time")
+
+  val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
   val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
 

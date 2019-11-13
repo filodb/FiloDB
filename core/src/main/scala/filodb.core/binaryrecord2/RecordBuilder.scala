@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, PartitionSchema, Schema}
+import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -28,21 +28,20 @@ import filodb.memory.format.vectors.Histogram
  *                   where one copies the BinaryRecord somewhere else every time, and allocation is minimized by
  *                   reusing the same container over and over.
  */
-final class RecordBuilder(memFactory: MemFactory,
-                          containerSize: Int = RecordBuilder.DefaultContainerSize,
-                          reuseOneContainer: Boolean = false,
-                          // Put fields here so scalac won't generate stupid and slow initialization check logic
-                          // Seriously this makes var updates like twice as fast
-                          private var curBase: Any = UnsafeUtils.ZeroPointer,
-                          private var fieldNo: Int = -1,
-                          private var curRecordOffset: Long = -1L,
-                          private var curRecEndOffset: Long = -1L,
-                          private var maxOffset: Long = -1L,
-                          private var mapOffset: Long = -1L,
-                          private var recHash: Int = -1) extends StrictLogging {
+class RecordBuilder(memFactory: MemFactory,
+                    containerSize: Int = RecordBuilder.DefaultContainerSize,
+                    reuseOneContainer: Boolean = false) extends StrictLogging {
   import RecordBuilder._
   import UnsafeUtils._
   require(containerSize >= RecordBuilder.MinContainerSize, s"RecordBuilder.containerSize < minimum")
+
+  private var curBase: Any = UnsafeUtils.ZeroPointer
+  private var fieldNo: Int = -1
+  private var curRecordOffset: Long = -1L
+  private var curRecEndOffset: Long = -1L
+  private var maxOffset: Long = -1L
+  private var mapOffset: Long = -1L
+  private var recHash: Int = -1
 
   private val containers = new collection.mutable.ArrayBuffer[RecordContainer]
   var schema: RecordSchema = _
@@ -51,10 +50,15 @@ final class RecordBuilder(memFactory: MemFactory,
 
   if (reuseOneContainer) newContainer()
 
+  /**
+    * Override to return a different clock, intended when running tests.
+    */
+  def currentTimeMillis: Long = System.currentTimeMillis()
+
   // Reset last container and all pointers
   def reset(): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
-    containers.last.updateTimestamp()
+    containers.last.updateTimestamp(currentTimeMillis)
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -529,7 +533,7 @@ final class RecordBuilder(memFactory: MemFactory,
     curRecEndOffset = curRecordOffset
     container.updateLengthWithOffset(curRecordOffset)
     container.writeVersionWord()
-    container.updateTimestamp()
+    container.updateTimestamp(currentTimeMillis)
     maxOffset = newOff + containerSize
   }
 
@@ -650,13 +654,13 @@ object RecordBuilder {
     * In order to ingest all these multiple time series of a single metric to the
     * same shard, we have to trim the suffixes while calculating shardKeyHash.
     *
-    * @param schema - affected schema
+    * @param options - DatasetOptions
     * @param shardKeyColName  - ShardKey label name as String
     * @param shardKeyColValue - ShardKey label value as String
     * @return - Label value after removing the suffix
     */
-  final def trimShardColumn(schema: Schema, shardKeyColName: String, shardKeyColValue: String): String = {
-    schema.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
+  final def trimShardColumn(options: DatasetOptions, shardKeyColName: String, shardKeyColValue: String): String = {
+    options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
       case Some(trimMetricSuffixColumn) => trimMetricSuffixColumn.find(shardKeyColValue.endsWith) match {
                                             case Some(s)  => shardKeyColValue.dropRight(s.length)
                                             case _        => shardKeyColValue

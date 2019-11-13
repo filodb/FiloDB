@@ -1,5 +1,7 @@
 package filodb.cassandra.columnstore
 
+import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 
 import filodb.core._
@@ -41,7 +43,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val sourceChunks = chunkSetStream(names take 3).toListL.runAsync.futureValue
 
-    val parts = lz4ColStore.readRawPartitions(dataset.ref, partScan).toListL.runAsync.futureValue
+    val parts = lz4ColStore.readRawPartitions(dataset.ref, 0.millis.toMillis, partScan).toListL.runAsync.futureValue
     parts should have length (1)
     parts(0).chunkSets should have length (1)
     parts(0).chunkSets(0).vectors.toSeq shouldEqual sourceChunks.head.chunks

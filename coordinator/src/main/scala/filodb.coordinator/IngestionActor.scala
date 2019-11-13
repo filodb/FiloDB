@@ -13,7 +13,6 @@ import akka.event.LoggingReceive
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
-import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, Iterators}
@@ -206,14 +205,6 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     }
   }
 
-  private def flushStream(startGroupNo: Int = 0): Observable[FlushCommand] = {
-    if (source.config.as[Option[Boolean]]("noflush").getOrElse(false)) {
-      FlushStream.empty
-    } else {
-      FlushStream.interval(numGroups, storeConfig.flushInterval / numGroups, startGroupNo)
-    }
-  }
-
   /**
    * Initiates post-recovery ingestion and regular flushing from the source.
    * startingGroupNo and offset would be defined for recovery scenarios.
@@ -241,7 +232,6 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         shard,
         stream,
         flushSched,
-        flushStream(startingGroupNo),
         onCancel)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data

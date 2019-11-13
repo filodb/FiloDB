@@ -6,6 +6,7 @@ import scalaxy.loops._
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.MemoryReader._
 
 final case class MinMax(min: Int, max: Int)
 
@@ -145,51 +146,51 @@ object DeltaDeltaVector {
  */
 object DeltaDeltaDataReader extends LongVectorDataReader {
   val InnerVectorOffset = 20
-  override def length(vector: BinaryVectorPtr): Int =
-    IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
-  final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 8)
-  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 16)
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = {
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
+    IntBinaryVector.simple(acc, vector + InnerVectorOffset).length(acc, vector + InnerVectorOffset)
+  final def initValue(acc: MemoryReader, vector: BinaryVectorPtr): Long = acc.getLong(vector + 8)
+  final def slope(acc: MemoryReader, vector: BinaryVectorPtr): Int = acc.getInt(vector + 16)
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Long = {
     val inner = vector + InnerVectorOffset
-    initValue(vector) + slope(vector).toLong * n + IntBinaryVector.simple(inner)(inner, n)
+    initValue(acc, vector) + slope(acc, vector).toLong * n + IntBinaryVector.simple(acc, inner)(acc, inner, n)
   }
 
   // Should be close to O(1), initial guess should be almost spot on
-  def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val _slope = slope(vector).toLong
-    val _len   = length(vector)
-    var elemNo = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
-                 else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
+  def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int = {
+    val _slope = slope(acc, vector).toLong
+    val _len   = length(acc, vector)
+    var elemNo = if (_slope == 0) { if (item <= initValue(acc, vector)) 0 else length(acc, vector) }
+                 else             { ((item - initValue(acc, vector) + (_slope - 1)) / _slope).toInt }
     if (elemNo < 0) elemNo = 0
     if (elemNo >= _len) elemNo = _len - 1
-    var curBase = initValue(vector) + _slope * elemNo
+    var curBase = initValue(acc, vector) + _slope * elemNo
     val inner = vector + InnerVectorOffset
-    val inReader = IntBinaryVector.simple(inner)
+    val inReader = IntBinaryVector.simple(acc, inner)
 
     // Back up while we are less than current value until we can't back up no more
-    while (elemNo >= 0 && item < (curBase + inReader(inner, elemNo))) {
+    while (elemNo >= 0 && item < (curBase + inReader(acc, inner, elemNo))) {
       elemNo -= 1
       curBase -= _slope
     }
 
-    if (elemNo >= 0 && item == (curBase + inReader(inner, elemNo))) return elemNo
+    if (elemNo >= 0 && item == (curBase + inReader(acc, inner, elemNo))) return elemNo
 
     elemNo += 1
     curBase += _slope
 
     // Increase while we are greater than current value until past end
-    while (elemNo < _len && item > (curBase + inReader(inner, elemNo))) {
+    while (elemNo < _len && item > (curBase + inReader(acc, inner, elemNo))) {
       elemNo += 1
       curBase += _slope
     }
 
-    if (elemNo < _len && item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
+    if (elemNo < _len && item == (curBase + inReader(acc, inner, elemNo))) elemNo else elemNo | 0x80000000
   }
 
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
     val inner = vector + InnerVectorOffset
-    DeltaDeltaConstDataReader.slopeSum(initValue(vector), slope(vector), start, end) +
-      IntBinaryVector.simple(inner).sum(inner, start, end)
+    DeltaDeltaConstDataReader.slopeSum(initValue(acc, vector), slope(acc, vector), start, end) +
+      IntBinaryVector.simple(acc, inner).sum(acc, inner, start, end)
   }
 
   // Efficient iterator as we keep track of current value and inner iterator
@@ -201,15 +202,18 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     }
   }
 
-  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = {
+  final def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = {
     val inner = vector + InnerVectorOffset
-    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
-    new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector).toLong)
+    val innerIt = IntBinaryVector.simple(acc, inner).iterate(acc, inner, startElement)
+    new DeltaDeltaIterator(innerIt, slope(acc, vector), initValue(acc, vector) +
+      startElement * slope(acc, vector).toLong)
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-      require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-      val itr = iterate(vector, start)
+  def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
+              prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+      require(start >= 0 && end < length(acc, vector), s"($start, $end) is " +
+        s"out of bounds, length=${length(acc, vector)}")
+      val itr = iterate(acc, vector, start)
       var prevVector: Long = prev
       var changes = 0
       for {i <- start until end + 1 optimized} {
@@ -231,19 +235,20 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
  * losing the exact values when they are really close anyways.
  */
 object DeltaDeltaConstDataReader extends LongVectorDataReader {
-  override def length(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 8)
-  final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 12)
-  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 20)
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = initValue(vector) + slope(vector) * n
+  override def length(acc: MemoryReader, vector: BinaryVectorPtr): Int = acc.getInt(vector + 8)
+  final def initValue(acc: MemoryReader, vector: BinaryVectorPtr): Long = acc.getLong(vector + 12)
+  final def slope(acc: MemoryReader, vector: BinaryVectorPtr): Int = acc.getInt(vector + 20)
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): Long =
+    initValue(acc, vector) + slope(acc, vector) * n
 
   // This is O(1) since we can find exactly where on line it is
-  final def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
-    val _slope = slope(vector).toLong
-    val guess = if (_slope == 0) { if (item <= initValue(vector)) 0 else length(vector) }
-                else             { ((item - initValue(vector) + (_slope - 1)) / _slope).toInt }
+  final def binarySearch(acc: MemoryReader, vector: BinaryVectorPtr, item: Long): Int = {
+    val _slope = slope(acc, vector).toLong
+    val guess = if (_slope == 0) { if (item <= initValue(acc, vector)) 0 else length(acc, vector) }
+                else             { ((item - initValue(acc, vector) + (_slope - 1)) / _slope).toInt }
     if (guess < 0)                         { 0x80000000 }
-    else if (guess >= length(vector))      { 0x80000000 | length(vector) }
-    else if (item != apply(vector, guess)) { 0x80000000 | guess }
+    else if (guess >= length(acc, vector))      { 0x80000000 | length(acc, vector) }
+    else if (item != apply(acc, vector, guess)) { 0x80000000 | guess }
     else                                   { guess }
   }
 
@@ -251,9 +256,10 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
   // let len = end - start + 1
   //   = initVal + start*slope + initVal + (start+1)*slope + .... + initVal + end*slope
   //   = len * initVal + len*start*slope + ((end-start)*len/2) * slope
-  final def sum(vector: BinaryVectorPtr, start: Int, end: Int): Double = {
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    slopeSum(initValue(vector), slope(vector), start, end)
+  final def sum(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int): Double = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is " +
+      s"out of bounds, length=${length(acc, vector)}")
+    slopeSum(initValue(acc, vector), slope(acc, vector), start, end)
   }
 
   private[memory] def slopeSum(initVal: Long, slope: Int, start: Int, end: Int): Double = {
@@ -261,22 +267,25 @@ object DeltaDeltaConstDataReader extends LongVectorDataReader {
     len.toDouble * (initVal + start * slope.toLong) + ((end-start)*len/2) * slope.toLong
   }
 
-  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
-    private final var curBase = initValue(vector) + startElement * slope(vector).toLong
+  final def iterate(acc: MemoryReader, vector: BinaryVectorPtr,
+                    startElement: Int = 0): LongIterator = new LongIterator {
+    private final var curBase = initValue(acc, vector) + startElement * slope(acc, vector).toLong
     final def next: Long = {
       val out = curBase
-      curBase += slope(vector)
+      curBase += slope(acc, vector)
       out
     }
   }
 
-  def changes(vector: BinaryVectorPtr, start: Int, end: Int, prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
-    require(start >= 0 && end < length(vector), s"($start, $end) is out of bounds, length=${length(vector)}")
-    val firstValue = apply(vector, start)
-    val lastValue = apply(vector, end)
+  def changes(acc: MemoryReader, vector: BinaryVectorPtr, start: Int, end: Int,
+              prev: Long, ignorePrev: Boolean = false): (Long, Long) = {
+    require(start >= 0 && end < length(acc, vector), s"($start, $end) is out " +
+      s"of bounds, length=${length(acc, vector)}")
+    val firstValue = apply(acc, vector, start)
+    val lastValue = apply(acc, vector, end)
     // compare current element with last element(prev) of previous chunk
     val changes = if (!ignorePrev && prev != firstValue) 1 else 0
-    if (slope(vector) == 0) (changes, lastValue) else (end - start + changes, lastValue)
+    if (slope(acc, vector) == 0) (changes, lastValue) else (end - start + changes, lastValue)
   }
 }
 
@@ -304,7 +313,7 @@ class DeltaDeltaAppendingVector(val addr: BinaryRegion.NativePointer,
   final def apply(index: Int): Long = initValue + slope.toLong * index + deltas(index)
   final def numBytes: Int = 20 + deltas.numBytes
   final def reader: VectorDataReader = DeltaDeltaDataReader
-  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(addr)
+  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(nativePtrReader, addr)
 
   final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
   final def addData(data: Long): AddResponse = {

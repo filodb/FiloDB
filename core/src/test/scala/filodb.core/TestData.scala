@@ -1,5 +1,6 @@
 package filodb.core
 
+import scala.concurrent.duration._
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
@@ -233,14 +234,18 @@ object MachineMetricsData {
   def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
 
   // Dataset1: Partition keys (series) / Row key timestamp
-  val dataset1 = Dataset("metrics1", Seq("series:string"), columns)
+  val options = DatasetOptions.DefaultOptions.copy(metricColumn = "series")
+  val dataset1 = Dataset("metrics1", Seq("series:string"), columns, options)
   val schema1 = dataset1.schema
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
-  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0,
+              ingestionTimeMillis: Long = System.currentTimeMillis()): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory) {
+      override def currentTimeMillis: Long = ingestionTimeMillis
+    }
     stream.foreach { row =>
       builder.startNewRecord(ds.schema)
       row.foreach { thing => builder.addSlowly(thing) }
@@ -249,8 +254,15 @@ object MachineMetricsData {
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
   }
 
-  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5): Seq[SomeData] =
-    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map { case (group, i) => records(ds, group, i) }
+  /**
+    * @param ingestionTimeAdjust defines the ingestion time increment for each generated
+    * RecordContainer
+    */
+  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
+                     ingestionTimeAdjust: Long = 40000): Seq[SomeData] =
+    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
+      case (group, i) => records(ds, group, i, i * ingestionTimeAdjust)
+    }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
@@ -371,8 +383,10 @@ object MachineMetricsData {
   val histPartKey = histKeyBuilder.partKeyFromObjects(histDataset.schema, "request-latency", extraTags)
 
   val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")), null, 16)
-  private val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
-                                                 dummyContext, true)
+  val histIngestBH = new BlockMemFactory(blockStore, None, histDataset.schema.data.blockMetaSize,
+                                         dummyContext, true)
+  val histMaxBH = new BlockMemFactory(blockStore, None, histMaxDS.schema.data.blockMetaSize,
+                                      dummyContext, true)
   private val histBufferPool = new WriteBufferPool(TestData.nativeMem, histDataset.schema.data, TestData.storeConf)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
@@ -382,7 +396,7 @@ object MachineMetricsData {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH) }
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
@@ -396,9 +410,9 @@ object MachineMetricsData {
     val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH) }
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
-    part.switchBuffers(histIngestBH, encode = true)
+    part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 4, 3)))
   }

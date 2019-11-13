@@ -46,8 +46,8 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int,
     UnsafeUtils.setInt(base, offset + 4, word)
   }
 
-  private[binaryrecord2] def updateTimestamp(): Unit = {
-    UnsafeUtils.setLong(base, offset + 8, System.currentTimeMillis())
+  private[binaryrecord2] def updateTimestamp(timestampMillis: Long): Unit = {
+    UnsafeUtils.setLong(base, offset + 8, timestampMillis)
   }
 
   @inline final def version: Int = (UnsafeUtils.getInt(base, offset + 4) >> 24) & 0x00ff

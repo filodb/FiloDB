@@ -8,6 +8,7 @@ import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.memory.NativeMemoryManager
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors._
 
 /**
@@ -25,13 +26,14 @@ class BasicFiloBenchmark {
   // Ok, create a LongColumn and benchmark it.
   val numValues = 1000
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  val acc = nativePtrReader
 
   val randomLongs = (0 until numValues).map(i => util.Random.nextInt.toLong)
 
   val ivbuilder = LongBinaryVector.appendingVectorNoNA(memFactory, numValues)
   randomLongs.foreach(ivbuilder.addData)
   val iv = ivbuilder.optimize(memFactory)
-  val ivReader = LongBinaryVector(iv)
+  val ivReader = LongBinaryVector(acc, iv)
 
   val dblBuilder = DoubleVector.appendingVectorNoNA(memFactory, numValues)
   randomLongs.map(_.toDouble).foreach(dblBuilder.addData)
@@ -44,7 +46,7 @@ class BasicFiloBenchmark {
   val byteIVBuilder = LongBinaryVector.appendingVectorNoNA(memFactory, numValues)
   randomLongs.zipWithIndex.map { case (rl, i) => i * 10000 + (rl % 128) }.foreach(byteIVBuilder.addData)
   val byteVect = byteIVBuilder.optimize(memFactory)
-  val byteReader = LongBinaryVector(byteVect)
+  val byteReader = LongBinaryVector(acc, byteVect)
 
   @TearDown
   def shutdown(): Unit = {
@@ -59,8 +61,9 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumAllLongsApply(): Long = {
     var total = 0L
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until numValues optimized } {
-      total += ivReader(iv, i)
+      total += ivReader(acc2, iv, i)
     }
     total
   }
@@ -70,7 +73,7 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumAllLongsIterate(): Long = {
     var total = 0L
-    val it = ivReader.iterate(iv)
+    val it = ivReader.iterate(acc, iv)
     for { i <- 0 until numValues optimized } {
       total += it.next
     }
@@ -81,21 +84,21 @@ class BasicFiloBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumAllLongsSumMethod(): Double = {
-    ivReader.sum(iv, 0, numValues - 1)
+    ivReader.sum(acc, iv, 0, numValues - 1)
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumDoublesSumMethod(): Double = {
-    dblReader.sum(dblBuilder.addr, 0, numValues - 1)
+    dblReader.sum(acc, dblBuilder.addr, 0, numValues - 1)
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumAllIntsSumMethod(): Long = {
-    intReader.sum(intBuilder.addr, 0, numValues - 1)
+    intReader.sum(acc, intBuilder.addr, 0, numValues - 1)
   }
 
   @Benchmark
@@ -103,8 +106,9 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesApply(): Long = {
     var total = 0L
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until numValues optimized } {
-      total += byteReader(byteVect, i)
+      total += byteReader(acc2, byteVect, i)
     }
     total
   }
@@ -114,7 +118,7 @@ class BasicFiloBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesIterate(): Long = {
     var total = 0L
-    val it = byteReader.iterate(byteVect)
+    val it = byteReader.iterate(acc, byteVect)
     for { i <- 0 until numValues optimized } {
       total += it.next
     }
@@ -125,6 +129,6 @@ class BasicFiloBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def sumTimeSeriesBytesSum(): Double = {
-    byteReader.sum(byteVect, 0, numValues - 1)
+    byteReader.sum(acc, byteVect, 0, numValues - 1)
   }
 }

@@ -5,7 +5,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
 
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
@@ -213,7 +213,8 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (HistogramColumn, i) =>
         result += s"${colNames(i)}= ${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
     }
-    val schemaStr = partitionFieldStart.map(x => s"schema=${RecordSchema.schemaID(base, offset)} ").getOrElse("")
+    val schemaName = Schemas.global.schemaName(RecordSchema.schemaID(base, offset))
+    val schemaStr = partitionFieldStart.map(x => s"schema=$schemaName ").getOrElse("")
     s"b2[$schemaStr ${result.mkString(",")}]"
   }
 
@@ -400,6 +401,9 @@ object RecordSchema {
   }
 
   final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
+
+  final def schemaID(bytes: Array[Byte]): Int =
+    if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
 
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =

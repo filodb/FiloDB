@@ -32,17 +32,19 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
 
   import BatchDownsampler._
   import DownsamplerSettings._
-  import Utils._
+
+  import java.time.Instant._
 
   mainFunction()
 
+  // Gotcha!! Needed a separate mainFunction
+  // to create a closure for spark to serialize and move to executors.
+  // Otherwise, config values below were not being sent over.
   private def mainFunction() = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
       .getOrCreate()
-
-    val splits = cassandraColStore.getScanSplits(rawDatasetRef)
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
@@ -60,10 +62,14 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
     logger.info(s"This is the Downsampling driver. Starting downsampling job " +
-      s"rawDataset=$rawDatasetName for userTimeInPeriod=${millisToString(userTimeInPeriod)} " +
-      s"ingestionTimeStart=${millisToString(ingestionTimeStart)} " +
-      s"ingestionTimeEnd=${millisToString(ingestionTimeEnd)} " +
-      s"userTimeStart=${millisToString(userTimeStart)} userTimeEnd=${millisToString(userTimeEnd)}")
+      s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
+      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
+      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
+
+    val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
+    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+      s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
@@ -71,8 +77,8 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
         import filodb.core.Iterators._
         val rawDataSource = cassandraColStore
         rawDataSource.getChunksByIngestionTimeRange(rawDatasetRef, splitIter,
-          ingestionTimeStart, ingestionTimeEnd,
-          userTimeStart, userTimeEnd, batchSize).toIterator()
+          ingestionTimeStart, ingestionTimeEnd, rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          userTimeStart, userTimeEnd, batchSize, batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEnd)

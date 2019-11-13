@@ -83,6 +83,13 @@ object FilodbSettings {
     global().get
   }
 
+  def globalOrDefault: FilodbSettings =
+    global().getOrElse {
+      val settings = new FilodbSettings()
+      global := Some(settings)
+      settings
+    }
+
   def reset(): Unit = global := None
 }
 

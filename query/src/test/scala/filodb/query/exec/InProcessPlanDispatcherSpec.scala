@@ -17,13 +17,14 @@ import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.metadata.{Column, Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
+// So, this is effectively a test for NonLeafExecPlan
 class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
 
   import ZeroCopyUTF8String._
@@ -87,7 +88,6 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
   val histMaxData: Stream[Seq[Any]] = MMD.histMax(histData)
 
   it ("inprocess dispatcher should execute and return monix task which in turn should return QueryResult") {
-
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
@@ -95,10 +95,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
-    val execPlan1 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
-    val execPlan2 = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, timeseriesSchema, filters, AllChunkScan, Nil)
+    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
@@ -108,6 +108,58 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
       case r: QueryResult =>
         r.result.size shouldEqual 1
         r.result.head.numRows shouldEqual Some(numRawSamples)
+    }
+  }
+
+  import Column.ColumnType._
+
+  it ("inprocess dispatcher should work when a child plan returns no time series") {
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+
+    val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
+
+    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, emptyFilters, AllChunkScan)
+
+    val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
+    val result = dispatcher.dispatch(sep).runAsync.futureValue
+
+    result match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+        r.result.size shouldEqual 1
+        r.result.head.numRows shouldEqual Some(numRawSamples)
+    }
+
+    // Switch the order and make sure it's OK if the first result doesn't have any data
+    val sep2 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan1))
+    val result2 = dispatcher.dispatch(sep2).runAsync.futureValue
+
+    result2 match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+        r.result.size shouldEqual 1
+        r.result.head.numRows shouldEqual Some(numRawSamples)
+    }
+
+    // Two children none of which returns data
+    val sep3 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan2))
+    val result3 = dispatcher.dispatch(sep3).runAsync.futureValue
+
+    result3 match {
+      case e: QueryError => throw e.t
+      case r: QueryResult =>
+        r.resultSchema.columns.map(_.colType) shouldEqual Nil
+        r.result.size shouldEqual 0
     }
   }
 }

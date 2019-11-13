@@ -17,7 +17,7 @@ object TimeSeriesPartitionSpec {
   import MachineMetricsData._
   import BinaryRegion.NativePointer
 
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  val memFactory = new NativeMemoryManager(50 * 1024 * 1024)
 
   val maxChunkSize = TestData.storeConf.maxChunksSize
   protected val myBufferPool = new WriteBufferPool(memFactory, schema1.data, TestData.storeConf)
@@ -67,7 +67,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     }
   }
 
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
+  private val blockStore = new PageAlignedBlockManager(200 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, schema1.data.blockMetaSize,
                                       dummyContext, true)
@@ -139,6 +139,23 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
 
     chunkSets.head.invokeFlushListener()    // update newestFlushedID
     part.unflushedChunksets shouldEqual 1
+  }
+
+  it("should enforce user time length in each chunk") {
+    part = makePart(0, dataset1)
+    // user time maximum is not enforced, so just one chunk
+    singleSeriesReaders().take(35).foreach { r => part.ingest(0, r, ingestBlockHolder, Long.MaxValue) }
+    part.numChunks shouldEqual 1
+
+    part = makePart(0, dataset1)
+    // 11 samples per chunk since maxChunkTime is 10 seconds
+    singleSeriesReaders().take(33).foreach { r => part.ingest(0, r, ingestBlockHolder, 10000) }
+    part.numChunks shouldEqual 3
+
+    part = makePart(0, dataset1)
+    // 11 samples per chunk since maxChunkTime is 10 seconds
+    singleSeriesReaders().take(34).foreach { r => part.ingest(0, r, ingestBlockHolder, 10000) }
+    part.numChunks shouldEqual 4
   }
 
   it("should be able to read a time range of ingested data") {

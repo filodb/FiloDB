@@ -407,7 +407,7 @@ For more information on memory configuration, please have a look at the [ingesti
 FiloDB is designed to efficiently ingest a huge number of individual time series - depending on available memory, one million or more time series per node is achievable.  Here are some pointers on choosing them:
 
 * It is better to have smaller time series, as the indexing and filtering operations are designed to work on units of time series, and not samples within each time series.
-* The most flexible partition key is just to use a `MapColumn` and insert tags.
+* The default partition key consists of a metric name, and tags represented as a  `MapColumn`.
 * Each time series does take up both heap and offheap memory, and memory is likely the main limiting factor.  The amount of configured memory limits the number of actively ingesting time series possible at any moment.
 
 ### Sharding
@@ -427,11 +427,11 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
-Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
+Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
     http_req_timer{_ws_="demo", _ns_="foo",__col__="min"}
 
-By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
+By default if `__col__` is not specified then the `value-column` option of each data schema is used.
 
 Some special functions exist to aid debugging and for other purposes:
 

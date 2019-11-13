@@ -134,7 +134,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("foo:bar{a=\"bc\"}")
     parseSuccessfully("foo{NaN='bc'}")
     parseSuccessfully("foo{a=\"b\", foo!=\"bar\", test=~\"test\", bar!~\"baz\"}")
-
+    parseSuccessfully(":node_memory_utilisation:{_ns=\"piepubliccloud\"}")
 
     parseError("{")
     parseError("}")
@@ -251,6 +251,8 @@ class ParserSpec extends FunSpec with Matchers {
         "ScalarVectorBinaryOperation(MUL,5.0,ScalarVectorBinaryOperation(ADD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
+      "stdvar(http_requests_total)" ->
+        "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Irate,List())",
       "idelta(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -298,6 +300,8 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List())",
       "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], 0.4)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(0.4))",
+      "holt_winters(http_requests_total{job=\"api-server\"}[5m], 0.01, 0.1)" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(0.01, 0.1))",
 
 
      // Binary Expressions should generate Logical Plan according to precedence

@@ -28,6 +28,7 @@ object FiloSettings {
       "-deprecation",
       "-encoding", "UTF-8",
       "-unchecked",
+      "-target:jvm-1.8",
       "-feature",
       "-Xfuture",
       "-Xfatal-warnings",
