@@ -339,16 +339,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[core] var evictionWatermark: Long = 0L
 
   /**
-    * Dirty partitions whose start/end times have not been updated to cassandra
+    * Dirty partitions whose start/end times have not been updated to cassandra.
+    *
+    * IMPORTANT. Only modify this var in IngestScheduler
     */
   private[memstore] final var dirtyPartitionsForIndexFlush = new EWAHCompressedBitmap()
-
-  /**
-    * This is the group during which this shard will flush dirty part keys. Randomized to
-    * ensure we dont flush across shards at same time
-    */
-  private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
-  logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
 
   /**
     * The offset up to and including the last record in this group to be successfully persisted.
@@ -700,12 +695,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
 
-    // Prepare to flush current index records, switch current currentIndexTimeBucket partId
-    // bitmap with new one.  Return Some if part keys need to be flushed (happens for last
-    // flush group). Otherwise, None.
-    logger.debug(s"Preparing to flush index partKey changes in dataset=$ref" +
-      s"shard=$shardNum . ")
-    purgeExpiredPartitions()
+    if (groupNum == 0) purgeExpiredPartitions()
     val old = dirtyPartitionsForIndexFlush
     dirtyPartitionsForIndexFlush = new EWAHCompressedBitmap()
     FlushGroup(shardNum, groupNum, latestOffset, old)
@@ -856,7 +846,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
       /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
          If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
-      updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush.getOrElse(dirtyPartitionsForIndexFlush))
+      updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush)
       chunks
     }
 
@@ -914,7 +904,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
     resTry.foreach { resp =>
       logger.info(s"Flush of dataset=$ref shard=$shardNum group=${flushGroup.groupNum} " +
-        s"indexFlush=${flushGroup.dirtyPartsToFlush.isDefined} " +
         s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
     }
     partitionMaker.cleanupOldestBuckets()
@@ -926,24 +915,22 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
-    flushGroup.dirtyPartsToFlush.map { dirtyParts =>
-      var numPartKeys = 0
-      val partKeyRecords = InMemPartitionIterator(dirtyParts.intIterator).map { p =>
-        numPartKeys += 1
-        toPartKeyRecord(p)
-      }
-      colStore.writePartKeys(ref, shardNum,
-                             Observable.fromIterator(partKeyRecords),
-                             storeConfig.diskTTLSeconds).map { case resp =>
-        logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
-        shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
-        resp
-      }.recover { case e =>
-        logger.error(s"Internal Error when persisting part keys in dataset=$ref shard=$shardNum - " +
-          "should have not reached this state", e)
-        DataDropped
-      }
-    }.getOrElse(Future.successful(Success))
+    var numPartKeys = 0
+    val partKeyRecords = InMemPartitionIterator(flushGroup.dirtyPartsToFlush.intIterator).map { p =>
+      numPartKeys += 1
+      toPartKeyRecord(p)
+    }
+    colStore.writePartKeys(ref, shardNum,
+                           Observable.fromIterator(partKeyRecords),
+                           storeConfig.diskTTLSeconds).map { case resp =>
+      logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
+      shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
+      resp
+    }.recover { case e =>
+      logger.error(s"Internal Error when persisting part keys in dataset=$ref shard=$shardNum - " +
+        "should have not reached this state", e)
+      DataDropped
+    }
   }
   // scalastyle:on method.length
 
