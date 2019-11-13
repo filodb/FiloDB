@@ -19,16 +19,17 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
   import MachineMetricsData._
 
   val memStore = new TimeSeriesMemStore(config, columnStore, metaStore)
+  val numShards = 4
 
   // First create the tables in C*
   override def beforeAll(): Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
-    columnStore.initialize(dataset1.ref, 4).futureValue
+    columnStore.initialize(dataset1.ref, numShards).futureValue
   }
 
   before {
-    columnStore.truncate(dataset1.ref).futureValue
+    columnStore.truncate(dataset1.ref, numShards).futureValue
     metaStore.clearAllData().futureValue
   }
 

@@ -42,8 +42,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   before {
-    colStore.truncate(dataset.ref).futureValue
-    colStore.truncate(GdeltTestData.dataset2.ref).futureValue
+    colStore.truncate(dataset.ref, 4).futureValue
+    colStore.truncate(GdeltTestData.dataset2.ref, 4).futureValue
     memStore.reset()
     metaStore.clearAllData()
   }

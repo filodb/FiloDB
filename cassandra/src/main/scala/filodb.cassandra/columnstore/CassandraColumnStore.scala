@@ -267,7 +267,6 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     ret.onComplete(_ => span.finish())
     ret
   }
-
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],

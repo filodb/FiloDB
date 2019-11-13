@@ -5,7 +5,7 @@ import java.util.concurrent.locks.StampedLock
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.{Random, Try}
+import scala.util.Try
 
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
