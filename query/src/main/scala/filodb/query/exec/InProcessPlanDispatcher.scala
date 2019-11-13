@@ -56,7 +56,8 @@ case class UnsupportedChunkSource() extends ChunkSource {
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] =
     throw new UnsupportedOperationException("This operation is not supported")
 
-  override def readRawPartitions(ref: DatasetRef, partMethod: PartitionScanMethod,
+  override def readRawPartitions(ref: DatasetRef, maxChunkTime: Long,
+                                 partMethod: PartitionScanMethod,
                                  chunkMethod: ChunkScanMethod): Observable[RawPartData] =
     throw new UnsupportedOperationException("This operation is not supported")
 }

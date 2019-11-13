@@ -6,6 +6,7 @@ import filodb.core.Types.ChunkID
 import filodb.core.metadata.Schema
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, NativeMemoryManager}
+import filodb.memory.format.MemoryReader._
 import filodb.memory.format.UnsafeUtils
 
 object PagedReadablePartition extends StrictLogging {
@@ -71,7 +72,8 @@ class PagedReadablePartition(override val schema: Schema,
     method == AllChunkScan && chunkInfos.isEmpty
   }
 
-  override def hasChunksAt(id: ChunkID): Boolean = chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(_) == id)
+  override def hasChunksAt(id: ChunkID): Boolean =
+    chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(nativePtrReader, _) == id)
 
   override def earliestTime: Long = ???
 

@@ -162,12 +162,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
     * ** User/Ingestion End times are exclusive **
     */
+  // scalastyle:off parameter.number
   def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
                                     splits: Iterator[ScanSplit],
                                     ingestionTimeStart: Long,
                                     ingestionTimeEnd: Long,
                                     userTimeStart: Long,
                                     userTimeEnd: Long,
+                                    maxChunkTime: Long,
                                     batchSize: Int,
                                     batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
     val partKeys = Observable.fromIterator(splits).flatMap {
@@ -187,7 +189,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         s"userTimeEnd=$userTimeEnd")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable
       // based on how much faster downsampling should run, and how much additional read load cassandra can take.
-      chunksTable.readRawPartitionRangeBB(parts, userTimeStart, userTimeEnd).toIterator().toSeq
+      chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, userTimeEnd).toIterator().toSeq
     }
   }
 
@@ -275,7 +277,6 @@ case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
 }
 
 trait CassandraChunkSource extends RawChunkSource with StrictLogging {
-  import Iterators._
 
   def config: Config
   def filoSessionProvider: Option[FiloSessionProvider]
@@ -302,69 +303,54 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val partParallelism = 4
 
+  /**
+    * Read chunks from persistent store. Note the following constraints under which query is optimized:
+    *
+    * 1. Within a cassandra partition, chunks are ordered by chunkId. ChunkIds have this property:
+    * `chunkID(t1) > chunkId(t2) if and only if t1 > t2`.
+    *
+    * 2. All chunks have samples with a range of userTime. During ingestion, we restrict the maximum
+    * range for the userTime. This restriction makes it possible to issue single CQL query to fetch
+    * all relevant chunks from cassandra. We do this by searching for searching in cassandra for chunkIds
+    * between `chunkID(queryStartTime - maxChunkTime)` and `chunkID(queryEndTime)`. The reason we need to
+    * subtract maxChunkTime from queryStartTime is for the range to include the first chunk which may have
+    * relevant data but may have a startTime outside the query range.
+    *
+    * @param ref dataset ref
+    * @param maxChunkTime maximum userTime (in millis) allowed in a single chunk. This restriction makes it
+    *                     possible to issue single CQL query to fetch all relevant chunks from cassandra
+    * @param partMethod selector for partitions
+    * @param chunkMethod selector for chunks
+    * @return Stored chunks and infos for each matching partition
+    */
   def readRawPartitions(ref: DatasetRef,
+                        maxChunkTime: Long,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
-    val indexTable = getOrCreateIngestionTimeIndexTable(ref)
-    logger.debug(s"Scanning partitions for $ref with method $partMethod...")
-    val (filters, infoRecords) = partMethod match {
-      case SinglePartitionScan(partition, _) =>
-        (Nil, indexTable.getInfos(partition))
-
-      case MultiPartitionScan(partitions, _) =>
-        (Nil, indexTable.getMultiInfos(partitions))
-
-      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
-        (filters, indexTable.scanInfos(tokens))
-
-      case other: PartitionScanMethod =>  ???
-    }
-    // For now, partition filter func is disabled.  In the near future, this logic to scan through partitions
-    // and filter won't be necessary as we will have Lucene indexes to pull up specific partitions.
-    // val filterFunc = KeyFilter.makePartitionFilterFunc(dataset, filters)
-
+    val chunkTable = getOrCreateChunkTable(ref)
     partMethod match {
-      // Compute minimum start time from the infos, then do efficient range query MULTIGET
-      case MultiPartitionScan(partitions, _) =>
-        val chunkTable = getOrCreateChunkTable(ref)
-        Observable.fromTask(startTimeFromInfos(infoRecords, chunkMethod.startTime, chunkMethod.endTime))
-          .flatMap { case startTime =>
-            chunkTable.readRawPartitionRange(partitions, startTime, chunkMethod.endTime)
-          }
-      case other: PartitionScanMethod =>
-        // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
-        infoRecords.sortedGroupBy(_.binPartition.hashCode)
-                   .mapAsync(partParallelism) { case (_, binIndices) =>
-                     val infoBytes = binIndices.map(_.data.array)
-                     assembleRawPartData(ref, binIndices.head.binPartition.array, infoBytes, chunkMethod)
-                   }
-    }
-  }
-
-  // Returns the minimum start time from all the ChunkInfos that are within [startTime, endTime) query range
-  // Needed so we can do range queries efficiently by chunkID
-  private def startTimeFromInfos(infoRecords: Observable[InfoRecord],
-                                 startTime: Long,
-                                 endTime: Long): Task[Long] = {
-    infoRecords.foldLeftL(Long.MaxValue) { case (curStart, InfoRecord(_, data)) =>
-      val infoStartTime = ChunkSetInfo.getStartTime(data.array)
-      val infoEndTime = ChunkSetInfo.getEndTime(data.array)
-      if (infoStartTime <= endTime && infoEndTime >= startTime) {
-        Math.min(curStart, infoStartTime)
-      } else {
-        curStart
-      }
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), Nil)  =>
+        chunkTable.scanPartitionsBySplit(tokens)
+      case _ =>
+        val partitions = partMethod match {
+          case MultiPartitionScan(p, _) => p
+          case SinglePartitionScan(p, _) => Seq(p)
+          case p => throw new UnsupportedOperationException(s"PartitionScan $p to be implemented later")
+        }
+        val (start, end) = if (chunkMethod == AllChunkScan) (minChunkUserTime, maxChunkUserTime)
+                           else (chunkMethod.startTime - maxChunkTime, chunkMethod.endTime)
+        chunkTable.readRawPartitionRange(partitions, start, end)
     }
   }
 
   def getOrCreateChunkTable(dataset: DatasetRef): TimeSeriesChunksTable = {
-    chunkTableCache.getOrElseUpdate(dataset, { (dataset: DatasetRef) =>
+    chunkTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
       new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
-                                    { (dataset: DatasetRef) =>
+                                    { dataset: DatasetRef =>
                                       new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
   }
 
@@ -380,17 +366,4 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def reset(): Unit = {}
 
-  private def assembleRawPartData(ref: DatasetRef,
-                                  partKeyBytes: Array[Byte],
-                                  chunkInfos: Seq[Array[Byte]],
-                                  chunkMethod: ChunkScanMethod): Task[RawPartData] = {
-    val chunkTable = getOrCreateChunkTable(ref)
-
-    val filteredInfos = chunkInfos.filter { infoBytes =>
-      ChunkSetInfo.getStartTime(infoBytes) <= chunkMethod.endTime &&
-      ChunkSetInfo.getEndTime(infoBytes) >= chunkMethod.startTime
-    }
-
-    chunkTable.readRawPartitionData(partKeyBytes, filteredInfos)
-  }
 }
