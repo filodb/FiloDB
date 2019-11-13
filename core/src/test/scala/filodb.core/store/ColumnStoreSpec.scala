@@ -8,7 +8,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
-import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, FlushStream, TimeSeriesMemStore}
+import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
 
@@ -125,7 +125,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, Task {}).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -142,7 +142,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, Task {}).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)

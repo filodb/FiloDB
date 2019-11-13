@@ -240,8 +240,11 @@ object MachineMetricsData {
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
-  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0,
+              ingestionTimeMillis: Long = System.currentTimeMillis()): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory) {
+      override def currentTimeMillis: Long = ingestionTimeMillis
+    }
     stream.foreach { row =>
       builder.startNewRecord(ds.schema)
       row.foreach { thing => builder.addSlowly(thing) }
@@ -250,8 +253,15 @@ object MachineMetricsData {
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
   }
 
-  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5): Seq[SomeData] =
-    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map { case (group, i) => records(ds, group, i) }
+  /**
+    * @param ingestionTimeAdjust defines the ingestion time increment for each generated
+    * RecordContainer
+    */
+  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
+                     ingestionTimeAdjust: Long = 40000): Seq[SomeData] =
+    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
+      case (group, i) => records(ds, group, i, i * ingestionTimeAdjust)
+    }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
