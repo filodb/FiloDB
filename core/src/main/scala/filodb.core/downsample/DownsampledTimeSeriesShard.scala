@@ -17,6 +17,7 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesShard(ref: DatasetRef,
+                                 storeConfig: StoreConfig,
                                  val schemas: Schemas,
                                  colStore: ColumnStore,
                                  shardNum: Int,
@@ -36,8 +37,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   val indexDataset = downsampledDatasetRefs(indexResolution)
 
 
-  private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
-    downsampleTtls.max)
+  private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -107,7 +107,10 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     val partKeys = lookup.partsInMemoryIter.intIterator().map(partKeyFromPartId, 10000) // TODO configure
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
-        colStore.readRawPartitions(downsampledDataset, SinglePartitionScan(partBytes, shardNum), lookup.chunkMethod)
+        colStore.readRawPartitions(downsampledDataset,
+                                   storeConfig.maxChunkTime.toMillis,
+                                   SinglePartitionScan(partBytes, shardNum),
+                                   lookup.chunkMethod)
           .map(makePagedPartition)
           .toListL
           .map(Observable.fromIterable)

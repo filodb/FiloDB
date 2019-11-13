@@ -1,5 +1,8 @@
 package filodb.memory.format
 
+import filodb.memory.format.MemoryReader._
+import filodb.memory.format.vectors.HistogramReader
+
 // Value type for section type, must be a byte
 // Use of this value class helps prevent type coercion errors from using just an Int
 final private[format] case class SectionType(n: Int) extends AnyVal
@@ -21,52 +24,53 @@ final private[format] case class SectionType(n: Int) extends AnyVal
  */
 final case class Section private(addr: Long) extends AnyVal {
   // not including length bytes
-  final def sectionNumBytes: Int = Ptr.U16(addr).getU16
+  final def sectionNumBytes(acc: MemoryReader): Int = Ptr.U16(addr).getU16(acc)
 
-  final def numElements: Int = Ptr.U8(addr).add(2).getU8
+  final def numElements(acc: MemoryReader): Int = Ptr.U8(addr).add(2).getU8(acc)
 
-  final def sectionType: SectionType = SectionType(Ptr.U8(addr).add(3).getU8)
+  final def sectionType(acc: MemoryReader): SectionType = SectionType(Ptr.U8(addr).add(3).getU8(acc))
 
   // Ptr to first record of section
   final def firstElem: Ptr.U8 = Ptr.U8(addr) + 4
 
   // The address at the end of this section's elements, based on current num bytes
-  final def endAddr: Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes)
+  final def endAddr(acc: MemoryReader): Ptr.U8 = Ptr.U8(addr).add(4).add(sectionNumBytes(acc))
 
-  final def isComplete: Boolean = numElements > 0
+  final def isComplete(acc: MemoryReader): Boolean = numElements(acc) > 0
 
   /**
    * Updates the number of bytes and elements atomically.
    * Checks that new values make sense.
    */
-  final def update(addedBytes: Int, addedElements: Int): Unit = {
+  final def update(acc: MemoryAccessor, addedBytes: Int, addedElements: Int): Unit = {
     require(addedBytes > 0 && addedElements > 0)
-    val newNumElements = numElements + addedElements
-    val newNumBytes = sectionNumBytes + addedBytes
+    val newNumElements = numElements(acc) + addedElements
+    val newNumBytes = sectionNumBytes(acc) + addedBytes
     require(newNumElements <= 255 && newNumBytes <= 65535)
-    Ptr.I32(addr).asMut.set(newNumBytes | (newNumElements << 16) | (sectionType.n << 24))
+    Ptr.I32(addr).asMut.set(acc, newNumBytes | (newNumElements << 16) | (sectionType(acc).n << 24))
   }
 
-  final def setNumElements(num: Int): Unit = {
+  final def setNumElements(acc: MemoryAccessor, num: Int): Unit = {
     require(num >= 0 && num <= 255)
-    Ptr.U8(addr).add(2).asMut.set(num)
+    Ptr.U8(addr).add(2).asMut.set(acc, num)
   }
 
-  final def setType(typ: SectionType): Unit = {
-    Ptr.U8(addr).add(3).asMut.set(typ.n)
+  final def setType(acc: MemoryAccessor, typ: SectionType): Unit = {
+    Ptr.U8(addr).add(3).asMut.set(acc, typ.n)
   }
 
-  def debugString: String = s"Section@$addr: {numBytes=$sectionNumBytes, len=$numElements, type=$sectionType}"
+  def debugString(acc: MemoryReader): String = s"Section@$addr: {numBytes=${sectionNumBytes(acc)}, " +
+    s"len=${numElements(acc)}, type=${sectionType(acc)}"
 }
 
 object Section {
-  def fromPtr(addr: Ptr.U8): Section = Section(addr.addr)
+  def fromPtr(acc: MemoryReader, addr: Ptr.U8): Section = Section(addr.addr)
 
-  def init(sectionAddr: Ptr.U8, typ: SectionType = TypeNormal): Section = {
+  def init(acc: MemoryAccessor, sectionAddr: Ptr.U8, typ: SectionType = TypeNormal): Section = {
     val newSect = Section(sectionAddr.addr)
-    newSect.setNumElements(0)
-    newSect.setType(typ)
-    sectionAddr.asU16.asMut.set(0)
+    newSect.setNumElements(acc, 0)
+    newSect.setType(acc, typ)
+    sectionAddr.asU16.asMut.set(acc, 0)
     newSect
   }
 
@@ -84,7 +88,7 @@ trait SectionWriter {
 
   // Call to initialize the section writer with the address of the first section and how many bytes left
   def initSectionWriter(firstSectionAddr: Ptr.U8, remainingBytes: Int): Unit = {
-    curSection = Section.init(firstSectionAddr)
+    curSection = Section.init(MemoryAccessor.nativePtrAccessor, firstSectionAddr)
     bytesLeft = remainingBytes - 4    // account for initial section header bytes
   }
 
@@ -94,15 +98,15 @@ trait SectionWriter {
   // Returns true if appending numBytes will start a new section
   protected def needNewSection(numBytes: Int): Boolean = {
     // Check remaining length/space.  A section must be less than 2^16 bytes long. Create new section if needed
-    val newNumBytes = curSection.sectionNumBytes + numBytes
-    curSection.numElements >= maxElementsPerSection.n || newNumBytes >= 65536
+    val newNumBytes = curSection.sectionNumBytes(nativePtrReader) + numBytes
+    curSection.numElements(nativePtrReader) >= maxElementsPerSection.n || newNumBytes >= 65536
   }
 
   // Appends a blob, writing a 2-byte length prefix before it.
   protected def appendBlob(base: Any, offset: Long, numBytes: Int): AddResponse = {
     if (needNewSection(numBytes)) {
       if (bytesLeft >= (4 + numBytes)) {
-        curSection = Section.init(curSection.endAddr)
+        curSection = Section.init(MemoryAccessor.nativePtrAccessor, curSection.endAddr(nativePtrReader))
         bytesLeft -= 4
       } else return VectorTooSmall(4 + numBytes, bytesLeft)
     }
@@ -112,7 +116,9 @@ trait SectionWriter {
   // Appends a blob, forcing creation of a new section too
   protected def newSectionWithBlob(base: Any, offset: Long, numBytes: Int, sectType: SectionType): AddResponse = {
     if (bytesLeft >= (4 + numBytes)) {
-      curSection = Section.init(curSection.endAddr, sectType)
+      curSection = Section.init(MemoryAccessor.nativePtrAccessor,
+                                curSection.endAddr(nativePtrReader),
+                                sectType)
       bytesLeft -= 4
     } else return VectorTooSmall(4 + numBytes, bytesLeft)
     addBlobInner(base, offset, numBytes)
@@ -121,11 +127,11 @@ trait SectionWriter {
   private def addBlobInner(base: Any, offset: Long, numBytes: Int): AddResponse =
     // Copy bytes to end address, update variables
     if (bytesLeft >= (numBytes + 2)) {
-      val writeAddr = curSection.endAddr
-      writeAddr.asU16.asMut.set(numBytes)
+      val writeAddr = curSection.endAddr(nativePtrReader)
+      writeAddr.asU16.asMut.set(MemoryAccessor.nativePtrAccessor, numBytes)
       UnsafeUtils.unsafe.copyMemory(base, offset, UnsafeUtils.ZeroPointer, (writeAddr + 2).addr, numBytes)
       bytesLeft -= (numBytes + 2)
-      curSection.update(numBytes + 2, 1)
+      curSection.update(MemoryAccessor.nativePtrAccessor, numBytes + 2, 1)
       Ack
     } else VectorTooSmall(numBytes + 2, bytesLeft)
 }
@@ -133,7 +139,7 @@ trait SectionWriter {
 /**
  * Methods to help navigate elements with 2-byte length prefixes within sections.
  */
-trait SectionReader {
+trait SectionReader { self: HistogramReader =>
   var curSection: Section = _
   var curElemNo = -1
   var sectStartingElemNo = 0
@@ -148,7 +154,7 @@ trait SectionReader {
 
   // Initializes internal state when reading from a new section.  Override to add anything else needed.
   protected def setSection(sectAddr: Ptr.U8, newElemNo: Int = 0): Unit = {
-    curSection = Section.fromPtr(sectAddr)
+    curSection = Section.fromPtr(acc, sectAddr)
     curHist = curSection.firstElem
     curElemNo = newElemNo
     sectStartingElemNo = newElemNo
@@ -170,8 +176,9 @@ trait SectionReader {
       curHist
     } else if (elemNo > curElemNo) {
       // Jump forward to next section until we are in section containing elemNo.  BUT, don't jump beyond cur length
-      while (elemNo >= (sectStartingElemNo + curSection.numElements) && curSection.endAddr.addr < endAddr.addr) {
-        setSection(curSection.endAddr, sectStartingElemNo + curSection.numElements)
+      while (elemNo >= (sectStartingElemNo + curSection.numElements(acc)) &&
+                curSection.endAddr(acc).addr < endAddr.addr) {
+        setSection(curSection.endAddr(acc), sectStartingElemNo + curSection.numElements(acc))
       }
 
       curHist = skipAhead(curHist, elemNo - curElemNo)
@@ -196,21 +203,21 @@ trait SectionReader {
     var togo = numElems
     var ptr = startPtr
     while (togo > 0) {
-      ptr += ptr.asU16.getU16 + 2
+      ptr += ptr.asU16.getU16(acc) + 2 // add 2 to length of header
       togo -= 1
     }
     ptr
   }
 
   def iterateSections: Iterator[Section] = new Iterator[Section] {
-    var curSect = Section.fromPtr(firstSectionAddr)
-    final def hasNext: Boolean = curSect.endAddr.addr <= endAddr.addr
+    var curSect = Section.fromPtr(acc, firstSectionAddr)
+    final def hasNext: Boolean = curSect.endAddr(acc).addr <= endAddr.addr
     final def next: Section = {
       val sect = curSect
-      curSect = Section.fromPtr(curSect.endAddr)
+      curSect = Section.fromPtr(acc, curSect.endAddr(acc))
       sect
     }
   }
 
-  def dumpAllSections: String = iterateSections.map(_.debugString).mkString("\n")
+  def dumpAllSections: String = iterateSections.map(_.debugString(acc)).mkString("\n")
 }

@@ -1,5 +1,7 @@
 package filodb.core.store
 
+import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
@@ -8,7 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
-import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, FlushStream, TimeSeriesMemStore}
+import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
 
@@ -79,14 +81,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // partition exists but no chunks in range > 1000, this should find nothing
     val noChunkScan = TimeRangeChunkScan(1000L, 2000L)
-    val parts = colStore.readRawPartitions(dataset.ref, partScan, noChunkScan).toListL.runAsync.futureValue
-    parts should have length (1)
-    parts.head.chunkSets should have length (0)
+    val parts = colStore.readRawPartitions(dataset.ref, 1.millis.toMillis,
+                             partScan, noChunkScan).toListL.runAsync.futureValue
+    parts should have length (0)
   }
 
   it should "return empty iterator if cannot find partition or version" in {
     // Don't write any data
-    colStore.readRawPartitions(dataset.ref, partScan)
+    colStore.readRawPartitions(dataset.ref, 1.hour.toMillis, partScan)
             .toListL.runAsync.futureValue should have length (0)
   }
 
@@ -125,7 +127,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, Task {}).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -142,7 +144,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2.ref, schemas, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, Task {}).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream, s, Task {}).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)

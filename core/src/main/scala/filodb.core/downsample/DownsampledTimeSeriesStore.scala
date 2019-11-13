@@ -34,9 +34,7 @@ class DownsampledTimeSeriesStore(val store: ColumnStore,
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
 
-  type Shards = NonBlockingHashMapLong[DownsampledTimeSeriesShard]
-
-  private val datasets = new HashMap[DatasetRef, Shards]
+  private val datasets = new HashMap[DatasetRef, NonBlockingHashMapLong[DownsampledTimeSeriesShard]]
 
   val stats = new ChunkSourceStats
 
@@ -49,29 +47,19 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new DownsampledTimeSeriesShard(ref, schemas, store, shard, filodbConfig)
+      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store, shard, filodbConfig)
       shards.put(shard, tsdb)
     }
   }
 
-  /**
-    * WARNING: use only for testing. Not performant
-    */
   def refreshIndexForTesting(dataset: DatasetRef): Unit =
     datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
       s.refreshPartKeyIndexBlocking()
     })
 
-  /**
-    * Retrieve shard for given dataset and shard number as an Option
-    */
   private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[DownsampledTimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
-  /**
-    * Retrieve shard for given dataset and shard number. Raises exception if
-    * the shard is not setup.
-    */
   private[filodb] def getShardE(dataset: DatasetRef, shard: Int): DownsampledTimeSeriesShard = {
     datasets.get(dataset)
             .flatMap(shards => Option(shards.get(shard)))
@@ -102,10 +90,6 @@ extends MemStore with StrictLogging {
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                              end: Long, start: Long, limit: Int): Iterator[PartKey] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, end, start, limit)).getOrElse(Iterator.empty)
-
-  def readRawPartitions(ref: DatasetRef,
-                        partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = ???
 
   def lookupPartitions(ref: DatasetRef,
                        partMethod: PartitionScanMethod,
@@ -161,11 +145,11 @@ extends MemStore with StrictLogging {
   override def ingest(dataset: DatasetRef, shard: Int,
                       data: SomeData): Unit = throw new UnsupportedOperationException()
 
-  override def ingestStream(dataset: DatasetRef, shard: Int,
-                            stream: Observable[SomeData],
-                            flushSched: Scheduler,
-                            flushStream: Observable[FlushCommand],
-                            cancelTask: Task[Unit]): CancelableFuture[Unit] = throw new UnsupportedOperationException()
+  override def ingestStream(dataset: DatasetRef,
+                   shard: Int,
+                   stream: Observable[SomeData],
+                   flushSched: Scheduler,
+                   cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit] = throw new UnsupportedOperationException()
 
   override def recoverStream(dataset: DatasetRef, shard: Int,
                              stream: Observable[SomeData],
@@ -184,4 +168,7 @@ extends MemStore with StrictLogging {
     datasets.get(ref).map(_.values.asScala.head.schemas)
   }
 
+  override def readRawPartitions(ref: DatasetRef, maxChunkTime: Long,
+                                 partMethod: PartitionScanMethod,
+                                 chunkMethod: ChunkScanMethod): Observable[RawPartData] = ???
 }
