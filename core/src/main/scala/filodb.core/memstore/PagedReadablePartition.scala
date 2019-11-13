@@ -5,8 +5,6 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.Types.ChunkID
 import filodb.core.metadata.Schema
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BinaryRegionLarge, NativeMemoryManager}
-import filodb.memory.format.MemoryReader._
 import filodb.memory.format.UnsafeUtils
 
 object PagedReadablePartition extends StrictLogging {
@@ -14,90 +12,56 @@ object PagedReadablePartition extends StrictLogging {
 }
 
 /**
-  * Pages raw partition data read from Cassandra into off-heap memory.
-  * This can now be used for various operations like downsampling, cross-DC repair,
-  * or even be evolved (with more changes) into an ODP solution.
+  * Readable Partition constructed using data read from Cassandra.
+  * This can now be used for various operations like downsampling, cross-DC repair etc.
   *
-  * Note that `mem` is the native memory manager used to allocate off-heap memory
-  * to store the paged chunks.
+  * Note that this partition would not have ALL data available for the partition. Only
+  * that which was read from Cassandra.
   *
-  * IMPORTANT: This partition needs to be freed by calling `free()` after the chunks
-  * are read.
+  * Any ChunkScanMethod will return results from all available chunks. This optimization
+  * is done since that check would already done and does not need to be repeated.
   */
 class PagedReadablePartition(override val schema: Schema,
                              override val shard: Int,
                              override val partID: Int,
-                             pd: RawPartData,
-                             mem: NativeMemoryManager) extends ReadablePartition {
+                             partData: RawPartData) extends ReadablePartition {
 
-  import PagedReadablePartition._
-  private val chunkInfos = debox.Buffer[BinaryRegion.NativePointer]()
-
-  var partitionKey: BinaryRegion.NativePointer = _
-
-  loadToOffHeap()
-
-  private def loadToOffHeap() = {
-    val (_, pk, _) = BinaryRegionLarge.allocateAndCopy(pd.partitionKey, UnsafeUtils.arayOffset, mem)
-    partitionKey = pk
-
-    pd.chunkSets.foreach { rawChunkSet =>
-
-      val vectors = rawChunkSet.vectors.map { buf =>
-        val (bytes, offset , len) = UnsafeUtils.BOLfromBuffer(buf)
-        val vec = mem.allocateOffheap(len)
-        UnsafeUtils.copy(bytes, offset, UnsafeUtils.ZeroPointer, vec, len)
-        vec
-      }
-      val chunkInfoAddr = mem.allocateOffheap(schema.data.blockMetaSize)
-      TimeSeriesShard.writeMetaWithoutPartId(chunkInfoAddr, rawChunkSet.infoBytes, vectors)
-      val info = ChunkSetInfo(chunkInfoAddr)
-      chunkInfos += info.infoAddr
-    }
-    _log.debug(s"Loaded ${chunkInfos.length} chunksets into partition with key ${stringPartition}")
-  }
-
-  override def numChunks: Int = chunkInfos.length
+  override def numChunks: Int = partData.chunkSets.length
 
   override def appendingChunkLen: Int = 0
 
-  override def infos(method: ChunkScanMethod): ChunkInfoIterator = {
-    if (method == AllChunkScan) chunkInfoIteratorImpl
-    else throw new UnsupportedOperationException("This partition supports AllChunkScan only")
-  }
+  override def infos(method: ChunkScanMethod): ChunkInfoIterator = chunkInfoIteratorImpl
 
-  override def infos(startTime: Long, endTime: Long): ChunkInfoIterator = ???
+  override def infos(startTime: Long, endTime: Long): ChunkInfoIterator = chunkInfoIteratorImpl
 
-  override def hasChunks(method: ChunkScanMethod): Boolean = {
-    method == AllChunkScan && chunkInfos.isEmpty
-  }
+  override def hasChunks(method: ChunkScanMethod): Boolean = partData.chunkSets.nonEmpty
 
   override def hasChunksAt(id: ChunkID): Boolean =
-    chunkInfos.iterator().exists(ChunkSetInfo.getChunkID(nativePtrReader, _) == id)
+    partData.chunkSets.iterator
+      .map(c => ChunkSetInfoOnHeap(c.infoBytes, c.vectors))
+      .exists(_.id == id)
 
   override def earliestTime: Long = ???
 
-  def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
+  def partKeyBase: Array[Byte] = partData.partitionKey
 
-  def partKeyOffset: Long = partitionKey
+  def partKeyOffset: Long = UnsafeUtils.arayOffset
+
+  override def partKeyBytes: Array[Byte] = partData.partitionKey
 
   private def chunkInfoIteratorImpl = {
     new ChunkInfoIterator {
-      private val iter = chunkInfos.iterator
+      private val iter = partData.chunkSets.iterator
       override def close(): Unit = {}
       override def hasNext: Boolean = iter.hasNext
-      override def nextInfo: ChunkSetInfo = ChunkSetInfo(iter.next())
+      override def nextInfo = ???
+      override def nextInfoReader: ChunkSetInfoReader = {
+        val nxt = iter.next()
+        ChunkSetInfoOnHeap(nxt.infoBytes, nxt.vectors)
+      }
       override def lock(): Unit = {}
       override def unlock(): Unit = {}
     }
   }
 
-  def free(): Unit = {
-    chunkInfos.foreach { ptr =>
-      val ci = ChunkSetInfo(ptr)
-      for { col <- schema.data.columns.indices } mem.freeMemory(ci.vectorPtr(col))
-      mem.freeMemory(ci.infoAddr)
-    }
-    mem.freeMemory(partitionKey)
-  }
 }

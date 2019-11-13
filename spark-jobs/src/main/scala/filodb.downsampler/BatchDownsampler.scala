@@ -152,8 +152,7 @@ object BatchDownsampler extends StrictLogging with Instance {
       case Some(downsampleSchema) =>
         logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
 
-        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0,
-          rawPart, offHeapMem.nativeMemoryManager)
+        val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
         val bufferPool = offHeapMem.bufferPools(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
 
