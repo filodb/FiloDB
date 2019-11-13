@@ -5,6 +5,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
@@ -22,7 +23,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
                                  colStore: ColumnStore,
                                  shardNum: Int,
                                  filodbConfig: Config)
-                                (implicit val ioPool: ExecutionContext) {
+                                (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
 
@@ -35,7 +36,6 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   val indexResolution = downsampleResolutions(downsampleTtls.indexOf(downsampleTtls.max))
   val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
   val indexDataset = downsampledDatasetRefs(indexResolution)
-
 
   private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
 
@@ -71,7 +71,6 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   def refreshPartKeyIndexBlocking(): Unit = {}
 
-
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod): PartLookupResult = {
     partMethod match {
@@ -80,7 +79,6 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
       case FilteredPartitionScan(split, filters) =>
 
         if (filters.nonEmpty) {
-
           val res = partKeyIndex.partIdsFromFilters2(filters,
             chunkMethod.startTime,
             chunkMethod.endTime)
@@ -98,7 +96,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
     // Step 1: Choose the downsample level depending on the range requested
     val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)
-
+    logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
     // Step 2: Query Cassandra table for that downsample level using colStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
@@ -111,12 +109,11 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
                                    storeConfig.maxChunkTime.toMillis,
                                    SinglePartitionScan(partBytes, shardNum),
                                    lookup.chunkMethod)
-          .map(makePagedPartition)
+          .map(pd => makePagedPartition(pd, lookup.firstSchemaId.get))
           .toListL
           .map(Observable.fromIterable)
       }.flatten
   }
-
 
   protected def schemaIDFromPartID(partID: Int): Int = {
     partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
@@ -125,9 +122,25 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     }.getOrElse(throw new IllegalStateException("PartId returned by lucene, but partKey not found"))
   }
 
-  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = ???
+  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = {
+    chunkScanMethod match {
+      case AllChunkScan => downsampledDatasetRefs(downsampleTtls.last)
+      case TimeRangeChunkScan(startTime, _) =>
+        val res = downsampleTtls.find(t => startTime > System.currentTimeMillis() - t.toMillis)
+                                .getOrElse(downsampleTtls.last)
+        downsampledDatasetRefs(res)
+      case _ => ???
+    }
+  }
 
-  private def makePagedPartition(part: RawPartData): ReadablePartition = ???
+  private def makePagedPartition(part: RawPartData, firstSchemaId: Int): ReadablePartition = {
+    val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
+    if (schemaId != firstSchemaId)
+      throw new IllegalArgumentException("Query involves results with multiple schema. " +
+        "Use type tag to provide narrower query")
+    // FIXME It'd be nice to pass in the correct partId here instead of -1
+    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part)
+  }
 
   /**
     * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
@@ -151,9 +164,9 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
         // have a centralized service/store for serving metadata
         currVal = schemas.part.binSchema.toStringPairs(nextPart, UnsafeUtils.arayOffset)
           .filter(labelNames contains _._1).map(pair => {
-          (pair._1.utf8 -> pair._2.utf8)
+          pair._1.utf8 -> pair._2.utf8
         }).toMap
-        foundValue = currVal.size > 0
+        foundValue = currVal.nonEmpty
       }
       foundValue
     }
