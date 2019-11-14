@@ -135,13 +135,6 @@ trait ExecPlan extends QueryCommand  {
         var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
           .map {
-            case srv: SerializedRangeVector =>
-              numResultSamples += srv.numRowsInt
-              // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > limit)
-                throw new BadQueryException(s"This query results in more than $limit samples. " +
-                  s"Try applying more filters or reduce time range.")
-              srv
             case srv: SerializableRangeVector  =>
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results

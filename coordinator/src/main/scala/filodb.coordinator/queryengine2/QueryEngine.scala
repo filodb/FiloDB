@@ -1,5 +1,5 @@
 package filodb.coordinator.queryengine2
-//scalastyle:off
+
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
@@ -14,17 +14,16 @@ import monix.execution.Scheduler
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-
 import filodb.core.{DatasetRef}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.SpreadProvider
 import filodb.core.store._
-import filodb.core.{SpreadProvider}
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
 import filodb.query.exec._
-//scalastyle:on
+
 
 trait TsdbQueryParams
 case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
@@ -370,9 +369,13 @@ class QueryEngine(dsRef: DatasetRef,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
-
+    val paramsExec = if (!lp.functionArgs.isEmpty) {
+      materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
+    } else {
+      Nil
+    }
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn))))
+      lp.end, Some(lp.window), Some(execRangeFn), paramsExec)))
     rawSeries
   }
 

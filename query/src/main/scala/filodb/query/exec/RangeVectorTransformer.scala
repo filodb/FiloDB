@@ -29,7 +29,7 @@ private case class PlanResult(plans: Seq[ExecPlan], needsStitch: Boolean = false
   */
 trait RangeVectorTransformer extends java.io.Serializable {
 
-  def funcParams: Seq[FuncArgs]  // to do validate that it return scalar range
+  def funcParams: Seq[FuncArgs]
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
@@ -287,14 +287,6 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
                                       timeStepParams: RangeParams) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
-
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-    ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema = SerializedRangeVector.toSchema(columns)
-
-  val resultSchema = ResultSchema(columns, 1)
-  val builder = SerializedRangeVector.newBuilder()
-
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 

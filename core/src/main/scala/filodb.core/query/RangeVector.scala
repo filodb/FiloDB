@@ -108,7 +108,7 @@ trait ScalarVector extends SerializableRangeVector {
 case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarVector {
   override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
     map{ x=> new TransientRow(x._1, x._2)}.iterator
-  def getValue(time: Long): Double = timeValueMap.get(time).get
+  def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsInt: Int = timeValueMap.size
 }
@@ -226,7 +226,8 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   val numRowsInt: Int,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
-                                  startRecordNo: Int) extends RangeVector with java.io.Serializable {
+                                  startRecordNo: Int) extends RangeVector with SerializableRangeVector with
+  java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
 

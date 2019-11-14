@@ -355,8 +355,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("instance"), Nil, Seq("role"), "metric")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
