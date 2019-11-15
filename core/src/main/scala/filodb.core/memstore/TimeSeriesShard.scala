@@ -17,7 +17,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
@@ -497,13 +497,14 @@ class TimeSeriesShard(val ref: DatasetRef,
       .withTag("shard", shardNum).start()
 
     val fut = colStore.scanPartKeys(ref, shardNum)
+      .asyncBoundary(OverflowStrategy.Default)
+      .executeOn(ingestSched)
       .map { pk => addPartKey(pk) }
       .completedL.runAsync(ingestSched)
-    fut.onComplete { _ =>
+    fut.map { _ =>
       completeIndexRecovery()
       tracer.finish()
     }(ingestSched)
-    fut
   }
 
   def completeIndexRecovery(): Unit = {
@@ -803,8 +804,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    logger.debug(s"Added entry into partKeys table partId=${p.partID} in dataset=$ref " +
-      s"shard=$shardNum partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
     PartKeyRecord(p.partKeyBytes, startTime, endTime)
   }
 
@@ -917,13 +916,18 @@ class TimeSeriesShard(val ref: DatasetRef,
     var numPartKeys = 0
     val partKeyRecords = InMemPartitionIterator(flushGroup.dirtyPartsToFlush.intIterator).map { p =>
       numPartKeys += 1
-      toPartKeyRecord(p)
+      val pk = toPartKeyRecord(p)
+      logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
+        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime}")
+      pk
     }
     colStore.writePartKeys(ref, shardNum,
                            Observable.fromIterator(partKeyRecords),
                            storeConfig.diskTTLSeconds).map { case resp =>
-      logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
-      shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
+      if (numPartKeys > 0) {
+        logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
+        shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
+      }
       resp
     }.recover { case e =>
       logger.error(s"Internal Error when persisting part keys in dataset=$ref shard=$shardNum - " +
