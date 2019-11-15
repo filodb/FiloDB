@@ -30,9 +30,6 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
        |    PRIMARY KEY (partKey)
        |) WITH compression = {'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val readCql = s"SELECT segmentid, segment " +
-    s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc"
-
   lazy val writePartitionCql =
     session.prepare(
       s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?) USING TTL ?")

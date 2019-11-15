@@ -343,7 +343,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     *
     * IMPORTANT. Only modify this var in IngestScheduler
     */
-  private[memstore] final var dirtyPartitionsForIndexFlush = new EWAHCompressedBitmap()
+  private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
 
   /**
     * The offset up to and including the last record in this group to be successfully persisted.
@@ -407,6 +407,30 @@ class TimeSeriesShard(val ref: DatasetRef,
     findNext()
 
     final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
+    final def next: TimeSeriesPartition = {
+      val toReturn = nextPart
+      nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
+      findNext()
+      toReturn
+    }
+  }
+
+  case class InMemPartitionIterator2(partIds: debox.Buffer[Int]) extends PartitionIterator {
+    var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
+    val skippedPartIDs = debox.Buffer.empty[Int]
+    var nexPartId = -1
+    findNext()
+
+    private def findNext(): Unit = {
+      while (nexPartId < partIds.length && nextPart == UnsafeUtils.ZeroPointer) {
+        nexPartId += 1
+        nextPart = partitions.get(nexPartId)
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nexPartId
+      }
+    }
+
+    final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
+
     final def next: TimeSeriesPartition = {
       val toReturn = nextPart
       nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
@@ -697,7 +721,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
     if (groupNum == 0) purgeExpiredPartitions()
     val old = dirtyPartitionsForIndexFlush
-    dirtyPartitionsForIndexFlush = new EWAHCompressedBitmap()
+    dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
     FlushGroup(shardNum, groupNum, latestOffset, old)
   }
 
@@ -914,7 +938,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
     var numPartKeys = 0
-    val partKeyRecords = InMemPartitionIterator(flushGroup.dirtyPartsToFlush.intIterator).map { p =>
+    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
       numPartKeys += 1
       val pk = toPartKeyRecord(p)
       logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
@@ -966,7 +990,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
-                                     dirtyParts: EWAHCompressedBitmap) = {
+                                     dirtyParts: debox.Buffer[Int]) = {
     // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
     // causing the iterator to be consumed synchronously in some cases. It doesnt
     // seem to be consistent environment to environment.
@@ -979,7 +1003,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
-        dirtyParts.set(p.partID)
+        dirtyParts += p.partID
         activelyIngesting.clear(p.partID)
         p.ingesting = false
       }
@@ -1097,7 +1121,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
       }
-      dirtyPartitionsForIndexFlush.set(partId) // causes current time bucket to include this partId
+      dirtyPartitionsForIndexFlush += partId // causes current time bucket to include this partId
       activelyIngesting.synchronized {
         activelyIngesting.set(partId)
         newPart.ingesting = true
@@ -1143,7 +1167,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             if (!tsp.ingesting) {
               // time series was inactive and has just started re-ingesting
               updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              dirtyPartitionsForIndexFlush.set(part.partID)
+              dirtyPartitionsForIndexFlush += part.partID
               activelyIngesting.set(part.partID)
               tsp.ingesting = true
             }

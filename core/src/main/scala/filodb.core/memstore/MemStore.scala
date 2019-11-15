@@ -2,7 +2,6 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
@@ -27,7 +26,7 @@ sealed trait DataOrCommand
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
-                            dirtyPartsToFlush: EWAHCompressedBitmap)
+                            dirtyPartsToFlush: debox.Buffer[Int])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
