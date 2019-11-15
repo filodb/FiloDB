@@ -393,6 +393,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   val tracedPartFilters = storeConfig.traceFilters
 
+  /**
+    * Iterate TimeSeriesPartition objects relevant to given partIds.
+    */
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
@@ -415,6 +418,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  /**
+    * Iterate TimeSeriesPartition objects relevant to given partIds.
+    */
   case class InMemPartitionIterator2(partIds: debox.Buffer[Int]) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
