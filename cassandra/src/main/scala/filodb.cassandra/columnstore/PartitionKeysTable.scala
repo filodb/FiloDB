@@ -43,7 +43,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  def writePartKey(shard: Int, pk: PartKeyRecord, diskTimeToLive: Int): Future[Response] = {
+  def writePartKey(pk: PartKeyRecord, diskTimeToLive: Int): Future[Response] = {
     if (diskTimeToLive <= 0) {
       connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
         pk.partKey, pk.startTime: JLong, pk.endTime: JLong))
@@ -55,7 +55,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
 
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
     def cql(start: String, end: String): String =
-      s"SELECT * FROM ${tableString}_$shard " +
+      s"SELECT * FROM ${tableString} " +
         s"WHERE TOKEN(partKey) >= $start AND TOKEN(partKey) < $end "
     val it = tokens.iterator.flatMap { case (start, end) =>
       session.execute(cql(start, end)).iterator.asScala

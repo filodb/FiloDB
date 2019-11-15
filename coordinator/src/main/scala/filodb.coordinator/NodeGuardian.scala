@@ -54,12 +54,12 @@ final class NodeGuardian(val settings: FilodbSettings,
     requestor ! ClusterState(shardMappers, subscriptions)
 
   private def shardSnapshot(s: CurrentShardSnapshot): Unit = {
-    logger.debug(s"Updating shardMappers for ref ${s.ref}")
+    logger.trace(s"Updating shardMappers for ref ${s.ref}")
     shardMappers(s.ref) = s.map
   }
 
   private def shardEvent(e: ShardEvent): Unit = {
-    logger.debug(s"Updating shard mapper for ref ${e.ref} with event $e")
+    logger.trace(s"Updating shard mapper for ref ${e.ref} with event $e")
     for {
       map <- shardMappers.get(e.ref)
       if map.updateFromEvent(e).isSuccess

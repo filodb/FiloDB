@@ -193,7 +193,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+    case s: ShardIngestionState       => logger.trace(s"Received IngestionState/Snapshot ${s.map}")
                                          shardMaps.put(s.ref, s.map)
                                          forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)

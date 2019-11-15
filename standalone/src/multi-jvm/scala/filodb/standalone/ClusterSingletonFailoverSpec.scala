@@ -87,8 +87,8 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       implicit val patienceConfig = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
       metaStore.initialize().futureValue shouldBe Success
       metaStore.clearAllData().futureValue shouldBe Success
-      colStore.initialize(dataset, 4).futureValue shouldBe Success
-      colStore.truncate(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, numShards).futureValue shouldBe Success
+      colStore.truncate(dataset, numShards).futureValue shouldBe Success
 
       val datasetObj = TestTimeseriesProducer.dataset
       colStore.initialize(dataset, 4).futureValue shouldBe Success

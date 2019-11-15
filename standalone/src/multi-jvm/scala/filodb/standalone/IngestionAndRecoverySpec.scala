@@ -77,15 +77,15 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     runOn(first) {
       metaStore.initialize().futureValue shouldBe Success
       metaStore.clearAllData().futureValue shouldBe Success
-      colStore.initialize(dataset, 4).futureValue shouldBe Success
-      colStore.truncate(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, numShards).futureValue shouldBe Success
+      colStore.truncate(dataset, numShards).futureValue shouldBe Success
     }
     enterBarrier("existing-data-cleared")
   }
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      colStore.initialize(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, numShards).futureValue shouldBe Success
       info("Dataset created")
     }
     enterBarrier("dataset-created")

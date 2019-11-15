@@ -492,7 +492,6 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    assertThreadName(IngestSchedName)
     val tracer = Kamon.buildSpan("memstore-recover-index-latency")
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum).start()
@@ -503,7 +502,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     fut.onComplete { _ =>
       completeIndexRecovery()
       tracer.finish()
-    }
+    }(ingestSched)
     fut
   }
 

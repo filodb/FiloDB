@@ -262,7 +262,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val span = Kamon.buildSpan("write-part-keys").start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
-      Task.fromFuture(table.writePartKey(shard, pk, ttl))
+      Task.fromFuture(table.writePartKey(pk, ttl))
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runAsync
     ret.onComplete(_ => span.finish())
     ret
