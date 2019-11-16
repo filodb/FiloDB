@@ -184,7 +184,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
                                        scalarOnLhs: Boolean,
                                        funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
   protected[exec] def args: String =
-    s"operator=$operator, scalarOnLhs=$scalarOnLhs, scalar=$funcParams"
+    s"operator=$operator, scalarOnLhs=$scalarOnLhs"
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
