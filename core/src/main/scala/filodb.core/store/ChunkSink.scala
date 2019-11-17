@@ -1,6 +1,7 @@
 package filodb.core.store
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
@@ -67,8 +68,10 @@ class ChunkSinkStats {
   private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
 
   private val chunksetWrites     = Kamon.counter("chunkset-writes")
-  var chunksetsWritten = 0
-  var partKeysWritten = 0
+  private val partKeysWrites     = Kamon.counter("partKey-writes")
+
+  var chunksetsWritten = new AtomicInteger(0)
+  var partKeysWritten = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
@@ -83,11 +86,12 @@ class ChunkSinkStats {
 
   def chunksetWrite(): Unit = {
     chunksetWrites.increment
-    chunksetsWritten += 1
+    chunksetsWritten.incrementAndGet()
   }
 
-  def partKeysWritten(numKeys: Int): Unit = {
-    partKeysWritten += numKeys
+  def partKeysWrite(numKeys: Int): Unit = {
+    partKeysWrites.increment(numKeys)
+    partKeysWritten.addAndGet(numKeys)
   }
 }
 
@@ -138,7 +142,8 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] =
-    Future.successful(Success)
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] = {
+    partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
+  }
 
 }

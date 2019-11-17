@@ -255,13 +255,13 @@ object MachineMetricsData {
   }
 
   /**
-    * @param ingestionTimeAdjust defines the ingestion time increment for each generated
+    * @param ingestionTimeStep defines the ingestion time increment for each generated
     * RecordContainer
     */
   def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
-                     ingestionTimeAdjust: Long = 40000): Seq[SomeData] =
+                     ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0): Seq[SomeData] =
     stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
-      case (group, i) => records(ds, group, i, i * ingestionTimeAdjust)
+      case (group, i) => records(ds, group, i, ingestionTimeStart + i * ingestionTimeStep)
     }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
@@ -286,14 +286,15 @@ object MachineMetricsData {
   }
 
   // Everything increments by 1 for simple predictability and testing
-  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000): Stream[Seq[Any]] = {
+  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
+                        seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
     Stream.from(0).map { n =>
       Seq(startTs + n * timeStep,
          (1 + n).toDouble,
          (20 + n).toDouble,
          (99.9 + n).toDouble,
          (85 + n).toLong,
-         "Series " + (n % numSeries))
+         seriesPrefix + (n % numSeries))
     }
   }
 

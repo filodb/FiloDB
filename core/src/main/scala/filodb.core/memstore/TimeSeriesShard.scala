@@ -5,7 +5,7 @@ import java.util.concurrent.locks.StampedLock
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.Try
+import scala.util.{Random, Try}
 
 import bloomfilter.CanGenerateHashFrom
 import bloomfilter.mutable.BloomFilter
@@ -346,6 +346,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
 
   /**
+    * This is the group during which this shard will flush dirty part keys. Randomized to
+    * ensure we dont flush time buckets across shards at same time
+    */
+  private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
+  logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
+
+  /**
     * The offset up to and including the last record in this group to be successfully persisted.
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
@@ -424,14 +431,14 @@ class TimeSeriesShard(val ref: DatasetRef,
   case class InMemPartitionIterator2(partIds: debox.Buffer[Int]) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
-    var nexPartId = -1
+    var nextPartId = -1
     findNext()
 
     private def findNext(): Unit = {
-      while (nexPartId < partIds.length && nextPart == UnsafeUtils.ZeroPointer) {
-        nexPartId += 1
-        nextPart = partitions.get(nexPartId)
-        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nexPartId
+      while (nextPartId + 1 < partIds.length && nextPart == UnsafeUtils.ZeroPointer) {
+        nextPartId += 1
+        nextPart = partitions.get(nextPartId)
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartId
       }
     }
 
@@ -725,10 +732,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
 
-    if (groupNum == 0) purgeExpiredPartitions()
-    val old = dirtyPartitionsForIndexFlush
-    dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
-    FlushGroup(shardNum, groupNum, latestOffset, old)
+    val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
+      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
+      purgeExpiredPartitions()
+      val old = dirtyPartitionsForIndexFlush
+      dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
+      old
+    } else {
+      debox.Buffer.ofSize[Int](0)
+    }
+
+    FlushGroup(shardNum, groupNum, latestOffset, dirtyPartKeys)
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
@@ -872,8 +886,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val ds = shardDownsamplers(p.schema.schemaHash)
       ds.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
 
-      /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
-         If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
+      /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period. */
       updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush)
       chunks
     }
@@ -895,14 +908,16 @@ class TimeSeriesShard(val ref: DatasetRef,
         else Future.successful(Success)
       }
 
-    /* Step 5.2: We flush index time buckets in the one designated group for each shard
-     * We recover future since we want to proceed to write time buckets even if chunk flush failed.
-     * This is done after writeChunksFuture because chunkSetIter is lazy. */
-    val writeIndexTimeBucketsFuture = writeChunksFuture.recover {case _ => Success}
+    /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
+     * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
+     * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
+     * be added during iteration due to endTime detection
+     */
+    val writeDirtyPartKeysFuture = writeChunksFuture.recover {case _ => Success}
       .flatMap( _=> writeDirtyPartKeys(flushGroup))
 
-    /* Step 6: Checkpoint after time buckets and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFuture, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
+    /* Step 6: Checkpoint after dirty part keys and chunks are flushed */
+    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
@@ -943,9 +958,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
-    var numPartKeys = 0
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
-      numPartKeys += 1
       val pk = toPartKeyRecord(p)
       logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
         s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime}")
@@ -954,9 +967,10 @@ class TimeSeriesShard(val ref: DatasetRef,
     colStore.writePartKeys(ref, shardNum,
                            Observable.fromIterator(partKeyRecords),
                            storeConfig.diskTTLSeconds).map { case resp =>
-      if (numPartKeys > 0) {
-        logger.info(s"Finished flush of partKeys numPartKeys=$numPartKeys resp=$resp for dataset=$ref shard=$shardNum")
-        shardStats.numDirtyPartKeysFlushed.increment(numPartKeys)
+      if (flushGroup.dirtyPartsToFlush.length > 0) {
+        logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
+          s" resp=$resp for dataset=$ref shard=$shardNum")
+        shardStats.numDirtyPartKeysFlushed.increment(flushGroup.dirtyPartsToFlush.length)
       }
       resp
     }.recover { case e =>
@@ -1109,7 +1123,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * If it is a previously seen partKey that is already in index, it reassigns same partId so that indexes
     * are still valid.
     *
-    * This method also updates lucene index and time bucket bitmaps properly.
+    * This method also updates lucene index and dirty part keys properly.
     */
   private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
     assertThreadName(IngestSchedName)
@@ -1127,7 +1141,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
       }
-      dirtyPartitionsForIndexFlush += partId // causes current time bucket to include this partId
+      dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
       activelyIngesting.synchronized {
         activelyIngesting.set(partId)
         newPart.ingesting = true

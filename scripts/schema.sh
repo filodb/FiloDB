@@ -17,7 +17,6 @@ CREATE TABLE  IF NOT EXISTS ${FILO_ADMIN_KEYSPACE}.checkpoints (
     databasename text,
     datasetname text,
     shardnum int,
-    highesttimebucket int STATIC,
     groupnum int,
     offset bigint,
     PRIMARY KEY ((databasename, datasetname, shardnum), groupnum)
