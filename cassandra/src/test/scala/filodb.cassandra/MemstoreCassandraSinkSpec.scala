@@ -35,7 +35,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
 
   it("should flush MemStore data to C*, and be able to read back data from C* directly") {
     memStore.setup(dataset1.ref, Schemas(dataset1.schema), 0, TestData.storeConf)
-    memStore.store.sinkStats.chunksetsWritten shouldEqual 0
+    memStore.store.sinkStats.chunksetsWritten.get shouldEqual 0
 
     // Flush every ~50 records
     val start = System.currentTimeMillis
@@ -45,8 +45,8 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     Thread sleep 1000
 
     // Two flushes and 3 chunksets have been flushed
-    memStore.store.sinkStats.chunksetsWritten should be >= 3
-    memStore.store.sinkStats.chunksetsWritten should be <= 4
+    memStore.store.sinkStats.chunksetsWritten.get should be >= 3
+    memStore.store.sinkStats.chunksetsWritten.get should be <= 4
 
     memStore.refreshIndexForTesting(dataset1.ref)
     // Verify data still in MemStore... all of it

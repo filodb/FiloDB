@@ -70,8 +70,8 @@ class ChunkSinkStats {
   private val chunksetWrites     = Kamon.counter("chunkset-writes")
   private val partKeysWrites     = Kamon.counter("partKey-writes")
 
-  var chunksetsWritten = new AtomicInteger(0)
-  var partKeysWritten = new AtomicInteger(0)
+  val chunksetsWritten = new AtomicInteger(0)
+  val partKeysWritten = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
