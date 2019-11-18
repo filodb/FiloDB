@@ -1,13 +1,14 @@
 package filodb.query.exec.rangefn
 
 import java.lang.{Double => JLDouble}
-import java.util
 
 import debox.Buffer
+import java.util
 
 import filodb.core.query.{TransientHistMaxRow, TransientHistRow, TransientRow}
-import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{vectors => bv, BinaryVector, VectorDataReader}
+import filodb.core.store.ChunkSetInfoReader
+import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
+import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.QueryConfig
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
@@ -37,12 +38,13 @@ class MinOverTimeChunkedFunctionD(var min: Double = Double.NaN) extends ChunkedD
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, min)
   }
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     var rowNum = startRowNum
-    val it = doubleReader.iterate(doubleVect, startRowNum)
+    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
       min = if (min.isNaN) nextVal else Math.min(min, nextVal)
@@ -56,12 +58,13 @@ class MinOverTimeChunkedFunctionL(var min: Long = Long.MaxValue) extends Chunked
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, min.toDouble)
   }
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
     var rowNum = startRowNum
-    val it = longReader.iterate(longVect, startRowNum)
+    val it = longReader.iterate(longVectAcc, longVect, startRowNum)
     while (rowNum <= endRowNum) {
       min = Math.min(min, it.next)
       rowNum += 1
@@ -74,12 +77,13 @@ class MaxOverTimeChunkedFunctionD(var max: Double = Double.NaN) extends ChunkedD
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, max)
   }
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     var rowNum = startRowNum
-    val it = doubleReader.iterate(doubleVect, startRowNum)
+    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     while (rowNum <= endRowNum) {
       val nextVal = it.next
       max = if (max.isNaN) nextVal else Math.max(max, nextVal) // cannot compare NaN, always < anything else
@@ -93,12 +97,13 @@ class MaxOverTimeChunkedFunctionL(var max: Long = Long.MinValue) extends Chunked
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, max.toDouble)
   }
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
     var rowNum = startRowNum
-    val it = longReader.iterate(longVect, startRowNum)
+    val it = longReader.iterate(longVectAcc, longVect, startRowNum)
     while (rowNum <= endRowNum) {
       max = Math.max(max, it.next)
       rowNum += 1
@@ -145,7 +150,8 @@ abstract class SumOverTimeChunkedFunction(var sum: Double = Double.NaN) extends 
 }
 
 class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with ChunkedDoubleRangeFunction {
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
@@ -153,19 +159,20 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
     if (sum.isNaN) {
       sum = 0d
     }
-    sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
+    sum += doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
   }
 }
 
 class SumOverTimeChunkedFunctionL extends SumOverTimeChunkedFunction() with ChunkedLongRangeFunction {
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
     if (sum.isNaN) {
       sum = 0d
     }
-    sum += longReader.sum(longVect, startRowNum, endRowNum)
+    sum += longReader.sum(longVectAcc, longVect, startRowNum, endRowNum)
   }
 }
 
@@ -176,7 +183,8 @@ extends TimeRangeFunction[TransientHistRow] {
     sampleToEmit.setValues(endTimestamp, h)
   }
 
-  final def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+  final def addTimeChunks(vectAcc: MemoryReader,
+                          vectPtr: BinaryVector.BinaryVectorPtr,
                           reader: VectorDataReader,
                           startRowNum: Int,
                           endRowNum: Int): Unit = {
@@ -208,20 +216,22 @@ class SumAndMaxOverTimeFuncHD(maxColID: Int) extends ChunkedRangeFunction[Transi
 
   import BinaryVector.BinaryVectorPtr
 
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
     // At least one sample is present
     if (startRowNum <= endRowNum) {
-      hFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+      hFunc.addTimeChunks(valueVectorAcc, valueVector, valueReader, startRowNum, endRowNum)
 
       // Get valueVector/reader for max column
-      val maxVectPtr = info.vectorPtr(maxColID)
-      maxFunc.addTimeChunks(maxVectPtr, bv.DoubleVector(maxVectPtr), startRowNum, endRowNum)
+      val maxVectAcc = info.vectorAccessor(maxColID)
+      val maxVectPtr = info.vectorAddress(maxColID)
+      maxFunc.addTimeChunks(maxVectAcc, maxVectPtr, bv.DoubleVector(maxVectAcc, maxVectPtr), startRowNum, endRowNum)
     }
   }
 }
@@ -245,20 +255,23 @@ class AvgWithSumAndCountOverTimeFuncD(countColId: Int) extends ChunkedRangeFunct
 
   import BinaryVector.BinaryVectorPtr
 
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
     // At least one sample is present
     if (startRowNum <= endRowNum) {
-      sumFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+      sumFunc.addTimeChunks(valueVectorAcc, valueVector, valueReader, startRowNum, endRowNum)
 
       // Get valueVector/reader for count column
-      val countVectPtr = info.vectorPtr(countColId)
-      countFunc.addTimeChunks(countVectPtr, bv.DoubleVector(countVectPtr), startRowNum, endRowNum)
+      val countVectAcc = info.vectorAccessor(countColId)
+      val countVectPtr = info.vectorAddress(countColId)
+      countFunc.addTimeChunks(countVectAcc, countVectPtr,
+        bv.DoubleVector(countVectAcc, countVectPtr), startRowNum, endRowNum)
     }
   }
 }
@@ -282,20 +295,22 @@ class AvgWithSumAndCountOverTimeFuncL(countColId: Int) extends ChunkedRangeFunct
 
   import BinaryVector.BinaryVectorPtr
 
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+  // scalastyle:off parameter.number
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
     // Do BinarySearch for start/end pos only once for both columns == WIN!
-    val startRowNum = tsReader.binarySearch(tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
     // At least one sample is present
     if (startRowNum <= endRowNum) {
-      sumFunc.addTimeChunks(valueVector, valueReader, startRowNum, endRowNum)
+      sumFunc.addTimeChunks(valueVectorAcc, valueVector, valueReader, startRowNum, endRowNum)
 
       // Get valueVector/reader for count column
-      val cntVectPtr = info.vectorPtr(countColId)
-      countFunc.addTimeChunks(cntVectPtr, bv.DoubleVector(cntVectPtr), startRowNum, endRowNum)
+      val cntVectAcc = info.vectorAccessor(countColId)
+      val cntVectPtr = info.vectorAddress(countColId)
+      countFunc.addTimeChunks(cntVectAcc, cntVectPtr, bv.DoubleVector(cntVectAcc, cntVectPtr), startRowNum, endRowNum)
     }
   }
 }
@@ -335,7 +350,8 @@ class CountOverTimeChunkedFunction(var count: Int = 0) extends TimeRangeFunction
     sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
 
-  def addTimeChunks(vectPtr: BinaryVector.BinaryVectorPtr,
+  def addTimeChunks(vectAcc: MemoryReader,
+                    vectPtr: BinaryVector.BinaryVectorPtr,
                     reader: VectorDataReader,
                     startRowNum: Int,
                     endRowNum: Int): Unit = {
@@ -352,14 +368,15 @@ class CountOverTimeChunkedFunctionD(var count: Double = Double.NaN) extends Chun
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, count)
   }
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     if (count.isNaN) {
       count = 0d
     }
-    count += doubleReader.count(doubleVect, startRowNum, endRowNum)
+    count += doubleReader.count(doubleVectAcc, doubleVect, startRowNum, endRowNum)
   }
 }
 
@@ -404,24 +421,26 @@ abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var coun
 }
 
 class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with ChunkedDoubleRangeFunction {
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
     if (sum.isNaN) {
       sum = 0d
     }
-    sum += doubleReader.sum(doubleVect, startRowNum, endRowNum)
-    count += doubleReader.count(doubleVect, startRowNum, endRowNum)
+    sum += doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
+    count += doubleReader.count(doubleVectAcc, doubleVect, startRowNum, endRowNum)
   }
 }
 
 class AvgOverTimeChunkedFunctionL extends AvgOverTimeChunkedFunction() with ChunkedLongRangeFunction {
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    sum += longReader.sum(longVect, startRowNum, endRowNum)
+    sum += longReader.sum(longVectAcc, longVect, startRowNum, endRowNum)
     count += (endRowNum - startRowNum + 1)
   }
 }
@@ -478,11 +497,12 @@ abstract class VarOverTimeChunkedFunctionD(var sum: Double = 0d,
                                            var count: Int = 0,
                                            var squaredSum: Double = 0d) extends ChunkedDoubleRangeFunction {
   override final def reset(): Unit = { sum = 0d; count = 0; squaredSum = 0d }
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    val it = doubleReader.iterate(doubleVect, startRowNum)
+    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     var _sum = 0d
     var _sqSum = 0d
     var elemNo = startRowNum
@@ -520,11 +540,12 @@ abstract class VarOverTimeChunkedFunctionL(var sum: Double = 0d,
                                            var count: Int = 0,
                                            var squaredSum: Double = 0d) extends ChunkedLongRangeFunction {
   override final def reset(): Unit = { sum = 0d; count = 0; squaredSum = 0d }
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    val it = longReader.iterate(longVect, startRowNum)
+    val it = longReader.iterate(longVectAcc, longVect, startRowNum)
     var _sum = 0d
     var _sqSum = 0d
     var elemNo = startRowNum
@@ -566,7 +587,8 @@ abstract class ChangesChunkedFunction(var changes: Double = Double.NaN, var prev
 
 class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
   ChunkedDoubleRangeFunction {
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
@@ -574,7 +596,7 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
       changes = 0d
     }
 
-    val changesResult = doubleReader.changes(doubleVect, startRowNum, endRowNum, prev)
+    val changesResult = doubleReader.changes(doubleVectAcc, doubleVect, startRowNum, endRowNum, prev)
     changes += changesResult._1
     prev = changesResult._2
   }
@@ -583,14 +605,15 @@ class ChangesChunkedFunctionD() extends ChangesChunkedFunction() with
 // scalastyle:off
 class ChangesChunkedFunctionL extends ChangesChunkedFunction with
   ChunkedLongRangeFunction{
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
     if (changes.isNaN) {
       changes = 0d
     }
-    val changesResult = longReader.changes(longVect, startRowNum, endRowNum, prev.toLong)
+    val changesResult = longReader.changes(longVectAcc, longVect, startRowNum, endRowNum, prev.toLong)
     changes += changesResult._1
     prev = changesResult._2
   }
@@ -626,7 +649,8 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
   with ChunkedDoubleRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
@@ -638,7 +662,7 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends Quanti
     else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
       var rowNum = startRowNum
-      val it = doubleReader.iterate(doubleVect, startRowNum)
+      val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         // There are many possible values of NaN.  Use a function to ignore them reliably.
@@ -655,7 +679,9 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
@@ -664,7 +690,7 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
     else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
       var rowNum = startRowNum
-      val it = longReader.iterate(longVect, startRowNum)
+      val it = longReader.iterate(longVectAcc, longVect, startRowNum)
       while (rowNum <= endRowNum) {
         var nextvalue = it.next
         values += nextvalue
@@ -726,11 +752,12 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[FuncArgs]) extends HoltWinters
     (res, currRowNum)
   }
 
-  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
+                                doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    val it = doubleReader.iterate(doubleVect, startRowNum)
+    val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
     var rowNum = startRowNum
     if (JLDouble.isNaN(s0) && JLDouble.isNaN(b0)) {
       // check if it is a new chunk
@@ -772,11 +799,12 @@ class HoltWintersChunkedFunctionL(funcParams: Seq[FuncArgs]) extends HoltWinters
 
   val (sf, tf) = parseParameters(funcParams)
 
-  final def addTimeLongChunks(longVect: BinaryVector.BinaryVectorPtr,
+  final def addTimeLongChunks(longVectAcc: MemoryReader,
+                              longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    val it = longReader.iterate(longVect, startRowNum)
+    val it = longReader.iterate(longVectAcc, longVect, startRowNum)
     var rowNum = startRowNum
     if (JLDouble.isNaN(b0)) {
       if (endRowNum - startRowNum >= 2) {

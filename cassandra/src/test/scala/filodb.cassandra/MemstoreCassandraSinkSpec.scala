@@ -1,5 +1,7 @@
 package filodb.cassandra
 
+import scala.concurrent.duration._
+
 import monix.reactive.Observable
 
 import filodb.core._
@@ -55,7 +57,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     // Verify data is in Cassandra ... but only groups 0, 1 which has following partitions:
     // Series 3, Series 4, Series 8, Series 9
     val splits2 = columnStore.getScanSplits(dataset1.ref, 1)
-    val rawParts = columnStore.readRawPartitions(dataset1.ref, FilteredPartitionScan(splits2.head))
+    val rawParts = columnStore.readRawPartitions(dataset1.ref, 1.hour.toMillis, FilteredPartitionScan(splits2.head))
                               .toListL.runAsync.futureValue
     val writtenNums = (5 to 95 by 10) ++ (6 to 96 by 10) ++ (8 to 98 by 10)
     // Cannot check the result, because FilteredPartitionScan() will be broken until indices are implemented

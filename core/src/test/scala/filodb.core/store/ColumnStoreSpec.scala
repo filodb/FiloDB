@@ -1,5 +1,7 @@
 package filodb.core.store
 
+import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.reactive.Observable
@@ -79,14 +81,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // partition exists but no chunks in range > 1000, this should find nothing
     val noChunkScan = TimeRangeChunkScan(1000L, 2000L)
-    val parts = colStore.readRawPartitions(dataset.ref, partScan, noChunkScan).toListL.runAsync.futureValue
-    parts should have length (1)
-    parts.head.chunkSets should have length (0)
+    val parts = colStore.readRawPartitions(dataset.ref, 1.millis.toMillis,
+                             partScan, noChunkScan).toListL.runAsync.futureValue
+    parts should have length (0)
   }
 
   it should "return empty iterator if cannot find partition or version" in {
     // Don't write any data
-    colStore.readRawPartitions(dataset.ref, partScan)
+    colStore.readRawPartitions(dataset.ref, 1.hour.toMillis, partScan)
             .toListL.runAsync.futureValue should have length (0)
   }
 

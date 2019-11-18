@@ -3,7 +3,9 @@ package filodb.query.exec.rangefn
 import scalaxy.loops._
 
 import filodb.core.query.{TransientHistRow, TransientRow}
-import filodb.memory.format.{vectors => bv, CounterVectorReader}
+import filodb.memory.format.{CounterVectorReader, MemoryReader}
+import filodb.memory.format.{vectors => bv}
+
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.query.QueryConfig
 
@@ -156,7 +158,7 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
     super.reset()
   }
 
-  def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit = {
     val dblReader = reader.asDoubleReader
@@ -164,11 +166,11 @@ abstract class ChunkedRateFunctionBase extends CounterChunkedRangeFunction[Trans
       numSamples += endRowNum - startRowNum + 1
       if (startTime < lowestTime) {
         lowestTime = startTime
-        lowestValue = dblReader.correctedValue(vector, startRowNum, correctionMeta)
+        lowestValue = dblReader.correctedValue(acc, vector, startRowNum, correctionMeta)
       }
       if (endTime > highestTime) {
         highestTime = endTime
-        highestValue = dblReader.correctedValue(vector, endRowNum, correctionMeta)
+        highestValue = dblReader.correctedValue(acc, vector, endRowNum, correctionMeta)
       }
     }
   }
@@ -205,7 +207,7 @@ class ChunkedDeltaFunction extends ChunkedRateFunctionBase {
   def isRate: Boolean    = false
 
   // We have to override addTimeChunks as delta function does not care about corrections
-  override def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+  override def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                              startRowNum: Int, endRowNum: Int,
                              startTime: Long, endTime: Long): Unit = {
     val dblReader = reader.asDoubleReader
@@ -213,11 +215,11 @@ class ChunkedDeltaFunction extends ChunkedRateFunctionBase {
       numSamples += endRowNum - startRowNum + 1
       if (startTime < lowestTime) {
         lowestTime = startTime
-        lowestValue = dblReader(vector, startRowNum)
+        lowestValue = dblReader(acc, vector, startRowNum)
       }
       if (endTime > highestTime) {
         highestTime = endTime
-        highestValue = dblReader(vector, endRowNum)
+        highestValue = dblReader(acc, vector, endRowNum)
       }
     }
   }
@@ -248,7 +250,7 @@ abstract class HistogramRateFunctionBase extends CounterChunkedRangeFunction[Tra
     super.reset()
   }
 
-  def addTimeChunks(vector: BinaryVectorPtr, reader: CounterVectorReader,
+  def addTimeChunks(acc: MemoryReader, vector: BinaryVectorPtr, reader: CounterVectorReader,
                     startRowNum: Int, endRowNum: Int,
                     startTime: Long, endTime: Long): Unit = reader match {
     case histReader: bv.CounterHistogramReader =>

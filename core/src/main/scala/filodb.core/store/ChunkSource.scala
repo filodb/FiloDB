@@ -45,6 +45,7 @@ trait RawChunkSource {
    * Implemented by lower-level persistent ChunkSources to return "raw" partition data
    */
   def readRawPartitions(ref: DatasetRef,
+                        maxChunkTime: Long,
                         partMethod: PartitionScanMethod,
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData]
 }

@@ -1,11 +1,22 @@
 package filodb.core.downsample
 
+import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
 final case class DownsampleConfig(config: Config) {
   val enabled = config.hasPath("enabled") && config.getBoolean("enabled")
-  val resolutions = if (enabled) config.as[Seq[Int]]("resolutions-ms") else Seq.empty
+
+  val resolutions = if (config.hasPath ("resolutions")) config.as[Seq[FiniteDuration]]("resolutions")
+                    else Seq.empty
+
+  val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
+             else Seq.empty
+  require(resolutions.length == ttls.length)
+
+  val schemas = if (config.hasPath ("raw-schema-names")) config.as[Seq[String]]("raw-schema-names")
+                else Seq.empty
 
   def makePublisher(): DownsamplePublisher = {
     if (!enabled) {
