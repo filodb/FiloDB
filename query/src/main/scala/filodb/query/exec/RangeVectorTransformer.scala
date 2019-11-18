@@ -241,3 +241,29 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
     }
   }
 }
+
+final case class OffsetFunctionMapper(offset: Long) extends RangeVectorTransformer {
+  protected[exec] def args: String =
+    s"offset=$offset"
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+
+      val resultRv = source.toListL.map { rvs =>
+        rvs.map { rv =>
+          new RangeVector {
+            override def key: RangeVectorKey = rv.key
+
+            override def rows: Iterator[RowReader] = rv.rows.map{r =>
+              new TransientRow(r.getLong(0) + offset,  r.getDouble(1))
+            }
+          }
+        }
+
+      }.map(Observable.fromIterable)
+
+      Observable.fromTask(resultRv).flatten
+    }
+}

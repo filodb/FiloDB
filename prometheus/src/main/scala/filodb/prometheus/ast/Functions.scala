@@ -61,12 +61,13 @@ trait Functions extends Base with Operators with Vectors {
       else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
+        val offsetMillis : Long = rangeExpression.offset.map(_.millis).getOrElse(0)
 
         PeriodicSeriesWithWindowing(
           rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
-          timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+          timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
           rangeExpression.window.millis,
-          rangeFunctionId, otherParams)
+          rangeFunctionId, rangeExpression.offset.map(_.millis), otherParams)
       }
     }
 

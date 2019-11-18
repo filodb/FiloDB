@@ -338,7 +338,9 @@ class ParserSpec extends FunSpec with Matchers {
       "sort(http_requests_total)" ->
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Sort,List())",
       "sort_desc(http_requests_total)" ->
-        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),SortDesc,List())"
+        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),SortDesc,List())",
+     "rate(http_requests_total[5m] offset 1w)" -> ""
+
     )
 
     val qts: Long = 1524855988L

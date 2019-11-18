@@ -2,6 +2,7 @@ package filodb.query
 
 import filodb.core.query.ColumnFilter
 
+
 sealed trait LogicalPlan
 
 /**
@@ -72,7 +73,8 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
 case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
-                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          end: Long,
+                          offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -89,6 +91,7 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        end: Long,
                                        window: Long,
                                        function: RangeFunctionId,
+                                       offset: Option[Long] = None,
                                        functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan
 {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
