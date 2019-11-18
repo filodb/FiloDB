@@ -325,7 +325,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
     * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
     */
-  private final val activelyIngesting = new EWAHCompressedBitmap
+  private[memstore] final val activelyIngesting = new EWAHCompressedBitmap
 
   private val numFlushIntervalsDuringRetention = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
@@ -477,6 +477,9 @@ class TimeSeriesShard(val ref: DatasetRef,
           shardStats.rowsSkipped.increment
           try {
             // Needed to update index with new partitions added during recovery with correct startTime.
+            // This is important to do since the group designated for dirty part key persistence can
+            // lag behind group the partition belongs to. Hence during recovery, we skip
+            // ingesting the sample, but create the partition and mark it as dirty.
             // TODO:
             // explore aligning index time buckets with chunks, and we can then
             // remove this partition existence check per sample.

@@ -253,6 +253,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
     0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
+    0.until(10).foreach{i => tsShard.activelyIngesting.get(i) shouldEqual true}
 
     val startTime2 = startTime1 + 1000 * numSamples
 
@@ -267,8 +268,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
     partKeysWritten shouldEqual numPartKeysWritten + 30
-    0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual false}
-    10.until(20).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
+    0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
+    0.until(10).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual false}
+    10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
+    10.until(20).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual true}
 
     val startTime3 = startTime2 + 1000 * numSamples
 
@@ -284,8 +287,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started + 10 set2 series ended +
     // 10 set1 series restarted
     partKeysWritten shouldEqual numPartKeysWritten + 50
-    0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
-    10.until(20).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual false}
+    0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
+    0.until(10).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual true}
+    10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
+    10.until(20).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual false}
   }
 
   it("should recover index data from col store correctly") {
