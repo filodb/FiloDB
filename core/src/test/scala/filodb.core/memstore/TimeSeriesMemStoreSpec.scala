@@ -231,7 +231,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
   }
 
-  it("should flush dirty part keys during one group of a flush interval") {
+  it("should flush dirty part keys during start-ingestion, end-ingestion and re-ingestion") {
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
@@ -240,20 +240,46 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
     tsShard.dirtyPartitionsForIndexFlush.isEmpty shouldEqual true
 
-    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(),
-      n = 500, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = 0))
+    val startTime1 = 10000
+    val numSamples = 500
+
+    val stream = Observable.fromIterable(groupedRecords(dataset1,
+      linearMultiSeries(startTs= startTime1, seriesPrefix = "Set1"),
+      n = numSamples, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = 0))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
     memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
 
-    partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 series started
+    partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
 
-//    // TODO ingest more time series so a flush cycle passes without above series ingesting
-//    val stream2 = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(seriesPrefix = "Difft "),
-//      n = 500, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = 600000))
-//      .executeWithModel(BatchedExecution(5)) // results in 200 records
-//    memStore.ingestStream(dataset1.ref, 0, stream2, s).futureValue
-//
-//    partKeysWritten shouldEqual numPartKeysWritten + 30 // 10 series started + 10 series ended + 10 series started
+    val startTime2 = startTime1 + 1000 * numSamples
+
+    // ingest more time series so a flush cycle passes without above series ingesting
+    // this should result in time series end of ingestion being detected
+    val stream2 = Observable.fromIterable(groupedRecords(dataset1,
+      linearMultiSeries(startTs= startTime2, seriesPrefix = "Set2"),
+      n = numSamples, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = tsShard.lastIngestionTime + 1,
+      offset = tsShard.latestOffset.toInt + 1))
+      .executeWithModel(BatchedExecution(5)) // results in 200 records
+    memStore.ingestStream(dataset1.ref, 0, stream2, s).futureValue
+
+    // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
+    partKeysWritten shouldEqual numPartKeysWritten + 30
+
+    val startTime3 = startTime2 + 1000 * numSamples
+
+    // now reingest the stopped time series set1. This should reset endTime again for the Set1 series
+    // it should also end 10 Set2 series
+    val stream3 = Observable.fromIterable(groupedRecords(dataset1,
+      linearMultiSeries(startTs= startTime3, seriesPrefix = "Set1"),
+      n = 500, groupSize = 10, ingestionTimeStep = 310000, ingestionTimeStart = tsShard.lastIngestionTime + 1,
+      offset = tsShard.latestOffset.toInt + 1))
+      .executeWithModel(BatchedExecution(5)) // results in 200 records
+    memStore.ingestStream(dataset1.ref, 0, stream3, s).futureValue
+
+    // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started + 10 set2 series ended +
+    // 10 set1 series restarted
+    partKeysWritten shouldEqual numPartKeysWritten + 50
+
 
   }
 
@@ -330,7 +356,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     var endTime = 0L
     for { n <- partIDs } {
       val part = shard.partitions.get(n)
-      part.switchBuffers(blockFactory, encode=true)
+      part.switchBuffers(blockFactory, encode = true)
       shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
       endTime = part.timestampOfLatestSample
     }

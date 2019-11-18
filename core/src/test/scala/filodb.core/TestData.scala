@@ -259,9 +259,10 @@ object MachineMetricsData {
     * RecordContainer
     */
   def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
-                     ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0): Seq[SomeData] =
+                     ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
+                     offset: Int = 0): Seq[SomeData] =
     stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
-      case (group, i) => records(ds, group, i, ingestionTimeStart + i * ingestionTimeStep)
+      case (group, i) => records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
     }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,

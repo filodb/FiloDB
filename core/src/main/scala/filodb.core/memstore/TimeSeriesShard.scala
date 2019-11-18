@@ -361,7 +361,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Highest ingestion timestamp observed.
     */
-  private var lastIngestionTime = Long.MinValue
+  private[memstore] var lastIngestionTime = Long.MinValue
 
   // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
   // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
