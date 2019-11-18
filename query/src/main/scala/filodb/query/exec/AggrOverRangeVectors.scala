@@ -638,17 +638,13 @@ object StdvarRowAggregator extends RowAggregator {
       if (acc.mean.isNaN) acc.mean = 0d
       if (acc.stdVar.isNaN) acc.stdVar = 0d
 
-      val aggStdvar = aggRes.getDouble(1)
-      val aggMean = aggRes.getDouble(2)
-      val aggCount = aggRes.getLong(3)
-
-      val newMean = (acc.mean * acc.count + aggMean * aggCount) / (acc.count + aggCount)
+      val newMean = (acc.mean * acc.count + aggRes.getDouble(2) * aggRes.getLong(3)) / (acc.count + aggRes.getLong(3))
       val accSquareSum = (acc.stdVar + math.pow(acc.mean, 2)) * acc.count
-      val aggSquareSum = (aggStdvar + math.pow(aggMean, 2)) * aggCount
-      val newStdVar = (accSquareSum + aggSquareSum) / (acc.count + aggCount) - math.pow(newMean, 2)
+      val aggResSquareSum = (aggRes.getDouble(1) + math.pow(aggRes.getDouble(2), 2)) * aggRes.getLong(3)
+      val newStdVar = (accSquareSum + aggResSquareSum) / (acc.count + aggRes.getLong(3)) - math.pow(newMean, 2)
       acc.stdVar = newStdVar
       acc.mean = newMean
-      acc.count += aggCount
+      acc.count += aggRes.getLong(3)
     }
     acc
   }
