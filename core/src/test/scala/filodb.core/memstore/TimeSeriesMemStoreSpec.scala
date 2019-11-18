@@ -5,11 +5,13 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
+import org.apache.lucene.util.BytesRef
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
@@ -31,6 +33,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   after {
     memStore.reset()
     memStore.metastore.clearAllData()
+    TestData.nativeMem.shutdown()
   }
 
   val schemas1 = Schemas(schema1)
@@ -250,6 +253,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingestStream(dataset1.ref, 0, stream, s).futureValue
 
     partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
+    0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
 
     val startTime2 = startTime1 + 1000 * numSamples
 
@@ -264,6 +268,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
     partKeysWritten shouldEqual numPartKeysWritten + 30
+    0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual false}
+    10.until(20).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
 
     val startTime3 = startTime2 + 1000 * numSamples
 
@@ -279,7 +285,50 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started + 10 set2 series ended +
     // 10 set1 series restarted
     partKeysWritten shouldEqual numPartKeysWritten + 50
+    0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
+    10.until(20).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual false}
+  }
 
+  it("should recover index data from col store correctly") {
+
+    val partBuilder = new RecordBuilder(TestData.nativeMem)
+
+    val pkPtrs = GdeltTestData.partKeyFromRecords(dataset1,
+      records(dataset1, linearMultiSeries().take(2)), Some(partBuilder))
+    val pks = pkPtrs.map(dataset1.partKeySchema.asByteArray(_))
+
+    val colStore = new NullColumnStore() {
+      override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = {
+        val keys = Seq(
+          PartKeyRecord(pks(0), 50, 100), // series that has ended ingestion
+          PartKeyRecord(pks(1), 250, Long.MaxValue) // series that is currently ingesting
+        )
+        Observable.fromIterable(keys)
+      }
+    }
+
+    val memStore = new TimeSeriesMemStore(config, colStore, new InMemoryMetaStore(), Some(policy))
+    memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+      demandPagedRetentionPeriod = 1.hour,
+      flushInterval = 10.minutes))
+    Thread sleep 1000
+
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
+    tsShard.recoverIndex().futureValue
+
+    tsShard.partitions.size shouldEqual 1 // only ingesting partitions should be loaded into heap
+    tsShard.partKeyIndex.indexNumEntries shouldEqual 2 // all partitions should be added to index
+    tsShard.partitions.get(0) shouldEqual UnsafeUtils.ZeroPointer
+    tsShard.partitions.get(1).partKeyBytes shouldEqual pks(1)
+    tsShard.partitions.get(1).ingesting shouldEqual true
+
+    // Entries should be in part key index
+    tsShard.partKeyIndex.startTimeFromPartId(0) shouldEqual 50
+    tsShard.partKeyIndex.startTimeFromPartId(1) shouldEqual 250
+    tsShard.partKeyIndex.endTimeFromPartId(0) shouldEqual 100
+    tsShard.partKeyIndex.endTimeFromPartId(1) shouldEqual Long.MaxValue
+    tsShard.partKeyIndex.partKeyFromPartId(0).get shouldEqual new BytesRef(pks(0))
+    tsShard.partKeyIndex.partKeyFromPartId(1).get shouldEqual new BytesRef(pks(1))
 
   }
 
