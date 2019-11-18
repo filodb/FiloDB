@@ -84,11 +84,11 @@ object PrometheusModel {
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
                                   "_partIds_" -> srv.key.partIds.mkString(","))
                 else Map.empty)
-    val samples =  srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+    val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
     }.toSeq
 
-    val res =  if (samples.isEmpty)
+    val res = if (samples.isEmpty)
       None
     else
       Some(samples)

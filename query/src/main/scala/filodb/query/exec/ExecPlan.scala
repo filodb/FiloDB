@@ -236,7 +236,7 @@ trait ExecPlan extends QueryCommand  {
   protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
      rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
       s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
-       printFunctionArgument(t, level +i + 1).mkString("\n")
+       printFunctionArgument(t, level + i + 1).mkString("\n")
     }
   }
 
@@ -245,9 +245,9 @@ trait ExecPlan extends QueryCommand  {
       Seq("")
     } else {
       rvt.funcParams.zipWithIndex.map { case (f, i) =>
-        val prefix = s"\n${"-" * (level + i + 1)}FA${i+1}~"
+        val prefix = s"\n${"-" * (level)}FA${i + 1}~"
         f match {
-          case e: ExecPlanFuncArgs => prefix + "\n" + e.execPlan.printTree(true, level + i + 2)
+          case e: ExecPlanFuncArgs => prefix + "\n" + e.execPlan.printTree(true, level)
           case _ => prefix + f.toString
         }
       }
