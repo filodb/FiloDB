@@ -32,7 +32,6 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   after {
     partBuilder.removeAndFreeContainers(partBuilder.allContainers.length)
-    TestData.nativeMem.shutdown()
   }
 
   implicit class RichIntIterator(ii: IntIterator) {

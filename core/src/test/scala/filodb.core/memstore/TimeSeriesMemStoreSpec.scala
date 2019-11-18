@@ -33,7 +33,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   after {
     memStore.reset()
     memStore.metastore.clearAllData()
-    TestData.nativeMem.shutdown()
   }
 
   val schemas1 = Schemas(schema1)
