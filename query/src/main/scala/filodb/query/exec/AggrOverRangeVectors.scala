@@ -634,7 +634,8 @@ object StdvarRowAggregator extends RowAggregator {
   }
   def reduceAggregate(acc: StdvarHolder, aggRes: RowReader): StdvarHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
+
+    if (!aggRes.getDouble(1).isNaN && !aggRes.getDouble(2).isNaN) {
       if (acc.mean.isNaN) acc.mean = 0d
       if (acc.stdVar.isNaN) acc.stdVar = 0d
 
