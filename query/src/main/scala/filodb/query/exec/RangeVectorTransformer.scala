@@ -62,7 +62,7 @@ object RangeVectorTransformer {
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String =
-    s"function=$function, funcParams=$funcParams"
+    s"function=$function"
 
   def apply (source: Observable[RangeVector],
             queryConfig: QueryConfig,

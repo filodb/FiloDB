@@ -25,7 +25,7 @@ case class LabelReplaceFunction(funcParams: Seq[String])
   val srcLabel: String = funcParams(2)
   val regexString: String = funcParams(3)
 
-  require(dstLabel.matches(labelIdentifier), s"Invalid destination label name: $dstLabel")
+  require(dstLabel.matches(labelIdentifier), "Invalid destination label name")
 
   try {
     Pattern.compile(regexString)

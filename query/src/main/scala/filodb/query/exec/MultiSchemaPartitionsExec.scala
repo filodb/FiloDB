@@ -95,7 +95,8 @@ final case class MultiSchemaPartitionsExec(id: String,
 
   override protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
      Option(finalPlan).getOrElse(this).rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+       s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
+         printFunctionArgument(t, level + i + 1).mkString("\n")
     }
   }
 }

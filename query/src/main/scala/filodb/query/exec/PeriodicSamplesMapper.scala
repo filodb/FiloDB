@@ -36,7 +36,7 @@ final case class PeriodicSamplesMapper(start: Long,
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
-    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
+    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId"
 
   //scalastyle:off
   def apply(source: Observable[RangeVector],
