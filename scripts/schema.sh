@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS ${FILO_KEYSPACE}.${DATASET}_partitionkeys_$SHARD (
     startTime bigint,
     endTime bigint,
     PRIMARY KEY (partKey)
-) WITH compression = {'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 EOF
 
 done

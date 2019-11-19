@@ -28,7 +28,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
        |    startTime bigint,
        |    endTime bigint,
        |    PRIMARY KEY (partKey)
-       |) WITH compression = {'sstable_compression': '$sstableCompression'}""".stripMargin
+       |) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
 
   lazy val writePartitionCql =
     session.prepare(
