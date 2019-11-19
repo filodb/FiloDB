@@ -3,7 +3,7 @@ package filodb.core.memstore
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
 
@@ -17,8 +17,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
-import monix.reactive.Observable
-import org.apache.lucene.util.BytesRef
+import monix.reactive.{Observable, OverflowStrategy}
 import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
@@ -26,8 +25,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnFilter, ColumnInfo, Filter}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -54,11 +52,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").refine(tags)
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").refine(tags)
 
-  val currentIndexTimeBucket = Kamon.gauge("memstore-index-timebucket-current").refine(tags)
-  val indexTimeBucketBytesWritten = Kamon.counter("memstore-index-timebucket-bytes-total").refine(tags)
-  val numKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-keys-total").refine(tags)
-  val numRolledKeysInLatestTimeBucket = Kamon.counter("memstore-index-timebucket-num-rolled-keys-total").refine(tags)
-  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-records-processed").refine(tags)
+  val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").refine(tags)
+  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").refine(tags)
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").refine(tags)
 
   /**
@@ -138,14 +133,6 @@ object TimeSeriesShard {
       ChunkSetInfo.setVectorPtr(addr, i, vectors(i))
     }
   }
-
-  val indexTimeBucketSchema = new RecordSchema(Seq(ColumnInfo("startTime", ColumnType.LongColumn),
-    ColumnInfo("endTime", ColumnType.LongColumn),
-    ColumnInfo("partKey", ColumnType.StringColumn)))
-
-  // TODO make configurable if necessary
-  val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
-  val indexTimeBucketSegmentSize = 1024 * 1024 // 1MB
 
   // Initial size of partitionSet and partition map structures.  Make large enough to avoid too many resizes.
   val InitialNumPartitions = 128 * 1024
@@ -338,21 +325,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
     * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
     */
-  private final val activelyIngesting = new EWAHCompressedBitmap
+  private[memstore] final val activelyIngesting = new EWAHCompressedBitmap
 
-  private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
+  private val numFlushIntervalsDuringRetention = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
-  // Use 1/4 of max # buckets for initial ChunkMap size
-  private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
-
-  /**
-    * Current time bucket number. Time bucket number is initialized from last value stored in metastore
-    * and is incremented each time a new bucket is prepared for flush.
-    *
-    * This value is mutated only from the ingestion thread, but read from both flush and ingestion threads.
-    */
-  @volatile
-  private var currentIndexTimeBucket = 0
+  // Use 1/4 of flush intervals within retention period for initial ChunkMap size
+  private val initInfoMapSize = Math.max((numFlushIntervalsDuringRetention / 4) + 4, 20)
 
   /**
     * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
@@ -361,20 +339,18 @@ class TimeSeriesShard(val ref: DatasetRef,
   private[core] var evictionWatermark: Long = 0L
 
   /**
-    * Keeps track of the list of partIds of partKeys to store in each index time bucket.
-    * This is used to persist the time buckets, and track the partIds to roll over to latest
-    * time bucket
+    * Dirty partitions whose start/end times have not been updated to cassandra.
+    *
+    * IMPORTANT. Only modify this var in IngestScheduler
     */
-  private[memstore] final val timeBucketBitmaps = new NonBlockingHashMapLong[EWAHCompressedBitmap]()
+  private[memstore] final var dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
 
   /**
-    * This is the group during which this shard will flush time buckets. Randomized to
+    * This is the group during which this shard will flush dirty part keys. Randomized to
     * ensure we dont flush time buckets across shards at same time
     */
-  private final val indexTimeBucketFlushGroup = Random.nextInt(numGroups)
-  logger.info(s"Index time buckets for shard=$shardNum will flush in group $indexTimeBucketFlushGroup")
-
-  initTimeBuckets()
+  private final val dirtyPartKeysFlushGroup = Random.nextInt(numGroups)
+  logger.info(s"Dirty Part Keys for shard=$shardNum will flush in group $dirtyPartKeysFlushGroup")
 
   /**
     * The offset up to and including the last record in this group to be successfully persisted.
@@ -385,7 +361,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   /**
     * Highest ingestion timestamp observed.
     */
-  private var lastIngestionTime = Long.MinValue
+  private[memstore] var lastIngestionTime = Long.MinValue
 
   // Flush groups when ingestion time is observed to cross a time boundary (typically an hour),
   // plus a group-specific offset. This simplifies disaster recovery -- chunks can be copied
@@ -424,6 +400,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   val tracedPartFilters = storeConfig.traceFilters
 
+  /**
+    * Iterate TimeSeriesPartition objects relevant to given partIds.
+    */
   case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
     val skippedPartIDs = debox.Buffer.empty[Int]
@@ -446,6 +425,33 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  /**
+    * Iterate TimeSeriesPartition objects relevant to given partIds.
+    */
+  case class InMemPartitionIterator2(partIds: debox.Buffer[Int]) extends PartitionIterator {
+    var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
+    val skippedPartIDs = debox.Buffer.empty[Int]
+    var nextPartId = -1
+    findNext()
+
+    private def findNext(): Unit = {
+      while (nextPartId + 1 < partIds.length && nextPart == UnsafeUtils.ZeroPointer) {
+        nextPartId += 1
+        nextPart = partitions.get(nextPartId)
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartId
+      }
+    }
+
+    final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
+
+    final def next: TimeSeriesPartition = {
+      val toReturn = nextPart
+      nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
+      findNext()
+      toReturn
+    }
+  }
+
   // An iterator over partitions looked up from partition keys stored as byte[]'s
   // Note that we cannot give skippedPartIDs because we don't have IDs only have keys
   // and we cannot look up IDs from keys since part keys are not indexed in Lucene
@@ -454,15 +460,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     private val partIt = keys.toIterator.flatMap(getPartition)
     final def hasNext: Boolean = partIt.hasNext
     final def next: TimeSeriesPartition = partIt.next
-  }
-
-  private[memstore] def initTimeBuckets() = {
-    val highestIndexTimeBucket = Await.result(metastore.readHighestIndexTimeBucket(ref, shardNum), 1.minute)
-    currentIndexTimeBucket = highestIndexTimeBucket.map(_ + 1).getOrElse(0)
-    val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
-    for { i <- currentIndexTimeBucket to earliestTimeBucket by -1 optimized } {
-      timeBucketBitmaps.put(i, new EWAHCompressedBitmap())
-    }
   }
 
   // RECOVERY: Check the watermark for the group that this record is part of.  If the ingestOffset is < watermark,
@@ -480,6 +477,9 @@ class TimeSeriesShard(val ref: DatasetRef,
           shardStats.rowsSkipped.increment
           try {
             // Needed to update index with new partitions added during recovery with correct startTime.
+            // This is important to do since the group designated for dirty part key persistence can
+            // lag behind group the partition belongs to. Hence during recovery, we skip
+            // ingesting the sample, but create the partition and mark it as dirty.
             // TODO:
             // explore aligning index time buckets with chunks, and we can then
             // remove this partition existence check per sample.
@@ -532,38 +532,19 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    val p = Promise[Unit]()
-    Future {
-      assertThreadName(IngestSchedName)
-      val tracer = Kamon.buildSpan("memstore-recover-index-latency")
-        .withTag("dataset", ref.dataset)
-        .withTag("shard", shardNum).start()
+    val tracer = Kamon.buildSpan("memstore-recover-index-latency")
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum).start()
 
-      /* We need this map to track partKey->partId because lucene index cannot be looked up
-       using partKey efficiently, and more importantly, it is eventually consistent.
-        The map and contents will be garbage collected after we are done with recovery */
-      val partIdMap = debox.Map.empty[BytesRef, Int]
-
-      val earliestTimeBucket = Math.max(0, currentIndexTimeBucket - numTimeBucketsToRetain)
-      logger.info(s"Recovering timebuckets $earliestTimeBucket to ${currentIndexTimeBucket - 1} " +
-        s"for dataset=$ref shard=$shardNum ")
-      // go through the buckets in reverse order to first one wins and we need not rewrite
-      // entries in lucene
-      // no need to go into currentIndexTimeBucket since it is not present in cass
-      val timeBuckets = for {tb <- currentIndexTimeBucket - 1 to earliestTimeBucket by -1} yield {
-        colStore.getPartKeyTimeBucket(ref, shardNum, tb).map { b =>
-          new IndexData(tb, b.segmentId, RecordContainer(b.segment.array()))
-        }
-      }
-      Observable.flatten(timeBuckets: _*)
-        .foreach(tb => extractTimeBucket(tb, partIdMap))(ingestSched)
-        .map(_ => completeIndexRecovery())(ingestSched)
-        .onComplete { _ =>
-          tracer.finish()
-          p.success(())
-        }(ingestSched)
+    val fut = colStore.scanPartKeys(ref, shardNum)
+      .asyncBoundary(OverflowStrategy.Default)
+      .executeOn(ingestSched)
+      .map { pk => addPartKey(pk) }
+      .completedL.runAsync(ingestSched)
+    fut.map { _ =>
+      completeIndexRecovery()
+      tracer.finish()
     }(ingestSched)
-    p.future
   }
 
   def completeIndexRecovery(): Unit = {
@@ -574,85 +555,57 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   // scalastyle:off method.length
-  private[memstore] def extractTimeBucket(segment: IndexData, partIdMap: debox.Map[BytesRef, Int]): Unit = {
+  private[memstore] def addPartKey(pk: PartKeyRecord): Unit = {
     assertThreadName(IngestSchedName)
-    var numRecordsProcessed = 0
-    segment.records.iterate(indexTimeBucketSchema).foreach { row =>
-      // read binary record and extract the indexable data fields
-      val startTime: Long = row.getLong(0)
-      val endTime: Long = row.getLong(1)
-      val partKeyBaseOnHeap = row.getBlobBase(2).asInstanceOf[Array[Byte]]
-      val partKeyOffset = row.getBlobOffset(2)
-      val partKeyNumBytes = row.getBlobNumBytes(2)
-      val partKeyBytesRef = new BytesRef(partKeyBaseOnHeap,
-                                         PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset),
-                                         partKeyNumBytes)
-
-      // look up partKey in partIdMap if it already exists before assigning new partId.
-      // We cant look it up in lucene because we havent flushed index yet
-      if (partIdMap.get(partKeyBytesRef).isEmpty) {
-        val partId = if (endTime == Long.MaxValue) {
-          // this is an actively ingesting partition
-          val group = partKeyGroup(schemas.part.binSchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
-          val schemaId = RecordSchema.schemaID(partKeyBaseOnHeap, partKeyOffset)
-          val schema = schemas(schemaId)
-          if (schema != Schemas.UnknownSchema) {
-            val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, CREATE_NEW_PARTID, schema, 4)
-            // In theory, we should not get an OutOfMemPartition here since
-            // it should have occurred before node failed too, and with data stopped,
-            // index would not be updated. But if for some reason we see it, drop data
-            if (part == OutOfMemPartition) {
-              logger.error("Could not accommodate partKey while recovering index. " +
-                "WriteBuffer size may not be configured correctly")
-              None
-            } else {
-              val stamp = partSetLock.writeLock()
-              try {
-                partSet.add(part) // createNewPartition doesn't add part to partSet
-                part.ingesting = true
-                Some(part.partID)
-              } finally {
-                partSetLock.unlockWrite(stamp)
-              }
-            }
-          } else {
-            logger.info(s"Ignoring part key with unknown schema ID $schemaId")
-            shardStats.unknownSchemaDropped.increment
-            None
-          }
+    val partId = if (pk.endTime == Long.MaxValue) {
+      // this is an actively ingesting partition
+      val group = partKeyGroup(schemas.part.binSchema, pk.partKey, UnsafeUtils.arayOffset, numGroups)
+      val schemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
+      val schema = schemas(schemaId)
+      if (schema != Schemas.UnknownSchema) {
+        val part = createNewPartition(pk.partKey, UnsafeUtils.arayOffset, group, CREATE_NEW_PARTID, schema, 4)
+        // In theory, we should not get an OutOfMemPartition here since
+        // it should have occurred before node failed too, and with data stopped,
+        // index would not be updated. But if for some reason we see it, drop data
+        if (part == OutOfMemPartition) {
+          logger.error("Could not accommodate partKey while recovering index. " +
+            "WriteBuffer size may not be configured correctly")
+          None
         } else {
-          // partition assign a new partId to non-ingesting partition,
-          // but no need to create a new TSPartition heap object
-          // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
-          evictedPartKeys.synchronized {
-            require(!evictedPartKeysDisposed)
-            evictedPartKeys.add(PartKey(partKeyBaseOnHeap, partKeyOffset))
-          }
-          Some(createPartitionID())
-        }
-
-        // add newly assigned partId to lucene index
-        partId.foreach { partId =>
-          partIdMap(partKeyBytesRef) = partId
-          partKeyIndex.addPartKey(partKeyBaseOnHeap, partId, startTime, endTime,
-            PartKeyLuceneIndex.unsafeOffsetToBytesRefOffset(partKeyOffset))(partKeyNumBytes)
-          timeBucketBitmaps.get(segment.timeBucket).set(partId)
-          activelyIngesting.synchronized {
-            if (endTime == Long.MaxValue) activelyIngesting.set(partId)
-            else activelyIngesting.clear(partId)
+          val stamp = partSetLock.writeLock()
+          try {
+            partSet.add(part) // createNewPartition doesn't add part to partSet
+            part.ingesting = true
+            Some(part.partID)
+          } finally {
+            partSetLock.unlockWrite(stamp)
           }
         }
       } else {
-        // partId has already been assigned for this partKey because we previously processed a later record in time.
-        // Time buckets are processed in reverse order, and given last one wins and is used for index,
-        // we skip this record and move on.
+        logger.info(s"Ignoring part key with unknown schema ID $schemaId")
+        shardStats.unknownSchemaDropped.increment
+        None
       }
-      numRecordsProcessed += 1
+    } else {
+      // partition assign a new partId to non-ingesting partition,
+      // but no need to create a new TSPartition heap object
+      // instead add the partition to evictedPArtKeys bloom filter so that it can be found if necessary
+      evictedPartKeys.synchronized {
+        require(!evictedPartKeysDisposed)
+        evictedPartKeys.add(PartKey(pk.partKey, UnsafeUtils.arayOffset))
+      }
+      Some(createPartitionID())
     }
-    shardStats.indexRecoveryNumRecordsProcessed.increment(numRecordsProcessed)
-    logger.info(s"Recovered partKeys for dataset=$ref shard=$shardNum" +
-      s" timebucket=${segment.timeBucket} segment=${segment.segment} numRecordsInBucket=$numRecordsProcessed" +
-      s" numPartsInIndex=${partIdMap.size} numIngestingParts=${partitions.size}")
+
+    // add newly assigned partId to lucene index
+    partId.foreach { partId =>
+      partKeyIndex.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+      activelyIngesting.synchronized {
+        if (pk.endTime == Long.MaxValue) activelyIngesting.set(partId)
+        else activelyIngesting.clear(partId)
+      }
+    }
+    shardStats.indexRecoveryNumRecordsProcessed.increment()
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
@@ -782,22 +735,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     logger.debug(s"Switching write buffers for group $groupNum in dataset=$ref shard=$shardNum")
     InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
 
-    // Prepare to flush current index records, switch current currentIndexTimeBucket partId
-    // bitmap with new one.  Return Some if part keys need to be flushed (happens for last
-    // flush group). Otherwise, None.
-    val flushTimeBucket = if (groupNum == indexTimeBucketFlushGroup) {
-      logger.debug(s"Switching timebucket=$currentIndexTimeBucket in dataset=$ref" +
-        s"shard=$shardNum out for flush. ")
-      currentIndexTimeBucket += 1
-      shardStats.currentIndexTimeBucket.set(currentIndexTimeBucket)
-      timeBucketBitmaps.put(currentIndexTimeBucket, new EWAHCompressedBitmap())
+    val dirtyPartKeys = if (groupNum == dirtyPartKeysFlushGroup) {
+      logger.debug(s"Switching dirty part keys in dataset=$ref shard=$shardNum out for flush. ")
       purgeExpiredPartitions()
-      Some(FlushIndexTimeBuckets(currentIndexTimeBucket-1))
+      val old = dirtyPartitionsForIndexFlush
+      dirtyPartitionsForIndexFlush = debox.Buffer.empty[Int]
+      old
     } else {
-      None
+      debox.Buffer.ofSize[Int](0)
     }
 
-    FlushGroup(shardNum, groupNum, latestOffset, flushTimeBucket)
+    FlushGroup(shardNum, groupNum, latestOffset, dirtyPartKeys)
   }
 
   private def purgeExpiredPartitions(): Unit = ingestSched.executeTrampolined { () =>
@@ -892,7 +840,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     bufferMemoryManager.updateStats()
   }
 
-  private def addPartKeyToTimebucketRb(timebucketNum: Int, indexRb: RecordBuilder, p: TimeSeriesPartition) = {
+  private def toPartKeyRecord(p: TimeSeriesPartition): PartKeyRecord = {
     assertThreadName(IOSchedName)
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime // can remotely happen since lucene reads are eventually consistent
@@ -903,14 +851,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    indexRb.startNewRecord(indexTimeBucketSchema, 0)
-    indexRb.addLong(startTime)
-    indexRb.addLong(endTime)
-    // Need to add 4 to include the length bytes
-    indexRb.addBlob(p.partKeyBase, p.partKeyOffset, BinaryRegionLarge.numBytes(p.partKeyBase, p.partKeyOffset) + 4)
-    logger.debug(s"Added entry into timebucket=${timebucketNum} partId=${p.partID} in dataset=$ref " +
-      s"shard=$shardNum partKey[${p.stringPartition}] with startTime=$startTime endTime=$endTime")
-    indexRb.endRecord(false)
+    PartKeyRecord(p.partKeyBytes, startTime, endTime)
   }
 
   // scalastyle:off method.length
@@ -948,9 +889,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       val ds = shardDownsamplers(p.schema.schemaHash)
       ds.populateDownsampleRecords(p, p.infosToBeFlushed, downsampleRecords)
 
-      /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period.
-         If we are flushing time buckets, use its timeBucketId, otherwise, use currentTimeBucket id. */
-      updateIndexWithEndTime(p, chunks, flushGroup.flushTimeBuckets.map(_.timeBucket).getOrElse(currentIndexTimeBucket))
+      /* Step 4: Update endTime of all partKeys that stopped ingesting in this flush period. */
+      updateIndexWithEndTime(p, chunks, flushGroup.dirtyPartsToFlush)
       chunks
     }
 
@@ -971,14 +911,16 @@ class TimeSeriesShard(val ref: DatasetRef,
         else Future.successful(Success)
       }
 
-    /* Step 5.2: We flush index time buckets in the one designated group for each shard
-     * We recover future since we want to proceed to write time buckets even if chunk flush failed.
-     * This is done after writeChunksFuture because chunkSetIter is lazy. */
-    val writeIndexTimeBucketsFuture = writeChunksFuture.recover {case _ => Success}
-      .flatMap( _=> writeTimeBuckets(flushGroup))
+    /* Step 5.2: We flush dirty part keys in the one designated group for each shard.
+     * We recover future since we want to proceed to write dirty part keys even if chunk flush failed.
+     * This is done after writeChunksFuture because chunkSetIter is lazy. More partKeys could
+     * be added during iteration due to endTime detection
+     */
+    val writeDirtyPartKeysFuture = writeChunksFuture.recover {case _ => Success}
+      .flatMap( _=> writeDirtyPartKeys(flushGroup))
 
-    /* Step 6: Checkpoint after time buckets and chunks are flushed */
-    val result = Future.sequence(Seq(writeChunksFuture, writeIndexTimeBucketsFuture, pubDownsampleFuture)).map {
+    /* Step 6: Checkpoint after dirty part keys and chunks are flushed */
+    val result = Future.sequence(Seq(writeChunksFuture, writeDirtyPartKeysFuture, pubDownsampleFuture)).map {
       _.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
     }.flatMap {
       case Success           => blockHolder.markUsedBlocksReclaimable()
@@ -1008,7 +950,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
     resTry.foreach { resp =>
       logger.info(s"Flush of dataset=$ref shard=$shardNum group=${flushGroup.groupNum} " +
-        s"timebucket=${flushGroup.flushTimeBuckets.map(_.timeBucket)} " +
         s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
     }
     partitionMaker.cleanupOldestBuckets()
@@ -1018,75 +959,28 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   // scalastyle:off method.length
-  private def writeTimeBuckets(flushGroup: FlushGroup): Future[Response] = {
+  private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
-    flushGroup.flushTimeBuckets.map { cmd =>
-      val rbTrace = Kamon.buildSpan("memstore-index-timebucket-populate-timebucket")
-        .withTag("dataset", ref.dataset)
-        .withTag("shard", shardNum).start()
-
-      /* Note regarding thread safety of accessing time bucket bitmaps:
-
-         Every flush task reads bits on the earliest time bucket bitmap and sets bits on the
-         latest timeBucket, both of which are uniquely associated with the flush group. Since
-         each flush group is associated with different latest and earliest time buckets,
-         concurrent threads should not be reading or writing to same time bucket bitmaps, or
-         even setting the same time bucket in the collection. This can in theory happen only if
-         a flush task lasts more than the retention period (not possible).
-      */
-
-      /* Add to timeBucketRb partKeys for (earliestTimeBucketBitmap && ~stoppedIngesting).
-       These keys are from earliest time bucket that are still ingesting */
-      val earliestTimeBucket = cmd.timeBucket - numTimeBucketsToRetain
-      if (earliestTimeBucket >= 0) {
-        var partIdsToRollOver = timeBucketBitmaps.get(earliestTimeBucket)
-        activelyIngesting.synchronized {
-          partIdsToRollOver = partIdsToRollOver.and(activelyIngesting)
-        }
-        val newBitmap = timeBucketBitmaps.get(cmd.timeBucket).or(partIdsToRollOver)
-        timeBucketBitmaps.put(cmd.timeBucket, newBitmap)
-        shardStats.numRolledKeysInLatestTimeBucket.increment(partIdsToRollOver.cardinality())
+    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
+      val pk = toPartKeyRecord(p)
+      logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
+        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime}")
+      pk
+    }
+    colStore.writePartKeys(ref, shardNum,
+                           Observable.fromIterator(partKeyRecords),
+                           storeConfig.diskTTLSeconds).map { case resp =>
+      if (flushGroup.dirtyPartsToFlush.length > 0) {
+        logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
+          s" resp=$resp for dataset=$ref shard=$shardNum")
+        shardStats.numDirtyPartKeysFlushed.increment(flushGroup.dirtyPartsToFlush.length)
       }
-
-      /* Remove the earliest time bucket from memory now that we have rolled over data */
-      timeBucketBitmaps.remove(earliestTimeBucket)
-
-      /* create time bucket using record builder */
-      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSegmentSize)
-      InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
-        addPartKeyToTimebucketRb(cmd.timeBucket, timeBucketRb, p)
-      }
-      val numPartKeysInBucket = timeBucketBitmaps.get(cmd.timeBucket).cardinality()
-      logger.debug(s"Number of records in timebucket=${cmd.timeBucket} of " +
-        s"dataset=$ref shard=$shardNum is $numPartKeysInBucket")
-      shardStats.numKeysInLatestTimeBucket.increment(numPartKeysInBucket)
-
-      /* compress and persist index time bucket bytes */
-      val blobToPersist = timeBucketRb.optimalContainerBytes(true)
-      rbTrace.finish()
-      shardStats.indexTimeBucketBytesWritten.increment(blobToPersist.map(_.length).sum)
-      // we pad to C* ttl to ensure that data lives for longer than time bucket roll over time
-      colStore.writePartKeyTimeBucket(ref, shardNum, cmd.timeBucket, blobToPersist,
-        storeConfig.diskTTLSeconds + indexTimeBucketTtlPaddingSeconds).flatMap {
-        case Success => /* Persist the highest time bucket id in meta store */
-          writeHighestTimebucket(shardNum, cmd.timeBucket)
-        case er: ErrorResponse =>
-          logger.error(s"Failure for flush of timeBucket=${cmd.timeBucket} and rollover of " +
-            s"earliestTimeBucket=$earliestTimeBucket for dataset=$ref shard=$shardNum : $er")
-          // TODO missing persistence of a time bucket even after c* retries may result in inability to query
-          // existing data. Revisit later for better resilience for long c* failure
-          Future.successful(er)
-      }.map { case resp =>
-        logger.info(s"Finished flush for timeBucket=${cmd.timeBucket} with ${blobToPersist.length} segments " +
-          s"and rollover of earliestTimeBucket=$earliestTimeBucket with resp=$resp for dataset=$ref " +
-          s"shard=$shardNum")
-        resp
-      }.recover { case e =>
-        logger.error(s"Internal Error when persisting time bucket in dataset=$ref shard=$shardNum - " +
-          "should have not reached this state", e)
-        DataDropped
-      }
-    }.getOrElse(Future.successful(Success))
+      resp
+    }.recover { case e =>
+      logger.error(s"Internal Error when persisting part keys in dataset=$ref shard=$shardNum - " +
+        "should have not reached this state", e)
+      DataDropped
+    }
   }
   // scalastyle:on method.length
 
@@ -1114,22 +1008,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  private def writeHighestTimebucket(shardNum: Int, timebucket: Int): Future[Response] = {
-    assertThreadName(IOSchedName)
-    metastore.writeHighestIndexTimeBucket(ref, shardNum, timebucket).recover { case e =>
-      logger.error(s"Critical! Highest Time Bucket persistence skipped after retries failed in " +
-        s"dataset=$ref shard=$shardNum", e)
-      // Sorry - need to skip to keep the ingestion moving
-      DataDropped
-    }
-  }
-
   private[memstore] def updatePartEndTimeInIndex(p: TimeSeriesPartition, endTime: Long): Unit =
     partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
-                                     timeBucket: Int) = {
+                                     dirtyParts: debox.Buffer[Int]) = {
     // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
     // causing the iterator to be consumed synchronously in some cases. It doesnt
     // seem to be consistent environment to environment.
@@ -1142,7 +1026,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         var endTime = p.timestampOfLatestSample
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
-        timeBucketBitmaps.get(timeBucket).set(p.partID)
+        dirtyParts += p.partID
         activelyIngesting.clear(p.partID)
         p.ingesting = false
       }
@@ -1242,7 +1126,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * If it is a previously seen partKey that is already in index, it reassigns same partId so that indexes
     * are still valid.
     *
-    * This method also updates lucene index and time bucket bitmaps properly.
+    * This method also updates lucene index and dirty part keys properly.
     */
   private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
     assertThreadName(IngestSchedName)
@@ -1260,7 +1144,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         // newly created partition is re-ingesting now, so update endTime
         updatePartEndTimeInIndex(newPart, Long.MaxValue)
       }
-      timeBucketBitmaps.get(currentIndexTimeBucket).set(partId) // causes current time bucket to include this partId
+      dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
       activelyIngesting.synchronized {
         activelyIngesting.set(partId)
         newPart.ingesting = true
@@ -1306,7 +1190,7 @@ class TimeSeriesShard(val ref: DatasetRef,
             if (!tsp.ingesting) {
               // time series was inactive and has just started re-ingesting
               updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
-              timeBucketBitmaps.get(currentIndexTimeBucket).set(part.partID)
+              dirtyPartitionsForIndexFlush += part.partID
               activelyIngesting.set(part.partID)
               tsp.ingesting = true
             }
