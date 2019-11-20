@@ -49,7 +49,7 @@ case class ScalarFixedDoubleExec(id: String,
     Task {
       rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
         qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector: Observable[ScalarVector] = if (transf.funcParams.isEmpty) {
+        val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty) {
           Observable.empty
         } else {
           transf.funcParams.head.getResult

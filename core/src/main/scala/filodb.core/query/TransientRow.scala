@@ -44,7 +44,7 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
   def getDouble(columnNo: Int): Double = if (columnNo == 1) value
-  else throw new IllegalArgumentException(s"Invalid col $columnNo")
+                                         else throw new IllegalArgumentException(s"Invalid col $columnNo")
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
@@ -119,10 +119,10 @@ final class AvgAggTransientRow extends MutableRowReader {
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
-  else if (columnNo == 2) count
-  else throw new IllegalArgumentException()
+                                     else if (columnNo == 2) count
+                                     else throw new IllegalArgumentException()
   def getDouble(columnNo: Int): Double = if (columnNo == 1) avg
-  else throw new IllegalArgumentException()
+                                         else throw new IllegalArgumentException()
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
@@ -154,11 +154,11 @@ final class StdvarAggTransientRow extends MutableRowReader {
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
-  else if (columnNo == 3) count
+                                     else if (columnNo == 3) count
   else throw new IllegalArgumentException()
   def getDouble(columnNo: Int): Double = if (columnNo == 1) stdVar
-  else if (columnNo == 2) avg
-  else throw new IllegalArgumentException()
+                                         else if (columnNo == 2) avg
+                                         else throw new IllegalArgumentException()
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
@@ -196,11 +196,11 @@ final class QuantileAggTransientRow() extends MutableRowReader {
   def getString(columnNo: Int): String = ???
   def getAny(columnNo: Int): Any = ???
   def getBlobBase(columnNo: Int): Any = if (columnNo == 1) blobBase
-  else throw new IllegalArgumentException()
+                                        else throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) blobOffset
-  else throw new IllegalArgumentException()
+                                           else throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
-  else throw new IllegalArgumentException()
+                                            else throw new IllegalArgumentException()
 
   override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
     // Needed since blobs are serialized as strings (for now) underneath the covers.

@@ -46,8 +46,10 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
     * be preceded by a rate function or a sum-of-rate function.
     */
   override def apply(source: Observable[RangeVector],
-                     queryConfig: QueryConfig, limit: Int,
-                     sourceSchema: ResultSchema, paramResponse: Observable[ScalarVector]): Observable[RangeVector] = {
+                     queryConfig: QueryConfig,
+                     limit: Int,
+                     sourceSchema: ResultSchema,
+                     paramResponse: Observable[ScalarRangeVector]): Observable[RangeVector] = {
 
     val res = source.toListL.map { rvs =>
 

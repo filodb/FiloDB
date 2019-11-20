@@ -87,7 +87,7 @@ final case class MultiSchemaPartitionsExec(id: String,
 
   // Print inner node's details for debugging
   override def curNodeText(level: Int): String = {
-    val innerText= if (Option(finalPlan).isDefined) {
+    val innerText = if (Option(finalPlan).isDefined) {
       s"Inner: +  ${Option(finalPlan).map(_.curNodeText(level + 1)).get}\n"
     } else ""
     s"${super.curNodeText(level)} $innerText"

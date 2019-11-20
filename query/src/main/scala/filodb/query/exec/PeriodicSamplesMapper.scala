@@ -38,12 +38,12 @@ final case class PeriodicSamplesMapper(start: Long,
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId"
 
-  //scalastyle:off
+ //scalastyle:off
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
-            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")

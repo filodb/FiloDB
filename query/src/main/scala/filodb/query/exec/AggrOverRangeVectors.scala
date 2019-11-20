@@ -68,7 +68,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
-            paramResponse: Observable[ScalarVector] = Observable.empty): Observable[RangeVector] = {
+            paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
@@ -108,7 +108,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
-            paramResponse: Observable[ScalarVector]): Observable[RangeVector] = {
+            paramResponse: Observable[ScalarRangeVector]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }

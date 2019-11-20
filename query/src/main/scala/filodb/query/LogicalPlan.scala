@@ -2,12 +2,16 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams}
 
-sealed trait LogicalPlan
+sealed trait LogicalPlan{
+  def isRoutable : Boolean = true
+}
 
 /**
   * Super class for a query that results in range vectors with raw samples
   */
-sealed trait RawSeriesPlan extends LogicalPlan
+sealed trait RawSeriesPlan extends LogicalPlan {
+  override def isRoutable: Boolean = false
+}
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
   def children: Seq[LogicalPlan]
@@ -19,7 +23,9 @@ sealed trait NonLeafLogicalPlan extends LogicalPlan {
   */
 sealed trait PeriodicSeriesPlan extends LogicalPlan
 
-sealed trait MetadataQueryPlan extends LogicalPlan
+sealed trait MetadataQueryPlan extends LogicalPlan{
+  override def isRoutable: Boolean = false
+}
 
 /**
   * A selector is needed in the RawSeries logical plan to specify
@@ -56,7 +62,9 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  */
 case class RawChunkMeta(rangeSelector: RangeSelector,
                         filters: Seq[ColumnFilter],
-                        column: String) extends PeriodicSeriesPlan
+                        column: String) extends PeriodicSeriesPlan {
+  override def isRoutable: Boolean = false
+}
 
 /**
   * Concrete logical plan to query for data in a given range
@@ -133,7 +141,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   * Apply Scalar Binary operation to a collection of RangeVectors
   */
 case class ScalarVectorBinaryOperation(operator: BinaryOperator,
-                                       scalar: ScalarPlan,
+                                       scalarArg: ScalarPlan,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vector)
@@ -180,10 +188,12 @@ case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
 }
 
 
-case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan  {
+case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
+  override def isRoutable: Boolean = false
 }
 
 case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: RangeParams) extends ScalarPlan with FunctionArgsPlan {
+  override def isRoutable: Boolean = false
 }
 
 case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {

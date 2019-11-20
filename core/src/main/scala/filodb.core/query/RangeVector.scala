@@ -1,19 +1,20 @@
 package filodb.core.query
-//scalastyle:off
-import java.time.{LocalDateTime, ZoneOffset, YearMonth}
+
+import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
 import scala.collection.mutable.ListBuffer
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
+
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
+import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
-import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
-//scalastyle:on
 
 /**
   * Identifier for a single RangeVector.
@@ -72,8 +73,8 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
 
 object CustomRangeVectorKey {
   def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
-    CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).
-      map { lv => UTF8Str(lv(0)) -> UTF8Str(lv(1))
+    CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
+      UTF8Str(lv(0)) -> UTF8Str(lv(1))
     }.toMap)
   }
 
@@ -100,21 +101,21 @@ trait SerializableRangeVector extends RangeVector {
   def numRowsInt: Int
 }
 
-trait ScalarVector extends SerializableRangeVector {
+trait ScalarRangeVector extends SerializableRangeVector {
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
   def getValue(time: Long): Double
 }
 
-case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarVector {
+case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
   override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
-    map{ x=> new TransientRow(x._1, x._2)}.iterator
+                                            map{ x => new TransientRow(x._1, x._2)}.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsInt: Int = timeValueMap.size
 }
 
 final case class RangeParams(start: Long, step: Long, end: Long)
-trait ScalarSingleValue extends ScalarVector {
+trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
@@ -165,12 +166,7 @@ case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue 
 case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = {
     val dayOfWeek = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfWeek
-    if (dayOfWeek == 7) {
-      0
-    }
-    else {
-      dayOfWeek.getValue
-    }
+    if (dayOfWeek == 7) 0 else dayOfWeek.getValue
   }
   override def getValue(time: Long): Double = value
 }

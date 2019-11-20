@@ -113,13 +113,12 @@ class QueryEngine(dsRef: DatasetRef,
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
     if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || // It is a raw data query
-      rootLogicalPlan.isInstanceOf[RawChunkMeta] ||
+      (!rootLogicalPlan.isRoutable) ||
       !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
         !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
       // failure routing
-      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan) || // Sub queries have different time ranges (unusual)
-       rootLogicalPlan.isInstanceOf[ScalarTimeBasedPlan]) //No need to route since there is no metric
+      !QueryRoutingPlanner.hasSingleTimeRange(rootLogicalPlan)) // Sub queries have different time ranges (unusual)
       {
        generateLocalExecPlan(rootLogicalPlan, queryId, submitTime, options, querySpreadProvider)
       } else {
@@ -267,13 +266,7 @@ class QueryEngine(dsRef: DatasetRef,
                                            lp: ScalarVectorBinaryOperation,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
-    val funcArg = lp.scalar match {
-      case num: ScalarFixedDoublePlan  => Seq(StaticFuncArgs(num.scalar, num.timeStepParams))
-      case  s: ScalarVaryingDoublePlan => Seq(ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
-        spreadProvider)))
-      case  t: ScalarTimeBasedPlan     => Seq(TimeFuncArgs(t.rangeParams))
-      case  _                          =>  throw new UnsupportedOperationException("Invalid logical plan")
-    }
+    val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), queryId, submitTime, options, spreadProvider)
 
     if (vectors.plans.length > 1 && funcArg.isInstanceOf[ExecPlanFuncArgs]) {
       val targetActor = pickDispatcher(vectors.plans)
@@ -354,11 +347,7 @@ class QueryEngine(dsRef: DatasetRef,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction, spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    val paramsExec = if (!lp.functionArgs.isEmpty) {
-      materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
-    } else {
-      Nil
-    }
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
     vectors
   }
@@ -370,11 +359,7 @@ class QueryEngine(dsRef: DatasetRef,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
-    val paramsExec = if (!lp.functionArgs.isEmpty) {
-      materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
-    } else {
-      Nil
-    }
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(execRangeFn), paramsExec)))
     rawSeries
@@ -490,12 +475,17 @@ class QueryEngine(dsRef: DatasetRef,
                                       submitTime: Long,
                                       options: QueryOptions,
                                       spreadProvider: SpreadProvider): Seq[FuncArgs] = {
-    functionParams.map { param =>
+    if (functionParams.isEmpty){
+      Nil
+    } else{
+      functionParams.map { param =>
         param match {
-        case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-        case  s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
-          spreadProvider))
-        case  _  =>  throw new UnsupportedOperationException("Invalid logical plan")
+          case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
+            spreadProvider))
+          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
+          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+        }
       }
     }
   }
@@ -557,9 +547,9 @@ class QueryEngine(dsRef: DatasetRef,
                                      options: QueryOptions,
                                      lp: ScalarFixedDoublePlan,
                                      spreadProvider: SpreadProvider): PlanResult = {
-    val scalarTimeBasedExec = ScalarFixedDoubleExec(queryId, dsRef, lp.timeStepParams, lp.scalar,
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(queryId, dsRef, lp.timeStepParams, lp.scalar,
       options.sampleLimit)
-    PlanResult(Seq(scalarTimeBasedExec), false)
+    PlanResult(Seq(scalarFixedDoubleExec), false)
   }
 
     /**

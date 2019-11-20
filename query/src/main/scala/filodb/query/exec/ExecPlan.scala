@@ -122,7 +122,7 @@ trait ExecPlan extends QueryCommand  {
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-          val paramRangeVector: Observable[ScalarVector] = if (transf.funcParams.isEmpty){
+          val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty){
             Observable.empty
           } else {
             transf.funcParams.head.getResult
@@ -272,34 +272,33 @@ abstract class LeafExecPlan extends ExecPlan {
 }
 
 sealed trait FuncArgs{
-  def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarVector]
+  def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarRangeVector]
 }
+
 case class ExecPlanFuncArgs(execPlan: ExecPlan) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
-    Observable.now(execPlan)
-      .mapAsync(Runtime.getRuntime.availableProcessors()) { plan =>
-        plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${plan.printTree()}", ex)
-          QueryError(execPlan.id, ex)
-        }
-      }.map {
-      case (QueryResult(_, _, result) )=> result.head.asInstanceOf[ScalarVaryingDouble]
+
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
+    Observable.fromTask(execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
+      qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
+      QueryError(execPlan.id, ex)
+    }.map {
+      case (QueryResult(_, _, result)) => result.head.asInstanceOf[ScalarVaryingDouble]
       case (QueryError(_, ex)) => throw ex
-    }
+    })
   }
 
   override def toString: String = execPlan.printTree() + "\n"
 }
 
-case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
+final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.now(
      new ScalarFixedDouble(timeStepParams, scalar))
   }
 }
 
-case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarVector] = {
+final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.now(
       new TimeScalar(timeStepParams))
   }

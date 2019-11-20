@@ -139,8 +139,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * Check whether logical plan has a PeriodicSeriesPlan
     */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan] ||
-      logicalPlan.isInstanceOf[ScalarFixedDoublePlan] || logicalPlan.isInstanceOf[ScalarTimeBasedPlan]) {
+    if (!logicalPlan.isRoutable) {
       false
     } else if (logicalPlan.isInstanceOf[ScalarVectorBinaryOperation]) {
       return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ScalarVectorBinaryOperation].vector))
