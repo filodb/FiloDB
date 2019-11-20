@@ -28,11 +28,13 @@ object DownsamplerSettings extends StrictLogging {
 
   val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
+  logger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
+
   val rawDatasetIngestionConfig = filodbSettings.streamConfigs.map { config =>
         IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       }.find(_.ref.toString == rawDatasetName).get
 
-  val rawSchemaNames = downsamplerConfig.as[Seq[String]]("raw-schema-names")
+  val rawSchemaNames = rawDatasetIngestionConfig.downsampleConfig.schemas
 
   val downsampleResolutions = rawDatasetIngestionConfig.downsampleConfig.resolutions
 
