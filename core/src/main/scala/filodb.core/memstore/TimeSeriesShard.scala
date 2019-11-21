@@ -170,7 +170,7 @@ object PartitionIterator {
 /**
   * TSPartition lookup from filters result, usually step 1 of querying.
   *
-  * @param partsInMemoryIter iterates through the in-Memory partitions, some of which may not need ODP.
+  * @param partsInMemory iterates through the in-Memory partitions, some of which may not need ODP.
   *                          Caller needs to filter further
   * @param firstSchemaId if defined, the first Schema ID found. If not defined, probably there's no data.
   * @param partIdsMemTimeGap contains partIDs in memory but with potential time gaps in data. Their
@@ -179,7 +179,7 @@ object PartitionIterator {
   */
 case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
-                            partsInMemoryIter: EWAHCompressedBitmap,
+                            partsInMemory: EWAHCompressedBitmap,
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
@@ -530,7 +530,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def startFlushingIndex(): Unit =
-    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMaxDelaySeconds, storeConfig.partIndexFlushMinDelaySeconds)
+    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
 
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
@@ -1474,7 +1474,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
-    val partIter = new InMemPartitionIterator(iterResult.partsInMemoryIter.intIterator())
+    val partIter = new InMemPartitionIterator(iterResult.partsInMemory.intIterator())
     Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p

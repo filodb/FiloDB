@@ -203,7 +203,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
-    flushThread.close()
+    if (flushThread != UnsafeUtils.ZeroPointer) flushThread.close()
     indexWriter.close()
   }
 

@@ -83,7 +83,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
             chunkMethod.startTime,
             chunkMethod.endTime)
           val _schema = Option(res.getFirstSetBit).filter(_ >= 0).map(schemaIDFromPartID)
-          // send index result in the partsInMemoryIter field of lookup
+          // send index result in the partsInMemory field of lookup
           PartLookupResult(shardNum, chunkMethod, res,
             _schema, debox.Map.empty[Int, Long], debox.Buffer.empty)
         } else {
@@ -102,7 +102,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
     import filodb.core.Iterators._
-    val partKeys = lookup.partsInMemoryIter.intIterator().map(partKeyFromPartId, 10000) // TODO configure
+    val partKeys = lookup.partsInMemory.intIterator().map(partKeyFromPartId, 10000) // TODO configure
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
         colStore.readRawPartitions(downsampledDataset,

@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration._
 import scala.util.Random
 
 import com.googlecode.javaewah.IntIterator
@@ -15,10 +16,10 @@ import filodb.memory.format.UTF8Wrapper
 import filodb.memory.format.ZeroCopyUTF8String._
 
 class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
-  import GdeltTestData._
   import Filter._
+  import GdeltTestData._
 
-  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, TestData.storeConf)
+  val keyIndex = new PartKeyLuceneIndex(dataset6.ref, dataset6.schema.partition, 0, 1.hour)
   val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   def partKeyOnHeap(dataset: Dataset,
@@ -57,27 +58,27 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partNums1.toSeq shouldEqual Seq(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
     val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
-    val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2),start, end)
+    val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
     partNums2.toSeq shouldEqual Seq(7, 8, 9)
 
     val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3),start, end)
+    val partNums3 = keyIndex.partIdsFromFilters(Seq(filter3), start, end)
     partNums3.toSeq shouldEqual Seq(8, 9)
 
     val filter4 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4),10, start-1)
+    val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4), 10, start-1)
     partNums4.toSeq shouldEqual Seq.empty
 
     val filter5 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5),end + 100, end + 100000)
+    val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5), end + 100, end + 100000)
     partNums5.toSeq should not equal (Seq.empty)
 
     val filter6 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6),start - 10000, end )
+    val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6), start - 10000, end )
     partNums6.toSeq should not equal (Seq.empty)
 
     val filter7 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7),(start + end)/2, end + 1000 )
+    val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
     partNums7.toSeq should not equal (Seq.empty)
 
   }
@@ -163,7 +164,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partNums1.toSeq shouldEqual Seq(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
     val filter2 = ColumnFilter("Actor2Code", Equals("GOV".utf8))
-    val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2),start, end)
+    val partNums2 = keyIndex.partIdsFromFilters(Seq(filter2), start, end)
     partNums2.toSeq shouldEqual Seq(7, 8, 9)
 
     val filter3 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
@@ -171,19 +172,19 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partNums3.toSeq shouldEqual Seq(8, 9)
 
     val filter4 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4),10, start-1)
+    val partNums4 = keyIndex.partIdsFromFilters(Seq(filter4), 10, start-1)
     partNums4.toSeq shouldEqual Seq.empty
 
     val filter5 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5),end + 20000, end + 100000)
+    val partNums5 = keyIndex.partIdsFromFilters(Seq(filter5), end + 20000, end + 100000)
     partNums5.toSeq should equal (Seq.empty)
 
     val filter6 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6),start - 10000, end-1 )
+    val partNums6 = keyIndex.partIdsFromFilters(Seq(filter6), start - 10000, end-1 )
     partNums6.toSeq should not equal (Seq.empty)
 
     val filter7 = ColumnFilter("Actor2Name", Equals("REGIME".utf8))
-    val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7),(start + end)/2, end + 1000 )
+    val partNums7 = keyIndex.partIdsFromFilters(Seq(filter7), (start + end)/2, end + 1000 )
     partNums7.toSeq should not equal (Seq.empty)
   }
 
@@ -247,7 +248,7 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, TestData.storeConf)
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour)
     partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
       index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
     }
