@@ -73,8 +73,8 @@ trait Functions extends Base with Operators with Vectors {
           // No lookback needed as we are looking at chunk metadata only, not raw samples
           val rangeSelector = timeParamToSelector(timeParams, 0)
           val (filters, columns) = seriesParam match {
-            case i: InstantExpression => (i.columnFilters :+ i.nameFilter, i.columns)
-            case r: RangeExpression => (r.columnFilters :+ r.nameFilter, r.columns)
+            case i: InstantExpression => (i.columnFilters, i.columns)
+            case r: RangeExpression   => (r.columnFilters, r.columns)
           }
           filoFunctionIdOpt.get match {
             case FiloFunctionId.ChunkMetaAll => // Just get the raw chunk metadata
