@@ -23,11 +23,9 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
 sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
-final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
-final case class FlushIndexTimeBuckets(timeBucket: Int)
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
-                            flushTimeBuckets: Option[FlushIndexTimeBuckets])
+                            dirtyPartsToFlush: debox.Buffer[Int])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
@@ -209,7 +207,7 @@ trait MemStore extends ChunkSource {
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
    */
-  def truncate(dataset: DatasetRef): Future[Response]
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /**
    * Resets the state of the MemStore. Usually used for testing.
