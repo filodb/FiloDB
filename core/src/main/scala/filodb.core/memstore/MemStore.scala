@@ -95,7 +95,6 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushSched the Scheduler to use to schedule flush tasks
-   * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes the stream ends.  It is up to the caller to ensure this.
    */

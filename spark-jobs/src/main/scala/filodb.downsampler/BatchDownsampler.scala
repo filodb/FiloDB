@@ -18,6 +18,7 @@ import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
+import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 /**
@@ -155,9 +156,12 @@ object BatchDownsampler extends StrictLogging with Instance {
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
         val bufferPool = offHeapMem.bufferPools(rawSchemaId)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
+        val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
+                                                   rawReadablePart.partKeyOffset,
+                                                   offHeapMem.nativeMemoryManager)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
-          val part = new TimeSeriesPartition(0, downsampleSchema, rawReadablePart.partitionKey,
+          val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
                                             0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
           res -> part
         }.toMap

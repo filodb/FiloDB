@@ -162,7 +162,8 @@ extends MemStore with StrictLogging {
 
   override def latestOffset(dataset: DatasetRef, shard: Int): Long = throw new UnsupportedOperationException()
 
-  override def truncate(dataset: DatasetRef): Future[Response] = throw new UnsupportedOperationException()
+  override def truncate(dataset: DatasetRef, numShards: Int): Future[Response] =
+    throw new UnsupportedOperationException()
 
   override def schemas(ref: DatasetRef): Option[Schemas] = {
     datasets.get(ref).map(_.values.asScala.head.schemas)
