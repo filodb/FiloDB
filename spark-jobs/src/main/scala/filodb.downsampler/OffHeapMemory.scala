@@ -4,15 +4,22 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.memstore.WriteBufferPool
 import filodb.core.metadata.Schema
-import filodb.downsampler.BatchDownsampler.settings
+import filodb.core.store.StoreConfig
 import filodb.memory._
 
-class OffHeapMemory(rawSchemas: Seq[Schema], kamonTags: Map[String, String], maxMetaSize: Int)
+class OffHeapMemory(schemas: Seq[Schema],
+                    kamonTags: Map[String, String],
+                    maxMetaSize: Int,
+                    storeConfig: StoreConfig)
   extends StrictLogging {
 
-  logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=${settings.nativeMemManagerSize} " +
-    s"and blockMemorySize=${settings.blockMemorySize}")
-  val blockStore = new PageAlignedBlockManager(settings.blockMemorySize,
+  private val blockMemSize = storeConfig.shardMemSize
+  private val nativeMemSize = storeConfig.ingestionBufferMemSize
+
+
+  logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=$nativeMemSize " +
+    s"and blockMemorySize=$blockMemSize")
+  val blockStore = new PageAlignedBlockManager(blockMemSize,
     stats = new MemoryStats(kamonTags),
     reclaimer = new ReclaimListener {
       override def onReclaim(metadata: Long, numBytes: Int): Unit = {}
@@ -21,15 +28,15 @@ class OffHeapMemory(rawSchemas: Seq[Schema], kamonTags: Map[String, String], max
 
   val blockMemFactory = new BlockMemFactory(blockStore, None, maxMetaSize, kamonTags, false)
 
-  val nativeMemoryManager = new NativeMemoryManager(settings.nativeMemManagerSize, kamonTags)
+  val nativeMemoryManager = new NativeMemoryManager(nativeMemSize, kamonTags)
 
   /**
     * Buffer Pool keyed by Raw schema Id
     */
   val bufferPools = {
     val bufferPoolByRawSchemaId = debox.Map.empty[Int, WriteBufferPool]
-    rawSchemas.foreach { s =>
-      val pool = new WriteBufferPool(nativeMemoryManager, s.downsample.get.data, settings.downsampleStoreConfig)
+    schemas.foreach { s =>
+      val pool = new WriteBufferPool(nativeMemoryManager, s.data, storeConfig)
       bufferPoolByRawSchemaId += s.schemaHash -> pool
     }
     bufferPoolByRawSchemaId

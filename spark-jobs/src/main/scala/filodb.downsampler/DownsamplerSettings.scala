@@ -52,10 +52,6 @@ object DownsamplerSettings extends StrictLogging {
 
   val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
-  val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
-
-  val nativeMemManagerSize = downsamplerConfig.getMemorySize("off-heap-native-memory-size").toBytes
-
   val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
 
   val widenIngestionTimeRangeBy = downsamplerConfig.as[FiniteDuration]("widen-ingestion-time-range-by")

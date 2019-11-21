@@ -80,11 +80,11 @@ object BatchDownsampler extends StrictLogging with Instance {
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  private val downsampleDatasetRefs =
+  private[downsampler] val downsampleDatasetRefs =
     DownsampledTimeSeriesStore.downsampleDatasetRefs(rawDatasetRef, settings.downsampleResolutions)
 
 
-  private val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
+  private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
@@ -106,7 +106,8 @@ object BatchDownsampler extends StrictLogging with Instance {
     }
     val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
-    val offHeapMem = new OffHeapMemory(rawSchemas, kamonTags, maxMetaSize)
+    val offHeapMem = new OffHeapMemory(rawSchemas.map(_.downsample.get),
+      kamonTags, maxMetaSize, settings.downsampleStoreConfig)
     var numDsChunks = 0
     try {
       rawPartsBatch.foreach { rawPart =>
@@ -155,7 +156,7 @@ object BatchDownsampler extends StrictLogging with Instance {
         logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
 
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
-        val bufferPool = offHeapMem.bufferPools(rawSchemaId)
+        val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
                                                    rawReadablePart.partKeyOffset,

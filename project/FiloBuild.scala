@@ -238,8 +238,10 @@ object FiloBuild extends Build {
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
-    "org.apache.spark"       %%      "spark-core" % sparkVersion % "provided",
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % "provided",
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test,
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test,
     scalaxyDep
   )
 

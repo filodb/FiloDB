@@ -1,6 +1,7 @@
 package filodb.downsampler
 
 import com.typesafe.scalalogging.StrictLogging
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
 /**
@@ -28,22 +29,35 @@ import org.apache.spark.sql.SparkSession
   * Since we query for a broader ingestionTime, it will include data arriving early/late by 2 hours.
   *
   */
-object DownsamplerMain extends App with StrictLogging with Serializable {
+object DownsamplerMain extends App {
+
+  val d = new Downsampler
+  val sparkConf = new SparkConf(loadDefaults = true)
+  d.run(sparkConf)
+  d.shutdown()
+}
+
+
+
+class Downsampler extends StrictLogging {
 
   import BatchDownsampler._
   import DownsamplerSettings._
 
   import java.time.Instant._
 
-  mainFunction()
+  def shutdown(): Unit = {
+    cassandraColStore.shutdown()
+  }
 
-  // Gotcha!! Needed a separate mainFunction
+  // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
-  private def mainFunction() = {
+  def run(conf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
+      .config(conf)
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
@@ -76,18 +90,19 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
         val rawDataSource = cassandraColStore
-        rawDataSource.getChunksByIngestionTimeRange(rawDatasetRef, splitIter,
-          ingestionTimeStart, ingestionTimeEnd, rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          userTimeStart, userTimeEnd, batchSize, batchTime).toIterator()
+        rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
+          splits = splitIter, ingestionTimeStart = ingestionTimeStart,
+          ingestionTimeEnd = ingestionTimeEnd,
+          userTimeStart = userTimeStart, userTimeEnd = userTimeEnd,
+          maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          batchSize = batchSize, batchTime = batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEnd)
       }
     spark.sparkContext.stop()
-    cassandraColStore.shutdown()
-
-    // TODO migrate index entries
 
     logger.info(s"Downsampling Driver completed successfully")
   }
+
 }
