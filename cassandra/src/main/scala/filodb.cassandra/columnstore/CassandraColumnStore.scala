@@ -186,7 +186,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
-        s"userTimeEnd=$userTimeEnd")
+        s"userTimeEnd=$userTimeEnd maxChunkTime=$maxChunkTime")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable
       // based on how much faster downsampling should run, and how much additional read load cassandra can take.
       chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, userTimeEnd).toIterator().toSeq
