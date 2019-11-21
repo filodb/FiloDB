@@ -34,6 +34,8 @@ object DownsamplerSettings extends StrictLogging {
         IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       }.find(_.ref.toString == rawDatasetName).get
 
+  logger.info(s"DatasetConfig for dataset $rawDatasetName was $rawDatasetIngestionConfig")
+
   val rawSchemaNames = rawDatasetIngestionConfig.downsampleConfig.schemas
 
   val downsampleResolutions = rawDatasetIngestionConfig.downsampleConfig.resolutions
