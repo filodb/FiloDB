@@ -155,7 +155,7 @@ final class StdvarAggTransientRow extends MutableRowReader {
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp
                                      else if (columnNo == 3) count
-  else throw new IllegalArgumentException()
+                                     else throw new IllegalArgumentException()
   def getDouble(columnNo: Int): Double = if (columnNo == 1) stdVar
                                          else if (columnNo == 2) avg
                                          else throw new IllegalArgumentException()

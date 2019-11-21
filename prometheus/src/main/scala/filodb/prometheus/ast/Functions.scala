@@ -49,7 +49,6 @@ trait Functions extends Base with Operators with Vectors {
         }
       } else if (allParams.isEmpty) {
         ScalarTimeBasedPlan(scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end) )
-
       }  else {
         val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
 

@@ -108,11 +108,12 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
     } else {
       funcParams.head match {
         case s: StaticFuncArgs   => evaluate(source, funcParams.map(x => x.asInstanceOf[StaticFuncArgs]).
-          map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)), queryConfig, limit, sourceSchema)
+                                      map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)), queryConfig, limit,
+                                      sourceSchema)
         case t: TimeFuncArgs     => evaluate(source, funcParams.map(x => x.asInstanceOf[TimeFuncArgs]).
-          map(x => TimeScalar(x.timeStepParams)), queryConfig, limit, sourceSchema)
+                                      map(x => TimeScalar(x.timeStepParams)), queryConfig, limit, sourceSchema)
         case e: ExecPlanFuncArgs => paramResponse.map(param => evaluate(source, Seq(param), queryConfig,
-          limit, sourceSchema)).flatten
+                                      limit, sourceSchema)).flatten
         case _                   => throw new IllegalArgumentException(s"Invalid function param")
       }
     }

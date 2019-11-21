@@ -39,6 +39,7 @@ final case class PeriodicSamplesMapper(start: Long,
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId"
 
  //scalastyle:off
+ // Method is longer than 50 lines
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,

@@ -125,6 +125,7 @@ trait ExecPlan extends QueryCommand {
           val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty) {
             Observable.empty
           } else {
+            require(transf.funcParams.size == 1, "Only one funcParams exists")
             transf.funcParams.head.getResult
           }
 
@@ -282,7 +283,7 @@ sealed trait FuncArgs {
 /**
   * FuncArgs for ExecPlan
   */
-case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
+final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.fromTask(execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>

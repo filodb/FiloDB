@@ -267,16 +267,8 @@ class QueryEngine(dsRef: DatasetRef,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
     val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), queryId, submitTime, options, spreadProvider)
-
-    if (vectors.plans.length > 1 && funcArg.isInstanceOf[ExecPlanFuncArgs]) {
-      val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
-      topPlan.addRangeVectorTransformer((ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
-      PlanResult(Seq(topPlan), vectors.needsStitch)
-    } else {
-      vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
-      vectors
-    }
+    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
+    vectors
   }
 
   private def materializeBinaryJoin(queryId: String,
