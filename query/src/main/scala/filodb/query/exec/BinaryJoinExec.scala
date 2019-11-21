@@ -63,7 +63,6 @@ final case class BinaryJoinExec(id: String,
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
                               queryConfig: QueryConfig): Observable[RangeVector] = {
-   // childResponses.
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex

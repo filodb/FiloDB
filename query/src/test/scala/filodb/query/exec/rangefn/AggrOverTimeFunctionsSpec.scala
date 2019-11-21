@@ -387,10 +387,10 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
       data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
         case (val1, val2) => if (val1 == -1) {
-          val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
-        } else {
-          val1 shouldEqual (val2)
-        }
+                                val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
+                              } else {
+                                val1 shouldEqual (val2)
+                              }
       }
     }
   }

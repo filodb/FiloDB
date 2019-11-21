@@ -173,18 +173,19 @@ object QueryRoutingPlanner extends RoutingPlanner {
     */
   def getPeriodicSeriesTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
-      case lp: PeriodicSeries => TimeRange(lp.start, lp.end)
+      case lp: PeriodicSeries              => TimeRange(lp.start, lp.end)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.start, lp.end)
-      case lp: ApplyInstantFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: Aggregate => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: BinaryJoin => getPeriodicSeriesTimeFromLogicalPlan(lp.lhs) // can assume lhs & rhs have same time
+      case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: BinaryJoin                  => // can assume lhs & rhs have same time
+                                              getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
-      case lp: ApplyMiscellaneousFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ScalarVaryingDoublePlan => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ScalarTimeBasedPlan => TimeRange(lp.rangeParams.start, lp.rangeParams.end)
-      case lp: VectorPlan => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
-      case _ => throw new BadQueryException(s"Invalid logical plan")
+      case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarVaryingDoublePlan     => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.start, lp.rangeParams.end)
+      case lp: VectorPlan                  => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
+      case _                               => throw new BadQueryException(s"Invalid logical plan")
     }
   }
 

@@ -64,7 +64,6 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function"
 
-
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], queryConfig: QueryConfig,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
     RangeVectorTransformer.valueColumnType(sourceSchema) match {

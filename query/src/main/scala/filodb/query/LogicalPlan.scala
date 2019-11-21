@@ -132,8 +132,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
-                      ignoring: Seq[String] = Nil, include: Seq[String] = Nil) extends PeriodicSeriesPlan
-  with NonLeafLogicalPlan {
+                      ignoring: Seq[String] = Nil,
+                      include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
 }
 
@@ -171,8 +171,7 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   * Apply Sort Function to a collection of RangeVectors
   */
 case class ApplySortFunction(vectors: PeriodicSeriesPlan,
-                             function: SortFunctionId,
-                             functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                             function: SortFunctionId) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
@@ -181,9 +180,9 @@ trait FunctionArgsPlan extends LogicalPlan
 trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
 
 case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
-                      function: ScalarFunctionId,
-                      timeStepParams: RangeParams,
-                      functionArgs: Seq[FunctionArgsPlan] = Nil)  extends ScalarPlan with NonLeafLogicalPlan {
+                                   function: ScalarFunctionId,
+                                   timeStepParams: RangeParams,
+                                   functionArgs: Seq[FunctionArgsPlan] = Nil)  extends ScalarPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 

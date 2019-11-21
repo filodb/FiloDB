@@ -39,7 +39,7 @@ final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSch
   * Convention is for all concrete subclasses of ExecPlan to
   * end with 'Exec' for easy identification
   */
-trait ExecPlan extends QueryCommand  {
+trait ExecPlan extends QueryCommand {
   /**
     * The query id
     */
@@ -122,7 +122,7 @@ trait ExecPlan extends QueryCommand  {
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-          val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty){
+          val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty) {
             Observable.empty
           } else {
             transf.funcParams.head.getResult
@@ -224,7 +224,7 @@ trait ExecPlan extends QueryCommand  {
     s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
-    val transf = printRangeVectorTransformersForLevel(level)
+    val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n"))
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
@@ -271,25 +271,43 @@ abstract class LeafExecPlan extends ExecPlan {
   final def children: Seq[ExecPlan] = Nil
 }
 
-sealed trait FuncArgs{
+/**
+  * Function Parameter for RangeVectorTransformer
+  * getResult will get the ScalarRangeVector for the FuncArg
+  */
+sealed trait FuncArgs {
   def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarRangeVector]
 }
 
-case class ExecPlanFuncArgs(execPlan: ExecPlan) extends FuncArgs {
+/**
+  * FuncArgs for ExecPlan
+  */
+case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.fromTask(execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
       qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
       QueryError(execPlan.id, ex)
     }.map {
-      case (QueryResult(_, _, result)) => result.head.asInstanceOf[ScalarVaryingDouble]
-      case (QueryError(_, ex)) => throw ex
+      case (QueryResult(_, _, result))  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                                            if (result.isEmpty) {
+                                              ScalarFixedDouble(timeStepParams, Double.NaN)
+                                            } else {
+                                              result.head match {
+                                                case f: ScalarFixedDouble   => f
+                                                case s: ScalarVaryingDouble => s
+                                              }
+                                            }
+      case (QueryError(_, ex))          =>  throw ex
     })
   }
 
   override def toString: String = execPlan.printTree() + "\n"
 }
 
+/**
+  * FuncArgs for scalar parameter
+  */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.now(
@@ -297,6 +315,9 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   }
 }
 
+/**
+  * FuncArgs for date and time functions
+  */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.now(

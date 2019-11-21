@@ -55,9 +55,9 @@ final case class ReduceAggregateExec(id: String,
 final case class AggregateMapReduce(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
                                     without: Seq[String],
-                                    by: Seq[String]) extends RangeVectorTransformer {
+                                    by: Seq[String],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   require(without == Nil || by == Nil, "Cannot specify both without and by clause")
-  override def funcParams: Seq[FuncArgs] = Nil
   val withoutLabels = without.map(ZeroCopyUTF8String(_)).toSet
   val byLabels = by.map(ZeroCopyUTF8String(_)).toSet
 
@@ -99,10 +99,10 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 }
 
 final case class AggregatePresenter(aggrOp: AggregationOperator,
-                                    aggrParams: Seq[Any]) extends RangeVectorTransformer {
+                                    aggrParams: Seq[Any],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
-  override def funcParams: Seq[FuncArgs] = Nil
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,

@@ -336,7 +336,6 @@ case class DaysInMonthImpl() extends EmptyParamsInstantFunction {
 
 /**
  * Histogram quantile function for Histogram columns, where all buckets are together.
- * @param funcParams - a single value between 0 and 1, the quantile to calculate.
  */
 case class HistogramQuantileImpl() extends HistToDoubleIFunction {
   final def apply(value: Histogram, scalarParam: Seq[Double]): Double = {
@@ -348,9 +347,11 @@ case class HistogramQuantileImpl() extends HistToDoubleIFunction {
 
 /**
  * Histogram max quantile function for Histogram column + extra max (Double) column.
- * //@param scalarParam - a single value between 0 and 1, the quantile to calculate.
  */
 case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
+  /**
+    * @param scalarParam - a single value between 0 and 1, the quantile to calculate.
+    */
   final def apply(hist: Histogram, max: Double, scalarParam: Seq[Double]): Double = {
     require(scalarParam.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     val maxHist = hist match {
@@ -363,10 +364,13 @@ case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
 
 /**
  * Function to extract one bucket from any histogram (could be computed, not just raw).
- * @param funcParams - a single value which is the Double bucket or "le" to extract.  If it does not correspond
- *                     to any existing bucket then NaN is returned.
  */
 case class HistogramBucketImpl() extends HistToDoubleIFunction {
+
+  /**
+    * @param scalarParam - a single value which is the Double bucket or "le" to extract.  If it does not correspond
+    *                     to any existing bucket then NaN is returned.
+    */
   final def apply(value: Histogram, scalarParam: Seq[Double]): Double = {
     require(scalarParam.length == 1, "Bucket/le required for histogram bucket")
     val bucket = scalarParam(0)

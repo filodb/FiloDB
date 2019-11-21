@@ -88,10 +88,7 @@ object PrometheusModel {
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
     }.toSeq
 
-    val res = if (samples.isEmpty)
-      None
-    else
-      Some(samples)
+    val res = if (samples.isEmpty) None else Some(samples)
 
     Result(tags,
       // remove NaN in HTTP results

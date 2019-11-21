@@ -482,7 +482,7 @@ class QueryEngine(dsRef: DatasetRef,
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
           case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
-            spreadProvider))
+                                             spreadProvider), s.timeStepParams)
           case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
           case _                          => throw new UnsupportedOperationException("Invalid logical plan")
         }

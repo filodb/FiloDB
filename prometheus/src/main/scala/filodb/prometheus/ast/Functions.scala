@@ -41,11 +41,11 @@ trait Functions extends Base with Operators with Vectors {
       if (vectorFn.isDefined) {
         allParams.head match {
           case num: ScalarExpression => VectorPlan(ScalarFixedDoublePlan(num.toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end)))
-          case function: Function => val nestedPlan = function.toPeriodicSeriesPlan(timeParams)
-            nestedPlan match {
-              case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
-              case _ => throw new UnsupportedOperationException()
-            }
+          case function: Function    => val nestedPlan = function.toPeriodicSeriesPlan(timeParams)
+                                        nestedPlan match {
+                                          case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
+                                          case _ => throw new UnsupportedOperationException()
+                                        }
         }
       } else if (allParams.isEmpty) {
         ScalarTimeBasedPlan(scalarFunctionIdOpt.get, RangeParams(timeParams.start, timeParams.step, timeParams.end) )
@@ -53,6 +53,7 @@ trait Functions extends Base with Operators with Vectors {
       }  else {
         val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
 
+       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
        val stringParam = allParams.filter(!_.equals(seriesParam)).filter(_.isInstanceOf[InstantExpression]).
          map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
         val otherParams : Seq[FunctionArgsPlan] = allParams.filter(!_.equals(seriesParam)).

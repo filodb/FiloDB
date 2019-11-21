@@ -24,6 +24,7 @@ case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVecto
 
   import HistogramQuantileMapper._
   require(funcParams.size == 1, "histogram_quantile function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "Dynamic arg not supported yet")
 
   private val quantile = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
 

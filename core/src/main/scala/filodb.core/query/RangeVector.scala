@@ -2,8 +2,6 @@ package filodb.core.query
 
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
-import scala.collection.mutable.ListBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -97,15 +95,26 @@ trait RangeVector {
   def numRows: Option[Int] = None
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
+
+/**
+  *  A marker trait to identify range vector that can be serialized for write into wire. If Range Vector does not
+  *  implement this marker trait, then query engine will convert it to one that does.
+  */
 trait SerializableRangeVector extends RangeVector {
   def numRowsInt: Int
 }
 
+/**
+  * Range Vector that represents a scalar result. Scalar results result in only one range vector.
+  */
 trait ScalarRangeVector extends SerializableRangeVector {
   def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
   def getValue(time: Long): Double
 }
 
+/**
+  * ScalarRangeVector which has time specific value
+  */
 case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
   override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
                                             map{ x => new TransientRow(x._1, x._2)}.iterator
@@ -115,54 +124,77 @@ case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) exte
 }
 
 final case class RangeParams(start: Long, step: Long, end: Long)
+
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
   override def rows: Iterator[RowReader] = {
-    val rowList = new ListBuffer[TransientRow]()
-    for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
-      rowList += new TransientRow(i*1000, getValue(i*1000))
-      numRowsInt = numRowsInt + 1
+    Iterator.from(0, rangeParams.step.toInt).takeWhile(_ <= rangeParams.end - rangeParams.start).map { i =>
+      numRowsInt += 1
+      val t = i + rangeParams.start
+      new TransientRow(t * 1000, getValue(t * 1000))
     }
-    rowList.iterator
   }
 }
 
-
+/**
+  * ScalarRangeVector which has one value for all time's
+  */
 case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
   def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is the time
+  */
 case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue  {
   override def getValue(time: Long): Double = time.toDouble / 1000
 }
 
+/**
+  * ScalarRangeVector for which value is UTC Hour
+  */
 case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC Minute
+  */
 case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMinute
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC Minute
+  */
 case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMonthValue
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC Year
+  */
 case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getYear
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC day of month
+  */
 case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfMonth
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC day of week
+  */
 case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = {
     val dayOfWeek = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfWeek
@@ -171,6 +203,9 @@ case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   override def getValue(time: Long): Double = value
 }
 
+/**
+  * ScalarRangeVector for which value is current UTC days in month
+  */
 case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = {
     val ldt = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC)

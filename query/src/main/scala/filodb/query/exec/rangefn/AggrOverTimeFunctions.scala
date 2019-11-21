@@ -625,6 +625,7 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { quantileResult = Double.NaN; values = Buffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
     val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
       val counter = values.length

@@ -34,8 +34,7 @@ trait Expressions extends Aggregates with Functions {
       }
 
       (lhs, rhs) match {
-        case (lh: Function, rh: Function) if rh.isInstanceOf[Function] && lh.isScalarFunction()
-          && rh.isScalarFunction() =>
+        case (lh: Function, rh: Function) if lh.isScalarFunction() && rh.isScalarFunction() =>
           val scalar = lh.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
           val seriesPlanRhs = rh.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
