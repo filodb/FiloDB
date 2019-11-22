@@ -242,6 +242,10 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
   }
 }
 
+/**
+  * Adds offset to timestamp to generate output of offset function, since the time should be according to query
+  * time parameters
+  */
 final case class OffsetFunctionMapper(offset: Long) extends RangeVectorTransformer {
   protected[exec] def args: String =
     s"offset=$offset"
@@ -261,7 +265,6 @@ final case class OffsetFunctionMapper(offset: Long) extends RangeVectorTransform
             }
           }
         }
-
       }.map(Observable.fromIterable)
 
       Observable.fromTask(resultRv).flatten

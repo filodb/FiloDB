@@ -343,7 +343,7 @@ class QueryEngine(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(execRangeFn), lp.functionArgs)))
-    lp.offset.map(x  => rawSeries.plans.foreach(_.addRangeVectorTransformer(OffsetFunctionMapper(x))))
+    lp.offset.map(x => rawSeries.plans.foreach(_.addRangeVectorTransformer(OffsetFunctionMapper(x))))
     rawSeries
   }
 
