@@ -130,11 +130,29 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result8(0).rows.map(_.getDouble(1)), readyToAggr8.map { v =>
       stdvar(v.map(_.getDouble(1)))
     }.iterator)
+
+    // Stddev
+    val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key)
+    val result9 = resultObs9.toListL.runAsync.futureValue
+    result9.size shouldEqual 1
+    result9(0).key shouldEqual noKey
+
+    val readyToAggr9 = samples.toList.map(_.rows.toList).transpose
+    compareIter(result9(0).rows.map(_.getDouble(1)), readyToAggr9.map { v =>
+      stddev(v.map(_.getDouble(1)))
+    }.iterator)
   }
 
   private def stdvar(items: List[Double]): Double = {
     val mean = items.sum / items.size
     items.map(i => math.pow((i-mean), 2)).sum / items.size
+  }
+
+  private def stddev(items: List[Double]): Double = {
+    val mean = items.sum / items.size
+    Math.pow(items.map(i => math.pow((i-mean), 2)).sum / items.size, 0.5)
   }
 
   private def quantile(q: Double, items: List[Double]): Double = {
@@ -239,6 +257,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
     compareIter(result8(0).rows.map(_.getDouble(1)), Seq(1.5625d, 0.27555555555556d).iterator)
+
+    // Stddev
+    val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv=>rv.key)
+    val result9 = resultObs9.toListL.runAsync.futureValue
+    result9.size shouldEqual 1
+    result9(0).key shouldEqual noKey
+    compareIter(result9(0).rows.map(_.getDouble(1)), Seq(1.25d, 0.52493385826745d).iterator)
   }
 
   it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
@@ -374,6 +401,15 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result8.size shouldEqual 1
     result8(0).key shouldEqual noKey
     compareIter(result8(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 0.27555555555556d).iterator)
+
+    // Stddev
+    val agg9 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
+    val resultObs9a = RangeVectorAggregator.mapReduce(agg9, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs9 = RangeVectorAggregator.mapReduce(agg9, true, resultObs9a, rv => rv.key)
+    val result9 = resultObs9.toListL.runAsync.futureValue
+    result9.size shouldEqual 1
+    result9(0).key shouldEqual noKey
+    compareIter(result9(0).rows.map(_.getDouble(1)), Seq(Double.NaN, 0.52493385826745d).iterator)
   }
 
   it("topK should not have any trailing value ") {
