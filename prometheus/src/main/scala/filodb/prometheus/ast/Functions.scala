@@ -44,7 +44,7 @@ trait Functions extends Base with Operators with Vectors {
           case function: Function    => val nestedPlan = function.toPeriodicSeriesPlan(timeParams)
                                         nestedPlan match {
                                           case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
-                                          case _ => throw new UnsupportedOperationException()
+                                          case _                      => throw new UnsupportedOperationException()
                                         }
         }
       } else if (allParams.isEmpty) {

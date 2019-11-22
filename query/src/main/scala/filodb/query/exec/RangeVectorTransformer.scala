@@ -217,7 +217,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
           val timestamp = next.getLong(0)
           val sclrVal = scalarRangeVector.getValue(timestamp)
           val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
-          else operatorFunction.calculate(nextVal, sclrVal)
+                         else operatorFunction.calculate(nextVal, sclrVal)
           result.setValues(timestamp, newValue)
           result
         }
@@ -235,8 +235,8 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
   val miscFunction: MiscellaneousFunction = {
     function match {
       case LabelReplace => LabelReplaceFunction(funcStringParam)
-      case LabelJoin => LabelJoinFunction(funcStringParam)
-      case _ => throw new UnsupportedOperationException(s"$function not supported.")
+      case LabelJoin    => LabelJoinFunction(funcStringParam)
+      case _            => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }
 

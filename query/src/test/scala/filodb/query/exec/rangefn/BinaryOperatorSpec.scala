@@ -261,7 +261,6 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     }
   }
 
-
   it ("should work with Func Args") {
     val samples: Array[RangeVector] = Array(
       new RangeVector {

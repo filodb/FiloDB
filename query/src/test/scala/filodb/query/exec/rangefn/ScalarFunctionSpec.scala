@@ -104,8 +104,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
         new TransientRow(3L, 30d)
       ).iterator
     })
-
-
+  
   it("should generate scalar") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
     val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
