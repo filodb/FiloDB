@@ -2,7 +2,6 @@ package filodb.query
 
 import filodb.core.query.ColumnFilter
 
-
 sealed trait LogicalPlan
 
 /**

@@ -338,16 +338,12 @@ class ParserSpec extends FunSpec with Matchers {
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),Sort,List())",
       "sort_desc(http_requests_total)" ->
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),SortDesc,List())"
-     //"rate(http_requests_total[5m] offset 1w)" -> ""
     )
 
     val qts: Long = 1524855988L
     queryToLpString.foreach { case (q, e) =>
       info(s"Parsing $q")
       val lp = Parser.queryToLogicalPlan(q, qts)
-      println("\nquery:" + q)
-      println("lp:"+ lp.toString)
-      println("e:" + e)
       if (lp.isInstanceOf[BinaryJoin])
        printBinaryJoin(lp)
       lp.toString shouldEqual (e)
