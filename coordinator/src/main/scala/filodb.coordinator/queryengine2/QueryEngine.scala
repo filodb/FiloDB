@@ -475,7 +475,7 @@ class QueryEngine(dsRef: DatasetRef,
                                         lp: ApplyAbsentFunction,
                                         spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    if(vectors.plans.length > 1) {
+    if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer((AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
