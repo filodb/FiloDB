@@ -43,12 +43,12 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   override def beforeAll(): Unit = {
     BatchDownsampler.downsampleDatasetRefs.values.foreach { ds =>
-      colStore.initialize(ds, 4)
-      colStore.truncate(ds, 4)
+      colStore.initialize(ds, 4).futureValue
+      colStore.truncate(ds, 4).futureValue
 
     }
-    colStore.initialize(BatchDownsampler.rawDatasetRef, 4)
-    colStore.truncate(BatchDownsampler.rawDatasetRef, 4)
+    colStore.initialize(BatchDownsampler.rawDatasetRef, 4).futureValue
+    colStore.truncate(BatchDownsampler.rawDatasetRef, 4).futureValue
   }
 
   override def afterAll(): Unit = {
