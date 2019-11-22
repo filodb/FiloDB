@@ -14,6 +14,9 @@ import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult,
 import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Time, Year}
 
+/**
+  * Exec Plans for time functions which can execute locally without being dispatched
+  */
 case class ScalarTimeBasedExec(id: String,
                                dataset: DatasetRef, params: RangeParams,
                                function: ScalarFunctionId,

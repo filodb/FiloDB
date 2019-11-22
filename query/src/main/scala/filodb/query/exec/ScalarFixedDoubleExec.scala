@@ -13,6 +13,10 @@ import filodb.core.store.ChunkSource
 import filodb.query.{QueryConfig, QueryResponse, QueryResult}
 import filodb.query.Query.qLogger
 
+
+/**
+  * Exec Plans for fixed scalars which can execute locally without being dispatched
+  */
 case class ScalarFixedDoubleExec(id: String,
                                  dataset: DatasetRef,
                                  params: RangeParams,

@@ -257,7 +257,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
                                   containers: Seq[RecordContainer],
                                   val schema: RecordSchema,
                                   startRecordNo: Int) extends RangeVector with SerializableRangeVector with
-  java.io.Serializable {
+                                  java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
 
