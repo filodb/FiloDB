@@ -261,7 +261,7 @@ final case class OffsetFunctionMapper(offset: Long) extends RangeVectorTransform
             override def key: RangeVectorKey = rv.key
 
             override def rows: Iterator[RowReader] = rv.rows.map{r =>
-              new TransientRow(r.getLong(0) + offset,  r.getDouble(1))
+              new TransientRow(r.getLong(0) + offset, r.getDouble(1))
             }
           }
         }

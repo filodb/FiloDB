@@ -43,11 +43,13 @@ trait Base {
    * Converts a TimeRangeParams into a RangeSelector at timeParam.start - startOffset
    * timeParam.start is in seconds, startOffset is in millis
    */
-  def timeParamToSelector(timeParam: TimeRangeParams, startOffset: Long, offset: Long = 0): RangeSelector = timeParam match {
-    case TimeStepParams(start, step, end) => IntervalSelector(start * 1000 - startOffset - offset, end * 1000 - offset)
-    case InMemoryParam(_)                 => InMemoryChunksSelector
-    case WriteBuffersParam(_)             => WriteBufferSelector
-  }
+  def timeParamToSelector(timeParam: TimeRangeParams, startOffset: Long, offset: Long = 0): RangeSelector =
+    timeParam match {
+      case TimeStepParams(start, step, end) => IntervalSelector(start * 1000 - startOffset - offset,
+                                               end * 1000 - offset)
+      case InMemoryParam(_)                 => InMemoryChunksSelector
+      case WriteBuffersParam(_)             => WriteBufferSelector
+    }
 
   /**
     * An identifier is an unquoted string
