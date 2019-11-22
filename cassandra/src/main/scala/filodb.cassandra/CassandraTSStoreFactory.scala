@@ -23,7 +23,6 @@ class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFa
   val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
 }
 
-
 class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
   val colStore = new CassandraColumnStore(config, ioPool)(ioPool)
   val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)

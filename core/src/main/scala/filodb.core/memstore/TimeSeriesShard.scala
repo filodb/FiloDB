@@ -454,16 +454,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  // An iterator over partitions looked up from partition keys stored as byte[]'s
-  // Note that we cannot give skippedPartIDs because we don't have IDs only have keys
-  // and we cannot look up IDs from keys since part keys are not indexed in Lucene
-  case class ByteKeysPartitionIterator(keys: Seq[Array[Byte]]) extends PartitionIterator {
-    val skippedPartIDs = debox.Buffer.empty[Int]
-    private val partIt = keys.toIterator.flatMap(getPartition)
-    final def hasNext: Boolean = partIt.hasNext
-    final def next: TimeSeriesPartition = partIt.next
-  }
-
   // RECOVERY: Check the watermark for the group that this record is part of.  If the ingestOffset is < watermark,
   // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
   class IngestConsumer(var ingestionTime: Long = 0,

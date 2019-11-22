@@ -71,7 +71,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     partKeyBytes = part.partKeyBytes
 
-    val recs = Stream(
+    val rawSamples = Stream(
       Seq(1574272801000L, 3d, seriesName, seriesTags),
       Seq(1574272802000L, 5d, seriesName, seriesTags),
 
@@ -88,7 +88,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       Seq(1574273042000L, 11d, seriesName, seriesTags)
     )
 
-    MachineMetricsData.records(rawDataset, recs).records.foreach { case (base, offset) =>
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
       val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
       part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
     }
@@ -98,19 +98,23 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
-  it ("should downsample data into cassandra using spark job") {
+  it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
     downsampler.run(sparkConf)
   }
 
-  it("should read and verify downsampled data from cassandra using PagedReadablePartition") {
+  it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
+    // TODO in future PR
+  }
+
+  it("should read and verify data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
     val downsampledPartData1 = colStore.readRawPartitions(
-        BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
-        0,
-        SinglePartitionScan(partKeyBytes))
+      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
+      0,
+      SinglePartitionScan(partKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
@@ -131,7 +135,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       (1574272982000L, 15.0, 17.0, 32.0, 2.0, 16.0),
       (1574273042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
     )
+  }
 
+  it("should read and verify data in cassandra using PagedReadablePartition for 5-min downsampled data") {
     val downsampledPartData2 = colStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
       0,
@@ -152,5 +158,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     downsampledData2 shouldEqual Seq(
       (1574273042000L, 3.0, 17.0, 112.0, 10.0, 11.2)
     )
+  }
+
+  it("should read and verify part key migration in cassandra for 5-min downsampled data") {
+    // TODO in future PR
   }
 }
