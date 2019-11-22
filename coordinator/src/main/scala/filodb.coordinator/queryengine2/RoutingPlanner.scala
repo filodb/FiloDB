@@ -141,16 +141,14 @@ object QueryRoutingPlanner extends RoutingPlanner {
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
     if (!logicalPlan.isRoutable) {
       false
-    } else if (logicalPlan.isInstanceOf[ScalarVectorBinaryOperation]) {
-      return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ScalarVectorBinaryOperation].vector))
-    } else if (logicalPlan.isInstanceOf[VectorPlan]){
-      return (isPeriodicSeriesPlan(logicalPlan.asInstanceOf[VectorPlan].scalars))
-    } else if (logicalPlan.isInstanceOf[ApplyInstantFunction]) {
-      isPeriodicSeriesPlan(logicalPlan.asInstanceOf[ApplyInstantFunction].vectors)
-    }   else if (logicalPlan.isInstanceOf[BinaryJoin]){
-      isPeriodicSeriesPlan(logicalPlan.asInstanceOf[BinaryJoin].lhs)
     } else {
-      true
+      logicalPlan match {
+        case s: ScalarVectorBinaryOperation => isPeriodicSeriesPlan(s.vector)
+        case v: VectorPlan                  => isPeriodicSeriesPlan(v.scalars)
+        case i: ApplyInstantFunction        => isPeriodicSeriesPlan(i.vectors)
+        case b: BinaryJoin                  => isPeriodicSeriesPlan(b.lhs)
+        case _                              => true
+      }
     }
   }
 

@@ -23,10 +23,9 @@ trait Functions extends Base with Operators with Vectors {
       *
       * @return true when function is scalar or time
       */
-    def isScalarFunction(): Boolean = {
-       name.equalsIgnoreCase("scalar") ||
-        name.equalsIgnoreCase("time")
-    }
+    def isScalarFunction(): Boolean =
+      name.equalsIgnoreCase("scalar") ||
+      name.equalsIgnoreCase("time")
 
     // scalastyle:off
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
@@ -52,9 +51,10 @@ trait Functions extends Base with Operators with Vectors {
       }  else {
         val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
 
-       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
-       val stringParam = allParams.filter(!_.equals(seriesParam)).filter(_.isInstanceOf[InstantExpression]).
-         map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
+        // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
+        val stringParam = allParams.filter(!_.equals(seriesParam)).
+                          filter(_.isInstanceOf[InstantExpression]).
+                          map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
         val otherParams : Seq[FunctionArgsPlan] = allParams.filter(!_.equals(seriesParam)).
           filter(!_.isInstanceOf[InstantExpression]).map {
           case num: ScalarExpression => ScalarFixedDoublePlan(num.toScalar,RangeParams(timeParams.start, timeParams.step, timeParams.end))

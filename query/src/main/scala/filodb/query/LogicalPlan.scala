@@ -2,8 +2,8 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams}
 
-sealed trait LogicalPlan{
-  def isRoutable : Boolean = true
+sealed trait LogicalPlan {
+  def isRoutable: Boolean = true
 }
 
 /**
@@ -176,32 +176,33 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
 }
 
 //scalastyle:off
+// Number of types declared in the file exceeds 30
 trait FunctionArgsPlan extends LogicalPlan
 trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
 
-case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
-                                   function: ScalarFunctionId,
-                                   timeStepParams: RangeParams,
-                                   functionArgs: Seq[FunctionArgsPlan] = Nil)  extends ScalarPlan with NonLeafLogicalPlan {
+final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
+                                         function: ScalarFunctionId,
+                                         timeStepParams: RangeParams,
+                                         functionArgs: Seq[FunctionArgsPlan] = Nil) extends ScalarPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
 
-case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
+final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
   override def isRoutable: Boolean = false
 }
 
-case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: RangeParams) extends ScalarPlan with FunctionArgsPlan {
+final case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: RangeParams) extends ScalarPlan with FunctionArgsPlan {
   override def isRoutable: Boolean = false
 }
 
-case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
 }
 
-case class ScalarScalarBinaryOperation(operator: BinaryOperator,
-                                       lhs: ScalarPlan,
-                                       rhs: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+final case class ScalarScalarBinaryOperation(operator: BinaryOperator,
+                                             lhs: ScalarPlan,
+                                             rhs: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(lhs,rhs)
 }
 

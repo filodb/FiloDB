@@ -20,7 +20,7 @@ object HistogramQuantileMapper {
   *
   * @param funcParams Needs one double quantile argument
   */
-case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
+final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
 
   import HistogramQuantileMapper._
   require(funcParams.size == 1, "histogram_quantile function needs a single quantile argument")

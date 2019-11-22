@@ -680,7 +680,6 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
   require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
-  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
   final def addTimeLongChunks(longVectAcc: MemoryReader,
                               longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,

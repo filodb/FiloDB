@@ -131,7 +131,7 @@ case class CeilImpl() extends EmptyParamsInstantFunction {
   * clamp_max(v instant-vector, max scalar) clamps the sample values
   * of all elements in v to have an upper limit of max.
   */
-case class ClampMaxImpl() extends DoubleInstantFunction {
+final case class ClampMaxImpl() extends DoubleInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double]): Double = {
     require(scalarParam.size == 1,
       "Cannot use ClampMax without providing a upper limit of max.")
@@ -143,7 +143,7 @@ case class ClampMaxImpl() extends DoubleInstantFunction {
   * clamp_min(v instant-vector, min scalar) clamps the sample values
   * of all elements in v to have a lower limit of min.
   */
-case class ClampMinImpl() extends DoubleInstantFunction {
+final case class ClampMinImpl() extends DoubleInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double]): Double = {
     require(scalarParam.size == 1,
       "Cannot use ClampMin without providing a lower limit of min.")
@@ -155,7 +155,7 @@ case class ClampMinImpl() extends DoubleInstantFunction {
   * exp(v instant-vector) calculates the exponential
   * function for all elements in v
   */
-case class ExpImpl() extends EmptyParamsInstantFunction {
+final case class ExpImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = scala.math.exp(value)
 }
 
@@ -163,7 +163,7 @@ case class ExpImpl() extends EmptyParamsInstantFunction {
   * floor(v instant-vector) rounds the sample values of all
   * elements in v down to the nearest integer.
   */
-case class FloorImpl() extends EmptyParamsInstantFunction {
+final case class FloorImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     scala.math.floor(value)
@@ -174,7 +174,7 @@ case class FloorImpl() extends EmptyParamsInstantFunction {
   * ln(v instant-vector) calculates the natural
   * logarithm for all elements in v
   */
-case class LnImpl() extends EmptyParamsInstantFunction {
+final case class LnImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     scala.math.log(value)
@@ -185,8 +185,7 @@ case class LnImpl() extends EmptyParamsInstantFunction {
   * log10(v instant-vector) calculates the decimal
   * logarithm for all elements in v.
   */
-case class Log10Impl() extends EmptyParamsInstantFunction {
-
+final case class Log10Impl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     /**
       * Validate the function before invoking the function.
@@ -200,7 +199,7 @@ case class Log10Impl() extends EmptyParamsInstantFunction {
   * log2(v instant-vector) calculates the binary
   * logarithm for all elements in v.
   */
-case class Log2Impl() extends EmptyParamsInstantFunction {
+final case class Log2Impl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     scala.math.log10(value) / scala.math.log10(2.0)
@@ -214,7 +213,7 @@ case class Log2Impl() extends EmptyParamsInstantFunction {
   * allows specifying the nearest multiple to which the sample values
   * should be rounded. This multiple may also be a fraction.
   */
-case class RoundImpl() extends DoubleInstantFunction {
+final case class RoundImpl() extends DoubleInstantFunction {
 
   override def apply(value: Double, scalarParam: Seq[Double]): Double = {
     /**
@@ -240,14 +239,14 @@ case class RoundImpl() extends DoubleInstantFunction {
 /**
   * sqrt(v instant-vector) calculates the square root of all elements in v.
   */
-case class SqrtImpl() extends EmptyParamsInstantFunction {
+final case class SqrtImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     scala.math.sqrt(value)
   }
 }
 
-case class MonthImpl() extends EmptyParamsInstantFunction {
+final case class MonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -260,7 +259,7 @@ case class MonthImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class YearImpl() extends EmptyParamsInstantFunction {
+final case class YearImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -271,7 +270,7 @@ case class YearImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class HourImpl() extends EmptyParamsInstantFunction {
+final case class HourImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -282,7 +281,7 @@ case class HourImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class MinuteImpl() extends EmptyParamsInstantFunction {
+final case class MinuteImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -293,7 +292,7 @@ case class MinuteImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class DayOfWeekImpl() extends EmptyParamsInstantFunction {
+final case class DayOfWeekImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -311,7 +310,7 @@ case class DayOfWeekImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class DayOfMonthImpl() extends EmptyParamsInstantFunction {
+final case class DayOfMonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -322,7 +321,7 @@ case class DayOfMonthImpl() extends EmptyParamsInstantFunction {
   }
 }
 
-case class DaysInMonthImpl() extends EmptyParamsInstantFunction {
+final case class DaysInMonthImpl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParam: Seq[Double] = Nil): Double = {
     require(scalarParam.isEmpty, "No additional parameters required for the instant function.")
     if (value.isNaN || value.isInfinite) {
@@ -337,7 +336,7 @@ case class DaysInMonthImpl() extends EmptyParamsInstantFunction {
 /**
  * Histogram quantile function for Histogram columns, where all buckets are together.
  */
-case class HistogramQuantileImpl() extends HistToDoubleIFunction {
+final case class HistogramQuantileImpl() extends HistToDoubleIFunction {
   final def apply(value: Histogram, scalarParam: Seq[Double]): Double = {
     require(scalarParam.length == 1, "Quantile (between 0 and 1) required for histogram quantile")
     val q = scalarParam(0)
@@ -348,7 +347,7 @@ case class HistogramQuantileImpl() extends HistToDoubleIFunction {
 /**
  * Histogram max quantile function for Histogram column + extra max (Double) column.
  */
-case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
+final case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
   /**
     * @param scalarParam - a single value between 0 and 1, the quantile to calculate.
     */
@@ -365,7 +364,7 @@ case class HistogramMaxQuantileImpl() extends HDToDoubleIFunction {
 /**
  * Function to extract one bucket from any histogram (could be computed, not just raw).
  */
-case class HistogramBucketImpl() extends HistToDoubleIFunction {
+final case class HistogramBucketImpl() extends HistToDoubleIFunction {
 
   /**
     * @param scalarParam - a single value which is the Double bucket or "le" to extract.  If it does not correspond

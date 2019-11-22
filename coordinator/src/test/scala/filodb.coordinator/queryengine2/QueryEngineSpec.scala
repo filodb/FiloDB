@@ -575,6 +575,4 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child.params.step shouldEqual step
     child.params.processFailure shouldEqual(false)
   }
-
-
 }

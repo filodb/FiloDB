@@ -115,9 +115,9 @@ trait ScalarRangeVector extends SerializableRangeVector {
 /**
   * ScalarRangeVector which has time specific value
   */
-case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
+final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
   override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
-                                            map{ x => new TransientRow(x._1, x._2)}.iterator
+                                            map { x => new TransientRow(x._1, x._2) }.iterator
   def getValue(time: Long): Double = timeValueMap(time)
 
   override def numRowsInt: Int = timeValueMap.size
@@ -141,21 +141,21 @@ trait ScalarSingleValue extends ScalarRangeVector {
 /**
   * ScalarRangeVector which has one value for all time's
   */
-case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
+final case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
   def getValue(time: Long): Double = value
 }
 
 /**
   * ScalarRangeVector for which value is the time
   */
-case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue  {
+final case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   override def getValue(time: Long): Double = time.toDouble / 1000
 }
 
 /**
   * ScalarRangeVector for which value is UTC Hour
   */
-case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour
   override def getValue(time: Long): Double = value
 }
@@ -163,7 +163,7 @@ case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
 /**
   * ScalarRangeVector for which value is current UTC Minute
   */
-case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMinute
   override def getValue(time: Long): Double = value
 }
@@ -171,7 +171,7 @@ case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
 /**
   * ScalarRangeVector for which value is current UTC Minute
   */
-case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMonthValue
   override def getValue(time: Long): Double = value
 }
@@ -179,7 +179,7 @@ case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
 /**
   * ScalarRangeVector for which value is current UTC Year
   */
-case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getYear
   override def getValue(time: Long): Double = value
 }
@@ -187,7 +187,7 @@ case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
 /**
   * ScalarRangeVector for which value is current UTC day of month
   */
-case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfMonth
   override def getValue(time: Long): Double = value
 }
@@ -195,7 +195,7 @@ case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue 
 /**
   * ScalarRangeVector for which value is current UTC day of week
   */
-case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = {
     val dayOfWeek = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfWeek
     if (dayOfWeek == 7) 0 else dayOfWeek.getValue
@@ -206,7 +206,7 @@ case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
 /**
   * ScalarRangeVector for which value is current UTC days in month
   */
-case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   def value: Double = {
     val ldt = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC)
     YearMonth.from(ldt).lengthOfMonth()

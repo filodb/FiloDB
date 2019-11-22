@@ -113,7 +113,7 @@ class QueryEngine(dsRef: DatasetRef,
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
     if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || // It is a raw data query
-      (!rootLogicalPlan.isRoutable) ||
+       (!rootLogicalPlan.isRoutable) ||
       !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
         !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
@@ -469,7 +469,7 @@ class QueryEngine(dsRef: DatasetRef,
                                       spreadProvider: SpreadProvider): Seq[FuncArgs] = {
     if (functionParams.isEmpty){
       Nil
-    } else{
+    } else {
       functionParams.map { param =>
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)

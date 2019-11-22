@@ -112,8 +112,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                       sourceSchema)
         case t: TimeFuncArgs     => evaluate(source, funcParams.map(x => x.asInstanceOf[TimeFuncArgs]).
                                       map(x => TimeScalar(x.timeStepParams)), queryConfig, limit, sourceSchema)
-        case e: ExecPlanFuncArgs => paramResponse.map(param => evaluate(source, Seq(param), queryConfig,
-                                      limit, sourceSchema)).flatten
+        case e: ExecPlanFuncArgs => paramResponse.map { param =>
+                                      evaluate(source, Seq(param), queryConfig, limit, sourceSchema)
+                                    }.flatten
         case _                   => throw new IllegalArgumentException(s"Invalid function param")
       }
     }
@@ -326,19 +327,13 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
-    val resultRv = source.toListL.map { rvs =>
-        rvs.map { rv =>
-          new RangeVector {
-            override def key: RangeVectorKey = rv.key
+    source.map { rv =>
+      new RangeVector {
+        override def key: RangeVectorKey = rv.key
 
-            override def rows: Iterator[RowReader] = rv.rows
-          }
-        }
-
-      }.map(Observable.fromIterable)
-
-      Observable.fromTask(resultRv).flatten
+        override def rows: Iterator[RowReader] = rv.rows
+      }
     }
+  }
   override def funcParams: Seq[FuncArgs] = Nil
 }
-
