@@ -61,7 +61,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val rawDataset = Dataset("prometheus", Schemas.gauge)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
-    val seriesName = "myGuage"
+    val seriesName = "myGauge"
     val seriesTags = Map("k".utf8 -> "v".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, seriesName, seriesTags)
 

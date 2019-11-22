@@ -93,6 +93,8 @@ object FiloBuild extends Build {
     .in(file("spark-jobs"))
     .settings(commonSettings: _*)
     .settings(name := "spark-jobs")
+    .settings(fork in Test := true)
+    .settings(baseDirectory in Test := file(".")) // since we have a config using FiloDB project root as relative path
     .settings(assemblySettings: _*)
     .settings(scalacOptions += "-language:postfixOps")
     .settings(libraryDependencies ++= sparkJobsDeps)

@@ -56,7 +56,7 @@ object DownsamplerSettings extends StrictLogging {
 
   val widenIngestionTimeRangeBy = downsamplerConfig.as[FiniteDuration]("widen-ingestion-time-range-by")
 
-  val chunkDuration = downsampleStoreConfig.flushInterval.toMillis
+  val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
 }
 

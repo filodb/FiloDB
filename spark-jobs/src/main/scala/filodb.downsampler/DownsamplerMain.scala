@@ -37,8 +37,6 @@ object DownsamplerMain extends App {
   d.shutdown()
 }
 
-
-
 class Downsampler extends StrictLogging {
 
   import BatchDownsampler._
@@ -67,11 +65,11 @@ class Downsampler extends StrictLogging {
     // Generally disabled, defaults the period that just ended prior to now.
     // Specified during reruns for downsampling old data
     val userTimeInPeriod: Long = spark.sparkContext.getConf.get("spark.filodb.downsampler.userTimeOverride",
-      s"${System.currentTimeMillis() - chunkDuration}").toLong
+      s"${System.currentTimeMillis() - downsampleChunkDuration}").toLong
     // by default assume a time in the previous downsample period
 
-    val userTimeStart: Long = (userTimeInPeriod / chunkDuration) * chunkDuration
-    val userTimeEnd: Long = userTimeStart + chunkDuration
+    val userTimeStart: Long = (userTimeInPeriod / downsampleChunkDuration) * downsampleChunkDuration
+    val userTimeEnd: Long = userTimeStart + downsampleChunkDuration
     val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
