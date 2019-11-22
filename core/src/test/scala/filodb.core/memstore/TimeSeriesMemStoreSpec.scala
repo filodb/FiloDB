@@ -12,7 +12,6 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
@@ -348,7 +347,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val range = TimeRangeChunkScan(105000L, 2000000L)
     val res = memStore.lookupPartitions(dataset2.ref, FilteredPartitionScan(split, Seq(filter)), range)
     res.firstSchemaId shouldEqual Some(schema2.schemaHash)
-    res.partsInMemoryIter.length shouldEqual 2   // two partitions should match
+    res.partsInMemory.cardinality() shouldEqual 2   // two partitions should match
     res.shard shouldEqual 0
     res.chunkMethod shouldEqual range
     res.partIdsMemTimeGap shouldEqual debox.Map(7 -> 107000L)
