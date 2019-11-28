@@ -156,63 +156,62 @@ final case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue 
   * ScalarRangeVector for which value is UTC Hour
   */
 final case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getHour
-  override def getValue(time: Long): Double = value
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getHour
 }
 
 /**
   * ScalarRangeVector for which value is current UTC Minute
   */
 final case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMinute
-  override def getValue(time: Long): Double = value
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getMinute
 }
 
 /**
   * ScalarRangeVector for which value is current UTC Minute
   */
 final case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getMonthValue
-  override def getValue(time: Long): Double = value
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getMonthValue
 }
 
 /**
   * ScalarRangeVector for which value is current UTC Year
   */
 final case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getYear
-  override def getValue(time: Long): Double = value
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getYear
 }
 
 /**
   * ScalarRangeVector for which value is current UTC day of month
   */
 final case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfMonth
-  override def getValue(time: Long): Double = value
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getDayOfMonth
 }
 
 /**
   * ScalarRangeVector for which value is current UTC day of week
   */
 final case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = {
-    val dayOfWeek = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC).getDayOfWeek
+  override def getValue(time: Long): Double = {
+    val dayOfWeek = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC).getDayOfWeek
     if (dayOfWeek == 7) 0 else dayOfWeek.getValue
   }
-  override def getValue(time: Long): Double = value
 }
 
 /**
   * ScalarRangeVector for which value is current UTC days in month
   */
 final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
-  def value: Double = {
-    val ldt = LocalDateTime.ofEpochSecond(rangeParams.start, 0, ZoneOffset.UTC)
-    YearMonth.from(ldt).lengthOfMonth()
+  override def getValue(time: Long): Double = {
+      val ldt = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+      YearMonth.from(ldt).lengthOfMonth()
   }
-  override def getValue(time: Long): Double = value
 }
+
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     val partition: ReadablePartition,

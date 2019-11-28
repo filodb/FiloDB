@@ -12,7 +12,7 @@ import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
 import filodb.query.Query.qLogger
-import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Time, Year}
+import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
   * Exec Plans for time functions which can execute locally without being dispatched
@@ -50,6 +50,7 @@ case class ScalarTimeBasedExec(id: String,
       case Time        => Seq(TimeScalar(params))
       case Hour        => Seq(HourScalar(params))
       case Minute      => Seq(MinuteScalar(params))
+      case Month       => Seq(MonthScalar(params))
       case Year        => Seq(YearScalar(params))
       case DayOfMonth  => Seq(DayOfMonthScalar(params))
       case DayOfWeek   => Seq(DayOfWeekScalar(params))
