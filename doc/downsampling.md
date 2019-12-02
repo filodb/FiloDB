@@ -121,7 +121,7 @@ downsampler on the downsampled dataset.
 ## Querying of Downsample Data
  
 Downsampled data for individual time series can be queried from the downsampled dataset. The downsampled dataset schema varies by schema type.  For gauges, the min, max, sum, count, and avergage are computed and stored in separate columns in the `ds-gauge` schema. The FiloDB Query Engine automatically translates queries to select the right column under the hood.
-For example `min(heap_usage{_ws_="demo",_ns_="myApp"})` is translated to something like `heap_usage::min{_ws_="demo",_ns_="myApp"}`.
+For example `min_over_time(heap_usage{_ws_="demo",_ns_="myApp"})` is roughly converted to something like `heap_usage::min{_ws_="demo",_ns_="myApp"}`.
 
 ## Validation of Downsample Results
 

@@ -103,7 +103,10 @@ trait Vectors extends Scalars with TimeUnits with Base {
     // Returns (trimmedMetricName, column) after stripping ::columnName
     private def extractStripColumn(metricName: String): (String, Option[String]) = {
       val parts = metricName.split("::", 2)
-      if (parts.size > 1) (parts(0), Some(parts(1))) else (metricName, None)
+      if (parts.size > 1) {
+        require(parts(1).nonEmpty, "cannot use empty column name")
+        (parts(0), Some(parts(1)))
+      } else (metricName, None)
     }
 
     /**
