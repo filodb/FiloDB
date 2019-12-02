@@ -271,7 +271,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
-            case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
+            case QueryResult(_, schema, result) => println(s"Output schema: $schema")
+                                                   println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }
