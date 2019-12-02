@@ -1,5 +1,6 @@
 package filodb.prometheus.ast
 
+import filodb.query.RangeFunctionId.Timestamp
 import filodb.query._
 
 trait Functions extends Base with Operators with Vectors {
@@ -60,13 +61,18 @@ trait Functions extends Base with Operators with Vectors {
       }
       else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
-        val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
 
-        PeriodicSeriesWithWindowing(
-          rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
-          timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
-          rangeExpression.window.millis,
-          rangeFunctionId, otherParams)
+        if (rangeFunctionId == Timestamp) {
+          seriesParam.asInstanceOf[InstantExpression].toPeriodicSeriesPlan(timeParams, Some(rangeFunctionId))
+        } else {
+          val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
+
+          PeriodicSeriesWithWindowing(
+            rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
+            timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+            rangeExpression.window.millis,
+            rangeFunctionId, otherParams)
+        }
       }
     }
 

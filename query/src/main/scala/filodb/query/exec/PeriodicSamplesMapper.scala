@@ -31,6 +31,8 @@ final case class PeriodicSamplesMapper(start: Long,
   require(step > 0, "step should be > 0")
 
   val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax)
+  if(functionId == Some(InternalRangeFunction.Timestamp))
+
   if (!isLastFn) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")

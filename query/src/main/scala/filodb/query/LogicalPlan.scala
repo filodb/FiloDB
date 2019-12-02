@@ -72,7 +72,8 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
 case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
-                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          end: Long,
+                          function: Option[RangeFunctionId] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 

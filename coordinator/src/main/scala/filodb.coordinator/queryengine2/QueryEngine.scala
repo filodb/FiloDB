@@ -4,14 +4,12 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 
 import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
@@ -351,8 +349,10 @@ class QueryEngine(dsRef: DatasetRef,
                                        options: QueryOptions,
                                        lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
+    val execRangeFn =  if (lp.function.isDefined) Some(InternalRangeFunction.lpToInternalFunc(lp.function.get))
+                       else None
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
-      None, None, Nil)))
+      None, execRangeFn, Nil)))
     rawSeries
   }
 
@@ -447,6 +447,10 @@ class QueryEngine(dsRef: DatasetRef,
                                                     lp: ApplyMiscellaneousFunction,
                                                     spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+//    if (lp.function == Timestamp)
+//      vectors.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
+//        None, None, Nil)))
+    //rawSeries
     vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }

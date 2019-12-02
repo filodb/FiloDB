@@ -49,6 +49,8 @@ object InternalRangeFunction {
   case object SumAndMaxOverTime extends InternalRangeFunction
   case object LastSampleHistMax extends InternalRangeFunction
 
+  case object Timestamp extends InternalRangeFunction
+
   def lpToInternalFunc(extFuncId: RangeFunctionId): InternalRangeFunction = extFuncId match {
     case RangeFunctionId.AvgOverTime   => AvgOverTime
     case RangeFunctionId.Changes       => Changes
@@ -68,6 +70,7 @@ object InternalRangeFunction {
     case RangeFunctionId.StdDevOverTime => StdDevOverTime
     case RangeFunctionId.StdVarOverTime => StdVarOverTime
     case RangeFunctionId.SumOverTime   => SumOverTime
+    case RangeFunctionId.Timestamp   =>  Timestamp
   }
 }
 
