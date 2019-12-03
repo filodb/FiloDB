@@ -175,15 +175,14 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
-//scalastyle:off
-// Number of types declared in the file exceeds 30
 trait FunctionArgsPlan extends LogicalPlan
 trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
 
 final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
                                          function: ScalarFunctionId,
                                          timeStepParams: RangeParams,
-                                         functionArgs: Seq[FunctionArgsPlan] = Nil) extends ScalarPlan with NonLeafLogicalPlan {
+                                         functionArgs: Seq[FunctionArgsPlan] = Nil)
+                                         extends ScalarPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
@@ -192,18 +191,14 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
   override def isRoutable: Boolean = false
 }
 
-final case class ScalarFixedDoublePlan(scalar: Double, timeStepParams: RangeParams) extends ScalarPlan with FunctionArgsPlan {
+final case class ScalarFixedDoublePlan(scalar: Double,
+                                       timeStepParams: RangeParams)
+                                       extends ScalarPlan with FunctionArgsPlan {
   override def isRoutable: Boolean = false
 }
 
 final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
-}
-
-final case class ScalarScalarBinaryOperation(operator: BinaryOperator,
-                                             lhs: ScalarPlan,
-                                             rhs: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
-  override def children: Seq[LogicalPlan] = Seq(lhs,rhs)
 }
 
 object LogicalPlan {
