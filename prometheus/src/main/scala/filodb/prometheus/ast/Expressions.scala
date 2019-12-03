@@ -28,6 +28,7 @@ trait Expressions extends Aggregates with Functions {
     if (vectorMatch.isDefined) {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
+    // scalastyle:off method.length
     override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
@@ -76,8 +77,11 @@ trait Expressions extends Aggregates with Functions {
           BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
             onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
             vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
+
+        case _ => throw new UnsupportedOperationException("Invalid operands")
       }
     }
+    // scalastyle:on method.length
   }
 
 }

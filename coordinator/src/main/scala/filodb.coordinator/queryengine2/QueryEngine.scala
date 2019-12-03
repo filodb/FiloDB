@@ -520,7 +520,7 @@ class QueryEngine(dsRef: DatasetRef,
                                          options: QueryOptions,
                                          lp: ScalarTimeBasedPlan,
                                          spreadProvider: SpreadProvider): PlanResult = {
-    val scalarTimeBasedExec = ScalarTimeBasedExec(queryId, dsRef, lp.rangeParams, lp.function,
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(queryId, dsRef, lp.rangeParams, lp.function,
       options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }

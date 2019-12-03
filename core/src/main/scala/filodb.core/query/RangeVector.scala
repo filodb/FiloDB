@@ -86,7 +86,7 @@ object CustomRangeVectorKey {
   val emptyAsZcUtf8 = toZcUtf8(empty)
 }
 
-/*
+/**
   * Represents a single result of any FiloDB Query.
   */
 trait RangeVector {
@@ -146,7 +146,7 @@ final case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) exte
 }
 
 /**
-  * ScalarRangeVector for which value is the time
+  * ScalarRangeVector for which value is the time of the instant sample in seconds.
   */
 final case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   override def getValue(time: Long): Double = time.toDouble / 1000

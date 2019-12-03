@@ -17,11 +17,11 @@ import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, 
 /**
   * Exec Plans for time functions which can execute locally without being dispatched
   */
-case class ScalarTimeBasedExec(id: String,
-                               dataset: DatasetRef, params: RangeParams,
-                               function: ScalarFunctionId,
-                               limit: Int,
-                               submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+case class TimeScalarGeneratorExec(id: String,
+                                   dataset: DatasetRef, params: RangeParams,
+                                   function: ScalarFunctionId,
+                                   limit: Int,
+                                   submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -32,7 +32,10 @@ case class ScalarTimeBasedExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+                                  (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+    throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
+      "a readily available static value")
+  }
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.

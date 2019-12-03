@@ -24,6 +24,8 @@ case class ScalarFixedDoubleExec(id: String,
                                  limit: Int,
                                  submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
 
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
 
   /**
     * Sub classes should override this method to provide a concrete
@@ -31,7 +33,10 @@ case class ScalarFixedDoubleExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                        (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+                        (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+    throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
+      "readily available static value")
+  }
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -44,8 +49,6 @@ case class ScalarFixedDoubleExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-      ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(columns)
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
