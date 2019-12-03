@@ -187,9 +187,6 @@ final case class LnImpl() extends EmptyParamsInstantFunction {
   */
 final case class Log10Impl() extends EmptyParamsInstantFunction {
   override def apply(value: Double, scalarParams: Seq[Double] = Nil): Double = {
-    /**
-      * Validate the function before invoking the function.
-      */
     require(scalarParams.isEmpty, "No additional parameters required for Log10.")
     scala.math.log10(value)
   }
@@ -216,9 +213,6 @@ final case class Log2Impl() extends EmptyParamsInstantFunction {
 final case class RoundImpl() extends DoubleInstantFunction {
 
   override def apply(value: Double, scalarParams: Seq[Double]): Double = {
-    /**
-      * Validate the function before invoking the function.
-      */
     require(scalarParams.size <= 1, "Only one optional parameters allowed for Round.")
 
       def toNearestInverse =
