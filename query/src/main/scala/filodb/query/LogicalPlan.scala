@@ -4,7 +4,7 @@ import filodb.core.query.{ColumnFilter, RangeParams}
 
 sealed trait LogicalPlan {
   /**
-    * Routing should be applied to all logical plans by default
+    * Execute failure routing
     */
   def isRoutable: Boolean = true
 }
