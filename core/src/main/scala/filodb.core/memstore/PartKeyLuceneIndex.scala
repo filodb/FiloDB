@@ -435,13 +435,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val term = new Term(column, value.toString)
-        new RegexpQuery(term, RegExp.ALL)
+        new RegexpQuery(term, RegExp.NONE)
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
         booleanQuery.add(allDocs, Occur.FILTER)
-        booleanQuery.add(new RegexpQuery(term, RegExp.ALL), Occur.MUST_NOT)
+        booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
         val term = new Term(column, value.toString)
