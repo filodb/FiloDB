@@ -19,6 +19,7 @@ import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
+import org.apache.lucene.util.automaton.RegExp
 import scalaxy.loops._
 
 import filodb.core.{concurrentCache, DatasetRef}
@@ -434,13 +435,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val term = new Term(column, value.toString)
-        new RegexpQuery(term)
+        new RegexpQuery(term, RegExp.ALL)
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
         booleanQuery.add(allDocs, Occur.FILTER)
-        booleanQuery.add(new RegexpQuery(term), Occur.MUST_NOT)
+        booleanQuery.add(new RegexpQuery(term, RegExp.ALL), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
         val term = new Term(column, value.toString)
