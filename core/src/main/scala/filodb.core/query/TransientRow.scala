@@ -1,4 +1,4 @@
-package filodb.query.exec
+package filodb.core.query
 
 import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 

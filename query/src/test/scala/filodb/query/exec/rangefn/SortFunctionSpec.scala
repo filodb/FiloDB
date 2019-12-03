@@ -2,9 +2,9 @@ package filodb.query.exec.rangefn
 
 import com.typesafe.config.{Config, ConfigFactory}
 import filodb.core.MetricsTestData
-import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
+import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.exec.TransientRow
+
 import filodb.query.{QueryConfig, SortFunctionId, exec}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
