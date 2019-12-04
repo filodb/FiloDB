@@ -2,9 +2,10 @@ package filodb.query.exec
 
 import java.util.concurrent.ThreadLocalRandom
 
+import filodb.core.query.TransientRow
+
 import scala.concurrent.duration._
 import scala.util.Random
-
 import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
 class LastSampleFunctionSpec extends RawDataWindowingSpec {

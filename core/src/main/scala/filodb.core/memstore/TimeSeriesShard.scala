@@ -150,9 +150,10 @@ object TimeSeriesShard {
     Math.abs(schema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
   }
 
-  private[memstore] final case class PartKey(base: Any, offset: Long)
   private[memstore] final val CREATE_NEW_PARTID = -1
 }
+
+private[core] final case class PartKey(base: Any, offset: Long)
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
   def skippedPartIDs: Buffer[Int]
@@ -169,7 +170,7 @@ object PartitionIterator {
 /**
   * TSPartition lookup from filters result, usually step 1 of querying.
   *
-  * @param partsInMemoryIter iterates through the in-Memory partitions, some of which may not need ODP.
+  * @param partsInMemory iterates through the in-Memory partitions, some of which may not need ODP.
   *                          Caller needs to filter further
   * @param firstSchemaId if defined, the first Schema ID found. If not defined, probably there's no data.
   * @param partIdsMemTimeGap contains partIDs in memory but with potential time gaps in data. Their
@@ -178,7 +179,7 @@ object PartitionIterator {
   */
 case class PartLookupResult(shard: Int,
                             chunkMethod: ChunkScanMethod,
-                            partsInMemoryIter: PartitionIterator,
+                            partsInMemory: EWAHCompressedBitmap,
                             firstSchemaId: Option[Int] = None,
                             partIdsMemTimeGap: debox.Map[Int, Long] = debox.Map.empty,
                             partIdsNotInMemory: debox.Buffer[Int] = debox.Buffer.empty)
@@ -243,7 +244,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, storeConfig)
+  private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum,
+    storeConfig.demandPagedRetentionPeriod)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -452,16 +454,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  // An iterator over partitions looked up from partition keys stored as byte[]'s
-  // Note that we cannot give skippedPartIDs because we don't have IDs only have keys
-  // and we cannot look up IDs from keys since part keys are not indexed in Lucene
-  case class ByteKeysPartitionIterator(keys: Seq[Array[Byte]]) extends PartitionIterator {
-    val skippedPartIDs = debox.Buffer.empty[Int]
-    private val partIt = keys.toIterator.flatMap(getPartition)
-    final def hasNext: Boolean = partIt.hasNext
-    final def next: TimeSeriesPartition = partIt.next
-  }
-
   // RECOVERY: Check the watermark for the group that this record is part of.  If the ingestOffset is < watermark,
   // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
   class IngestConsumer(var ingestionTime: Long = 0,
@@ -527,7 +519,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     _offset
   }
 
-  def startFlushingIndex(): Unit = partKeyIndex.startFlushThread()
+  def startFlushingIndex(): Unit =
+    partKeyIndex.startFlushThread(storeConfig.partIndexFlushMinDelaySeconds, storeConfig.partIndexFlushMaxDelaySeconds)
 
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
@@ -1435,11 +1428,13 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
     case SinglePartitionScan(partition, _) =>
-      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(Seq(partition)),
-                       Some(RecordSchema.schemaID(partition)))
+      val bitmap = new EWAHCompressedBitmap()
+      getPartition(partition).foreach(p => bitmap.set(p.partID))
+      PartLookupResult(shardNum, chunkMethod, bitmap, Some(RecordSchema.schemaID(partition)))
     case MultiPartitionScan(partKeys, _)   =>
-      PartLookupResult(shardNum, chunkMethod, ByteKeysPartitionIterator(partKeys),
-                       partKeys.headOption.map(RecordSchema.schemaID))
+      val bitmap = new EWAHCompressedBitmap()
+      partKeys.flatMap(getPartition).foreach(p => bitmap.set(p.partID))
+      PartLookupResult(shardNum, chunkMethod, bitmap, partKeys.headOption.map(RecordSchema.schemaID))
     case FilteredPartitionScan(split, filters) =>
       // No matter if there are filters or not, need to run things through Lucene so we can discover potential
       // TSPartitions to read back from disk
@@ -1464,12 +1459,13 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       // now provide an iterator that additionally supplies the startTimes for
       // those partitions that may need to be paged
-      PartLookupResult(shardNum, chunkMethod, new InMemPartitionIterator(coll.intIterator()),
+      PartLookupResult(shardNum, chunkMethod, coll,
                        _schema, startTimes, partIdsNotInMem)
   }
 
   def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
-    Observable.fromIterator(iterResult.partsInMemoryIter.map { p =>
+    val partIter = new InMemPartitionIterator(iterResult.partsInMemory.intIterator())
+    Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

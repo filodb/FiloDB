@@ -16,7 +16,7 @@ import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, Iterators}
-import filodb.core.downsample.DownsampleConfig
+import filodb.core.downsample.{DownsampleConfig, DownsampledTimeSeriesStore}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
@@ -158,6 +158,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     }
   }
 
+  // scalastyle:off method.length
   private def startIngestion(shard: Int): Unit = {
     try memStore.setup(ref, schemas, shard, storeConfig, downsample) catch {
       case ShardAlreadySetup(ds, shard) =>
@@ -168,31 +169,39 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     logger.info(s"Initiating ingestion for dataset=$ref shard=${shard}")
     logger.info(s"Metastore is ${memStore.metastore}")
     implicit val futureMapDispatcher = actorDispatcher
-    val ingestion = for {
-      _ <- memStore.recoverIndex(ref, shard)
-      checkpoints <- memStore.metastore.readCheckpoints(ref, shard) }
-    yield {
-      if (checkpoints.isEmpty) {
-        logger.info(s"No checkpoints were found for dataset=$ref shard=${shard} -- skipping kafka recovery")
-        // Start normal ingestion with no recovery checkpoint and flush group 0 first
-        normalIngestion(shard, None, 0)
-      } else {
-        // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
-        // offsets come back from the MemStore for us to report progress.
-        val startRecoveryWatermark = checkpoints.values.min + 1
-        val endRecoveryWatermark = checkpoints.values.max
-        val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
-        val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
-        logger.info(s"Starting recovery for dataset=$ref " +
-          s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark ; " +
-          s"last flushed group $lastFlushedGroup")
-        logger.info(s"Checkpoints for dataset=$ref shard=${shard} were $checkpoints")
-        for { lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
-                                       checkpoints) }
-        yield {
-          // Start reading past last offset for normal records; start flushes one group past last group
-          normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
-                          (lastFlushedGroup + 1) % numGroups)
+    val ingestion = if (memStore.isReadOnly) {
+      for {
+        _ <- memStore.recoverIndex(ref, shard)
+      } yield {
+        streamSubscriptions(shard) = CancelableFuture.never // simulate ingestion happens continuously
+      }
+    } else {
+      for {
+        _ <- memStore.recoverIndex(ref, shard)
+        checkpoints <- memStore.metastore.readCheckpoints(ref, shard)
+      } yield {
+        if (checkpoints.isEmpty) {
+          logger.info(s"No checkpoints were found for dataset=$ref shard=${shard} -- skipping kafka recovery")
+          // Start normal ingestion with no recovery checkpoint and flush group 0 first
+          normalIngestion(shard, None, 0)
+        } else {
+          // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
+          // offsets come back from the MemStore for us to report progress.
+          val startRecoveryWatermark = checkpoints.values.min + 1
+          val endRecoveryWatermark = checkpoints.values.max
+          val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
+          val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
+          logger.info(s"Starting recovery for dataset=$ref " +
+            s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark ; " +
+            s"last flushed group $lastFlushedGroup")
+          logger.info(s"Checkpoints for dataset=$ref shard=${shard} were $checkpoints")
+          for {lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
+            checkpoints)}
+            yield {
+              // Start reading past last offset for normal records; start flushes one group past last group
+              normalIngestion(shard, Some(lastOffset.getOrElse(endRecoveryWatermark) + 1),
+                (lastFlushedGroup + 1) % numGroups)
+            }
         }
       }
     }
@@ -365,11 +374,19 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     streamSubscriptions.remove(shardNum).foreach(_.cancel)
     streams.remove(shardNum).foreach(_.teardown())
     // Release memory for shard in MemStore
-    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shardNum)
-      .foreach { shard =>
-        shard.shutdown()
-        memStore.asInstanceOf[TimeSeriesMemStore].removeShard(ref, shardNum, shard)
-      }
+
+    memStore match {
+      case ro: DownsampledTimeSeriesStore => ro.getShard(ref, shardNum)
+                                            .foreach { shard =>
+                                              ro.removeShard(ref, shardNum, shard)
+                                            }
+
+      case m: TimeSeriesMemStore => m.getShard(ref, shardNum)
+                                      .foreach { shard =>
+                                        shard.shutdown()
+                                        m.removeShard(ref, shardNum, shard)
+                                      }
+    }
     logger.info(s"Released resources for dataset=$ref shard=$shardNum")
   }
 }

@@ -71,8 +71,8 @@ trait ChunkSetInfoReader {
   * @param infoBytes serialized chunkSetInfo
   * @param vectors serialized vectors
   */
-final case class ChunkSetInfoOnHeap(infoBytes: ByteBuffer, vectors: Seq[ByteBuffer]) extends ChunkSetInfoReader {
-  val bytesAcc = MemoryReader.fromByteBuffer(infoBytes)
+final case class ChunkSetInfoOnHeap(infoBytes: Array[Byte], vectors: Array[ByteBuffer]) extends ChunkSetInfoReader {
+  val bytesAcc = MemoryReader.fromArray(infoBytes)
   val vectorsAcc = vectors.map(MemoryReader.fromByteBuffer)
 
   def id: ChunkID = ChunkSetInfo.getChunkID(bytesAcc, 0)

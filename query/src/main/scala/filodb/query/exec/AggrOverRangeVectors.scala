@@ -55,7 +55,8 @@ final case class ReduceAggregateExec(id: String,
 final case class AggregateMapReduce(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
                                     without: Seq[String],
-                                    by: Seq[String]) extends RangeVectorTransformer {
+                                    by: Seq[String],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   require(without == Nil || by == Nil, "Cannot specify both without and by clause")
   val withoutLabels = without.map(ZeroCopyUTF8String(_)).toSet
   val byLabels = by.map(ZeroCopyUTF8String(_)).toSet
@@ -66,7 +67,8 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
@@ -97,14 +99,16 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 }
 
 final case class AggregatePresenter(aggrOp: AggregationOperator,
-                                    aggrParams: Seq[Any]) extends RangeVectorTransformer {
+                                    aggrParams: Seq[Any],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarRangeVector]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }
@@ -635,7 +639,8 @@ object StdvarRowAggregator extends RowAggregator {
   }
   def reduceAggregate(acc: StdvarHolder, aggRes: RowReader): StdvarHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
+
+    if (!aggRes.getDouble(1).isNaN && !aggRes.getDouble(2).isNaN) {
       if (acc.mean.isNaN) acc.mean = 0d
       if (acc.stdVar.isNaN) acc.stdVar = 0d
 
@@ -802,7 +807,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
     val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
-    val recSchema = SerializableRangeVector.toSchema(colSchema)
+    val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
@@ -815,7 +820,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.newBuilder())
+            val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
             builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))
             builder.addDouble(row.getDouble(i + 1))
@@ -829,7 +834,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
-      new SerializableRangeVector(key, numRows, builder.allContainers, recSchema, 0)
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }
 

@@ -1,13 +1,20 @@
 package filodb.query
 
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, RangeParams}
 
-sealed trait LogicalPlan
+sealed trait LogicalPlan {
+  /**
+    * Execute failure routing
+    */
+  def isRoutable: Boolean = true
+}
 
 /**
   * Super class for a query that results in range vectors with raw samples
   */
-sealed trait RawSeriesPlan extends LogicalPlan
+sealed trait RawSeriesPlan extends LogicalPlan {
+  override def isRoutable: Boolean = false
+}
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
   def children: Seq[LogicalPlan]
@@ -19,7 +26,9 @@ sealed trait NonLeafLogicalPlan extends LogicalPlan {
   */
 sealed trait PeriodicSeriesPlan extends LogicalPlan
 
-sealed trait MetadataQueryPlan extends LogicalPlan
+sealed trait MetadataQueryPlan extends LogicalPlan{
+  override def isRoutable: Boolean = false
+}
 
 /**
   * A selector is needed in the RawSeries logical plan to specify
@@ -56,7 +65,9 @@ case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
  */
 case class RawChunkMeta(rangeSelector: RangeSelector,
                         filters: Seq[ColumnFilter],
-                        column: String) extends PeriodicSeriesPlan
+                        column: String) extends PeriodicSeriesPlan {
+  override def isRoutable: Boolean = false
+}
 
 /**
   * Concrete logical plan to query for data in a given range
@@ -89,8 +100,8 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        end: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan
-{
+                                       functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -124,8 +135,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
-                      ignoring: Seq[String] = Nil, include: Seq[String] = Nil) extends PeriodicSeriesPlan
-  with NonLeafLogicalPlan {
+                      ignoring: Seq[String] = Nil,
+                      include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
 }
 
@@ -133,7 +144,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   * Apply Scalar Binary operation to a collection of RangeVectors
   */
 case class ScalarVectorBinaryOperation(operator: BinaryOperator,
-                                       scalar: AnyVal,
+                                       scalarArg: ScalarPlan,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vector)
@@ -144,7 +155,8 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   */
 case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
@@ -152,8 +164,9 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   * Apply Miscellaneous Function to a collection of RangeVectors
   */
 case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
-                                function: MiscellaneousFunctionId,
-                                functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                      function: MiscellaneousFunctionId,
+                                      stringArgs: Seq[String] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
@@ -161,9 +174,34 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
   * Apply Sort Function to a collection of RangeVectors
   */
 case class ApplySortFunction(vectors: PeriodicSeriesPlan,
-                                      function: SortFunctionId,
-                                      functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                             function: SortFunctionId) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+trait FunctionArgsPlan extends LogicalPlan
+trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
+
+final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
+                                         function: ScalarFunctionId,
+                                         timeStepParams: RangeParams,
+                                         functionArgs: Seq[FunctionArgsPlan] = Nil)
+                                         extends ScalarPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+
+final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
+  override def isRoutable: Boolean = false
+}
+
+final case class ScalarFixedDoublePlan(scalar: Double,
+                                       timeStepParams: RangeParams)
+                                       extends ScalarPlan with FunctionArgsPlan {
+  override def isRoutable: Boolean = false
+}
+
+final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(scalars)
 }
 
 object LogicalPlan {

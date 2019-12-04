@@ -83,7 +83,7 @@ class HistogramQueryBenchmark {
   val pEngine = new QueryEngine(promDataset.ref, promSchemas, shardMapper, EmptyFailureProvider)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
-  val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total{job="prometheus",__col__="h"}[30s]))"""
+  val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total::h{job="prometheus"}[30s]))"""
   val promQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total_bucket{job="prometheus"}[30s]))"""
 
   // Single-threaded query test

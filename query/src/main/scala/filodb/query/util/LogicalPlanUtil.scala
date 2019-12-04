@@ -16,11 +16,13 @@ object LogicalPlanUtil {
   def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Set[String]] = {
     val labelValues = LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
       lp match {
-        case lp: LabelValues         => lp.labelConstraints.get(labelName).map(Set(_))
-        case lp: RawSeries           => getLabelValueFromFilters(lp.filters, labelName)
-        case lp: RawChunkMeta        => getLabelValueFromFilters(lp.filters, labelName)
-        case lp: SeriesKeysByFilters => getLabelValueFromFilters(lp.filters, labelName)
-        case _                       => throw new BadQueryException("Invalid logical plan")
+        case lp: LabelValues           => lp.labelConstraints.get(labelName).map(Set(_))
+        case lp: RawSeries             => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: RawChunkMeta          => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: SeriesKeysByFilters   => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: ScalarTimeBasedPlan   => Nil // Plan does not have labels
+        case lp: ScalarFixedDoublePlan => Nil
+        case _                         => throw new BadQueryException("Invalid logical plan")
       }
     }
     if (labelValues.isEmpty) {
