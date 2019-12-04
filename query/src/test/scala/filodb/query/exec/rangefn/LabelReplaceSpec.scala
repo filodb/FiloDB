@@ -72,7 +72,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
 
     val funcParams = Seq("instance", "$1 new Label Value $2", "instance", "(.*):90(.*)")
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -118,7 +118,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("instanceNew", "$1-$1", "instance", "(.*)\\d")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -159,7 +159,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("instance", "$1", "instance", "(.*)9")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(sampleWithKey), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -182,13 +182,13 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace,
         funcParams)
-      miscellaneousFunctionMapper(  Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     } should have message "Invalid Regular Expression for label_replace"
 
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace,
         Seq("instance", "$1"))
-      miscellaneousFunctionMapper(  Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     } should have message "requirement failed: " +
       "Cannot use LabelReplace without function parameters: " +
       "instant-vector, dst_label string, replacement string, src_label string, regex string"
@@ -196,7 +196,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     the[IllegalArgumentException] thrownBy {
       val miscellaneousFunctionMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace,
         Seq("$instance", "$1", "instance", "(.*)9("))
-      miscellaneousFunctionMapper(  Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+      miscellaneousFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     } should have message "requirement failed: Invalid destination label name"
   }
 
@@ -210,7 +210,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "destination-value-$1", "src", "source-value-(.*)")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -236,7 +236,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "destination-value-$1", "src", "value-(.*)")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -262,7 +262,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "$1-value-$2 $3$67", "src", "(.*)-value-(.*)")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -288,7 +288,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "value-$1", "nonexistent-src", "source-value-(.*)")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -314,7 +314,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "value-$1", "nonexistent-src", ".*")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -340,7 +340,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "value-$1", "src", "dummy-regex")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -364,7 +364,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("dst", "", "dst", ".*")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
@@ -388,7 +388,7 @@ class LabelReplaceSpec extends FunSpec with Matchers with ScalaFutures {
     val funcParams = Seq("src", "", "", "")
 
     val labelVectorFnMapper = exec.MiscellaneousFunctionMapper(MiscellaneousFunctionId.LabelReplace, funcParams)
-    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = labelVectorFnMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultLabelValues = resultObs.toListL.runAsync.futureValue.map(_.key.labelValues)
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 

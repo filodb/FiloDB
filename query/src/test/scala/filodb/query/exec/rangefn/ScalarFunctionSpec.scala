@@ -107,7 +107,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   
   it("should generate scalar") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
-    val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = scalarFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runAsync.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarFixedDouble]) shouldEqual (true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)
@@ -117,7 +117,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should generate scalar values when there is one range vector") {
     val scalarFunctionMapper = exec.ScalarFunctionMapper(ScalarFunctionId.Scalar, RangeParams(1,1,1))
-    val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), queryConfig, 1000, resultSchema)
+    val resultObs = scalarFunctionMapper(Observable.fromIterable(oneSample), queryConfig, 1000, resultSchema, Nil)
     val resultRangeVectors = resultObs.toListL.runAsync.futureValue
     resultRangeVectors.forall(x => x.isInstanceOf[ScalarVaryingDouble]) shouldEqual (true)
     val resultRows = resultRangeVectors.flatMap(_.rows.map(_.getDouble(1)).toList)

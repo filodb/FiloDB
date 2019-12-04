@@ -73,14 +73,14 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should sort instant vectors in ascending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
-    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
   }
 
   it("should sort instant vectors in descending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.SortDesc)
-    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0))
   }

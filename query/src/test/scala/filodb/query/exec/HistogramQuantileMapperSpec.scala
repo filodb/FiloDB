@@ -59,7 +59,7 @@ class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFuture
 
     val result = hqMapper.apply(Observable.fromIterable(histRvs), queryConfig, 10,
                                 new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-                                  ColumnInfo("value", ColumnType.DoubleColumn)), 1), Observable.empty)
+                                  ColumnInfo("value", ColumnType.DoubleColumn)), 1), Nil)
                          .toListL.runAsync.futureValue
     for { i <- expectedResult.indices } {
         expectedResult(i)._1 shouldEqual result(i).key.labelValues
