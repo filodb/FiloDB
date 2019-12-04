@@ -319,7 +319,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
   }
 
-  it("stdvar should work for with NaN Test case 2") {
+  it("stdvar and stddev should work for with NaN Test case 2") {
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L, 3247.0), (2L, 3297.0))),
       toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
@@ -335,13 +335,22 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     )
 
     // Stdvar
-    val agg = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
-    val resultObsA = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
-    val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsA, rv => rv.key)
-    val result = resultObs.toListL.runAsync.futureValue
-    result.size shouldEqual 1
-    result(0).key shouldEqual noKey
-    compareIter(result(0).rows.map(_.getDouble(1)), Seq(12698496.88888889d, 12585030.222222222d).iterator)
+    val agg1 = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
+    val resultObs1a = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, true, resultObs1a, rv => rv.key)
+    val result1 = resultObs1.toListL.runAsync.futureValue
+    result1.size shouldEqual 1
+    result1(0).key shouldEqual noKey
+    compareIter(result1(0).rows.map(_.getDouble(1)), Seq(12698496.88888889d, 12585030.222222222d).iterator)
+
+    // Stddev
+    val agg2 = RowAggregator(AggregationOperator.Stddev, Nil, tvSchema)
+    val resultObs2a = RangeVectorAggregator.mapReduce(agg2, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs2 = RangeVectorAggregator.mapReduce(agg2, true, resultObs2a, rv => rv.key)
+    val result2 = resultObs2.toListL.runAsync.futureValue
+    result2.size shouldEqual 1
+    result2(0).key shouldEqual noKey
+    compareIter(result2(0).rows.map(_.getDouble(1)), Seq(3563.4950384263d, 3547.5386146203d).iterator)
   }
 
   it("should return NaN when all values are NaN for a timestamp ") {
