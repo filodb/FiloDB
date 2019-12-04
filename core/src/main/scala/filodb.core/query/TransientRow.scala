@@ -47,7 +47,11 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
                                          else throw new IllegalArgumentException(s"Invalid col $columnNo")
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
-  def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getAny(columnNo: Int): Any = {
+    if (columnNo == 0) timestamp
+    else if (columnNo == 1) value
+    else throw new IllegalArgumentException()
+  }
 
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
