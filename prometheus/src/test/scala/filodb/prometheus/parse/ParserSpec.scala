@@ -145,7 +145,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("foo{a*\"b\"}")
     parseError("foo{a>=\"b\"}")
 
-    parseError("foo{gibberish}")
+    parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
     parseError("{x=\"\"}")
@@ -261,6 +261,8 @@ class ParserSpec extends FunSpec with Matchers {
         "ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
+      "topk(5, http_requests_total::foo)" ->
+        "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(foo)),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
       "stdvar(http_requests_total)" ->
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -275,6 +277,8 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
         "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
+      "http_requests_total::sum{job=\"prometheus\"}[5m]" ->
+        "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(sum))",
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000)",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
