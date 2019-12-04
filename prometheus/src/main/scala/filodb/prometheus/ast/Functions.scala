@@ -72,14 +72,13 @@ trait Functions extends Base with Operators with Vectors {
         } else if (filoFunctionIdOpt.isDefined) {
           // No lookback needed as we are looking at chunk metadata only, not raw samples
           val rangeSelector = timeParamToSelector(timeParams, 0)
-          val (filters, columns) = seriesParam match {
-            case i: InstantExpression => (i.columnFilters, i.columns)
-            case r: RangeExpression   => (r.columnFilters, r.columns)
+          val (filters, column) = seriesParam match {
+            case i: InstantExpression => (i.columnFilters, i.column)
+            case r: RangeExpression   => (r.columnFilters, r.column)
           }
           filoFunctionIdOpt.get match {
-            case FiloFunctionId.ChunkMetaAll => // Just get the raw chunk metadata
-              RawChunkMeta(rangeSelector, filters, columns.headOption.getOrElse(""))
-          }
+            case FiloFunctionId.ChunkMetaAll =>   // Just get the raw chunk metadata
+              RawChunkMeta(rangeSelector, filters, column.getOrElse(""))
         } else if (miscellaneousFunctionIdOpt.isDefined) {
           val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
           val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
