@@ -253,6 +253,69 @@ object BatchDownsampler extends StrictLogging with Instance {
     }
   }
 
+  private def rowBasedDownsampleChunks(offHeapMem: OffHeapMemory,
+                                       rawPartToDownsample: ReadablePartition,
+                                       downsamplers: Seq[ChunkDownsampler],
+                                       downsampledParts: Map[FiniteDuration, TimeSeriesPartition],
+                                       userTimeStart: Long,
+                                       userTimeEnd: Long) = {
+    val timestampCol = 0
+    val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
+
+    // TODO create a rowReader that will not box the vals below
+    val downsampleRow = new Array[Any](downsamplers.size)
+    val downsampleRowReader = SeqRowReader(downsampleRow)
+
+    while (rawChunksets.hasNext) {
+      val chunkset = rawChunksets.nextInfoReader
+      val startTime = chunkset.startTime
+      val endTime = chunkset.endTime
+      val vecPtr = chunkset.vectorAddress(timestampCol)
+      val vecAcc = chunkset.vectorAccessor(timestampCol)
+      val tsReader = rawPartToDownsample.chunkReader(timestampCol, vecAcc, vecPtr).asLongReader
+
+      // for each downsample resolution
+      downsampledParts.foreach { case (resolution, part) =>
+        val resMillis = resolution.toMillis
+        // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
+        // Hence subtract - 1 below from chunk startTime to find the first downsample period.
+        // + 1 is needed since the startTime is inclusive. We don't want pStart to be 4:55:00:000;
+        // instead we want 4:55:00:001
+        var pStart = ((startTime - 1) / resMillis) * resMillis + 1
+        var pEnd = pStart + resMillis // end is inclusive
+        // for each downsample period
+        while (pStart <= endTime) {
+          if (pEnd >= userTimeStart && pEnd <= userTimeEnd) {
+            // fix the boundary row numbers for the downsample period by looking up the timestamp column
+            val startRowNum = tsReader.binarySearch(vecAcc, vecPtr, pStart) & 0x7fffffff
+            val endRowNum = Math.min(tsReader.ceilingIndex(vecAcc, vecPtr, pEnd), chunkset.numRows - 1)
+
+            // for each downsampler, add downsample column value
+            for {col <- downsamplers.indices optimized} {
+              val downsampler = downsamplers(col)
+              downsampler match {
+                case d: TimeChunkDownsampler =>
+                  downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
+                case d: DoubleChunkDownsampler =>
+                  downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
+                case h: HistChunkDownsampler =>
+                  downsampleRow(col) = h.downsampleChunk(rawPartToDownsample, chunkset, startRowNum, endRowNum)
+                    .serialize()
+              }
+            }
+            logger.trace(s"Ingesting into part=${part.hashCode}: $downsampleRow")
+            //use the userTimeStart as ingestionTime
+            part.ingest(userTimeStart, downsampleRowReader, offHeapMem.blockMemFactory)
+          }
+          pStart += resMillis
+          pEnd += resMillis
+        }
+      }
+    }
+  }
+
+
+
   /**
     * Persist chunks in `downsampledChunksToPersist` to Cassandra.
     */
