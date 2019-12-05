@@ -607,12 +607,6 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 
   def needsScores(): Boolean = false
 
-  def topKPartIdsSet(): debox.Set[Int] = {
-    val result = debox.Set.empty[Int]
-    topkResults.iterator().asScala.foreach { p => result += p._1 }
-    result
-  }
-
   def topKPartIds(): IntIterator = {
     val result = new EWAHCompressedBitmap()
     topkResults.iterator().asScala.foreach { p => result.set(p._1) }

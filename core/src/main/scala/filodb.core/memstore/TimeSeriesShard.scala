@@ -439,8 +439,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     private def findNext(): Unit = {
       while (nextPartId + 1 < partIds.length && nextPart == UnsafeUtils.ZeroPointer) {
         nextPartId += 1
-        nextPart = partitions.get(nextPartId)
-        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartId
+        nextPart = partitions.get(partIds(nextPartId))
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += partIds(nextPartId)
       }
     }
 
@@ -629,12 +629,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var resIndex = 0
+    var numResultsReturned = 0
     var partIndex = 0
 
     override def hasNext: Boolean = {
       var foundValue = false
-      while(partIndex < partIds.length && resIndex < limit && !foundValue) {
+      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
         val partId = partIds(partIndex)
 
         //retrieve PartKey either from In-memory map or from PartKeyIndex
@@ -654,7 +654,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
 
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      resIndex += 1
+      numResultsReturned += 1
       currVal
     }
   }
@@ -1085,7 +1085,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                             // verifying the partKey since the matching partition may have had an additional tag
                             if (c > 1) shardStats.evictedPartIdLookupMultiMatch.increment()
                             var i = 0
-                            var partId = CREATE_NEW_PARTID
+                            var partId = -1
                             do {
                               // find the most specific match for the given ingestion record
                               val nextPartId = matches(i)
@@ -1099,10 +1099,10 @@ class TimeSeriesShard(val ref: DatasetRef,
                                 }
                               }
                               i += 1
-                            } while (i < matches.length && partId != CREATE_NEW_PARTID)
-                            if (partId == CREATE_NEW_PARTID)
+                            } while (i < matches.length && partId != -1)
+                            if (partId == -1)
                               shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-                            partId
+                            partId // same as CREATE_NEW_PARTID if not present
       }
     } else CREATE_NEW_PARTID
   }
@@ -1431,16 +1431,17 @@ class TimeSeriesShard(val ref: DatasetRef,
     case FilteredPartitionScan(split, filters) =>
       // No matter if there are filters or not, need to run things through Lucene so we can discover potential
       // TSPartitions to read back from disk
-      val coll = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+      val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
 
-      if (coll.length > 250000) // TODO configure
-        throw new IllegalArgumentException("Reached limit of 250k time series per shard. " +
-          "Try to narrow your query by adding more filters")
+      val limit = 250000  // TODO configure
+      if (matches.length > limit)
+        throw new IllegalArgumentException(s"Saw ${matches.length} matching time series per shard. " +
+          s"Try to narrow your query by adding more filters so there is less than $limit matches")
 
       // first find out which partitions are being queried for data not in memory
-      val firstPartId = if (coll.isEmpty) None else Some(coll(0))
+      val firstPartId = if (matches.isEmpty) None else Some(matches(0))
       val _schema = firstPartId.filter(_ >= 0).map(schemaIDFromPartID)
-      val it1 = InMemPartitionIterator2(coll)
+      val it1 = InMemPartitionIterator2(matches)
       val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
       val partIdsNotInMem = it1.skippedPartIDs
       val startTimes = if (partIdsToPage.nonEmpty) {
@@ -1457,8 +1458,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       // now provide an iterator that additionally supplies the startTimes for
       // those partitions that may need to be paged
-      PartLookupResult(shardNum, chunkMethod, coll,
-                       _schema, startTimes, partIdsNotInMem)
+      PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
   }
 
   def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {

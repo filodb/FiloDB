@@ -148,12 +148,12 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var resIndex = 0
+    var numResultsReturned = 0
     var partIndex = 0
 
     override def hasNext: Boolean = {
       var foundValue = false
-      while(partIndex < partIds.length && resIndex < limit && !foundValue) {
+      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
         val partId = partIds(partIndex)
 
         import ZeroCopyUTF8String._
@@ -174,7 +174,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     }
 
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      resIndex += 1
+      numResultsReturned += 1
       currVal
     }
   }
