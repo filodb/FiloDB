@@ -667,8 +667,7 @@ class TimeSeriesShard(val ref: DatasetRef,
                           startTime: Long,
                           limit: Int): Iterator[PartKey] = {
     val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    partIds.iterator().take(limit).map(partKeyFromPartId)
-    // this boxes the int partIds but code is kludgy other wise for us to create an iterator result :(
+    InMemPartitionIterator2(partIds).take(limit).map { p => PartKey(p.partKeyBase, p.partKeyOffset) }
   }
 
   /**
@@ -1433,10 +1432,10 @@ class TimeSeriesShard(val ref: DatasetRef,
       // TSPartitions to read back from disk
       val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
 
-      val limit = 250000  // TODO configure
-      if (matches.length > limit)
-        throw new IllegalArgumentException(s"Saw ${matches.length} matching time series per shard. " +
-          s"Try to narrow your query by adding more filters so there is less than $limit matches")
+      if (matches.length > storeConfig.maxQueryMatches)
+        throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
+          s"to narrow your query by adding more filters so there is less than  matches " +
+          s"or request for increasing number of shards this metric lives in")
 
       // first find out which partitions are being queried for data not in memory
       val firstPartId = if (matches.isEmpty) None else Some(matches(0))
