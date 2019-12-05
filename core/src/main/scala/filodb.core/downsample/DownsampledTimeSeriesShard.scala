@@ -3,7 +3,6 @@ package filodb.core.downsample
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.FiniteDuration
 
-import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
@@ -37,6 +36,9 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
   val indexDataset = downsampledDatasetRefs(indexResolution)
 
+  // since all partitions are paged from store, this would be much lower than what is configured for raw data
+  val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
+
   private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
@@ -55,9 +57,9 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
                           endTime: Long,
                           startTime: Long,
                           limit: Int): Iterator[PartKey] = {
-    import filodb.core.Iterators._
-    partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-      .map( pId => PartKey(partKeyFromPartId(pId), UnsafeUtils.arayOffset), limit)
+    partKeyIndex.partIdsFromFilters(filter, startTime, endTime).iterator().take(limit).map { pId =>
+      PartKey(partKeyFromPartId(pId), UnsafeUtils.arayOffset)
+    }
   }
 
   def recoverIndex(): Future[Unit] = {
@@ -79,10 +81,12 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
       case FilteredPartitionScan(split, filters) =>
 
         if (filters.nonEmpty) {
-          val res = partKeyIndex.partIdsFromFilters2(filters,
+          val res = partKeyIndex.partIdsFromFilters(filters,
             chunkMethod.startTime,
             chunkMethod.endTime)
-          val _schema = Option(res.getFirstSetBit).filter(_ >= 0).map(schemaIDFromPartID)
+          val firstPartId = if (res.isEmpty) None else Some(res(0))
+
+          val _schema = firstPartId.map(schemaIDFromPartID)
           // send index result in the partsInMemory field of lookup
           PartLookupResult(shardNum, chunkMethod, res,
             _schema, debox.Map.empty[Int, Long], debox.Buffer.empty)
@@ -101,8 +105,13 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
-    import filodb.core.Iterators._
-    val partKeys = lookup.partsInMemory.intIterator().map(partKeyFromPartId, 10000) // TODO configure
+
+    if (lookup.partsInMemory.length > maxQueryMatches)
+      throw new IllegalArgumentException(s"Seeing ${lookup.partsInMemory.length} matching time series per shard. Try " +
+        s"to narrow your query by adding more filters so there is less than $maxQueryMatches matches " +
+        s"or request for increasing number of shards this metric lives in")
+
+    val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
         colStore.readRawPartitions(downsampledDataset,
@@ -145,15 +154,16 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   /**
     * Iterator for lazy traversal of partIdIterator, value for the given label will be extracted from the ParitionKey.
     */
-  case class LabelValueResultIterator(partIterator: IntIterator, labelNames: Seq[String], limit: Int)
+  case class LabelValueResultIterator(partIds: debox.Buffer[Int], labelNames: Seq[String], limit: Int)
     extends Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] {
     var currVal: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = _
-    var index = 0
+    var numResultsReturned = 0
+    var partIndex = 0
 
     override def hasNext: Boolean = {
       var foundValue = false
-      while(partIterator.hasNext && index < limit && !foundValue) {
-        val partId = partIterator.next()
+      while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
+        val partId = partIds(partIndex)
 
         import ZeroCopyUTF8String._
         //retrieve PartKey either from In-memory map or from PartKeyIndex
@@ -167,12 +177,13 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
           pair._1.utf8 -> pair._2.utf8
         }).toMap
         foundValue = currVal.nonEmpty
+        partIndex += 1
       }
       foundValue
     }
 
     override def next(): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
-      index += 1
+      numResultsReturned += 1
       currVal
     }
   }
