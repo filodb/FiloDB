@@ -50,7 +50,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
                      queryConfig: QueryConfig,
                      limit: Int,
                      sourceSchema: ResultSchema,
-                     paramResponse: Observable[ScalarRangeVector]): Observable[RangeVector] = {
+                     paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     val res = source.toListL.map { rvs =>
 

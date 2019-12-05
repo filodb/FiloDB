@@ -129,13 +129,7 @@ trait ExecPlan extends QueryCommand {
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchemaForTransformer)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-          val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty) {
-            Observable.empty
-          } else {
-            require(transf.funcParams.size == 1, "Only one funcParams exists")
-            transf.funcParams.head.getResult
-          }
-
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
