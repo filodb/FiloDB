@@ -1,5 +1,6 @@
 package filodb.core
 
+import scala.concurrent.duration._
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
@@ -240,8 +241,11 @@ object MachineMetricsData {
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(dataset1.schema, "series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
-  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
-    val builder = new RecordBuilder(MemFactory.onHeapFactory)
+  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0,
+              ingestionTimeMillis: Long = System.currentTimeMillis()): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory) {
+      override def currentTimeMillis: Long = ingestionTimeMillis
+    }
     stream.foreach { row =>
       builder.startNewRecord(ds.schema)
       row.foreach { thing => builder.addSlowly(thing) }
@@ -250,8 +254,16 @@ object MachineMetricsData {
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
   }
 
-  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5): Seq[SomeData] =
-    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map { case (group, i) => records(ds, group, i) }
+  /**
+    * @param ingestionTimeStep defines the ingestion time increment for each generated
+    * RecordContainer
+    */
+  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5,
+                     ingestionTimeStep: Long = 40000, ingestionTimeStart: Long = 0,
+                     offset: Int = 0): Seq[SomeData] =
+    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map {
+      case (group, i) => records(ds, group, offset + i, ingestionTimeStart + i * ingestionTimeStep)
+    }
 
   // Takes the partition key from stream record n, filtering the stream by only that partition,
   // then creates a ChunkSetStream out of it
@@ -275,14 +287,15 @@ object MachineMetricsData {
   }
 
   // Everything increments by 1 for simple predictability and testing
-  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000): Stream[Seq[Any]] = {
+  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000,
+                        seriesPrefix: String = "Series "): Stream[Seq[Any]] = {
     Stream.from(0).map { n =>
       Seq(startTs + n * timeStep,
          (1 + n).toDouble,
          (20 + n).toDouble,
          (99.9 + n).toDouble,
          (85 + n).toLong,
-         "Series " + (n % numSeries))
+         seriesPrefix + (n % numSeries))
     }
   }
 
@@ -385,7 +398,7 @@ object MachineMetricsData {
     val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
-    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH) }
+    container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histIngestBH, encode = true)
     (histData, RawDataRangeVector(null, part, AllChunkScan, Array(0, 3)))  // select timestamp and histogram columns only
@@ -399,7 +412,7 @@ object MachineMetricsData {
     val histData = histMax(linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets)).take(numSamples)
     val container = records(histMaxDS, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, histMaxDS, partKey=histPartKey, bufferPool=histMaxBP)
-    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH) }
+    container.iterate(histMaxDS.ingestionSchema).foreach { row => part.ingest(0, row, histMaxBH, 1.hour.toMillis) }
     // Now flush and ingest the rest to ensure two separate chunks
     part.switchBuffers(histMaxBH, encode = true)
     // Select timestamp, hist, max

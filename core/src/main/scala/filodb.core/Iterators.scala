@@ -7,6 +7,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 
+import com.googlecode.javaewah.IntIterator
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Ack, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.{Notification, Observable}
@@ -33,6 +34,16 @@ object Iterators extends StrictLogging {
         val (i1, i2) = iter.span(el => func(el) == firstValue)
         iter = i2
         (firstValue, Iterator.single(first) ++ i1)
+      }
+    }
+  }
+
+  implicit class IntIteratorMapper[T](intIterator: IntIterator) {
+    def map(f: Int => T, limit: Int): Iterator[T] = new Iterator[T] {
+      var currIndex: Int = 0
+      override def hasNext: Boolean = intIterator.hasNext && currIndex < limit
+      override def next(): T = {
+        currIndex += 1; f(intIterator.next())
       }
     }
   }

@@ -86,12 +86,15 @@ final case class MultiSchemaPartitionsExec(id: String,
                                s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName"
 
   // Print inner node's details for debugging
-  override def curNodeText(level: Int): String =
-    s"${super.curNodeText(level)}\n+Inner: ${Option(finalPlan).map(_.curNodeText(level)).getOrElse("None")}"
+  override def curNodeText(level: Int): String = {
+    val innerText = Option(finalPlan).map(e => s"Inner: + ${e.curNodeText(level + 1)}\n").getOrElse("")
+    s"${super.curNodeText(level)} $innerText"
+  }
 
   override protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
      Option(finalPlan).getOrElse(this).rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+       s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
+         printFunctionArgument(t, level + i + 1).mkString("\n")
     }
   }
 }

@@ -1,5 +1,7 @@
 package filodb.memory.format.vectors
 
+import java.nio.ByteBuffer
+
 import org.agrona.concurrent.UnsafeBuffer
 
 import filodb.memory.format._
@@ -14,7 +16,7 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.isAllNA shouldEqual true
     val reader = appender.reader.asInstanceOf[RowHistogramReader]
 
-    reader.length(appender.addr) shouldEqual 0
+    reader.length(acc, appender.addr) shouldEqual 0
     reader.numBuckets shouldEqual 0
     intercept[IllegalArgumentException] { reader(0) }
   }
@@ -46,7 +48,7 @@ class HistogramVectorTest extends NativeVectorTest {
       verifyHistogram(h, i)
     }
 
-    reader.iterate(0, 0).asInstanceOf[Iterator[Histogram]]
+    reader.iterate(acc, 0, 0).asInstanceOf[Iterator[Histogram]]
           .zipWithIndex.foreach { case (h, i) => verifyHistogram(h, i) }
   }
 
@@ -86,7 +88,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     val optimized = appender.optimize(memFactory)
     val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
-    optReader.length(optimized) shouldEqual rawHistBuckets.length
+    optReader.length(acc, optimized) shouldEqual rawHistBuckets.length
     (0 until rawHistBuckets.length).foreach { i =>
       val h = optReader(i)
       verifyHistogram(h, i)
@@ -99,6 +101,43 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.reset()
     appender.length shouldEqual 0
   }
+
+
+  it("should be able to read from on-heap Histogram Vector") {
+    val appender = HistogramVector.appending(memFactory, 1024)
+    rawLongBuckets.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(bucketScheme, rawBuckets, buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual rawHistBuckets.length
+
+    val reader = appender.reader.asInstanceOf[RowHistogramReader]
+    reader.length shouldEqual rawHistBuckets.length
+
+    (0 until rawHistBuckets.length).foreach { i =>
+      val h = reader(i)
+      verifyHistogram(h, i)
+    }
+
+    val optimized = appender.optimize(memFactory)
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+
+    val bytes = optReader.toBytes(acc, optimized)
+
+    val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+      MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+    onHeapAcc.foreach { a =>
+      val readerH = HistogramVector(a, 0)
+      (0 until rawHistBuckets.length).foreach { i =>
+        val h = readerH(i)
+        verifyHistogram(h, i)
+      }
+    }
+  }
+
 
   val lastIncrHist = LongHistogram(bucketScheme, incrHistBuckets.last.map(_.toLong))
 
@@ -121,16 +160,16 @@ class HistogramVectorTest extends NativeVectorTest {
 
     val optimized = appender.optimize(memFactory)
     val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
-    optReader.length(optimized) shouldEqual incrHistBuckets.length
+    optReader.length(acc, optimized) shouldEqual incrHistBuckets.length
     (0 until incrHistBuckets.length).foreach { i =>
       val h = optReader(i)
       verifyHistogram(h, i, incrHistBuckets)
     }
 
     val oReader2 = optReader.asInstanceOf[CounterHistogramReader]
-    oReader2.updateCorrection(optimized, NoCorrection) shouldEqual
+    oReader2.updateCorrection(acc, optimized, NoCorrection) shouldEqual
       HistogramCorrection(lastIncrHist, LongHistogram.empty(bucketScheme))
-    oReader2.updateCorrection(optimized, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+    oReader2.updateCorrection(acc, optimized, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
       HistogramCorrection(lastIncrHist, correction1)
   }
 
@@ -149,7 +188,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
     val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
     // One normal section, one dropped section
-    reader.iterateSections.toSeq.map(_.sectionType) shouldEqual Seq(SectionType(0), SectionType(1))
+    reader.iterateSections.toSeq.map(_.sectionType(acc)) shouldEqual Seq(SectionType(0), SectionType(1))
 
     (0 until incrHistBuckets.length).foreach { i =>
       verifyHistogram(reader(i), i, incrHistBuckets)
@@ -157,11 +196,11 @@ class HistogramVectorTest extends NativeVectorTest {
     }
 
     // Now, verify updateCorrection will propagate correction correctly
-    reader.updateCorrection(appender.addr, NoCorrection) shouldEqual
+    reader.updateCorrection(acc, appender.addr, NoCorrection) shouldEqual
       HistogramCorrection(lastIncrHist, lastIncrHist)
     val corr2 = correction1.copy
     corr2.add(lastIncrHist)
-    reader.updateCorrection(appender.addr, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
+    reader.updateCorrection(acc, appender.addr, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
       HistogramCorrection(lastIncrHist, corr2)
   }
 
@@ -235,17 +274,17 @@ class HistogramVectorTest extends NativeVectorTest {
   val incrReader = incrAppender.reader.asInstanceOf[CounterHistogramReader]
 
   it("should detect drop correctly at beginning of chunk and adjust CorrectionMeta") {
-    incrReader.detectDropAndCorrection(incrAddr, NoCorrection) shouldEqual NoCorrection
+    incrReader.detectDropAndCorrection(acc, incrAddr, NoCorrection) shouldEqual NoCorrection
 
     // No drop in first value, correction should be returned unchanged
     val meta1 = HistogramCorrection(correction1, correction2.copy)
-    incrReader.detectDropAndCorrection(incrAddr, meta1) shouldEqual meta1
+    incrReader.detectDropAndCorrection(acc, incrAddr, meta1) shouldEqual meta1
 
     // Drop in first value, correction should be done
     val meta2 = HistogramCorrection(lastIncrHist, correction2.copy)
     val corr3 = correction2.copy
     corr3.add(lastIncrHist)
-    incrReader.detectDropAndCorrection(incrAddr, meta2) shouldEqual
+    incrReader.detectDropAndCorrection(acc, incrAddr, meta2) shouldEqual
       HistogramCorrection(lastIncrHist, corr3)
   }
 

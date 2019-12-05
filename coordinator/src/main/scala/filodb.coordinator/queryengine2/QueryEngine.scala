@@ -14,10 +14,11 @@ import monix.execution.Scheduler
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{DatasetRef, SpreadProvider}
+import filodb.core.{DatasetRef}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.SpreadProvider
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query.{exec, _}
@@ -112,6 +113,7 @@ class QueryEngine(dsRef: DatasetRef,
     val querySpreadProvider = options.spreadProvider.getOrElse(spreadProvider)
 
     if (!QueryRoutingPlanner.isPeriodicSeriesPlan(rootLogicalPlan) || // It is a raw data query
+       (!rootLogicalPlan.isRoutable) ||
       !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams] &&
         !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
@@ -248,6 +250,13 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(queryId, submitTime, options, lp,
+                                              spreadProvider)
+      case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
+      case _                               => throw new BadQueryException("Invalid logical plan")
+
     }
   }
 
@@ -257,7 +266,8 @@ class QueryEngine(dsRef: DatasetRef,
                                            lp: ScalarVectorBinaryOperation,
                                            spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalar, lp.scalarIsLhs)))
+    val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), queryId, submitTime, options, spreadProvider)
+    vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
     vectors
   }
 
@@ -329,7 +339,8 @@ class QueryEngine(dsRef: DatasetRef,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction, spreadProvider : SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
+    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
     vectors
   }
 
@@ -340,8 +351,9 @@ class QueryEngine(dsRef: DatasetRef,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), lp.functionArgs)))
+      lp.end, Some(lp.window), Some(execRangeFn), paramsExec)))
     rawSeries
   }
 
@@ -446,8 +458,44 @@ class QueryEngine(dsRef: DatasetRef,
                                                     lp: ApplyMiscellaneousFunction,
                                                     spreadProvider: SpreadProvider): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
-    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.functionArgs)))
+    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
     vectors
+  }
+
+  private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
+                                      queryId: String,
+                                      submitTime: Long,
+                                      options: QueryOptions,
+                                      spreadProvider: SpreadProvider): Seq[FuncArgs] = {
+    if (functionParams.isEmpty){
+      Nil
+    } else {
+      functionParams.map { param =>
+        param match {
+          case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
+          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(generateLocalExecPlan(s, queryId, submitTime, options,
+                                             spreadProvider), s.timeStepParams)
+          case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
+          case _                          => throw new UnsupportedOperationException("Invalid logical plan")
+        }
+      }
+    }
+  }
+
+  private def materializeScalarPlan(queryId: String, submitTime: Long,
+                                    options: QueryOptions,
+                                    lp: ScalarVaryingDoublePlan,
+                                    spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+        if (vectors.plans.length > 1) {
+          val targetActor = pickDispatcher(vectors.plans)
+          val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+          topPlan.addRangeVectorTransformer((ScalarFunctionMapper(lp.function, lp.timeStepParams)))
+          PlanResult(Seq(topPlan), vectors.needsStitch)
+        } else {
+          vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.timeStepParams)))
+          vectors
+        }
   }
 
   private def materializeApplySortFunction(queryId: String,
@@ -467,7 +515,36 @@ class QueryEngine(dsRef: DatasetRef,
     }
   }
 
-  /**
+  private def materializeScalarTimeBased(queryId: String,
+                                         submitTime: Long,
+                                         options: QueryOptions,
+                                         lp: ScalarTimeBasedPlan,
+                                         spreadProvider: SpreadProvider): PlanResult = {
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(queryId, dsRef, lp.rangeParams, lp.function,
+      options.sampleLimit)
+    PlanResult(Seq(scalarTimeBasedExec), false)
+  }
+
+  private def materializeVectorPlan(queryId: String,
+                                   submitTime: Long,
+                                   options: QueryOptions,
+                                   lp: VectorPlan, spreadProvider : SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.scalars, queryId, submitTime, options, spreadProvider)
+    vectors.plans.foreach(_.addRangeVectorTransformer(VectorFunctionMapper()))
+    vectors
+  }
+
+  private def materializeFixedScalar(queryId: String,
+                                     submitTime: Long,
+                                     options: QueryOptions,
+                                     lp: ScalarFixedDoublePlan,
+                                     spreadProvider: SpreadProvider): PlanResult = {
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(queryId, dsRef, lp.timeStepParams, lp.scalar,
+      options.sampleLimit)
+    PlanResult(Seq(scalarFixedDoubleExec), false)
+  }
+
+    /**
    * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
    * if it is not the prometheus standard
    */

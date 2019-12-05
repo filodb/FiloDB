@@ -86,9 +86,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   // Used only for testing
   private def createDataset(originator: ActorRef,
-                            datasetObj: Dataset): Unit = {
+                            datasetObj: Dataset,
+                            numShards: Int): Unit = {
     (for {
-      resp2 <- memStore.store.initialize(datasetObj.ref) if resp2 == Success
+      resp2 <- memStore.store.initialize(datasetObj.ref, numShards) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
@@ -99,7 +100,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
-    memStore.store.initialize(dataset.ref)
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards)
     setupDataset( dataset,
                   ingestConfig.storeConfig,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
@@ -107,9 +108,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
-  private def truncateDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
+  private def truncateDataset(originator: ActorRef, dataset: DatasetRef, numShards: Int): Unit = {
     try {
-      memStore.truncate(dataset).map {
+      memStore.truncate(dataset, numShards).map {
         case Success    => originator ! DatasetTruncated
         case other: Any => originator ! ServerError(other)
       }
@@ -160,12 +161,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def datasetHandlers: Receive = LoggingReceive {
-    case CreateDataset(datasetObj, db) =>
+    case CreateDataset(numShards, datasetObj, db) =>
       // used only for unit testing now
-      createDataset(sender(), datasetObj)
+      createDataset(sender(), datasetObj, numShards)
 
-    case TruncateDataset(ref) =>
-      truncateDataset(sender(), ref)
+    case TruncateDataset(ref, numShards) =>
+      truncateDataset(sender(), ref, numShards)
   }
 
   def ingestHandlers: Receive = LoggingReceive {
@@ -192,7 +193,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+    case s: ShardIngestionState       => logger.trace(s"Received IngestionState/Snapshot ${s.map}")
                                          shardMaps.put(s.ref, s.map)
                                          forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)

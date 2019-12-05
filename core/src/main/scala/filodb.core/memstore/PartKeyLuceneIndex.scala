@@ -5,6 +5,7 @@ import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
+import scala.concurrent.duration.FiniteDuration
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -18,6 +19,7 @@ import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
+import org.apache.lucene.util.automaton.RegExp
 import scalaxy.loops._
 
 import filodb.core.{concurrentCache, DatasetRef}
@@ -27,7 +29,6 @@ import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
-import filodb.core.store.StoreConfig
 import filodb.memory.{BinaryRegionLarge, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
@@ -67,8 +68,9 @@ final case class TermInfo(term: UTF8Str, freq: Int)
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
                          shardNum: Int,
-                         storeConfig: StoreConfig,
-                         diskLocation: Option[File] = None) extends StrictLogging {
+                         retention: FiniteDuration, // only used to calculate fallback startTime
+                         diskLocation: Option[File] = None
+                         ) extends StrictLogging {
 
   import PartKeyLuceneIndex._
 
@@ -95,10 +97,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   //scalastyle:on
 
   //start this thread to flush the segments and refresh the searcher every specific time period
-  private val flushThread = new ControlledRealTimeReopenThread(indexWriter,
-                                                               searcherManager,
-                                                               storeConfig.partIndexFlushMaxDelaySeconds,
-                                                               storeConfig.partIndexFlushMinDelaySeconds)
+  private var flushThread: ControlledRealTimeReopenThread[IndexSearcher] = _
   private val luceneDocument = new ThreadLocal[Document]()
 
   private val mapConsumer = new MapItemConsumer {
@@ -147,7 +146,12 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     indexWriter.commit()
   }
 
-  def startFlushThread(): Unit = {
+  def startFlushThread(flushDelayMinSeconds: Int, flushDelayMaxSeconds: Int): Unit = {
+
+    flushThread = new ControlledRealTimeReopenThread(indexWriter,
+                                                    searcherManager,
+                                                    flushDelayMaxSeconds,
+                                                    flushDelayMinSeconds)
     flushThread.start()
     logger.info(s"Started flush thread for lucene index on dataset=$ref shard=$shardNum")
   }
@@ -200,7 +204,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def closeIndex(): Unit = {
     logger.info(s"Closing index on dataset=$ref shard=$shardNum")
-    flushThread.close()
+    if (flushThread != UnsafeUtils.ZeroPointer) flushThread.close()
     indexWriter.close()
   }
 
@@ -407,7 +411,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
                                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     var startTime = startTimeFromPartId(partId) // look up index for old start time
     if (startTime == NOT_FOUND) {
-      startTime = System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis
+      startTime = System.currentTimeMillis() - retention.toMillis
       logger.warn(s"Could not find in Lucene startTime for partId=$partId in dataset=$ref. Using " +
         s"$startTime instead.", new IllegalStateException()) // assume this time series started retention period ago
     }
@@ -431,13 +435,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val term = new Term(column, value.toString)
-        new RegexpQuery(term)
+        new RegexpQuery(term, RegExp.NONE)
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
         booleanQuery.add(allDocs, Occur.FILTER)
-        booleanQuery.add(new RegexpQuery(term), Occur.MUST_NOT)
+        booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
         val term = new Term(column, value.toString)
