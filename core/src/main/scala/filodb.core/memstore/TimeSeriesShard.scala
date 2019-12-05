@@ -667,7 +667,10 @@ class TimeSeriesShard(val ref: DatasetRef,
                           startTime: Long,
                           limit: Int): Iterator[PartKey] = {
     val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    InMemPartitionIterator2(partIds).take(limit).map { p => PartKey(p.partKeyBase, p.partKeyOffset) }
+    val inMem = InMemPartitionIterator2(partIds)
+    val inMemPartKeys = inMem.map { p => PartKey(p.partKeyBase, p.partKeyOffset) }
+    val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partKeyFromPartId)
+    (inMemPartKeys ++ skippedPartKeys).take(limit)
   }
 
   /**
