@@ -352,23 +352,21 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             sourceSchema: ResultSchema,
             paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
 
-    val resultRv = source.toListL.map { rvs =>
-      if (rvs.isEmpty) {
+    val resultRv = source.countL.map { l =>
+      if (l == 0) {
         Seq(new RangeVector {
           override def key: RangeVectorKey = {
             val labelsFromFilter = columnFilter.filter(_.filter.isInstanceOf[Equals]).
-              filterNot(_.column.equals(metricColumn)).map {
-              c => {
+              filterNot(_.column.equals(metricColumn)).map { c =>
                 ZeroCopyUTF8String(c.column) -> ZeroCopyUTF8String(c.filter.valuesStrings.head.asInstanceOf[String])
-              }
-            }.toMap
+              }.toMap
             CustomRangeVectorKey(labelsFromFilter)
           }
 
           override def rows: Iterator[RowReader] = {
             val rowList = new ListBuffer[TransientRow]()
             for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
-              rowList += new TransientRow(i*1000, 1)
+              rowList += new TransientRow(i * 1000, 1)
             }
             rowList.iterator
           }
