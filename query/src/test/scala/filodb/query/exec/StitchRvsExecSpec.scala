@@ -1,7 +1,8 @@
 package filodb.query.exec
 
-import scala.annotation.tailrec
+import filodb.core.query.TransientRow
 
+import scala.annotation.tailrec
 import org.scalatest.{FunSpec, Matchers}
 
 // scalastyle:off null

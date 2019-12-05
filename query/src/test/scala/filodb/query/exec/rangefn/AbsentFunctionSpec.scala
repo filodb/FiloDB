@@ -4,9 +4,8 @@ package filodb.query.exec.rangefn
 import com.typesafe.config.{Config, ConfigFactory}
 import filodb.core.MetricsTestData
 import filodb.core.query.Filter.{Equals, NotEqualsRegex}
-import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, RangeParams, RangeVector, RangeVectorKey, ResultSchema}
+import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.exec.TransientRow
 import filodb.query.{QueryConfig, exec}
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable

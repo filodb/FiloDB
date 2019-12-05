@@ -427,11 +427,11 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
-Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
+Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using a `::columnName` suffix in the metric name, like this request which pulls out the "min" column:
 
-    http_req_timer{_ws_="demo", _ns_="foo",__col__="min"}
+    http_req_timer::min{_ws_="demo", _ns_="foo"}
 
-By default if `__col__` is not specified then the `value-column` option of each data schema is used.
+By default if `::col` suffix is not specified then the `value-column` option of each data schema is used.
 
 Some special functions exist to aid debugging and for other purposes:
 
@@ -450,11 +450,10 @@ Example of debugging chunk metadata using the CLI:
 One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds (up to two orders of magnitude).  There is no "le" tag or individual time series for each bucket.  Here are the differences users need to be aware of when using `HistogramColumn`:
 
 * There is no need to append `_bucket` to the metric name.
-* However, you need to select the histogram column like `__col__="hist"`
-* To compute quantiles:  `histogram_quantile(0.7, sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))`
-* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo",__col__="hist"})`
-* Sum over multiple Histogram time series:  `sum(sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))` - you could then compute quantile over the sum.
-  - NOTE: Do NOT use `group by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
+* To compute quantiles:  `histogram_quantile(0.7, sum(rate(http_req_latency{app="foo"}[5m])))`
+* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo"})`
+* Sum over multiple Histogram time series:  `sum(rate(http_req_latency{app="foo"}[5m]))` - you could then compute quantile over the sum.
+  - NOTE: Do NOT use `by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
 
 FiloDB offers an improved accuracy `histogram_max_quantile` function designed to work with a max column from the source.  If clients are able to send the max value captured during a window, then we can report more accurate upper quantiles (ie 99%, 99.9%, etc.) that do not suffer from clipping.

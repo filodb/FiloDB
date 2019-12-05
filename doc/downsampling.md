@@ -120,11 +120,8 @@ downsampler on the downsampled dataset.
 
 ## Querying of Downsample Data
  
-Downsampled data for individual time series can be queried from the downsampled dataset. The PromQL
-filters in the query needs to include the `__col__` tag with the value of the downsample column name
-chosen in the downsample dataset. For example `heap_usage{_ws_="demo",_ns_="myApp" __col__="avg"}`
-
-Coming soon in subsequent PR: Automatic selection of column based on the time window function applied in the query.
+Downsampled data for individual time series can be queried from the downsampled dataset. The downsampled dataset schema varies by schema type.  For gauges, the min, max, sum, count, and avergage are computed and stored in separate columns in the `ds-gauge` schema. The FiloDB Query Engine automatically translates queries to select the right column under the hood.
+For example `min_over_time(heap_usage{_ws_="demo",_ns_="myApp"})` is roughly converted to something like `heap_usage::min{_ws_="demo",_ns_="myApp"}`.
 
 ## Validation of Downsample Results
 
@@ -132,13 +129,14 @@ Run main class [filodb.prom.downsample.GaugeDownsampleValidator](../http/src/tes
 
 ```
 -Dquery-endpoint=https://myFiloDbEndpoint.com
--Draw-data-promql=jvm_threads{_ws_=\"demo\",_ns_=\"myApplication\",measure=\"daemon\",__col__=\"value\"}[@@@@s]
+-Draw-data-promql=jvm_threads::value{_ws_=\"demo\",_ns_=\"myApplication\",measure=\"daemon\"}[@@@@s]
 -Dflush-interval=12h
 -Dquery-range=6h
 ```
 
 Notes:
-* `raw-data-promql` system property value should end with `,__col__="value"}[@@@@s]`.
+* `raw-data-promql` system property value should end with `[@@@@s]`.
+* `raw-data-promql` needs to have `::value` column selector suffix at end of metric name as it gets replaced with diff column names
 * The lookback window `@@@@` is replaced with downsample period by validation tool when running the query.
 
 This will perform validation of min, max, sum and count downsamplers by issuing same query to both datasets

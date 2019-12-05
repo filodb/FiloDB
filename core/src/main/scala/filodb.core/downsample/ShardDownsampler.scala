@@ -85,11 +85,12 @@ class ShardDownsampler(datasetName: String,
         .withTag("dataset", datasetName)
         .withTag("shard", shardNum).start()
       while (chunksets.hasNext) {
-        val chunkset = chunksets.nextInfo
+        val chunkset = chunksets.nextInfoReader
         val startTime = chunkset.startTime
         val endTime = chunkset.endTime
-        val tsPtr = chunkset.vectorPtr(0)
-        val tsReader = part.chunkReader(0, tsPtr).asLongReader
+        val tsPtr = chunkset.vectorAddress(0)
+        val tsAcc = chunkset.vectorAccessor(0)
+        val tsReader = part.chunkReader(0, tsAcc, tsPtr).asLongReader
         // for each downsample resolution
         records.foreach { case DownsampleRecords(resolution, builder) =>
           var pStart = ((startTime - 1) / resolution) * resolution + 1 // inclusive startTime for downsample period
@@ -97,8 +98,8 @@ class ShardDownsampler(datasetName: String,
           // for each downsample period
           while (pStart <= endTime) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
-            val startRowNum = tsReader.binarySearch(tsPtr, pStart) & 0x7fffffff
-            val endRowNum = Math.min(tsReader.ceilingIndex(tsPtr, pEnd), chunkset.numRows - 1)
+            val startRowNum = tsReader.binarySearch(tsAcc, tsPtr, pStart) & 0x7fffffff
+            val endRowNum = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, pEnd), chunkset.numRows - 1)
             builder.startNewRecord(targetSchema)
             // for each downsampler, add downsample column value
             downsamplers.foreach {

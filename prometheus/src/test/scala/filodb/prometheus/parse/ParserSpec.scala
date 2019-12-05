@@ -145,7 +145,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("foo{a*\"b\"}")
     parseError("foo{a>=\"b\"}")
 
-    parseError("foo{gibberish}")
+    parseError("foo::b{gibberish}")
     parseError("foo{1}")
     parseError("{}")
     parseError("{x=\"\"}")
@@ -243,14 +243,26 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
+      "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false)",
+      "time()" -> "ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988))",
+      "hour()" -> "ScalarTimeBasedPlan(Hour,RangeParams(1524855988,1000,1524855988))",
+      "scalar(http_requests_total)" -> "ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List())",
+      "scalar(http_requests_total) + node_info" ->
+        "ScalarVectorBinaryOperation(ADD,ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List()),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(node_info))),List()),1524855988000,1000000,1524855988000),true)",
+      "10 + http_requests_total" -> "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true)",
+      "vector(3)" -> "VectorPlan(ScalarFixedDoublePlan(3.0,RangeParams(1524855988,1000,1524855988)))",
+      "vector(scalar(http_requests_total))" -> "VectorPlan(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List()))",
+      "scalar(http_requests_total)" -> "ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List())",
       "10 + http_requests_total * 5" ->
-        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
       "10 + (http_requests_total * 5)" ->
-        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),false),true)",
       "(10 + http_requests_total) * 5" ->
-        "ScalarVectorBinaryOperation(MUL,5.0,ScalarVectorBinaryOperation(ADD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+        "ScalarVectorBinaryOperation(MUL,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
+      "topk(5, http_requests_total::foo)" ->
+        "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(foo)),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
       "stdvar(http_requests_total)" ->
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -265,6 +277,8 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
         "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
+      "http_requests_total::sum{job=\"prometheus\"}[5m]" ->
+        "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(sum))",
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000)",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
@@ -295,17 +309,19 @@ class ParserSpec extends FunSpec with Matchers {
       "changes(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List())",
       "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], 0.4)" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(0.4))",
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarFixedDoublePlan(0.4,RangeParams(1524855988,1000,1524855988))))",
+      "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], Scalar(http_requests_total))" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Scalar,RangeParams(1524855988,1000,1524855988),List())))",
+       "label_replace(http_requests_total,instance,new-label,instance,\"(.*)-(.*)\")" -> "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),LabelReplace,List(instance, new-label, instance, (.*)-(.*)))",
       "holt_winters(http_requests_total{job=\"api-server\"}[5m], 0.01, 0.1)" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(0.01, 0.1))",
-
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(ScalarFixedDoublePlan(0.01,RangeParams(1524855988,1000,1524855988)), ScalarFixedDoublePlan(0.1,RangeParams(1524855988,1000,1524855988))))",
 
      // Binary Expressions should generate Logical Plan according to precedence
      // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets which are according to precedence
       "(10 % http_requests_total) + 5" ->
-        "ScalarVectorBinaryOperation(ADD,5.0,ScalarVectorBinaryOperation(MOD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MOD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
       "10 % http_requests_total + 5" ->
-        "ScalarVectorBinaryOperation(ADD,5.0,ScalarVectorBinaryOperation(MOD,10.0,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
+        "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MOD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",
 
       "(http_requests_total % http_requests_total) + http_requests_total" ->
         "BinaryJoin(BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),MOD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List()),ADD,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
@@ -332,9 +348,9 @@ class ParserSpec extends FunSpec with Matchers {
       "bar + on(foo) (bla / on(baz, buz) group_right(test) blub)" -> "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(baz, buz),List(),List(test)),List(foo),List(),List())",
       "bar + on(foo) bla / on(baz, buz) group_right(test) blub" -> "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bar))),List()),1524855988000,1000000,1524855988000),ADD,OneToOne,BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(bla))),List()),1524855988000,1000000,1524855988000),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(blub))),List()),1524855988000,1000000,1524855988000),List(baz, buz),List(),List(test)),List(foo),List(),List())",
       "sort(http_requests_total)" ->
-        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Sort,List())",
+        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),Sort)",
       "sort_desc(http_requests_total)" ->
-        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),SortDesc,List())",
+        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),SortDesc)",
       "absent(http_requests_total{host=\"api-server\"})" ->"ApplyAbsentFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(ColumnFilter(host,Equals(api-server))),RangeParams(1524855988,1000,1524855988),List())"
     )
 

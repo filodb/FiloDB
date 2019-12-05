@@ -2,7 +2,7 @@ package filodb.query.exec
 
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.ResultSchema
+import filodb.core.query.{ResultSchema, TransientRow}
 import filodb.query.exec.rangefn.{RangeFunction, RawDataWindowingSpec}
 
 /**

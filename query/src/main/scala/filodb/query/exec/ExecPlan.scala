@@ -14,7 +14,7 @@ import filodb.core.DatasetRef
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, RangeVector, ResultSchema, SerializableRangeVector}
+import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.query._
@@ -115,7 +115,6 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
-
       FiloSchedulers.assertThreadName(QuerySchedName)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resSchemaForTransformer = if ((allTransformers.size > 0 &&
@@ -130,10 +129,17 @@ trait ExecPlan extends QueryCommand {
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchemaForTransformer)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-          (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(acc._2))
+          val paramRangeVector: Observable[ScalarRangeVector] = if (transf.funcParams.isEmpty) {
+            Observable.empty
+          } else {
+            require(transf.funcParams.size == 1, "Only one funcParams exists")
+            transf.funcParams.head.getResult
+          }
+
+          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
         }
-        val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
-        val builder = SerializableRangeVector.newBuilder()
+        val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
+        val builder = SerializedRangeVector.newBuilder()
         var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
           .map {
@@ -146,7 +152,7 @@ trait ExecPlan extends QueryCommand {
               srv
             case rv: RangeVector =>
               // materialize, and limit rows per RV
-              val srv = SerializableRangeVector(rv, builder, recSchema, printTree(false))
+              val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > limit)
@@ -158,7 +164,7 @@ trait ExecPlan extends QueryCommand {
           .toListL
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
-            SerializableRangeVector.queryResultBytes.record(numBytes)
+            SerializedRangeVector.queryResultBytes.record(numBytes)
             if (numBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
@@ -188,6 +194,7 @@ trait ExecPlan extends QueryCommand {
           qResult <- step2(res) }
     yield { qResult }
   }
+
 
   /**
     * Sub classes should override this method to provide a concrete
@@ -225,7 +232,7 @@ trait ExecPlan extends QueryCommand {
     s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
 
   final def getPlan(level: Int = 0): Seq[String] = {
-    val transf = printRangeVectorTransformersForLevel(level)
+    val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n"))
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
@@ -234,7 +241,22 @@ trait ExecPlan extends QueryCommand {
 
   protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
      rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})"
+      s"${"-" * (level + i)}T~${t.getClass.getSimpleName}(${t.args})" +
+       printFunctionArgument(t, level + i + 1).mkString("\n")
+    }
+  }
+
+  protected def printFunctionArgument(rvt: RangeVectorTransformer, level: Int) = {
+    if (rvt.funcParams.isEmpty) {
+      Seq("")
+    } else {
+      rvt.funcParams.zipWithIndex.map { case (f, i) =>
+        val prefix = s"\n${"-" * (level)}FA${i + 1}~"
+        f match {
+          case e: ExecPlanFuncArgs => prefix + "\n" + e.execPlan.printTree(true, level)
+          case _                   => prefix + f.toString
+        }
+      }
     }
   }
 
@@ -255,6 +277,60 @@ trait ExecPlan extends QueryCommand {
 
 abstract class LeafExecPlan extends ExecPlan {
   final def children: Seq[ExecPlan] = Nil
+}
+
+/**
+  * Function Parameter for RangeVectorTransformer
+  * getResult will get the ScalarRangeVector for the FuncArg
+  */
+sealed trait FuncArgs {
+  def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarRangeVector]
+}
+
+/**
+  * FuncArgs for ExecPlan
+  */
+final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
+
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
+    Observable.fromTask(execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
+      qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
+      QueryError(execPlan.id, ex)
+    }.map {
+      case (QueryResult(_, _, result))  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
+                                            if (result.isEmpty) {
+                                              ScalarFixedDouble(timeStepParams, Double.NaN)
+                                            } else {
+                                              result.head match {
+                                                case f: ScalarFixedDouble   => f
+                                                case s: ScalarVaryingDouble => s
+                                              }
+                                            }
+      case (QueryError(_, ex))          =>  throw ex
+    })
+  }
+
+  override def toString: String = execPlan.printTree() + "\n"
+}
+
+/**
+  * FuncArgs for scalar parameter
+  */
+final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
+    Observable.now(
+     new ScalarFixedDouble(timeStepParams, scalar))
+  }
+}
+
+/**
+  * FuncArgs for date and time functions
+  */
+final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
+  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
+    Observable.now(
+      new TimeScalar(timeStepParams))
+  }
 }
 
 abstract class NonLeafExecPlan extends ExecPlan {

@@ -1,6 +1,7 @@
 package filodb.downsampler
 
 import com.typesafe.scalalogging.StrictLogging
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
 /**
@@ -28,19 +29,33 @@ import org.apache.spark.sql.SparkSession
   * Since we query for a broader ingestionTime, it will include data arriving early/late by 2 hours.
   *
   */
-object DownsamplerMain extends App with StrictLogging with Serializable {
+object DownsamplerMain extends App {
+
+  val d = new Downsampler
+  val sparkConf = new SparkConf(loadDefaults = true)
+  d.run(sparkConf)
+  d.shutdown()
+}
+
+class Downsampler extends StrictLogging {
 
   import BatchDownsampler._
   import DownsamplerSettings._
 
   import java.time.Instant._
 
-  mainFunction()
+  def shutdown(): Unit = {
+    cassandraColStore.shutdown()
+  }
 
-  private def mainFunction() = {
+  // Gotcha!! Need separate function (Cannot be within body of a class)
+  // to create a closure for spark to serialize and move to executors.
+  // Otherwise, config values below were not being sent over.
+  def run(conf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
+      .config(conf)
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
@@ -50,11 +65,11 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
     // Generally disabled, defaults the period that just ended prior to now.
     // Specified during reruns for downsampling old data
     val userTimeInPeriod: Long = spark.sparkContext.getConf.get("spark.filodb.downsampler.userTimeOverride",
-      s"${System.currentTimeMillis() - chunkDuration}").toLong
+      s"${System.currentTimeMillis() - downsampleChunkDuration}").toLong
     // by default assume a time in the previous downsample period
 
-    val userTimeStart: Long = (userTimeInPeriod / chunkDuration) * chunkDuration
-    val userTimeEnd: Long = userTimeStart + chunkDuration
+    val userTimeStart: Long = (userTimeInPeriod / downsampleChunkDuration) * downsampleChunkDuration
+    val userTimeEnd: Long = userTimeStart + downsampleChunkDuration
     val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
 
@@ -65,7 +80,7 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
       s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
 
     val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
-    logger.info(s"Cassandra split size: ${splits.size}. We will have this may spark partitions. " +
+    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
       s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
 
     spark.sparkContext
@@ -73,18 +88,19 @@ object DownsamplerMain extends App with StrictLogging with Serializable {
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
         val rawDataSource = cassandraColStore
-        rawDataSource.getChunksByIngestionTimeRange(rawDatasetRef, splitIter,
-          ingestionTimeStart, ingestionTimeEnd,
-          userTimeStart, userTimeEnd, batchSize, batchTime).toIterator()
+        rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
+          splits = splitIter, ingestionTimeStart = ingestionTimeStart,
+          ingestionTimeEnd = ingestionTimeEnd,
+          userTimeStart = userTimeStart, userTimeEnd = userTimeEnd,
+          maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          batchSize = batchSize, batchTime = batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEnd)
       }
     spark.sparkContext.stop()
-    cassandraColStore.shutdown()
-
-    // TODO migrate index entries
 
     logger.info(s"Downsampling Driver completed successfully")
   }
+
 }

@@ -7,8 +7,9 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schemas
 import filodb.core.query._
-import filodb.core.store.{ChunkSetInfo, WindowedChunkIterator}
-import filodb.memory.format.{vectors => bv, _}
+import filodb.core.store.WindowedChunkIterator
+import filodb.memory.format._
+import filodb.memory.format.vectors.LongBinaryVector
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn._
@@ -25,7 +26,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
-                                       funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
+                                       funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
@@ -35,13 +36,15 @@ final case class PeriodicSamplesMapper(start: Long,
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
-    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
+    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId"
 
-
+ //scalastyle:off
+ // Method is longer than 50 lines
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
     if (step < queryConfig.minStepMs)
       throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
@@ -89,6 +92,7 @@ final case class PeriodicSamplesMapper(start: Long,
         }
     }
   }
+  //scalastyle:on
 
   // Transform source double or long to double schema
   override def schema(source: ResultSchema): ResultSchema = {
@@ -100,9 +104,14 @@ final case class PeriodicSamplesMapper(start: Long,
       source.copy(columns = source.columns.zipWithIndex.map {
         // Transform if its not a row key column
         case (ColumnInfo(name, ColumnType.LongColumn), i) if i >= source.numRowKeyColumns =>
-          ColumnInfo(name, ColumnType.DoubleColumn)
+          ColumnInfo("value", ColumnType.DoubleColumn)
         case (ColumnInfo(name, ColumnType.IntColumn), i) if i >= source.numRowKeyColumns =>
           ColumnInfo(name, ColumnType.DoubleColumn)
+        // For double columns, just rename the output so that it's the same no matter source schema.
+        // After all after applying a range function, source column doesn't matter anymore
+        // NOTE: we only rename if i is 1 or second column.  If its 2 it might be max which cannot be renamed
+        case (ColumnInfo(name, ColumnType.DoubleColumn), i) if i == 1 =>
+          ColumnInfo("value", ColumnType.DoubleColumn)
         case (c: ColumnInfo, _) => c
       }, fixedVectorLen = Some(((end - start) / step).toInt + 1))
     }
@@ -145,18 +154,17 @@ extends Iterator[R] with StrictLogging {
 
     wit.nextWindow()
     while (wit.hasNext) {
-      val queryInfo = wit.next
-      val nextInfo = ChunkSetInfo(queryInfo.infoPtr)
+      val nextInfo = wit.next
       try {
-        rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
+        rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
+                                nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
                                 wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
       } catch {
         case e: Exception =>
-          val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
-          val tsReader = bv.LongBinaryVector(timestampVector)
+          val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-                       s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} " +
-                       s"tsReader=$tsReader timestampVectorLength=${tsReader.length(timestampVector)}")
+                    s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+                    s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)}")
           throw e
       }
     }

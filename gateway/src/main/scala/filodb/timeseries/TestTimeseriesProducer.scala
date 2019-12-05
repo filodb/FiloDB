@@ -82,7 +82,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val rawSamplesUrl = s"http://localhost:8080/promql/prometheus/api/v1/query?query=$rawSamplesQ&time=$endQuery"
     logger.info(s"Raw Samples query URL: \n$rawSamplesUrl")
 
-    val downsampledQ = URLEncoder.encode("""heap_usage{dc="DC0",_ws_="demo",_ns_="App-0",__col__="sum"}[2m]""",
+    val downsampledQ = URLEncoder.encode("""heap_usage::sum{dc="DC0",_ws_="demo",_ns_="App-0"}[2m]""",
       StandardCharsets.UTF_8.toString)
     val downsampledSamplesUrl = s"http://localhost:8080/promql/prometheus_ds_1m/api/v1/query?" +
       s"query=$downsampledQ&time=$endQuery"

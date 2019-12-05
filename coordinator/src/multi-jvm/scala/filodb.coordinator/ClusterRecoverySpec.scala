@@ -155,7 +155,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, schema, vectors) =>
         schema.columns shouldEqual Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn),
-                                       ColumnInfo("AvgTone", ColumnType.DoubleColumn))
+                                       ColumnInfo("value", ColumnType.DoubleColumn))
         // query is counting each partition....
         vectors should have length (59 * 2)
         // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)

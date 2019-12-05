@@ -5,12 +5,10 @@ import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.MetricsTestData
-import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
+import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
-import filodb.query.exec.TransientRow
 
 class LableJoinSpec extends FunSpec with Matchers with ScalaFutures {
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")

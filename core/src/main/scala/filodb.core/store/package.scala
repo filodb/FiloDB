@@ -16,7 +16,7 @@ package object store {
   private val ingestionTimeMask = (1 << startTimeShift) - 1
 
   // Inclusive minumum allowed user time for chunk ids.
-  val minChunkUserTime = 0 // 1970
+  val minChunkUserTime = 0L // 1970
 
   // Inclusive maximum allowed user time for chunk ids.
   val maxChunkUserTime = (java.lang.Long.MAX_VALUE << startTimeShift) >>> startTimeShift // 2109
@@ -109,7 +109,8 @@ package object store {
    * @param ingestionTime seconds since 1970
    */
   final def chunkID(startTime: Long, ingestionTime: Long): Long = {
-    require(minChunkUserTime <= startTime && startTime <= maxChunkUserTime)
+    require(minChunkUserTime <= startTime && startTime <= maxChunkUserTime,
+      s"Invalid startTime startTime=$startTime minChunkUserTime=$minChunkUserTime maxChunkUserTime=$maxChunkUserTime")
     (1L << 63) ^ (startTime << startTimeShift) | Math.floorMod(ingestionTime, (48 * 24 * 60 * 60L))
   }
 

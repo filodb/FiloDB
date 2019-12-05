@@ -192,6 +192,8 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    // PSM should rename the double column to value always
+    result.resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
     result.result.size shouldEqual 1
     val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyKVWithMetric
@@ -294,7 +296,6 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     // Check that the "inner" SelectRawPartitionsExec has the right schema/columnIDs
     execPlan.finalPlan shouldBe a[SelectRawPartitionsExec]
     execPlan.finalPlan.asInstanceOf[SelectRawPartitionsExec].colIds shouldEqual Seq(0, 4, 3)
-
     val result = resp.asInstanceOf[QueryResult]
     result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, HistogramColumn, DoubleColumn)
     result.result.size shouldEqual 1
@@ -312,7 +313,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
     // Add the histogram_max_quantile function to ExecPlan and make sure results are OK
     execPlan.addRangeVectorTransformer(
-      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(0.99)))
+      exec.InstantVectorFunctionMapper(InstantFunctionId.HistogramMaxQuantile, Seq(StaticFuncArgs(0.99, RangeParams(0,0,0)))))
     val resp2 = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result2 = resp2.asInstanceOf[QueryResult]
     result2.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
@@ -368,13 +369,15 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     // Extract out the numRows, startTime, endTIme and verify
     val infosRead = result.result(0).rows.map { r => (r.getInt(1), r.getLong(2), r.getLong(3), r.getString(5)) }.toList
     infosRead.foreach { i => info(s"  Infos read => $i") }
-    val numChunks = numRawSamples / TestData.storeConf.maxChunksSize
-    infosRead should have length (numChunks)
-    infosRead.map(_._1) shouldEqual Seq.fill(numChunks)(TestData.storeConf.maxChunksSize)
+    val expectedNumChunks = 15
+    // One would expect numChunks = numRawSamples / TestData.storeConf.maxChunksSize
+    // but we also break chunks when time duration in chunk reaches max.
+    infosRead should have length expectedNumChunks
+    infosRead.map(_._1) shouldEqual (Seq.fill(expectedNumChunks-1)(67) ++ Seq(62))
     // Last chunk is the writeBuffer which is not encoded
     infosRead.map(_._4).dropRight(1).foreach(_ should include ("DeltaDeltaConst"))
 
-    val startTimes = tuples.grouped(TestData.storeConf.maxChunksSize).map(_.head._1).toBuffer
+    val startTimes = tuples.grouped(67).map(_.head._1).toBuffer
     infosRead.map(_._2) shouldEqual startTimes
   }
 

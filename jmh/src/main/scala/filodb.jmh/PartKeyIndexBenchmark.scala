@@ -2,13 +2,14 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
-import filodb.core.{DatasetRef, TestData}
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.PartKeyLuceneIndex
 import filodb.core.metadata.Schemas.promCounter
@@ -22,7 +23,7 @@ class PartKeyIndexBenchmark {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
   val ref = DatasetRef("prometheus")
-  val partKeyIndex = new PartKeyLuceneIndex(ref, promCounter.partition, 0, TestData.storeConf)
+  val partKeyIndex = new PartKeyLuceneIndex(ref, promCounter.partition, 0, 1.hour)
   val numSeries = 1000000
   val partKeyData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
   val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)

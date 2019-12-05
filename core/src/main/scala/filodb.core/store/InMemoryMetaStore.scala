@@ -87,22 +87,4 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   def deleteIngestionConfig(ref: DatasetRef): Future[Response] = Future {
     sources.remove(ref).map(x => Success).getOrElse(NotFound)
   }
-
-  /**
-    * Record highest time bucket for part key indexable data in meta store
-    */
-  override def writeHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int,
-                                           highestTimeBucket: Int): Future[Response] = {
-    timebuckets((dataset.dataset, shardNum)) = highestTimeBucket
-    Future.successful(Success)
-
-  }
-
-  /**
-    * Read highest time bucket for part key indexable data in meta store
-    */
-  override def readHighestIndexTimeBucket(dataset: DatasetRef,
-                                          shardNum: Int): Future[Option[Int]] = {
-    Future.successful(timebuckets.get((dataset.dataset, shardNum)))
-  }
 }
