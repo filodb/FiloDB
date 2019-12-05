@@ -44,7 +44,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
     val expectedRows = List(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1000, 20, 1100), "metric")
-    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema)
+    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual (1)
     val keys = result.map(_.key.labelValues)
@@ -56,7 +56,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
   it("should not generate range vector when sample is present") {
     val columnFilter = Seq(ColumnFilter("host", Equals("host1")), ColumnFilter("instance", Equals("instance1")))
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1000, 20, 1060), "metric")
-    val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema)
+    val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runAsync.futureValue
     result.isEmpty shouldEqual (true)
     val keys = result.map(_.key.labelValues)
@@ -67,7 +67,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val columnFilter = Seq(ColumnFilter("host", NotEqualsRegex("host1")))
     val expectedRows = List(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1000, 20, 1100), "metric")
-    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema)
+    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual (1)
     val keys = result.map(_.key.labelValues)
@@ -82,7 +82,7 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       ZeroCopyUTF8String("instance") -> ZeroCopyUTF8String("instance1"))
     val expectedRows = List(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1000, 20, 1100), "metric")
-    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema)
+    val resultObs = absentFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runAsync.futureValue
     result.size shouldEqual (1)
     val keys = result.map(_.key.labelValues)

@@ -352,7 +352,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
-            paramResponse: Observable[ScalarRangeVector] = Observable.empty): Observable[RangeVector] = {
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
     val resultRv = source.countL.map { l =>
       if (l == 0) {
