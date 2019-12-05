@@ -228,37 +228,37 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     allValues.drop(2).toSet shouldEqual infos.toSet
   }
 
-//  it("should be able to AND multiple filters together") {
-//    // Add the first ten keys and row numbers
-//    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
-//      .zipWithIndex.foreach { case (addr, i) =>
-//      keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
-//    }
-//
-//    keyIndex.refreshReadersBlocking()
-//
-//    val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
-//      ColumnFilter("Actor2Name", Equals("REGIME".utf8)))
-//    val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
-//    partNums1.toSeq should equal (Seq(8, 9))
-//
-//    val filters2 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
-//      ColumnFilter("Actor2Name", Equals("CHINA".utf8)))
-//    val partNums2 = keyIndex.partIdsFromFilters(filters2, 0, Long.MaxValue)
-//    partNums2.toSeq shouldEqual Nil
-//  }
-//
-//  it("should ignore unsupported columns and return empty filter") {
-//    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour)
-//    partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
-//      index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
-//    }
-//    keyIndex.refreshReadersBlocking()
-//
-//    val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)), ColumnFilter("Year", Equals(1979)))
-//    val partNums1 = index2.partIdsFromFilters(filters1, 0, Long.MaxValue)
-//    partNums1.toSeq shouldEqual Seq.empty
-//  }
+  it("should be able to AND multiple filters together") {
+    // Add the first ten keys and row numbers
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) =>
+      keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
+    }
+
+    keyIndex.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("Actor2Name", Equals("REGIME".utf8)))
+    val partNums1 = keyIndex.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1 shouldEqual debox.Buffer(8, 9)
+
+    val filters2 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+      ColumnFilter("Actor2Name", Equals("CHINA".utf8)))
+    val partNums2 = keyIndex.partIdsFromFilters(filters2, 0, Long.MaxValue)
+    partNums2 shouldEqual debox.Buffer.empty[Int]
+  }
+
+  it("should ignore unsupported columns and return empty filter") {
+    val index2 = new PartKeyLuceneIndex(dataset1.ref, dataset1.schema.partition, 0, 1.hour)
+    partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
+      index2.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, System.currentTimeMillis())()
+    }
+    keyIndex.refreshReadersBlocking()
+
+    val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)), ColumnFilter("Year", Equals(1979)))
+    val partNums1 = index2.partIdsFromFilters(filters1, 0, Long.MaxValue)
+    partNums1 shouldEqual debox.Buffer.empty[Int]
+  }
 
   it("should be able to fetch partKey from partId and partId from partKey") {
     // Add the first ten keys and row numbers

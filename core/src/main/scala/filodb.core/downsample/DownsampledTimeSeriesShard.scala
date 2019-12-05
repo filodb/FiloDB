@@ -36,6 +36,9 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
   val indexDataset = downsampledDatasetRefs(indexResolution)
 
+  // since all partitions are paged from store, this would be much lower than what is configured for raw data
+  val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
+
   private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
@@ -83,7 +86,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
             chunkMethod.endTime)
           val firstPartId = if (res.isEmpty) None else Some(res(0))
 
-          val _schema = firstPartId.filter(_ >= 0).map(schemaIDFromPartID)
+          val _schema = firstPartId.map(schemaIDFromPartID)
           // send index result in the partsInMemory field of lookup
           PartLookupResult(shardNum, chunkMethod, res,
             _schema, debox.Map.empty[Int, Long], debox.Buffer.empty)
@@ -102,7 +105,13 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
-    val partKeys = lookup.partsInMemory.iterator().take(10000).map(partKeyFromPartId) // TODO configure
+
+    if (lookup.partsInMemory.length > maxQueryMatches)
+      throw new IllegalArgumentException(s"Seeing ${lookup.partsInMemory.length} matching time series per shard. Try " +
+        s"to narrow your query by adding more filters so there is less than $maxQueryMatches matches " +
+        s"or request for increasing number of shards this metric lives in")
+
+    val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
         colStore.readRawPartitions(downsampledDataset,

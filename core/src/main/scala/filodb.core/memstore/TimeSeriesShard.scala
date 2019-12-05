@@ -1434,12 +1434,12 @@ class TimeSeriesShard(val ref: DatasetRef,
 
       if (matches.length > storeConfig.maxQueryMatches)
         throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
-          s"to narrow your query by adding more filters so there is less than  matches " +
-          s"or request for increasing number of shards this metric lives in")
+          s"to narrow your query by adding more filters so there is less than ${storeConfig.maxQueryMatches} matches " +
+          s"or request that number of shards for the metric be increased")
 
       // first find out which partitions are being queried for data not in memory
       val firstPartId = if (matches.isEmpty) None else Some(matches(0))
-      val _schema = firstPartId.filter(_ >= 0).map(schemaIDFromPartID)
+      val _schema = firstPartId.map(schemaIDFromPartID)
       val it1 = InMemPartitionIterator2(matches)
       val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
       val partIdsNotInMem = it1.skippedPartIDs
