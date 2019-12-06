@@ -24,11 +24,11 @@ import filodb.query.SuccessResponse
   * Run as main class with following system properties:
   *
   * -Dquery-endpoint=https://myFiloDbEndpoint.com
-  * -Draw-data-promql=jvm_threads{_ns=\"myApplication\",measure=\"daemon\",__col__=\"value\"}[@@@@s]
+  * -Draw-data-promql=jvm_threads::value{_ns=\"myApplication\",measure=\"daemon\"}[@@@@s]
   * -Dflush-interval=12h
   * -Dquery-range=6h
   *
-  * raw-data-promql property value should end with ',__col__="value"}[@@@@s]'.
+  * raw-data-promql property value should end with '}[@@@@s]'.
   * The lookback window is replaced by validation tool when running the query.
   *
   */
@@ -49,8 +49,8 @@ object GaugeDownsampleValidator extends App with StrictLogging {
   val flushIntervalHours = config.getDuration("flush-interval")
   val queryRange = config.getDuration("query-range")
 
-  require((rawPromql.endsWith(""",__col__="value"}[@@@@s]""")),
-    """Raw Data PromQL should end with ,__col__="value"}[@@@@s]""")
+  require((rawPromql.endsWith("""}[@@@@s]""")),
+    """Raw Data PromQL should end with }[@@@@s]""")
 
   // List of validations to perform
   val validations = Seq (

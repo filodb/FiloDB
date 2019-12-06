@@ -16,7 +16,7 @@ import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
+import filodb.core.query.{ColumnFilter, Filter, SerializedRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -86,7 +86,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[query.SerializableRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+        rv.asInstanceOf[query.SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
     result shouldEqual jobQueryResult1
@@ -119,7 +119,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[SerializableRangeVector]
+        response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
           .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
@@ -139,7 +139,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[query.SerializableRangeVector]
+        response(0).rows.map (row => response(0).asInstanceOf[query.SerializedRangeVector]
           .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }

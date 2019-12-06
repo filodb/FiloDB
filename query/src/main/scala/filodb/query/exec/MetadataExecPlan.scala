@@ -81,7 +81,7 @@ final case class LabelValuesDistConcatExec(id: String,
           metadataResult ++= rv.head.rows.map { rowReader =>
             val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
             rv.head match {
-              case srv: SerializableRangeVector =>
+              case srv: SerializedRangeVector =>
                 srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
                    .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
               case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")

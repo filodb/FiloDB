@@ -121,8 +121,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("instance"), Nil, Seq("role"), "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -156,8 +156,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Nil,  Seq("role", "mode"), Seq("role"), "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -196,8 +196,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("instance"), Nil, Nil, "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -241,8 +241,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("role"), "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeRole.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs2.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -275,8 +275,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("mode"), Seq("dummy"), "__name__")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleNodeCpu.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, samplesRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
@@ -355,8 +355,8 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       Seq("instance"), Nil, Seq("role"), "metric")
 
     // scalastyle:off
-    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializableRangeVector(rv, schema)))
-    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializableRangeVector(rv, schema)))
+    val lhs = QueryResult("someId", null, sampleLhs.map(rv => SerializedRangeVector(rv, schema)))
+    val rhs = QueryResult("someId", null, sampleRhs.map(rv => SerializedRangeVector(rv, schema)))
     // scalastyle:on
     val result = execPlan.compose(Observable.fromIterable(Seq((rhs, 1), (lhs, 0))), tvSchemaTask, queryConfig)
       .toListL.runAsync.futureValue

@@ -24,6 +24,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              failureRetries: Int,
+                             maxChunkTime: FiniteDuration,
                              retryDelay: FiniteDuration,
                              partIndexFlushMaxDelaySeconds: Int,
                              partIndexFlushMinDelaySeconds: Int,
@@ -33,7 +34,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
                              // filters on ingested records to log in detail
-                             traceFilters: Map[String, String]) {
+                             traceFilters: Map[String, String],
+                             maxQueryMatches: Int) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -46,6 +48,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "max-buffer-pool-size" -> maxBufferPoolSize,
                                "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
+                               "max-chunk-time" -> (maxChunkTime.toSeconds + "s"),
                                "num-block-pages" -> numPagesPerBlock,
                                "failure-retries" -> failureRetries,
                                "retry-delay" -> (retryDelay.toSeconds + "s"),
@@ -54,6 +57,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
+                               "max-query-matches" -> maxQueryMatches,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity).asJava)
 }
 
@@ -67,6 +71,7 @@ object StoreConfig {
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
+                                           |max-query-matches = 250000
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
@@ -86,7 +91,12 @@ object StoreConfig {
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
     val config = storeConfig.withFallback(defaults)
-    StoreConfig(config.as[FiniteDuration]("flush-interval"),
+    val flushInterval = config.as[FiniteDuration]("flush-interval")
+    // maxChunkTime should atleast be length of flush interval to accommodate all data within one chunk.
+    // better to be slightly greater so if more samples arrive within that flush period, two chunks are not created.
+    val fallbackMaxChunkTime = (flushInterval.toMillis * 1.1).toLong.millis
+    val maxChunkTime = config.as[Option[FiniteDuration]]("max-chunk-time").getOrElse(fallbackMaxChunkTime)
+    StoreConfig(flushInterval,
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
@@ -98,6 +108,7 @@ object StoreConfig {
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
                 config.getInt("failure-retries"),
+                maxChunkTime,
                 config.as[FiniteDuration]("retry-delay"),
                 config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,
                 config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,
@@ -105,7 +116,8 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
-                config.as[Map[String, String]]("trace-filters"))
+                config.as[Map[String, String]]("trace-filters"),
+                config.getInt("max-query-matches"))
   }
 }
 

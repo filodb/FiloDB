@@ -27,7 +27,6 @@ sealed class CheckpointTable(val config: Config,
        | databasename text,
        | datasetname text,
        | shardnum int,
-       | highesttimebucket int STATIC,
        | groupnum int,
        | offset bigint,
        | PRIMARY KEY ((databasename, datasetname, shardnum), groupnum)
@@ -40,19 +39,6 @@ sealed class CheckpointTable(val config: Config,
          | datasetname = ? AND
          | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
     // we want consistent reads during recovery
-
-  lazy val readTimeBucketCql =
-    session.prepare(
-      s"""SELECT highesttimebucket FROM $tableString WHERE
-         | databasename = ? AND
-         | datasetname = ? AND
-         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
-
-  lazy val writeTimeBucketCql =
-    session.prepare(
-      s"""INSERT INTO $tableString (databasename, datasetname, shardnum, highesttimebucket)
-         | VALUES (?, ?, ?, ?)""".stripMargin
-    )
 
   lazy val writeCheckpointCql = {
     val statement = session.prepare(
@@ -82,16 +68,4 @@ sealed class CheckpointTable(val config: Config,
       .toIterator // future of Iterator
       .map { it => it.map(r => r.getInt(0) -> r.getLong(1)).toMap }
   }
-
-  def writeHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int, highestTimeBucket: Int): Future[Response] = {
-    // TODO database name should not be an optional in internally since there is a default value. Punted for later.
-    execStmt(writeTimeBucketCql.bind(dataset.database.getOrElse(""),
-      dataset.dataset, shardNum: JInt, highestTimeBucket: JInt))
-  }
-
-  def readHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int): Future[Option[Int]] = {
-    session.executeAsync(readTimeBucketCql.bind(dataset.database.getOrElse(""),
-      dataset.dataset, shardNum: JInt)).toScalaFuture.map { rs => Option(rs.one()).map(_.getInt("highesttimebucket")) }
-  }
-
 }
