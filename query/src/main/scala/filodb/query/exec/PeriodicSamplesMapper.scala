@@ -9,7 +9,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
-import filodb.memory.format.vectors.LongBinaryVector
+import filodb.memory.format.vectors.{DoubleVector, LongBinaryVector}
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn._
@@ -161,9 +161,14 @@ extends Iterator[R] with StrictLogging {
       } catch {
         case e: Exception =>
           val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
+          val valLen = if (rv.partition.schema.data.columns(rv.valueColID).columnType == ColumnType.DoubleColumn) {
+            val valueReader = DoubleVector(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)
+            valueReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)
+          } else -1
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-                    s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
-                    s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)}")
+                  s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+                  s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)} " +
+                  s"valueVectorLength=$valLen", e)
           throw e
       }
     }
