@@ -9,7 +9,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
-import filodb.memory.format.vectors.{DoubleVector, LongBinaryVector}
+import filodb.memory.format.vectors.LongBinaryVector
 import filodb.query._
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn._
