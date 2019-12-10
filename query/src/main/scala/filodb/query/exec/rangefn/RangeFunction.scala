@@ -316,6 +316,7 @@ object RangeFunction {
       case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionL
       case Some(Changes)          => () => new ChangesChunkedFunctionL
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
+      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -323,6 +324,7 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
+  // scalastyle:off cyclomatic.complexity
   def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[InternalRangeFunction],
                             config: QueryConfig,
@@ -344,9 +346,11 @@ object RangeFunction {
       case Some(Changes)          => () => new ChangesChunkedFunctionD()
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
       case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
+      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   def histMaxRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
     f match {
