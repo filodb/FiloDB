@@ -11,43 +11,47 @@
 
 # Lucene Indexing
 
-We use a Lucene index to track startTime, endTime, tags and full partKey for every time series ingested within
-retention period. The Lucene index is kept up to date whenever time series starts/stops ingesting.
+A Lucene index keeps track of startTime, endTime, tags and full partKey for every time series ingested within
+retention period. It is used during the first part of query processing when relevant time series are identified
+for a given query filter. 
 
-Besides updating the local Lucene index, these events are added to index time-buckets and persisted for recovery on failure.
-The persist operations happen as part of the flush task. When a node restarts, records in the index
-time buckets are processed to recover/populate the local Lucene index. The index time bucket recovery
-and kafka data recovery streams are merged to form the recovery stream.
+The timestamp of the first sample of the time series is used as startTime and the last sample is used as endTime for
+indexing. For actively ingesting partitions, endTime is Long.MaxValue.
 
-## Time Bucket Creation during Normal Ingestion
+A document in the Lucene index is upserted whenever a partKey (time series) starts/stops/restarts ingesting.
+Besides updating the local Lucene index, this data persisted to Cassandra for recovery on failure.
+The persist operations happen as part of the flush task. When a node restarts, records from Cassandra
+are first scanned to re-populate the local Lucene index before any ingestion starts.
 
-Index time-buckets are persisted for each shard in random flush groups decided on startup. A time-bucket is one 
-flush interval long. Depending on retention period, last N time buckets are important for recovery.
+## Cassandra Schema
 
-N = ceil(RetentionPeriod / FlushPeriod)
-
-When a new time-bucket is flushed, we also look at the keys N time-buckets ago and bring in the partKeys that are still 
-ingesting into the latest time-bucket. This is to ensure that last N time buckets have all the partKeys to be recovered.
-
-We maintain a bitmap per time bucket within every shard. Newly ingested partKeys are added into Lucene index
-immediately, and added to the bitmap of latest time bucket. 
-
-During the flush task designated for index time-bucket persistence, following steps are done:
-* Bitmap for newest time-bucket is initialized
-* Bitmap for latest time-bucket is prepared for flush. This bitmap contains partIds which started/stopped ingesting in the last flush interval
-* Look at earliest time bucket and add to time bucket being flushed the partKeys that are still ingesting
-* Drop earliest time bucket
-* Remove from Lucene partKeys that have stopped ingesting for > retentionPeriod. At the same time, remove the partitions from the shard data structures. 
+PartKeys, start/endTimes are stored in a cassandra table with partKey as the partition/primary key.
+For efficient scans of entire shard's worth of data, we have a table per shard. Token scans are employed
+to read data quickly while bootstrapping FiloDB shard.
  
-## Index Recovery
+## Index Recovery from Cassandra
 
-One of the first steps when ingestion starts on a node is index recovery. We download the data from cassandra by first
-reading the highest time bucket persisted in checkpoints table and fetching the top time buckets that cover retention
-time. The buckets are processed in chronological  order.
+One of the first steps when ingestion starts on a node is index recovery. We download the data from cassandra
+and repopulate the Lucene index.
 
-Each record in the time buckets contain the partKey, startTime and endTime. The entries are upserted into local Lucene
-index. While the entries are added to Lucene, TimeSeriesPartition objects are also added to the shard data structures
-for each key in the index.
+For time series that are ingesting (endTime == Long.MaxValue) TimeSeriesPartition objects are created on heap. For
+those that have stopped ingesting, we do not load them into heap. It is done lazily when a query asks for it.  
 
-Once all buckets are extracted and re-indexed, we commit the index and start the Kafka recovery stream.
-Normal ingestion continues as usual after Kafka recovery.
+## Start / End Time Detection and Flush
+
+A list per shard tracks dirty partKeys that need persistence to cassandra. Part Key data is persisted in one randomly
+designated flush group per shard. This is to scatter the writes across shards and reduce cassandra peak write load. 
+During flush we also identify any partition that is marked as ingesting but has no data to be flushed as a
+non-ingesting partition and add them to the dirty keys that need to be persisted.
+
+## Kafka Checkpointing
+
+We piggy-back on regular flush group checkpointing as follows:
+
+For new partitions and restart-ingestion events, flushing of key data happens during the randomly designated group for
+the shard. Thus, checkpointing of this event will never be behind the last flush group's checkpoint. During kafka
+recovery, the partKey is added to index and marked as dirty for persistence even if we skip the sample.
+
+End-of-ingestion detection is done along with chunk flush, and persistence of end of time series marker will always
+be consistent with its group checkpoint. If for any reason node fails before persisting end-of-ingestion, the partition
+will be recovered as actively ingesting, and will eventually be marked as non-ingesting during its flush.

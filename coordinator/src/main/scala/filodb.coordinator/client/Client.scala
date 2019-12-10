@@ -97,7 +97,7 @@ trait ClientBase {
   def clusterActor: Option[ActorRef]
 }
 
-trait AllClientOps extends IngestionOps with DatasetOps with QueryOps with ClusterOps
+trait AllClientOps extends IngestionOps with QueryOps with ClusterOps
 
 /**
  * Standard client for a local FiloDB coordinator actor, which takes reference to a single NodeCoordinator

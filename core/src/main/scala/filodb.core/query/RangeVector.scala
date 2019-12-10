@@ -1,5 +1,7 @@
 package filodb.core.query
 
+import java.time.{LocalDateTime, YearMonth, ZoneOffset}
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -8,7 +10,7 @@ import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContaine
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store._
-import filodb.memory.{MemFactory, UTF8StringMedium}
+import filodb.memory.{MemFactory, UTF8StringMedium, UTF8StringShort}
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
@@ -27,7 +29,7 @@ trait RangeVectorKey extends java.io.Serializable {
 class SeqMapConsumer extends MapItemConsumer {
   val pairs = new collection.mutable.ArrayBuffer[(UTF8Str, UTF8Str)]
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 1, UTF8StringShort.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
   }
@@ -94,6 +96,122 @@ trait RangeVector {
   def prettyPrint(formatTime: Boolean = true): String = "RV String Not supported"
 }
 
+/**
+  *  A marker trait to identify range vector that can be serialized for write into wire. If Range Vector does not
+  *  implement this marker trait, then query engine will convert it to one that does.
+  */
+trait SerializableRangeVector extends RangeVector {
+  def numRowsInt: Int
+}
+
+/**
+  * Range Vector that represents a scalar result. Scalar results result in only one range vector.
+  */
+trait ScalarRangeVector extends SerializableRangeVector {
+  def key: RangeVectorKey = CustomRangeVectorKey(Map.empty)
+  def getValue(time: Long): Double
+}
+
+/**
+  * ScalarRangeVector which has time specific value
+  */
+final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]) extends ScalarRangeVector {
+  override def rows: Iterator[RowReader] = timeValueMap.toList.sortWith(_._1 < _._1).
+                                            map { x => new TransientRow(x._1, x._2) }.iterator
+  def getValue(time: Long): Double = timeValueMap(time)
+
+  override def numRowsInt: Int = timeValueMap.size
+}
+
+final case class RangeParams(start: Long, step: Long, end: Long)
+
+trait ScalarSingleValue extends ScalarRangeVector {
+  def rangeParams: RangeParams
+  var numRowsInt : Int = 0
+
+  override def rows: Iterator[RowReader] = {
+    Iterator.from(0, rangeParams.step.toInt).takeWhile(_ <= rangeParams.end - rangeParams.start).map { i =>
+      numRowsInt += 1
+      val t = i + rangeParams.start
+      new TransientRow(t * 1000, getValue(t * 1000))
+    }
+  }
+}
+
+/**
+  * ScalarRangeVector which has one value for all time's
+  */
+final case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
+  def getValue(time: Long): Double = value
+}
+
+/**
+  * ScalarRangeVector for which value is the time of the instant sample in seconds.
+  */
+final case class TimeScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = time.toDouble / 1000
+}
+
+/**
+  * ScalarRangeVector for which value is UTC Hour
+  */
+final case class HourScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getHour
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC Minute
+  */
+final case class MinuteScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getMinute
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC Minute
+  */
+final case class MonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getMonthValue
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC Year
+  */
+final case class YearScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getYear
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC day of month
+  */
+final case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+                                              .getDayOfMonth
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC day of week
+  */
+final case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = {
+    val dayOfWeek = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC).getDayOfWeek
+    if (dayOfWeek == 7) 0 else dayOfWeek.getValue
+  }
+}
+
+/**
+  * ScalarRangeVector for which value is current UTC days in month
+  */
+final case class DaysInMonthScalar(rangeParams: RangeParams) extends ScalarSingleValue {
+  override def getValue(time: Long): Double = {
+      val ldt = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC)
+      YearMonth.from(ldt).lengthOfMonth()
+  }
+}
+
 // First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     val partition: ReadablePartition,
@@ -105,7 +223,6 @@ final case class RawDataRangeVector(key: RangeVectorKey,
   // Obtain ChunkSetInfos from specific window of time from partition
   def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
 
-  def timestampColID: Int = partition.dataset.timestampColID
   // the query engine is based around one main data column to query, so it will always be the second column passed in
   def valueColID: Int = columnIDs(1)
 }
@@ -128,17 +245,18 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
 }
 
 /**
-  * SerializableRangeVector represents a RangeVector that can be serialized over the wire.
+  * SerializedRangeVector represents a RangeVector that can be serialized over the wire.
   * RecordContainers may be shared amongst all the SRV's from a single Result to minimize space and heap usage --
   *   this is the reason for the startRecordNo, the row # of the first container.
   * PLEASE PLEASE use Kryo to serialize this as it will make sure the single shared RecordContainer is
   * only serialized once as a single instance.
   */
-final class SerializableRangeVector(val key: RangeVectorKey,
-                                    val numRowsInt: Int,
-                                    containers: Seq[RecordContainer],
-                                    val schema: RecordSchema,
-                                    startRecordNo: Int) extends RangeVector with java.io.Serializable {
+final class SerializedRangeVector(val key: RangeVectorKey,
+                                  val numRowsInt: Int,
+                                  containers: Seq[RecordContainer],
+                                  val schema: RecordSchema,
+                                  startRecordNo: Int) extends RangeVector with SerializableRangeVector with
+                                  java.io.Serializable {
 
   override val numRows = Some(numRowsInt)
 
@@ -159,7 +277,8 @@ final class SerializableRangeVector(val key: RangeVectorKey,
             s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             schema.columnTypes(0) match {
-              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0),
+                reader.getBlobOffset(0))
               case _ => reader.getAny(0).toString
             }
           }
@@ -168,13 +287,13 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   }
 }
 
-object SerializableRangeVector extends StrictLogging {
+object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
 
   /**
-    * Creates a SerializableRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
+    * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
     * The most efficient option when you need to create multiple SRVs as the containers are automatically
     * shared correctly.
     * The containers are sent whole as most likely more than one would be sent, so they should mostly be packed.
@@ -182,7 +301,7 @@ object SerializableRangeVector extends StrictLogging {
   def apply(rv: RangeVector,
             builder: RecordBuilder,
             schema: RecordSchema,
-            execPlan: String): SerializableRangeVector = {
+            execPlan: String): SerializedRangeVector = {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.numRecords).getOrElse(0)
@@ -193,7 +312,7 @@ object SerializableRangeVector extends StrictLogging {
       val rows = rv.rows
       while (rows.hasNext) {
         numRows += 1
-        builder.addFromReader(rows.next)
+        builder.addFromReader(rows.next, schema, 0)
       }
     } finally {
       // clear exec plan
@@ -206,16 +325,16 @@ object SerializableRangeVector extends StrictLogging {
       case None                 => builder.allContainers
       case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
     }
-    new SerializableRangeVector(rv.key, numRows, containers, schema, startRecordNo)
+    new SerializedRangeVector(rv.key, numRows, containers, schema, startRecordNo)
   }
 
   /**
-    * Creates a SerializableRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
+    * Creates a SerializedRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
     * Since it wastes space when working with multiple RVs, should be used mostly for testing.
     */
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializedRangeVector = {
     val schema = toSchema(cols)
-    apply(rv, toBuilder(schema), schema, "Test-Only-Plan")
+    apply(rv, newBuilder(), schema, "Test-Only-Plan")
   }
 
   // TODO: make this configurable....
@@ -225,13 +344,11 @@ object SerializableRangeVector extends StrictLogging {
   val SchemaCacheSize = 100
   val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
 
-  def toSchema(colSchema: Seq[ColumnInfo], brColInfos: Map[Int, Seq[ColumnInfo]] = Map.empty): RecordSchema = {
-    val brSchemas = brColInfos.mapValues(toSchema(_))
-    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(columns = cols, brSchema = brSchemas) })
-  }
+  def toSchema(colSchema: Seq[ColumnInfo], brSchemas: Map[Int, RecordSchema] = Map.empty): RecordSchema =
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols, brSchema = brSchemas) })
 
-  def toBuilder(schema: RecordSchema): RecordBuilder =
-    new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)
+  def newBuilder(): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, MaxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

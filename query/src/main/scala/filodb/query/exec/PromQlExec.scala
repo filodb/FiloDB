@@ -5,14 +5,12 @@ import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
-import monix.reactive.Observable
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
@@ -28,29 +26,19 @@ case class PromQlExec(id: String,
   protected def args: String = params.toString
   import PromQlExec._
 
-  val builder = SerializableRangeVector.toBuilder(recSchema)
+  val builder = SerializedRangeVector.newBuilder()
 
-  /**
-    * Limit on number of samples returned by this ExecPlan
-    */
-  override def limit: Int = ???
+  def limit: Int = ???
 
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
     * node
     */
-  override protected def doExecute(source: ChunkSource, dataset: Dataset, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): Observable[RangeVector] = ???
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = ???
+  def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+               (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   override def execute(source: ChunkSource,
-                       dataset: Dataset,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
@@ -88,7 +76,7 @@ case class PromQlExec(id: String,
         override def numRows: Option[Int] = Option(samples.size)
 
       }
-      SerializableRangeVector(rv, builder, recSchema, printTree(useNewline = false))
+      SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
     }
     QueryResult(id, resultSchema, rangeVectors)
   }
@@ -103,7 +91,7 @@ object PromQlExec extends  StrictLogging{
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema = SerializableRangeVector.toSchema(columns)
+  val recSchema = SerializedRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .

@@ -133,10 +133,22 @@ kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partit
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev-ds-1m
 ```
 
-Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
+Download and start Cassandra 2.1 or more recent versions (Cassandra 3 and above recommended).
 
 ```
 bin/cassandra
+```
+
+You should install Cassandra using a tool which you're the most familiar with.
+
+For instance, one easy way to install it is via `brew`
+```
+brew install cassandra
+```
+
+Start Cassandra
+```
+brew services start cassandra
 ```
 
 Build the required projects
@@ -148,10 +160,11 @@ First initialize the keyspaces and tables in Cassandra.
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
+Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+The script below brings up the FiloDB Dev Standalone server, and then sets up the prometheus dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra. This script targets directly towards the `develop` branch.)
 
 ```
 ./filodb-dev-start.sh
@@ -215,7 +228,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ns="App-2"}'
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'heap_usage{_ws_="demo", _ns_="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -223,7 +236,27 @@ You can also look at Cassandra to check for persisted data. Look at the tables i
 If the above does not work, try the following:
 
 1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
-1a) Restart Kafka, this is sometimes necessary.
+
+- Before you remove a topic, update server.properties from configuration(conf) folder and have delete.topic.enable property set to true:
+`delete.topic.enable=true`
+- Run below kafka-topics.sh command with “–delete” option to remove “timeseries-dev” and "timeseries-dev-ds-1m":
+```sh
+ /usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev \
+                --delete  
+
+```
+```
+/usr/local/Cellar/kafka/2.3.0/libexec/bin/kafka-topics.sh --zookeeper localhost:2181 \
+                --topic timeseries-dev-ds-1m \
+                --delete
+```
+- You should see: 
+```
+Topic timeseries-dev is marked for deletion.
+Note: This will have no impact if delete.topic.enable is not set to true.
+```
+
 2) `./filodb-dev-stop.sh` and restart filodb instances like above
 3) Re-run `./dev-gateway.sh --gen-prom-data`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -Dconfig.file=conf/timeseries-filodb-server.conf -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
@@ -327,9 +360,15 @@ The **partition key** differentiates time series and also controls distribution 
 
 The data points use a configurable schema consisting of multiple columns.  Each column definition consists of `name:columntype`, with optional parameters. For examples, see the examples below, or see the introductory walk-through above where two datasets are created.
 
+A single partition key schema is used for a running FiloDB cluster, though multiple data schemas may be supported.  These schemas are defined in the config file - see the `partition-schema` and `schemas` sections of `filodb-defaults.conf`.  The CLI command `validateSchemas` may be run to verify schemas defined in config files, as follows:
+
+    ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command validateSchemas
+
 ### Dataset Configuration
 
 THIS IS IMPORTANT TO READ AND UNDERSTAND.
+
+Each "dataset" ingests one stream or Kafka topic of raw time series data, and is also the unit of isolation.  Each dataset contains its own offheap memory, and can have independent data retention and ingestion properties.
 
 Datasets are setup and loaded into the server via configuration files referred to by application.conf loaded by the server.
 See `conf/timeseries-dev-source.conf` for an example. It is important to note that some aspects of the dataset,
@@ -343,11 +382,10 @@ that part of the cluster could be with the old config and the rest could have ne
 
 ### Prometheus FiloDB Schema for Operational Metrics
 
-* Partition key = `tags:map`
-* Row key = `timestamp`
+* Partition key = `metric:string,tags:map`
 * Columns: `timestamp:ts,value:double:detectDrops=true`
 
-The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
+The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name, which in Prometheus data is a label/tag with the key `__name__`, is separated out to an explicit metric column.
 
 Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
 
@@ -358,7 +396,6 @@ NOTE: `detectDrops=true` allows for proper and efficient rate calculation on Pro
 Let's say that one had a metrics client, such as CodaHale metrics, which pre-aggregates percentiles and sends them along with the metric.  If we used the Prometheus schema, each percentile would wind up in its own time series.  This is fine, but incurs significant overhead as the partition key has to then be sent with each percentile over the wire.  Instead we can have a schema which includes all the percentiles together when sending the data:
 
 * Partition key = `metricName:string,tags:map`
-* Row key = `timestamp`
 * Columns: `timestamp:ts,min:double,max:double,p50:double,p90:double,p95:double,p99:double,p999:double`
 
 ### Data Modelling and Performance Considerations
@@ -370,7 +407,7 @@ For more information on memory configuration, please have a look at the [ingesti
 FiloDB is designed to efficiently ingest a huge number of individual time series - depending on available memory, one million or more time series per node is achievable.  Here are some pointers on choosing them:
 
 * It is better to have smaller time series, as the indexing and filtering operations are designed to work on units of time series, and not samples within each time series.
-* The most flexible partition key is just to use a `MapColumn` and insert tags.
+* The default partition key consists of a metric name, and tags represented as a  `MapColumn`.
 * Each time series does take up both heap and offheap memory, and memory is likely the main limiting factor.  The amount of configured memory limits the number of actively ingesting time series possible at any moment.
 
 ### Sharding
@@ -381,7 +418,7 @@ The number of shards in each dataset is preconfigured in the source config.  Ple
 
 Metrics are routed to shards based on factors:
 
-1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency.
+1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_`, `metric` labels are mandatory to calculate shard key along with `metric` column.
 2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
 ## Querying FiloDB
@@ -390,11 +427,11 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
-Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
+Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using a `::columnName` suffix in the metric name, like this request which pulls out the "min" column:
 
-    http_req_timer{_ns="foo",__col__="min"}
+    http_req_timer::min{_ws_="demo", _ns_="foo"}
 
-By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
+By default if `::col` suffix is not specified then the `value-column` option of each data schema is used.
 
 Some special functions exist to aid debugging and for other purposes:
 
@@ -406,18 +443,17 @@ Some special functions exist to aid debugging and for other purposes:
 
 Example of debugging chunk metadata using the CLI:
 
-    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ns="App-0"})' --start XX --end YY
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ws_="demo",_ns_="App-0"})' --start XX --end YY
 
 ### First-Class Histogram Support
 
 One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds (up to two orders of magnitude).  There is no "le" tag or individual time series for each bucket.  Here are the differences users need to be aware of when using `HistogramColumn`:
 
 * There is no need to append `_bucket` to the metric name.
-* However, you need to select the histogram column like `__col__="hist"`
-* To compute quantiles:  `histogram_quantile(0.7, sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))`
-* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo",__col__="hist"})`
-* Sum over multiple Histogram time series:  `sum(sum_over_time(http_req_latency{app="foo",__col__="hist"}[5m]))` - you could then compute quantile over the sum.
-  - NOTE: Do NOT use `group by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
+* To compute quantiles:  `histogram_quantile(0.7, sum(rate(http_req_latency{app="foo"}[5m])))`
+* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo"})`
+* Sum over multiple Histogram time series:  `sum(rate(http_req_latency{app="foo"}[5m]))` - you could then compute quantile over the sum.
+  - NOTE: Do NOT use `by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
 
 FiloDB offers an improved accuracy `histogram_max_quantile` function designed to work with a max column from the source.  If clients are able to send the max value captured during a window, then we can report more accurate upper quantiles (ie 99%, 99.9%, etc.) that do not suffer from clipping.
@@ -428,7 +464,7 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%_ns="filodb"%7D%5B1m%5D&time=1539908476'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total{_ws_="demo", _ns_="filodb"}[5m]&time=1568756529'
 
 ```json
 {
@@ -441,7 +477,8 @@ Example:
           "shard": "1",
           "__name__": "memstore_rows_ingested_total",
           "dataset": "prometheus",
-          "_ns": "filodb"
+          "_ws_": "demo"
+          "_ns_": "filodb"
         },
         "values": [
           [
@@ -476,7 +513,8 @@ Example:
           "shard": "0",
           "__name__": "memstore_rows_ingested_total",
           "dataset": "prometheus",
-          "_ns": "filodb"
+          "_ws_": "demo"
+          "_ns_": "filodb"
         },
         "values": [
           [
@@ -585,7 +623,7 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ns="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'memstore_rows_ingested_total{_ws_="demo", _ns_="filodb"}'
 
 ```
 Sending query command to server for prometheus with options QueryOptions(<function1>,16,60,100,None)...

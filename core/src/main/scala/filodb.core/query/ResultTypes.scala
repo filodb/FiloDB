@@ -24,6 +24,10 @@ final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: 
  */
 final case class ColumnInfo(name: String, colType: Column.ColumnType)
 
+object ColumnInfo {
+  def apply(col: Column): ColumnInfo = ColumnInfo(col.name, col.columnType)
+}
+
 /**
  * Describes the full schema of result types, including how many initial columns are for row keys.
  * The first ColumnInfo in the schema describes the first vector in Vectors and first field in Tuples, etc.
@@ -34,7 +38,7 @@ final case class ColumnInfo(name: String, colType: Column.ColumnType)
  * @param colIDs the column IDs of the columns, used to access additional columns if needed
  */
 final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
-                              brSchemas: Map[Int, Seq[ColumnInfo]] = Map.empty,
+                              brSchemas: Map[Int, RecordSchema] = Map.empty,
                               fixedVectorLen: Option[Int] = None,
                               colIDs: Seq[Int] = Nil) {
   import Column.ColumnType._
@@ -45,6 +49,10 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   // True if main col is Histogram and extra column is a Double
   def isHistDouble: Boolean = columns.length == 3 &&
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
+}
+
+object ResultSchema {
+  val empty = ResultSchema(Nil, 1)
 }
 
 /**

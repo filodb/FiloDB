@@ -12,7 +12,7 @@ import filodb.query.exec.rangefn.RawDataWindowingSpec
 
 class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures with RawDataWindowingSpec {
 
-  val resultSchema = ResultSchema(MetricsTestData.timeseriesDataset.infosFromIDs(0 to 1), 1)
+  val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
 
   val samples = Seq(
     100000L -> 100d,
@@ -30,15 +30,14 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
   it("should return value present at time - staleSampleAfterMs") {
 
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None)
-    val resultObs = periodicSamplesVectorFnMapper(MetricsTestData.timeseriesDataset,
-      Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema)
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema, Nil)
 
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
 
     resultRows.foreach(_.toList shouldEqual expectedResults)
 
-    val outSchema = periodicSamplesVectorFnMapper.schema(MetricsTestData.timeseriesDataset, resultSchema)
+    val outSchema = periodicSamplesVectorFnMapper.schema(resultSchema)
     outSchema.columns shouldEqual resultSchema.columns
     outSchema.fixedVectorLen shouldEqual Some(6)
   }

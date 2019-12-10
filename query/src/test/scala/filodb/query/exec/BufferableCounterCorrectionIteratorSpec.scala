@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import filodb.core.query.TransientRow
 import org.scalatest.{FunSpec, Matchers}
 
 class BufferableCounterCorrectionIteratorSpec extends FunSpec with Matchers {

@@ -77,15 +77,15 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     runOn(first) {
       metaStore.initialize().futureValue shouldBe Success
       metaStore.clearAllData().futureValue shouldBe Success
-      colStore.initialize(dataset).futureValue shouldBe Success
-      colStore.truncate(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, numShards).futureValue shouldBe Success
+      colStore.truncate(dataset, numShards).futureValue shouldBe Success
     }
     enterBarrier("existing-data-cleared")
   }
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      colStore.initialize(dataset).futureValue shouldBe Success
+      colStore.initialize(dataset, numShards).futureValue shouldBe Success
       info("Dataset created")
     }
     enterBarrier("dataset-created")
@@ -158,7 +158,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
       rangeEnd   = rangeStart + 15.minutes.toMillis
 
       // Print the top values in each shard just for debugging
-      topValuesInShards(client1, "_ns", 0 to 3)
+      topValuesInShards(client1, "_ws_", 0 to 3)
+      topValuesInShards(client1, "_ns_", 0 to 3)
       topValuesInShards(client1, "dc", 0 to 3)
 
       query1Response = runCliQuery(client1, queryTimestamp)

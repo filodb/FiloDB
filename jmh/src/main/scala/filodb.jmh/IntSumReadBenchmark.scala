@@ -12,10 +12,11 @@ import filodb.core.{NamesTestData, TestData}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.store.ChunkSet
 import filodb.memory.format.{vectors => bv, TupleRowReader, UnsafeUtils}
+import filodb.memory.format.MemoryReader._
+
 
 object IntSumReadBenchmark {
-  val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), "rownum",
-    DatasetOptions.DefaultOptions)
+  val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:long"), DatasetOptions.DefaultOptions)
   val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row.toLong), Some(0)) }
   val partKey = NamesTestData.defaultPartKey
   val rowColumns = Seq("int", "rownum", "part")
@@ -31,10 +32,11 @@ object IntSumReadBenchmark {
 class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
-
-  val chunkSet = ChunkSet(dataset, partKey, rowIt.map(TupleRowReader).take(NumRows).toSeq, TestData.nativeMem)
+  val acc = nativePtrReader
+  val chunkSet = ChunkSet(dataset.schema.data, partKey, 0,
+                          rowIt.map(TupleRowReader).take(NumRows).toSeq, TestData.nativeMem)
   val intVectAddr = UnsafeUtils.addressFromDirectBuffer(chunkSet.chunks(0))
-  val intReader   = bv.IntBinaryVector(intVectAddr)
+  val intReader   = bv.IntBinaryVector(acc, intVectAddr)
 
   @TearDown
   def shutdown(): Unit = {
@@ -49,8 +51,9 @@ class IntSumReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def applyVectorScan(): Int = {
     var total = 0
+    val acc2 = acc // local variable to make the scala compiler not use virtual invoke
     for { i <- 0 until NumRows optimized } {
-      total += intReader(intVectAddr, i)
+      total += intReader(acc2, intVectAddr, i)
     }
     total
   }
@@ -62,7 +65,7 @@ class IntSumReadBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def iterateScan(): Int = {
-    val it = intReader.iterate(intVectAddr, 0)
+    val it = intReader.iterate(acc, intVectAddr, 0)
     var sum = 0
     for { i <- 0 until NumRows optimized } {
       sum += it.next

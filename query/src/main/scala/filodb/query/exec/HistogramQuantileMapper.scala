@@ -4,7 +4,6 @@ import monix.reactive.Observable
 import org.agrona.MutableDirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.Histogram
@@ -21,12 +20,13 @@ object HistogramQuantileMapper {
   *
   * @param funcParams Needs one double quantile argument
   */
-case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTransformer {
+final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
 
   import HistogramQuantileMapper._
   require(funcParams.size == 1, "histogram_quantile function needs a single quantile argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "Dynamic arg not supported yet")
 
-  private val quantile = funcParams.head.asInstanceOf[Number].doubleValue()
+  private val quantile = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
 
   /**
     * Represents a prometheus histogram bucket for quantile calculation purposes.
@@ -46,9 +46,12 @@ case class HistogramQuantileMapper(funcParams: Seq[Any]) extends RangeVectorTran
     * but should be the rate of increase for that bucket counter. The histogram_quantile function should always
     * be preceded by a rate function or a sum-of-rate function.
     */
-  override def apply(dataset: Dataset, source: Observable[RangeVector],
-                     queryConfig: QueryConfig, limit: Int,
-                     sourceSchema: ResultSchema): Observable[RangeVector] = {
+  override def apply(source: Observable[RangeVector],
+                     queryConfig: QueryConfig,
+                     limit: Int,
+                     sourceSchema: ResultSchema,
+                     paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+
     val res = source.toListL.map { rvs =>
 
       // first group the buckets by histogram

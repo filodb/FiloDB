@@ -38,6 +38,20 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object Sqrt extends InstantFunctionId("sqrt")
 
+  case object DaysInMonth extends InstantFunctionId("days_in_month")
+
+  case object DayOfMonth extends InstantFunctionId("day_of_month")
+
+  case object DayOfWeek extends InstantFunctionId("day_of_week")
+
+  case object Hour extends InstantFunctionId("hour")
+
+  case object Minute extends InstantFunctionId("minute")
+
+  case object Month extends InstantFunctionId("month")
+
+  case object Year extends InstantFunctionId("year")
+
   // TODO time, vector, scalar
 }
 
@@ -81,7 +95,6 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
 
   case object SumOverTime extends RangeFunctionId("sum_over_time")
-
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry
@@ -207,26 +220,11 @@ sealed abstract class MiscellaneousFunctionId(override val entryName: String) ex
 object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
   val values = findValues
 
-  case object DaysInMonth extends MiscellaneousFunctionId("days_in_month")
-
-  case object DaysOfMonth extends MiscellaneousFunctionId("day_of_month")
-
-  case object DayOfWeek extends MiscellaneousFunctionId("day_of_week")
-
-  case object Hour extends MiscellaneousFunctionId("hour")
-
   case object LabelReplace extends MiscellaneousFunctionId("label_replace")
 
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
 
-  case object Minute extends MiscellaneousFunctionId("minute")
-
-  case object Month extends MiscellaneousFunctionId("month")
-
   case object Timestamp extends MiscellaneousFunctionId("timestamp")
-
-  case object Year extends MiscellaneousFunctionId("year")
-
 }
 
 sealed abstract class SortFunctionId(override val entryName: String) extends EnumEntry
@@ -238,6 +236,39 @@ object SortFunctionId extends Enum[SortFunctionId] {
   case object SortDesc extends SortFunctionId("sort_desc")
 }
 
+sealed abstract class ScalarFunctionId(override val entryName: String) extends EnumEntry
+
+object ScalarFunctionId extends Enum[ScalarFunctionId] {
+  val values = findValues
+
+  case object Scalar extends ScalarFunctionId("scalar")
+
+  case object Time extends ScalarFunctionId("time")
+
+  case object DaysInMonth extends ScalarFunctionId("days_in_month")
+
+  case object DayOfMonth extends ScalarFunctionId("day_of_month")
+
+  case object DayOfWeek extends ScalarFunctionId("day_of_week")
+
+  case object Hour extends ScalarFunctionId("hour")
+
+  case object Minute extends ScalarFunctionId("minute")
+
+  case object Month extends ScalarFunctionId("month")
+
+  case object Year extends ScalarFunctionId("year")
+
+}
+
+sealed abstract class VectorFunctionId(override val entryName: String) extends EnumEntry
+
+object VectorFunctionId extends Enum[VectorFunctionId] {
+  val values = findValues
+  case object Vector extends VectorFunctionId("vector")
+}
+
 
 //scalastyle:on
+
 

@@ -108,20 +108,25 @@ object DictUTF8Vector {
  * string deserialization to be done, thus the code is much much simpler.
  */
 object UTF8DictVectorDataReader extends UTF8VectorDataReader {
-  final def codeVectAddr(vector: BinaryVectorPtr): BinaryVectorPtr = vector + UnsafeUtils.getInt(vector + 8)
-  final def length(vector: BinaryVectorPtr): Int = IntBinaryVector(codeVectAddr(vector)).length(codeVectAddr(vector))
-  final def apply(vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
-    val code = IntBinaryVector(codeVectAddr(vector))(codeVectAddr(vector), n)
-    UTF8FlexibleVectorDataReader(vector + 12, code)
+  final def codeVectAddr(acc: MemoryReader, vector: BinaryVectorPtr): BinaryVectorPtr =
+    vector + acc.getInt(vector + 8)
+  final def length(acc: MemoryReader, vector: BinaryVectorPtr): Int =
+    IntBinaryVector(acc, codeVectAddr(acc, vector)).length(acc, codeVectAddr(acc, vector))
+  final def apply(acc: MemoryReader, vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
+    val code = IntBinaryVector(acc, codeVectAddr(acc, vector))(acc, codeVectAddr(acc, vector), n)
+    UTF8FlexibleVectorDataReader(acc, vector + 12, code)
   }
 
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
-    private final val codeIt = IntBinaryVector(codeVectAddr(vector)).iterate(codeVectAddr(vector), startElement)
-    def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(vector + 12, codeIt.next)
+  def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+    private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
+                        .iterate(acc, codeVectAddr(acc, vector), startElement)
+    def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(acc, vector + 12, codeIt.next)
   }
 
-  override def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator = new BooleanIterator {
-    private final val codeIt = IntBinaryVector(codeVectAddr(vector)).iterate(codeVectAddr(vector), startElement)
-    final def next: Boolean = codeIt.next != 0
-  }
+  override def iterateAvailable(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    new BooleanIterator {
+      private final val codeIt = IntBinaryVector(acc, codeVectAddr(acc, vector))
+        .iterate(acc, codeVectAddr(acc, vector), startElement)
+      final def next: Boolean = codeIt.next != 0
+    }
 }

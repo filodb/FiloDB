@@ -13,7 +13,8 @@ object DatasetCommands {
    * @param dataset the Dataset object
    * @param database optionally, the database/keyspace to create the dataset in
    */
-  final case class CreateDataset(dataset: Dataset,
+  final case class CreateDataset(numShards: Int,
+                                 dataset: Dataset,
                                  database: Option[String] = None) extends NodeCommand
 
   case object DatasetCreated extends Response with NodeResponse
@@ -23,7 +24,7 @@ object DatasetCommands {
   /**
    * Truncates all data from the memStore and any underlying ChunkSink/persistent store for a dataset
    */
-  final case class TruncateDataset(dataset: DatasetRef) extends NodeCommand
+  final case class TruncateDataset(dataset: DatasetRef, numShards: Int) extends NodeCommand
   case object DatasetTruncated extends NodeResponse
   final case class ServerError(errorObject: Any) extends NodeResponse
 }

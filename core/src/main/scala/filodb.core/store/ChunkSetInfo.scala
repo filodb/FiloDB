@@ -7,12 +7,13 @@ import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataSchema}
 import filodb.core.query.RawDataRangeVector
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
 import filodb.memory.format._
+import filodb.memory.format.MemoryReader._
 
 /**
   * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
@@ -38,15 +39,15 @@ object ChunkSet {
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
+  def apply(schema: DataSchema, part: PartitionKey, ingestionTime: Long,
+            rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
-    val startTime = dataset.timestamp(rows.head)
-    val info = ChunkSetInfo(factory, dataset, chunkID(startTime), rows.length,
-                            startTime,
-                            dataset.timestamp(rows.last))
-    val filoSchema = Column.toFiloSchema(dataset.dataColumns)
+    val startTime = schema.timestamp(rows.head)
+    val info = ChunkSetInfo(factory, schema, chunkID(startTime, ingestionTime), ingestionTime,
+                            rows.length, schema.timestamp(rows.last))
+    val filoSchema = Column.toFiloSchema(schema.columns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
-    val chunks = dataset.dataColumns.map(c => chunkMap(c.name))
+    val chunks = schema.columns.map(c => chunkMap(c.name))
     ChunkSet(info, part, Nil, chunks)
   }
 }
@@ -56,13 +57,15 @@ object ChunkSet {
   */
 final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
-  def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
+  def id: ChunkID = ChunkSetInfo.getChunkID(nativePtrReader, infoAddr)
+  // ingestion time as milliseconds from 1970
+  def ingestionTime: Long = ChunkSetInfo.getIngestionTime(nativePtrReader, infoAddr)
   // number of rows encoded by this chunkset
-  def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
+  def numRows: Int = ChunkSetInfo.getNumRows(nativePtrReader, infoAddr)
   // the starting timestamp of this chunkset
-  def startTime: Long = ChunkSetInfo.getStartTime(infoAddr)
+  def startTime: Long = ChunkSetInfo.getStartTime(nativePtrReader, infoAddr)
   // The ending timestamp of this chunkset
-  def endTime: Long = ChunkSetInfo.getEndTime(infoAddr)
+  def endTime: Long = ChunkSetInfo.getEndTime(nativePtrReader, infoAddr)
 
   /**
    * Returns the vector pointer for a particular column
@@ -129,50 +132,76 @@ object ChunkSetInfo extends StrictLogging {
    * ChunkSetInfo metadata schema:
    * +0  long   chunkID
    * +8  int    # rows in chunkset
-   * +12 long   start timestamp
+   * +12 long   ingestion time (milliseconds from 1970)
    * +20 long   end timestamp
    * +28 long[] pointers to each vector
    *
    * Note that block metadata has a 4-byte partition ID appended to the front also.
+   *
+   * Note 2: The chunkID is defined from the start timestamp, and so the start time doesn't need
+   * to be explicitly stored in a separate field.
    */
-  val OffsetChunkID = 0
-  val OffsetNumRows = 8
-  val OffsetStartTime = 12
-  val OffsetEndTime = 20
-  val OffsetVectors = 28
+  val OffsetChunkID       = 0
+  val OffsetNumRows       = 8
+  val OffsetIngestionTime = 12
+  val OffsetEndTime       = 20
+  val OffsetVectors       = 28
 
   def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
+
   def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
 
-  def getChunkID(infoPointer: NativePointer): ChunkID = UnsafeUtils.getLong(infoPointer + OffsetChunkID)
-  def getChunkID(infoBytes: Array[Byte]): ChunkID =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+  def getChunkID(infoAcc: MemoryReader, infoAddr: Long): ChunkID = infoAcc.getLong(infoAddr + OffsetChunkID)
+
   def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
 
-  def getNumRows(infoPointer: NativePointer): Int = UnsafeUtils.getInt(infoPointer + OffsetNumRows)
+  def getIngestionTime(infoAcc: MemoryReader, infoAddr: Long): Long =
+    infoAcc.getLong(infoAddr + OffsetIngestionTime)
+
+  def setIngestionTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetIngestionTime, time)
+
+  def getNumRows(infoAcc: MemoryReader, infoAddr: Long): Int = infoAcc.getInt(infoAddr + OffsetNumRows)
+
   def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
+
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
 
-  def getStartTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetStartTime)
-  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
-  def setStartTime(infoPointer: NativePointer, time: Long): Unit =
-    UnsafeUtils.setLong(infoPointer + OffsetStartTime, time)
+  def getStartTime(infoAcc: MemoryReader, infoAddr: Long): Long =
+    startTimeFromChunkID(getChunkID(infoAcc, infoAddr))
+
+  def getEndTime(infoAcc: MemoryReader, infoAddr: Long): Long = infoAcc.getLong(infoAddr + OffsetEndTime)
+
   def setEndTime(infoPointer: NativePointer, time: Long): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
-
-  def getStartTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetStartTime)
-  def getEndTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
 
   def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr = {
     require(infoPointer != 0, s"ERROR: getVectorPtr on infoPointer==0")
     UnsafeUtils.getLong(infoPointer + OffsetVectors + 8 * colNo)
   }
+
   def setVectorPtr(infoPointer: NativePointer, colNo: Int, vector: BinaryVector.BinaryVectorPtr): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetVectors + 8 * colNo, vector)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getChunkID(infoBytes: Array[Byte]): ChunkID =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getIngestionTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
+
+  // deprecated - Use reader api instead TODO remove this API
+  def getEndTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
 
   /**
    * Copies the non-vector-pointer portion of ChunkSetInfo
@@ -192,18 +221,18 @@ object ChunkSetInfo extends StrictLogging {
   /**
    * Initializes a new ChunkSetInfo with some initial fields
    */
-  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, startTime: Long): ChunkSetInfo = {
-    val infoAddr = factory.allocateOffheap(dataset.chunkSetInfoSize)
+  def initialize(factory: MemFactory, schema: DataSchema, id: ChunkID, ingestionTime: Long): ChunkSetInfo = {
+    val infoAddr = factory.allocateOffheap(schema.chunkSetInfoSize)
     setChunkID(infoAddr, id)
+    setIngestionTime(infoAddr, ingestionTime)
     resetNumRows(infoAddr)
-    setStartTime(infoAddr, startTime)
     setEndTime(infoAddr, Long.MaxValue)
     ChunkSetInfo(infoAddr)
   }
 
-  def apply(factory: MemFactory, dataset: Dataset,
-            id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
-    val newInfo = initialize(factory, dataset, id, startTime)
+  def apply(factory: MemFactory, schema: DataSchema,
+            id: ChunkID, ingestionTime: Long, numRows: Int, endTime: Long): ChunkSetInfo = {
+    val newInfo = initialize(factory, schema, id, ingestionTime)
     UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
     setEndTime(newInfo.infoAddr, endTime)
     newInfo
@@ -228,6 +257,7 @@ object ChunkSetInfo extends StrictLogging {
 trait ChunkInfoIterator { base: ChunkInfoIterator =>
   def close(): Unit
   def hasNext: Boolean
+  def nextInfoReader: ChunkSetInfoReader = ChunkSetInfoOffHeap(nextInfo)
   def nextInfo: ChunkSetInfo
 
   /**
@@ -322,21 +352,6 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator,
   final def unlock(): Unit = base.unlock()
 }
 
-/**
- * Stores, for each chunk in the WindowedChunkIterator, the reader and vector pointer for both
- * the timestamp and value columns.
- * NOTE: to prevent object bloat for value classes, the pointer to the info is stored.  Use info member
- * for easy access.
- */
-final case class ChunkQueryInfo(infoPtr: NativePointer,
-                                tsVector: BinaryVector.BinaryVectorPtr,
-                                tsReader: vectors.LongVectorDataReader,
-                                valueVector: BinaryVector.BinaryVectorPtr,
-                                valueReader: VectorDataReader) {
-  // ChunkSetInfo is a value class, use this for typed and efficient access without allocations
-  def info: ChunkSetInfo = ChunkSetInfo(infoPtr)
-}
-
 final case class CorruptVectorException(ptr: NativePointer,
                                         chunkStartTime: Long,
                                         partKeyString: String,
@@ -363,10 +378,9 @@ class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
                             private var readIndex: Int = 0,
-                            windowInfos: Buffer[ChunkQueryInfo] = Buffer.empty[ChunkQueryInfo])
-extends Iterator[ChunkQueryInfo] {
+                            windowInfos: Buffer[ChunkSetInfoReader] = Buffer.empty[ChunkSetInfoReader])
+extends Iterator[ChunkSetInfoReader] {
   private val infos = rv.chunkInfos(start - window, end)
-  private val tsColID = rv.timestampColID
 
   final def close(): Unit = infos.close()
 
@@ -390,28 +404,30 @@ extends Iterator[ChunkQueryInfo] {
     readIndex = 0
 
     // drop initial chunksets of window that are no longer part of the window
-    while (windowInfos.nonEmpty && windowInfos(0).info.endTime < curWindowStart) {
+    while (windowInfos.nonEmpty && windowInfos(0).endTime < curWindowStart) {
       windowInfos.remove(0)
     }
 
-    var lastEndTime = if (windowInfos.isEmpty) -1L else windowInfos(windowInfos.length - 1).info.endTime
+    var lastEndTime = if (windowInfos.isEmpty) -1L else windowInfos(windowInfos.length - 1).endTime
 
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
-      val next = infos.nextInfo
-      require(next.infoAddr != 0, s"NULL nextInfo; curWindowEnd=$curWindowEnd, windowInfos=$windowInfos")
+      val next = infos.nextInfoReader
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
-        val tsVector = next.vectorPtr(tsColID)
+        windowInfos += next
+        next.tsVectorAddr = next.vectorAddress(DataSchema.timestampColID)
         try {
-          val tsReader = vectors.LongBinaryVector(tsVector)
-          val valueVector = next.vectorPtr(rv.valueColID)
-          val valueReader = rv.partition.chunkReader(rv.valueColID, valueVector)
-          windowInfos += ChunkQueryInfo(next.infoAddr, tsVector, tsReader, valueVector, valueReader)
+          next.tsVectorAccessor = next.vectorAccessor(DataSchema.timestampColID)
+          next.tsReader = vectors.LongBinaryVector(next.tsVectorAccessor, next.tsVectorAddr)
+
+          next.valueVectorAccessor = next.vectorAccessor(rv.valueColID)
+          next.valueVectorAddr = next.vectorAddress(rv.valueColID)
+          next.valueReader = rv.partition.chunkReader(rv.valueColID, next.valueVectorAccessor, next.valueVectorAddr)
         } catch {
           case m: MatchError =>
-            throw CorruptVectorException(tsVector, next.startTime, rv.partition.stringPartition,
-                                         rv.partition.shard, m)
+            throw CorruptVectorException(next.tsVectorAddr, next.startTime, rv.partition.stringPartition,
+              rv.partition.shard, m)
         }
         lastEndTime = Math.max(next.endTime, lastEndTime)
       }
@@ -426,9 +442,8 @@ extends Iterator[ChunkQueryInfo] {
   /**
    * Returns the next ChunkSetInfo for the current window
    */
-  final def next: ChunkQueryInfo = {
+  final def next: ChunkSetInfoReader = {
     val next = windowInfos(readIndex)
-    require(next.infoPtr != 0, s"ERROR: info==null, windowInfos=$windowInfos readIndex=$readIndex")
     readIndex += 1
     next
   }
@@ -456,7 +471,7 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getBoolean(columnNo: Int): Boolean = ???
   def getInt(columnNo: Int): Int = columnNo match {
     case 1 => info.numRows
-    case 4 => BinaryVector.totalBytes(info.vectorPtr(column.id))
+    case 4 => BinaryVector.totalBytes(nativePtrReader, info.vectorPtr(column.id))
   }
   def getLong(columnNo: Int): Long = columnNo match {
     case 0 => info.id
@@ -467,11 +482,14 @@ class ChunkInfoRowReader(column: Column) extends RowReader {
   def getDouble(columnNo: Int): Double = ???
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = column.columnType match {
-    case IntColumn    => vectors.IntBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case LongColumn   => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case TimestampColumn => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
-    case DoubleColumn => vectors.DoubleVector(info.vectorPtr(column.id)).getClass.getName
-    case StringColumn => vectors.UTF8Vector(info.vectorPtr(column.id)).getClass.getName
+    case IntColumn    => vectors.IntBinaryVector(nativePtrReader,
+                                    info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(nativePtrReader,
+                                    info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(nativePtrReader,
+                                    info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(nativePtrReader, info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(nativePtrReader, info.vectorPtr(column.id)).getClass.getName
     case o: Any       => "nananana, heyheyhey, goodbye"
   }
 

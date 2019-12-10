@@ -4,29 +4,29 @@ import org.jboss.netty.buffer.ChannelBuffers
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.binaryrecord2.{RecordBuilder, StringifyMapItemConsumer}
+import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
-import filodb.prometheus.FormatConversion
 
 class InfluxRecordSpec extends FunSpec with Matchers {
   // First one has app tag
   // Second one does not
   // Third one is a histogram
   val rawInfluxLPs = Seq(
-    "recovery_row_skipped_total,dataset=timeseries,host=MacBook-Pro-229.local,_ns=filodb counter=0 1536790212000000000",
+    "recovery_row_skipped_total,dataset=timeseries,host=MacBook-Pro-229.local,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1 counter=0 1536790212000000000",
-    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ns=filodb counter=0 1536790212000000000",
-    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,_ns=filodb counter=0 1536790212000000000",
+    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
+    "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
     "memstore_flushes_success_total,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,url=http://localhost:9095 counter=0 1536628260000000000",
     "span_processing_time_seconds,error=false,host=MacBook-Pro-229.local,operation=memstore-recover-index-latency +Inf=2,0.005=0,0.01=0,0.025=0,0.05=0,0.075=0,0.1=1,0.25=2,0.5=2,0.75=2,1=2,10=2,2.5=2,5=2,7.5=2,count=2,sum=0.230162432 1536790212000000000"
   )
 
-  val dataset = FormatConversion.dataset
+  val schema = Schemas.promCounter
   val buffer = ChannelBuffers.buffer(8192)
 
   def convertToRecords(rawText: Seq[String]): Seq[Option[InfluxRecord]] = {
     rawText.map { line =>
       buffer.writeBytes(line.getBytes())
-      InfluxProtocolParser.parse(buffer, dataset.options)
+      InfluxProtocolParser.parse(buffer)
     }
   }
 
@@ -72,20 +72,22 @@ class InfluxRecordSpec extends FunSpec with Matchers {
 
     it("should create a full ingestion BinaryRecordV2 with addToBuilder") {
       val recordOpts = convertToRecords(rawInfluxLPs take 1)
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       // println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
       builder.allContainers.head.foreach { case (base, offset) =>
-        dataset.ingestionSchema.partitionHash(base, offset) should not equal (7)
-        dataset.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
-        dataset.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.0
+        schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
+        schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
+        schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.0
+
+        schema.ingestionSchema.asJavaString(base, offset, 2) shouldEqual "recovery_row_skipped_total"
 
         val consumer = new StringifyMapItemConsumer()
-        dataset.ingestionSchema.consumeMapItems(base, offset, 2, consumer)
+        schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
         consumer.stringPairs.toMap shouldEqual Map("dataset" -> "timeseries",
                                                    "host" -> "MacBook-Pro-229.local",
-                                                   "_ns" -> "filodb",
-                                                   "__name__" -> "recovery_row_skipped_total")
+                                                   "_ws_" -> "demo",
+                                                   "_ns_" -> "filodb")
       }
     }
   }
@@ -93,21 +95,24 @@ class InfluxRecordSpec extends FunSpec with Matchers {
   describe("InfluxPromHistogramRecord") {
     it("should create multiple BinaryRecordV2s with addToBuilder, one for each bucket") {
       val recordOpts = convertToRecords(rawInfluxLPs drop 5)
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+      val builder = new RecordBuilder(MemFactory.onHeapFactory)
       println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
       builder.allContainers.head.countRecords shouldEqual 17
       builder.allContainers.head.foreach { case (base, offset) =>
-        dataset.ingestionSchema.partitionHash(base, offset) should not equal (7)
-        dataset.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
+        schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
+        schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
         val consumer = new StringifyMapItemConsumer()
-        dataset.ingestionSchema.consumeMapItems(base, offset, 2, consumer)
+        schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
         val map = consumer.stringPairs.toMap
-        map("__name__") should startWith ("span_processing_time_seconds")
         map("operation") shouldEqual "memstore-recover-index-latency"
-        map("__name__").drop("span_processing_time_seconds".length) match {
-          case "_sum"    => dataset.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.230162432 +- 0.00000001
-          case "_count"  => dataset.ingestionSchema.getDouble(base, offset, 1) shouldEqual 2
+        (map.keySet - "le") shouldEqual Set("operation", "host", "error")
+
+        val metric = schema.ingestionSchema.asJavaString(base, offset, 2)
+        metric should startWith ("span_processing_time_seconds")
+        metric.drop("span_processing_time_seconds".length) match {
+          case "_sum"    => schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.230162432 +- 0.00000001
+          case "_count"  => schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 2
           case "_bucket" => map.contains("le") shouldEqual true
         }
       }

@@ -4,11 +4,9 @@ import java.lang.{Double => JLDouble}
 
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.memstore.TimeSeriesPartition
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
 import filodb.memory.format.{vectors => bv}
-
 /**
   * Enum of supported downsampling function names
   * @param entryName name of the function
@@ -70,8 +68,8 @@ trait DoubleChunkDownsampler extends ChunkDownsampler {
     * @param endRow The end row number for the downsample period (inclusive)
     * @return downsampled value to emit
     */
-  def downsampleChunk(part: TimeSeriesPartition,
-                      chunkset: ChunkSetInfo,
+  def downsampleChunk(part: ReadablePartition,
+                      chunkset: ChunkSetInfoReader,
                       startRow: Int,
                       endRow: Int): Double
 }
@@ -90,8 +88,8 @@ trait TimeChunkDownsampler extends ChunkDownsampler {
     * @param endRow The end row number for the downsample period (inclusive)
     * @return downsampled value to emit
     */
-  def downsampleChunk(part: TimeSeriesPartition,
-                      chunkset: ChunkSetInfo,
+  def downsampleChunk(part: ReadablePartition,
+                      chunkset: ChunkSetInfoReader,
                       startRow: Int,
                       endRow: Int): Long
 }
@@ -110,8 +108,8 @@ trait HistChunkDownsampler extends ChunkDownsampler {
     * @param endRow The end row number for the downsample period (inclusive)
     * @return downsampled value to emit
     */
-  def downsampleChunk(part: TimeSeriesPartition,
-                      chunkset: ChunkSetInfo,
+  def downsampleChunk(part: ReadablePartition,
+                      chunkset: ChunkSetInfoReader,
                       startRow: Int,
                       endRow: Int): bv.Histogram
 }
@@ -122,24 +120,27 @@ trait HistChunkDownsampler extends ChunkDownsampler {
 case class SumDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Sum downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.SumD
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr)
-    colReader.asDoubleReader.sum(vecPtr, startRow, endRow)
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
+    colReader.asDoubleReader.sum(vecAcc, vecPtr, startRow, endRow)
   }
 }
 
 case class HistSumDownsampler(val colIds: Seq[Int]) extends HistChunkDownsampler {
   require(colIds.length == 1, s"Sum downsample requires only one column. Got ${colIds.length}")
   val name = DownsamplerName.SumH
-  def downsampleChunk(part: TimeSeriesPartition,
-                      chunkset: ChunkSetInfo,
+  def downsampleChunk(part: ReadablePartition,
+                      chunkset: ChunkSetInfoReader,
                       startRow: Int,
                       endRow: Int): bv.Histogram = {
-    val histReader = part.chunkReader(colIds(0), chunkset.vectorPtr(colIds(0))).asHistReader
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val histReader = part.chunkReader(colIds(0), vecAcc, vecPtr).asHistReader
     histReader.sum(startRow, endRow)
   }
 }
@@ -150,13 +151,14 @@ case class HistSumDownsampler(val colIds: Seq[Int]) extends HistChunkDownsampler
 case class CountDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Count downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.CountD
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr)
-    colReader.asDoubleReader.count(vecPtr, startRow, endRow)
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
+    colReader.asDoubleReader.count(vecAcc, vecPtr, startRow, endRow)
   }
 }
 
@@ -166,16 +168,17 @@ case class CountDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
 case class MinDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Min downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.MinD
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
     // TODO MinOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr)
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     var min = Double.MaxValue
     var rowNum = startRow
-    val it = colReader.iterate(vecPtr, startRow).asDoubleIt
+    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
     while (rowNum <= endRow) {
       val nextVal = it.next
       if (!JLDouble.isNaN(nextVal)) min = Math.min(min, nextVal)
@@ -191,16 +194,17 @@ case class MinDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
 case class MaxDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Max downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.MaxD
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
     // TODO MaxOverTimeChunkedFunctionD has same code.  There is scope for refactoring logic into the vector class.
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr)
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
     var max = Double.MinValue
     var rowNum = startRow
-    val it = colReader.iterate(vecPtr, startRow).asDoubleIt
+    val it = colReader.iterate(vecAcc, vecPtr, startRow).asDoubleIt
     while (rowNum <= endRow) {
       val nextVal = it.next
       if (!JLDouble.isNaN(nextVal)) max = Math.max(max, nextVal)
@@ -218,17 +222,19 @@ case class AvgAcDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
   override val name: DownsamplerName = DownsamplerName.AvgAcD
   val avgCol = colIds(0)
   val countCol = colIds(1)
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    val avgVecPtr = chunkset.vectorPtr(avgCol)
-    val avgColReader = part.chunkReader(avgCol, avgVecPtr)
-    val cntVecPtr = chunkset.vectorPtr(countCol)
-    val cntColReader = part.chunkReader(countCol, cntVecPtr)
+    val avgVecAcc = chunkset.vectorAccessor(avgCol)
+    val avgVecPtr = chunkset.vectorAddress(avgCol)
+    val avgColReader = part.chunkReader(avgCol, avgVecAcc, avgVecPtr)
+    val cntVecAcc = chunkset.vectorAccessor(countCol)
+    val cntVecPtr = chunkset.vectorAddress(countCol)
+    val cntColReader = part.chunkReader(countCol, cntVecAcc, cntVecPtr)
     var rowNum = startRow
-    val avgIt = avgColReader.iterate(avgVecPtr, startRow).asDoubleIt
-    val cntIt = cntColReader.iterate(cntVecPtr, startRow).asDoubleIt
+    val avgIt = avgColReader.iterate(avgVecAcc, avgVecPtr, startRow).asDoubleIt
+    val cntIt = cntColReader.iterate(cntVecAcc, cntVecPtr, startRow).asDoubleIt
     var avg = 0d
     var cnt = 0d
     while (rowNum <= endRow) {
@@ -250,18 +256,21 @@ case class AvgScDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
   override val name: DownsamplerName = DownsamplerName.AvgScD
   val sumCol = colIds(0)
   val countCol = colIds(1)
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    val sumVecPtr = chunkset.vectorPtr(sumCol)
-    val sumColReader = part.chunkReader(sumCol, sumVecPtr)
-    val cntVecPtr = chunkset.vectorPtr(countCol)
-    val cntColReader = part.chunkReader(countCol, cntVecPtr)
-    val sumSum = sumColReader.asDoubleReader.sum(sumVecPtr, startRow, endRow)
-    val sumCount = cntColReader.asDoubleReader.sum(cntVecPtr, startRow, endRow)
+    val sumVecAcc = chunkset.vectorAccessor(sumCol)
+    val sumVecPtr = chunkset.vectorAddress(sumCol)
+    val sumColReader = part.chunkReader(sumCol, sumVecAcc, sumVecPtr)
+    val cntVecAcc = chunkset.vectorAccessor(countCol)
+    val cntVecPtr = chunkset.vectorAddress(countCol)
+    val cntColReader = part.chunkReader(countCol, cntVecAcc, cntVecPtr)
+    val sumSum = sumColReader.asDoubleReader.sum(sumVecAcc, sumVecPtr, startRow, endRow)
+    val sumCount = cntColReader.asDoubleReader.sum(cntVecAcc, cntVecPtr, startRow, endRow)
     sumSum / sumCount
   }
+
 }
 
 /**
@@ -270,16 +279,18 @@ case class AvgScDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDo
 case class AvgDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(colIds.length == 1, s"Avg downsample requires one column id with data to average. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.AvgD
-  override def downsampleChunk(part: TimeSeriesPartition,
-                               chunkset: ChunkSetInfo,
+  override def downsampleChunk(part: ReadablePartition,
+                               chunkset: ChunkSetInfoReader,
                                startRow: Int,
                                endRow: Int): Double = {
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr)
-    val sum = colReader.asDoubleReader.sum(vecPtr, startRow, endRow)
-    val count = colReader.asDoubleReader.count(vecPtr, startRow, endRow)
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr)
+    val sum = colReader.asDoubleReader.sum(vecAcc, vecPtr, startRow, endRow)
+    val count = colReader.asDoubleReader.count(vecAcc, vecPtr, startRow, endRow)
     sum / count
   }
+
 }
 
 /**
@@ -288,14 +299,16 @@ case class AvgDownsampler(override val colIds: Seq[Int]) extends DoubleChunkDown
 case class TimeDownsampler(override val colIds: Seq[Int]) extends TimeChunkDownsampler {
   require(colIds.length == 1, s"Time downsample requires only one column. Got ${colIds.length}")
   override val name: DownsamplerName = DownsamplerName.TimeT
-  def downsampleChunk(part: TimeSeriesPartition,
-                      chunkset: ChunkSetInfo,
+  def downsampleChunk(part: ReadablePartition,
+                      chunkset: ChunkSetInfoReader,
                       startRow: Int,
                       endRow: Int): Long = {
-    val vecPtr = chunkset.vectorPtr(colIds(0))
-    val colReader = part.chunkReader(colIds(0), vecPtr).asLongReader
-    colReader.apply(vecPtr, endRow)
+    val vecPtr = chunkset.vectorAddress(colIds(0))
+    val vecAcc = chunkset.vectorAccessor(colIds(0))
+    val colReader = part.chunkReader(colIds(0), vecAcc, vecPtr).asLongReader
+    colReader.apply(vecAcc, vecPtr, endRow)
   }
+
 }
 
 object ChunkDownsampler {

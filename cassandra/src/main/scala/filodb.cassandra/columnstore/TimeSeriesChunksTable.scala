@@ -75,7 +75,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
    * Reads and returns a single RawPartData, raw data for a single partition/time series
    */
   def readRawPartitionData(partKeyBytes: Array[Byte],
-                           columnIds: Array[Int],
                            chunkInfos: Seq[Array[Byte]]): Task[RawPartData] = {
     val query = readChunkInCql.bind().setBytes(0, toBuffer(partKeyBytes))
                                      .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
@@ -104,12 +103,18 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                               .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readRawPartitionRange(partitions: Seq[Array[Byte]],
-                            columnIds: Array[Int],
-                            startTime: Long, endTimeExclusive: Long): Observable[RawPartData] = {
-    val query = readChunkRangeCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
+                            startTime: Long,
+                            endTimeExclusive: Long): Observable[RawPartData] = {
+    readRawPartitionRangeBB(partitions.map(toBuffer), startTime, endTimeExclusive)
+  }
+
+  def readRawPartitionRangeBB(partitions: Seq[ByteBuffer],
+                              startTime: Long,
+                              endTimeExclusive: Long): Observable[RawPartData] = {
+    val query = readChunkRangeCql.bind().setList(0, partitions.asJava, classOf[ByteBuffer])
                                         .setLong(1, chunkID(startTime, 0))
                                         .setLong(2, chunkID(endTimeExclusive, 0))
-    val futRawParts = session.executeAsync(query)
+    val futRawParts: Future[Iterator[RawPartData]] = session.executeAsync(query)
                              .toIterator.handleErrors
                              .map { rowIt =>
                                rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
@@ -118,7 +123,31 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
                                  }
                              }
-    Observable.fromFuture(futRawParts).flatMap { it: Iterator[RawPartData] => Observable.fromIterator(it) }
+    for {
+      it <- Observable.fromFuture(futRawParts)
+      rpd <- Observable.fromIterator(it)
+    } yield rpd
+  }
+
+  def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
+    def cql(start: String, end: String): String =
+      s"SELECT partition, info, chunks FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end "
+    val res: Observable[Future[Iterator[RawPartData]]] = Observable.fromIterable(tokens).map { case (start, end) =>
+      session.executeAsync(cql(start, end)).toIterator.handleErrors
+              .map { rowIt =>
+                rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
+                  .sortedGroupBy(_._1)
+                  .map { case (partKeyBuffer, chunkSetIt) =>
+                    RawPartData(partKeyBuffer.array, chunkSetIt.map(_._2).toBuffer)
+                  }
+              }
+    }
+
+    for {
+      fut <- res
+      it <- Observable.fromFuture(fut)
+      rpd <- Observable.fromIterator(it)
+    } yield rpd
   }
 
 

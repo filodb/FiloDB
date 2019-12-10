@@ -10,7 +10,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -23,12 +23,9 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
 sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
-final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
-final case class FlushCommand(groupNum: Int) extends DataOrCommand
-final case class FlushIndexTimeBuckets(timeBucket: Int)
 
-final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLiveSeconds: Int,
-                            flushTimeBuckets: Option[FlushIndexTimeBuckets])
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
+                            dirtyPartsToFlush: debox.Buffer[Int])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
@@ -43,6 +40,9 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
+
+  def isReadOnly: Boolean
+
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
     * read from this store on demand as needed for recovery purposes.
@@ -54,12 +54,13 @@ trait MemStore extends ChunkSource {
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
    * This method only succeeds if the dataset and shard has not already been setup.
+   * @param schemas the Schemas that the shards can ingest. Might vary depending on dataset.
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
-   * @throws ShardAlreadySetup
+   * @throws filodb.core.memstore.ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int,
+  def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig,
             downsampleConfig: DownsampleConfig = DownsampleConfig.disabled): Unit
 
@@ -78,8 +79,12 @@ trait MemStore extends ChunkSource {
    * Sets up a shard of a dataset to continuously ingest new sets of records from a stream.
    * The records are immediately available for reads from that shard of the memstore.
    * Errors during ingestion are handled by the errHandler.
-   * Flushes to the ChunkSink are initiated by a potentially independent stream, the flushStream, which emits
-   *   flush events of a specific subgroup of a shard.
+   *
+   * Flushes to the ChunkSink are initiated at the discretion of the method implementation.
+   * The preferred strategy is to rely on the ingestion time obtained from the SomeData
+   * RecordContainers, but flushing can also be performed at regular intervals or based on
+   * resource limits.
+   *
    * NOTE: does not check that existing streams are not already writing to this store.  That needs to be
    * handled by an upper layer.  Multiple stream ingestion is not guaranteed to be thread safe, a single
    * stream is safe for now.
@@ -90,17 +95,13 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushSched the Scheduler to use to schedule flush tasks
-   * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
-   * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
-   *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
+   *        the Future completes the stream ends.  It is up to the caller to ensure this.
    */
   def ingestStream(dataset: DatasetRef,
                    shard: Int,
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
-                   flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
                    cancelTask: Task[Unit] = Task {}): CancelableFuture[Unit]
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
@@ -164,7 +165,7 @@ trait MemStore extends ChunkSource {
     * @return an Iterator for the TimeSeriesPartition
     */
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition]
+                          end: Long, start: Long, limit: Int): Iterator[PartKey]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard
@@ -205,7 +206,7 @@ trait MemStore extends ChunkSource {
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
    */
-  def truncate(dataset: DatasetRef): Future[Response]
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /**
    * Resets the state of the MemStore. Usually used for testing.
@@ -224,10 +225,10 @@ object MemStore {
    * constant column for each partition.
    */
   def getAppendables(memFactory: MemFactory,
-                     dataset: Dataset,
+                     schema: DataSchema,
                      config: StoreConfig): Array[BinaryAppendableVector[_]] = {
     val maxElements = config.maxChunksSize
-    dataset.dataColumns.zipWithIndex.map { case (col, index) =>
+    schema.columns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
         // Time series data doesn't really need the NA/null functionality, so use more optimal vectors
         // to save memory and CPU

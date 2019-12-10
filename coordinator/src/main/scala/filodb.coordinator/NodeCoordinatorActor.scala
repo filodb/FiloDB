@@ -86,9 +86,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   // Used only for testing
   private def createDataset(originator: ActorRef,
-                            datasetObj: Dataset): Unit = {
+                            datasetObj: Dataset,
+                            numShards: Int): Unit = {
     (for {
-      resp2 <- memStore.store.initialize(datasetObj.ref) if resp2 == Success
+      resp2 <- memStore.store.initialize(datasetObj.ref, numShards) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
@@ -99,7 +100,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
-    memStore.store.initialize(dataset.ref)
+    memStore.store.initialize(dataset.ref, ingestConfig.numShards)
     setupDataset( dataset,
                   ingestConfig.storeConfig,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
@@ -107,9 +108,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
-  private def truncateDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
+  private def truncateDataset(originator: ActorRef, dataset: DatasetRef, numShards: Int): Unit = {
     try {
-      memStore.truncate(dataset).map {
+      memStore.truncate(dataset, numShards).map {
         case Success    => originator ! DatasetTruncated
         case other: Any => originator ! ServerError(other)
       }
@@ -129,7 +130,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def setupDataset(dataset: Dataset,
                            storeConf: StoreConfig,
                            source: IngestionSource,
-                           downsample: DownsampleConfig): Unit = {
+                           downsample: DownsampleConfig,
+                           schemaOverride: Boolean = false): Unit = {
     import ActorName.{Ingestion, Query}
 
     logger.debug(s"Recreated dataset $dataset from string")
@@ -137,13 +139,17 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     clusterActor match {
       case Some(nca) =>
-        val props = IngestionActor.props(dataset, memStore, source, downsample, storeConf, statusActor.get)
+        val schemas = if (schemaOverride) Schemas(dataset.schema) else settings.schemas
+        if (schemaOverride) logger.info(s"Overriding schemas from settings: this better be a test!")
+        val props = IngestionActor.props(dataset.ref, schemas, memStore,
+                                         source, downsample, storeConf, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
 
         logger.info(s"Creating QueryActor for dataset $ref")
-        val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps.get(ref)), s"$Query-$ref")
+        val queryRef = context.actorOf(QueryActor.props(
+                         memStore, dataset.ref, schemas, shardMaps.get(ref)), s"$Query-$ref")
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
@@ -155,18 +161,18 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def datasetHandlers: Receive = LoggingReceive {
-    case CreateDataset(datasetObj, db) =>
+    case CreateDataset(numShards, datasetObj, db) =>
       // used only for unit testing now
-      createDataset(sender(), datasetObj.copy(database = db))
+      createDataset(sender(), datasetObj, numShards)
 
-    case TruncateDataset(ref) =>
-      truncateDataset(sender(), ref)
+    case TruncateDataset(ref, numShards) =>
+      truncateDataset(sender(), ref, numShards)
   }
 
   def ingestHandlers: Receive = LoggingReceive {
     case SetupDataset(dataset, resources, source, storeConf, downsample) =>
       // used only in unit tests
-      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample) }
+      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, downsample, true) }
 
     case IngestRows(dataset, shard, rows) =>
       withIngester(sender(), dataset) { _ ! IngestionActor.IngestRows(sender(), shard, rows) }
@@ -187,7 +193,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def coordinatorReceive: Receive = LoggingReceive {
     case e: CoordinatorRegistered     => registered(e)
-    case s: ShardIngestionState       => logger.debug(s"Received IngestionState/Snapshot ${s.map}")
+    case s: ShardIngestionState       => logger.trace(s"Received IngestionState/Snapshot ${s.map}")
                                          shardMaps.put(s.ref, s.map)
                                          forward(s, s.ref, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
@@ -211,13 +217,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     if (!datasetsInitialized) {
       logger.debug(s"Initializing stream configs: ${settings.streamConfigs}")
       settings.streamConfigs.foreach { config =>
-        val dataset = Dataset.fromConfig(config)
+        val dataset = settings.datasetFromStream(config)
         val ingestion = IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
         initializeDataset(dataset, ingestion)
       }
       datasetsInitialized = true
     }
-
   }
 
   /** Forwards shard actions to the ingester for the given dataset.
