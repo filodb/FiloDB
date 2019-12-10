@@ -5,35 +5,16 @@ import scala.concurrent.{ExecutionContext, Future}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
-import filodb.core.{ErrorResponse, Response, Success}
-import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesShardStats}
-import filodb.core.metadata.Dataset
-import filodb.core.query.ColumnInfo
+import filodb.core.metadata.Schema
 import filodb.core.store.ChunkInfoIterator
 import filodb.memory.MemFactory
 
 final case class DownsampleRecords(resolution: Int, builder: RecordBuilder)
 
-/**
-  * This class takes the responsibility of carrying out the
-  * downsampling algorithms and publish to another dataset given the chunksets.
-  */
-class ShardDownsampler(dataset: Dataset,
-                       shardNum: Int,
-                       enabled: Boolean,
-                       resolutions: Seq[Int],
-                       publisher: DownsamplePublisher,
-                       stats: TimeSeriesShardStats) extends StrictLogging {
-  if (enabled) {
-    logger.info(s"Downsampling enabled for dataset=${dataset.ref} shard=$shardNum with " +
-      s"following downsamplers: ${dataset.downsamplers.map(_.encoded)} at resolutions: $resolutions")
-  } else {
-    logger.info(s"Downsampling disabled for dataset=${dataset.ref} shard=$shardNum")
-  }
-
-  private[downsample] val downsampleSchema = downsampleIngestSchema()
-
+object ShardDownsampler extends StrictLogging {
   /**
     * Allocates record builders to store downsample records for chunksets that
     * are going to be newly encoded.
@@ -43,10 +24,10 @@ class ShardDownsampler(dataset: Dataset,
     * CAREFUL: Should not reuse downsampling records in a flush period without being sure
     * that flush tasks running in parallel will not use the same object.
     */
-  def newEmptyDownsampleRecords: Seq[DownsampleRecords] = {
+  def newEmptyDownsampleRecords(resolutions: Seq[Int], enabled: Boolean): Seq[DownsampleRecords] = {
     if (enabled) {
       resolutions.map { res =>
-        DownsampleRecords(res, new RecordBuilder(MemFactory.onHeapFactory, downsampleSchema))
+        DownsampleRecords(res, new RecordBuilder(MemFactory.onHeapFactory))
       }
     } else {
       Seq.empty
@@ -54,13 +35,40 @@ class ShardDownsampler(dataset: Dataset,
   }
 
   /**
-    * Formulates downsample schema using the downsampler configuration for dataset
+    * Publishes the current data in downsample builders, typically to Kafka
     */
-  private[downsample] def downsampleIngestSchema(): RecordSchema = {
-    // The name of the column in downsample record does not matter at the ingestion side. Type does matter.
-    val downsampleCols = dataset.downsamplers.map { d => ColumnInfo(s"${d.name.entryName}", d.colType) }
-    new RecordSchema(downsampleCols ++ dataset.partKeySchema.columns,
-      Some(downsampleCols.size), dataset.ingestionSchema.predefinedKeys)
+  def publishToDownsampleDataset(dsRecords: Seq[DownsampleRecords],
+                                 publisher: DownsamplePublisher, ref: DatasetRef, shard: Int)
+                                (implicit sched: ExecutionContext): Future[Response] = {
+    val responses = dsRecords.map { rec =>
+      val containers = rec.builder.optimalContainerBytes(true)
+      logger.debug(s"Publishing ${containers.size} downsample record containers " +
+        s"of dataset=$ref shard=$shard for resolution ${rec.resolution}")
+      publisher.publish(shard, rec.resolution, containers)
+    }
+    Future.sequence(responses).map(_.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success))
+  }
+}
+
+/**
+  * This class takes the responsibility of carrying out the
+  * downsampling algorithms and publish to another dataset given the chunksets.
+  * One ShardDownsampler exist for each source schema to target schema.
+  */
+class ShardDownsampler(datasetName: String,
+                       shardNum: Int,
+                       sourceSchema: Schema,
+                       targetSchema: Schema,
+                       enabled: Boolean,
+                       stats: TimeSeriesShardStats) extends StrictLogging {
+  private val downsamplers = sourceSchema.data.downsamplers
+
+  if (enabled) {
+    logger.info(s"Downsampling enabled for dataset=$datasetName shard=$shardNum with " +
+      s"following downsamplers: ${downsamplers.map(_.encoded)}")
+    logger.info(s"From source schema $sourceSchema to target schema $targetSchema")
+  } else {
+    logger.info(s"Downsampling disabled for dataset=$datasetName shard=$shardNum")
   }
 
   /**
@@ -74,15 +82,15 @@ class ShardDownsampler(dataset: Dataset,
                                 records: Seq[DownsampleRecords]): Unit = {
     if (enabled) {
       val downsampleTrace = Kamon.buildSpan("memstore-downsample-records-trace")
-        .withTag("dataset", dataset.name)
+        .withTag("dataset", datasetName)
         .withTag("shard", shardNum).start()
-      val timestampCol = dataset.timestampColID
       while (chunksets.hasNext) {
-        val chunkset = chunksets.nextInfo
+        val chunkset = chunksets.nextInfoReader
         val startTime = chunkset.startTime
         val endTime = chunkset.endTime
-        val vecPtr = chunkset.vectorPtr(timestampCol)
-        val tsReader = part.chunkReader(timestampCol, vecPtr).asLongReader
+        val tsPtr = chunkset.vectorAddress(0)
+        val tsAcc = chunkset.vectorAccessor(0)
+        val tsReader = part.chunkReader(0, tsAcc, tsPtr).asLongReader
         // for each downsample resolution
         records.foreach { case DownsampleRecords(resolution, builder) =>
           var pStart = ((startTime - 1) / resolution) * resolution + 1 // inclusive startTime for downsample period
@@ -90,11 +98,11 @@ class ShardDownsampler(dataset: Dataset,
           // for each downsample period
           while (pStart <= endTime) {
             // fix the boundary row numbers for the downsample period by looking up the timestamp column
-            val startRowNum = tsReader.binarySearch(vecPtr, pStart) & 0x7fffffff
-            val endRowNum = Math.min(tsReader.ceilingIndex(vecPtr, pEnd), chunkset.numRows - 1)
-            builder.startNewRecord()
+            val startRowNum = tsReader.binarySearch(tsAcc, tsPtr, pStart) & 0x7fffffff
+            val endRowNum = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, pEnd), chunkset.numRows - 1)
+            builder.startNewRecord(targetSchema)
             // for each downsampler, add downsample column value
-            dataset.downsamplers.foreach {
+            downsamplers.foreach {
               case d: TimeChunkDownsampler =>
                 builder.addLong(d.downsampleChunk(part, chunkset, startRowNum, endRowNum))
               case d: DoubleChunkDownsampler =>
@@ -103,7 +111,7 @@ class ShardDownsampler(dataset: Dataset,
                 builder.addBlob(h.downsampleChunk(part, chunkset, startRowNum, endRowNum).serialize())
             }
             // add partKey finally
-            builder.addPartKeyRecordFields(part.partKeyBase, part.partKeyOffset, dataset.partKeySchema)
+            builder.addPartKeyRecordFields(part.partKeyBase, part.partKeyOffset, sourceSchema.partKeySchema)
             builder.endRecord(true)
             stats.downsampleRecordsCreated.increment()
             pStart += resolution
@@ -114,21 +122,4 @@ class ShardDownsampler(dataset: Dataset,
       downsampleTrace.finish()
     }
   }
-
-  /**
-    * Publishes the current data in downsample builders, typically to Kafka
-    */
-  def publishToDownsampleDataset(dsRecords: Seq[DownsampleRecords])
-                                (implicit sched: ExecutionContext): Future[Response] = {
-    if (enabled) {
-      val responses = dsRecords.map { rec =>
-        val containers = rec.builder.optimalContainerBytes(true)
-        logger.debug(s"Publishing ${containers.size} downsample record containers " +
-          s"of dataset=${dataset.ref} shard=$shardNum for resolution ${rec.resolution}")
-        publisher.publish(shardNum, rec.resolution, containers)
-      }
-      Future.sequence(responses).map(_.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success))
-    } else Future.successful(Success)
-  }
-
 }

@@ -15,7 +15,8 @@ import filodb.core.{query, TestData}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
+import filodb.core.metadata.Schemas
+import filodb.core.query.{ColumnFilter, Filter, SerializedRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -50,13 +51,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   // Be sure to reset the builder; it is in an Object so static and shared amongst tests
   builder.reset()
   partTagsUTF8s.map( partTagsUTF8 => tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }
-    .foreach(builder.addFromReader))
+    .foreach(builder.addFromReader(_, timeseriesSchema)))
   val container = builder.allContainers.head
 
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
-    memStore.setup(timeseriesDataset, 0, TestData.storeConf)
+    memStore.setup(timeseriesDataset.ref, Schemas(timeseriesSchema), 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
   }
@@ -79,13 +80,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[query.SerializableRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+        rv.asInstanceOf[query.SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
     result shouldEqual jobQueryResult1
@@ -98,9 +99,9 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     resp match {
       case QueryResult(_, _, results) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
@@ -112,13 +113,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[SerializableRangeVector]
+        response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
           .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
@@ -132,13 +133,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     //Reducing limit results in truncated metadata response
     val execPlan = PartKeysExec("someQueryId", now, limit - 1, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now)
+      timeseriesDataset.ref, 0, timeseriesSchema.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[query.SerializableRangeVector]
+        response(0).rows.map (row => response(0).asInstanceOf[query.SerializedRangeVector]
           .schema.toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }

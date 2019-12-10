@@ -5,13 +5,13 @@ import akka.testkit.TestProbe
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
+
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.ConfigFactory
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}
+import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.TimeStepParams
@@ -31,13 +31,15 @@ class QueryEngineSpec extends FunSpec with Matchers {
   private def mapperRef = mapper
 
   val dataset = MetricsTestData.timeseriesDataset
+  val dsRef = dataset.ref
+  val schemas = Schemas(dataset.schema)
 
   val emptyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dataset, mapperRef, EmptyFailureProvider)
+  val engine = new QueryEngine(dsRef, schemas, mapperRef, EmptyFailureProvider)
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
@@ -85,7 +87,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     --ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
     ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
-    -----SelectRawPartitionsExec(shard=2, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#342951049])
+    -----MultiSchemaPartitionsExec(shard=2, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#342951049])
     ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
     -----SelectRawPartitionsExec(shard=3, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
@@ -104,7 +106,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       // Now there should be single level of reduce because we have 2 shards
       l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
-        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 2
         l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
         l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
@@ -126,7 +128,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       l1.children.foreach { l2 =>
         l2.isInstanceOf[ReduceAggregateExec] shouldEqual true
         l2.children.foreach { l3 =>
-          l3.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+          l3.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
           l3.rangeVectorTransformers.size shouldEqual 2
           l3.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
           l3.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
@@ -135,25 +137,20 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should throw BadQuery if illegal column name in LogicalPlan") {
-    val raw3 = raw2.copy(columns = Seq("foo"))
-    intercept[BadQueryException] {
-      engine.materialize(raw3, QueryOptions(), promQlQueryParams)
-    }
-  }
+  import com.softwaremill.quicklens._
 
   it("should rename Prom __name__ filters if dataset has different metric column") {
     // Custom QueryEngine with different dataset with different metric name
-    val dataset2 = dataset.copy(options = dataset.options.copy(
-      metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
-    val engine2 = new QueryEngine(dataset2, mapperRef, EmptyFailureProvider)
+    val datasetOpts = dataset.options.copy(metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job"))
+    val dataset2 = dataset.modify(_.schema.partition.options).setTo(datasetOpts)
+    val engine2 = new QueryEngine(dataset2.ref, Schemas(dataset2.schema), mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryOptions(), promQlQueryParams)
     execPlan.isInstanceOf[DistConcatExec] shouldEqual true
     execPlan.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-      val rpExec = l1.asInstanceOf[SelectRawPartitionsExec]
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      val rpExec = l1.asInstanceOf[MultiSchemaPartitionsExec]
       rpExec.filters.map(_.column).toSet shouldEqual Set("kpi", "job")
     }
   }
@@ -162,7 +159,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     var filodbSpreadMap = new collection.mutable.HashMap[collection.Map[String, String], Int]
     filodbSpreadMap.put(collection.Map(("job" -> "myService")), 2)
 
-    val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", filodbSpreadMap, 1)
+    val spreadFunc = QueryOptions.simpleMapSpreadFunc(Seq("job"), filodbSpreadMap, 1)
 
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
@@ -238,7 +235,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       // Now there should be single level of reduce because we have 2 shards
       l1.isInstanceOf[ReduceAggregateExec] shouldEqual true
       l1.children.foreach { l2 =>
-        l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+        l2.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 2
         l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
         l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
@@ -264,7 +261,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
@@ -275,7 +272,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
     reduceAggregateExec.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (100)
@@ -299,7 +296,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -324,7 +321,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
@@ -340,10 +337,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
     child1.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
         1010000
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
+      l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1060000)
@@ -371,7 +368,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -394,7 +391,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -417,7 +414,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -445,7 +442,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
     //900K to 1020K and 1020+60 k to 2000K
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
@@ -461,10 +458,10 @@ class QueryEngineSpec extends FunSpec with Matchers {
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
     child1.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual
         (1080000-lookBack)
-      l1.asInstanceOf[SelectRawPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
+      l1.asInstanceOf[MultiSchemaPartitionsExec].chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual 2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1080000)
@@ -497,7 +494,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
@@ -529,7 +526,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
@@ -539,7 +536,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     reduceAggregateExec.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
     reduceAggregateExec.children.foreach { l1 =>
-      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
       l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual from *1000
@@ -567,7 +564,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new QueryEngine(dataset, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
+    val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
     val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)

@@ -2,18 +2,19 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
+import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
-import filodb.core.TestData
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.PartKeyLuceneIndex
+import filodb.core.metadata.Schemas.promCounter
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
-import filodb.prometheus.FormatConversion
 import filodb.timeseries.TestTimeseriesProducer
 
 @State(Scope.Thread)
@@ -21,18 +22,18 @@ class PartKeyIndexBenchmark {
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
-  val dataset = FormatConversion.dataset
-  val partKeyIndex = new PartKeyLuceneIndex(dataset, 0, TestData.storeConf)
+  val ref = DatasetRef("prometheus")
+  val partKeyIndex = new PartKeyLuceneIndex(ref, promCounter.partition, 0, 1.hour)
   val numSeries = 1000000
   val partKeyData = TestTimeseriesProducer.timeSeriesData(0, numSeries) take numSeries
-  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema)
+  val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory)
   partKeyData.foreach(_.addToBuilder(partKeyBuilder))
 
   var partId = 1
   val now = System.currentTimeMillis()
   val consumer = new BinaryRegionConsumer {
     def onNext(base: Any, offset: Long): Unit = {
-      val partKey = dataset.partKeySchema.asByteArray(base, offset)
+      val partKey = promCounter.partition.binSchema.asByteArray(base, offset)
       partKeyIndex.addPartKey(partKey, partId, now)()
       partId += 1
     }

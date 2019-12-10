@@ -139,10 +139,17 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * Check whether logical plan has a PeriodicSeriesPlan
     */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[RawSeriesPlan] || logicalPlan.isInstanceOf[MetadataQueryPlan]) {
+    if (!logicalPlan.isRoutable) {
       false
-    } else
-    true
+    } else {
+      logicalPlan match {
+        case s: ScalarVectorBinaryOperation => isPeriodicSeriesPlan(s.vector)
+        case v: VectorPlan                  => isPeriodicSeriesPlan(v.scalars)
+        case i: ApplyInstantFunction        => isPeriodicSeriesPlan(i.vectors)
+        case b: BinaryJoin                  => isPeriodicSeriesPlan(b.lhs)
+        case _                              => true
+      }
+    }
   }
 
   /**
@@ -164,15 +171,19 @@ object QueryRoutingPlanner extends RoutingPlanner {
     */
   def getPeriodicSeriesTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
-      case lp: PeriodicSeries => TimeRange(lp.start, lp.end)
+      case lp: PeriodicSeries              => TimeRange(lp.start, lp.end)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.start, lp.end)
-      case lp: ApplyInstantFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: Aggregate => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: BinaryJoin => getPeriodicSeriesTimeFromLogicalPlan(lp.lhs) // can assume lhs & rhs have same time
+      case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: BinaryJoin                  => // can assume lhs & rhs have same time
+                                              getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
-      case lp: ApplyMiscellaneousFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ApplySortFunction => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case _ => throw new BadQueryException("Invalid logical plan")
+      case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarVaryingDoublePlan     => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.start, lp.rangeParams.end)
+      case lp: VectorPlan                  => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
+      case _                               => throw new BadQueryException(s"Invalid logical plan")
     }
   }
 
@@ -225,7 +236,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
         case rs: IntervalSelector => Some(rs.from)
         case _ => None
       }
-      case _                      => throw new BadQueryException("Invalid logical plan")
+      case _                      => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
     }
   }
 }

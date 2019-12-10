@@ -9,13 +9,14 @@ import scala.util.Try
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import monix.reactive.Observable
+import org.scalactic._
 
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryengine2.{PromQlQueryParams, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Schemas}
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
@@ -125,9 +126,6 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           args.host.map { server =>
             listRegisteredDatasets(Client.standaloneClient(system, server, args.port))
           }
-        case Some("truncate") =>
-          client.truncateDataset(getRef(args), timeout)
-          println(s"Truncated data for ${getRef(args)} with no errors")
 
         case Some("indexnames") =>
           val (remote, ref) = getClientAndRef(args)
@@ -144,6 +142,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         case Some("status") =>
           val (remote, ref) = getClientAndRef(args)
           dumpShardStatus(remote, ref)
+
+        case Some("validateSchemas") => validateSchemas()
 
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
@@ -203,6 +203,23 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     }
   }
 
+  def validateSchemas(): Unit = {
+    Schemas.fromConfig(config) match {
+      case Good(Schemas(partSchema, schemas)) =>
+        println("Schema validated.\nPartition schema:")
+        partSchema.columns.foreach(c => println(s"\t$c"))
+        schemas.foreach { case (schemaName, sch) =>
+          println(s"Schema $schemaName (id=${sch.schemaHash}):")
+          sch.data.columns.foreach(c => println(s"\t$c"))
+          println(s"\n\tDownsamplers: ${sch.data.downsamplers}\n\tDownsample schema: ${sch.data.downsampleSchema}")
+        }
+      case Bad(errors) =>
+        println(s"Schema validation errors:")
+        errors.foreach { case (name, err) => println(s"$name\t$err")}
+        exitCode = 1
+    }
+  }
+
   final case class QOptions(limit: Int, sampleLimit: Int,
                             everyN: Option[Int], timeout: FiniteDuration,
                             shardOverrides: Option[Seq[Int]],
@@ -254,7 +271,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
-            case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
+            case QueryResult(_, schema, result) => println(s"Output schema: $schema")
+                                                   println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }

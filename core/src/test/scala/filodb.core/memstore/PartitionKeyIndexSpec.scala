@@ -15,7 +15,7 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import filodb.memory.format.ZeroCopyUTF8String._
 
   val keyIndex = new PartitionKeyIndex(dataset6)
-  val partBuilder = new RecordBuilder(TestData.nativeMem, dataset6.partKeySchema)
+  val partBuilder = new RecordBuilder(TestData.nativeMem)
 
   before {
     keyIndex.reset()

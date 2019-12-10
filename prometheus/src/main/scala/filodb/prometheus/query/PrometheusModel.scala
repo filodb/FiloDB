@@ -84,16 +84,17 @@ object PrometheusModel {
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
                                   "_partIds_" -> srv.key.partIds.mkString(","))
                 else Map.empty)
+    val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+      Sampl(r.getLong(0) / 1000, r.getDouble(1))
+    }.toSeq
+
+    val res = if (samples.isEmpty) None else Some(samples)
 
     Result(tags,
       // remove NaN in HTTP results
       // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
       // in HTTP raw query results.
-      Some(
-        srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
-          Sampl(r.getLong(0) / 1000, r.getDouble(1))
-        }.toSeq
-      ),
+      res,
       None
     )
   }

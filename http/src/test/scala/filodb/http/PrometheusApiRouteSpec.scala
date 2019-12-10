@@ -20,13 +20,7 @@ object PrometheusApiRouteSpec extends ActorSpecConfig {
     inline-dataset-configs = [
       {
         dataset = "prometheus"
-        definition {
-          partition-columns = ["tags:map"]
-          data-columns = ["timestamp:ts", "value:double"]
-          row-key-columns = [ "timestamp" ]
-          downsamplers = []
-        }
-        ${TestData.optionsString}
+        schema = "gauge"
         num-shards = 4
         min-num-nodes = 1
         sourcefactory = "${classOf[NoOpStreamFactory].getName}"
@@ -48,6 +42,11 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   // Dataset will be created and ingestion started
   override def createActorSystem(): ActorSystem = PrometheusApiRouteSpec.getNewSystem
 
+  override def afterAll(): Unit = {
+    FilodbSettings.reset()
+    super.afterAll()
+  }
+
   val cluster = FilodbCluster(system)
   val probe = TestProbe()
   implicit val timeout = RouteTestTimeout(20.minute)
@@ -66,7 +65,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   }
 
   it("should get explainPlan for query") {
-    val query = "heap_usage{_ns=\"App-0\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
@@ -79,14 +78,14 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
       resp.debugInfo(0).toString should startWith("E~DistConcatExec()")
       resp.debugInfo(1) should startWith("-T~PeriodicSamplesMapper")
-      resp.debugInfo(2) should startWith("--E~SelectRawPartitionsExec")
+      resp.debugInfo(2) should startWith("--E~MultiSchemaPartitionsExec")
       resp.debugInfo(3) should startWith("-T~PeriodicSamplesMapper")
-      resp.debugInfo(4) should startWith("--E~SelectRawPartitionsExec")
+      resp.debugInfo(4) should startWith("--E~MultiSchemaPartitionsExec")
     }
   }
 
   it("should take spread override value from config for app") {
-    val query = "heap_usage{_ns=\"App-0\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
@@ -96,12 +95,12 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
     }
   }
 
   it("should get explainPlan for query based on spread as query parameter") {
-    val query = "heap_usage{_ns=\"App-1\"}"
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
@@ -111,12 +110,12 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
     }
   }
 
     it("should take default spread value if there is no override") {
-      val query = "heap_usage{_ns=\"App-1\"}"
+      val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
       Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
         s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
@@ -126,7 +125,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
         contentType shouldEqual ContentTypes.`application/json`
         val resp = responseAs[ExplainPlanResponse]
         resp.status shouldEqual "success"
-        resp.debugInfo.filter(_.startsWith("--E~SelectRawPartitionsExec")).length shouldEqual 2
+        resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 2
       }
     }
 }

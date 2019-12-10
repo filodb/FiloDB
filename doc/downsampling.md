@@ -47,10 +47,27 @@ emit timestamp value. One could later have downsamplers that emit histogram or l
 
 Downsampling for prometheus counters will come soon.
 
-Downsampling is configured at the time of dataset creation. For example:
+Downsampling is configured from the Schema.
+
+For example, a schema will contain downsampler config as follows:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,_ns --downsamplers "tTime(0),dMin(1),dMax(1),dSum(1),dCount(1),dAvg(1)"
+  schemas {
+    gauge {
+      # Each column def is of name:type format.  Type may be ts,long,double,string,int
+      # The first column must be ts or long
+      columns = ["timestamp:ts", "value:double:detectDrops=false"]
+
+      # Default column to query using PromQL
+      value-column = "value"
+
+      # Downsampling configuration.  See doc/downsampling.md
+      downsamplers = [ "tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)" ]
+
+      # If downsamplers are defined, then the downsample schema must also be defined
+      downsample-schema = "ds-gauge"
+    }
+  }
 ```
 
 In the above example, the data column `value` with index 1 is configured with the dMin, dMax, sSum, dCount and dAvg downsamplers.
@@ -65,7 +82,7 @@ order as the downsample type configuration. For the above example, we would crea
 dataset as:
 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset prometheus_ds_1m --dataColumns timestamp:ts,min:double,max:double,sum:double,count:double,avg:double --partitionColumns tags:map --shardKeyColumns __name__,_ns_,_ws_
 ```
 
 Note that there is no downsampling configuration here in the above dataset. Note that partition
@@ -103,11 +120,8 @@ downsampler on the downsampled dataset.
 
 ## Querying of Downsample Data
  
-Downsampled data for individual time series can be queried from the downsampled dataset. The PromQL
-filters in the query needs to include the `__col__` tag with the value of the downsample column name
-chosen in the downsample dataset. For example `heap_usage{_ns="myApp" __col__="avg"}`
-
-Coming soon in subsequent PR: Automatic selection of column based on the time window function applied in the query.
+Downsampled data for individual time series can be queried from the downsampled dataset. The downsampled dataset schema varies by schema type.  For gauges, the min, max, sum, count, and avergage are computed and stored in separate columns in the `ds-gauge` schema. The FiloDB Query Engine automatically translates queries to select the right column under the hood.
+For example `min_over_time(heap_usage{_ws_="demo",_ns_="myApp"})` is roughly converted to something like `heap_usage::min{_ws_="demo",_ns_="myApp"}`.
 
 ## Validation of Downsample Results
 
@@ -115,13 +129,14 @@ Run main class [filodb.prom.downsample.GaugeDownsampleValidator](../http/src/tes
 
 ```
 -Dquery-endpoint=https://myFiloDbEndpoint.com
--Draw-data-promql=jvm_threads{_ns=\"myApplication\",measure=\"daemon\",__col__=\"value\"}[@@@@s]
+-Draw-data-promql=jvm_threads::value{_ws_=\"demo\",_ns_=\"myApplication\",measure=\"daemon\"}[@@@@s]
 -Dflush-interval=12h
 -Dquery-range=6h
 ```
 
 Notes:
-* `raw-data-promql` system property value should end with `,__col__="value"}[@@@@s]`.
+* `raw-data-promql` system property value should end with `[@@@@s]`.
+* `raw-data-promql` needs to have `::value` column selector suffix at end of metric name as it gets replaced with diff column names
 * The lookback window `@@@@` is replaced with downsample period by validation tool when running the query.
 
 This will perform validation of min, max, sum and count downsamplers by issuing same query to both datasets

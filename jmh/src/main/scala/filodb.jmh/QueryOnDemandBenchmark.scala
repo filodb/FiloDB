@@ -16,7 +16,7 @@ import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
-import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
+import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -68,8 +68,8 @@ class QueryOnDemandBenchmark extends StrictLogging {
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
   Await.result(cluster.metaStore.clearAllData(), 5.seconds)  // to clear IngestionConfig
-  Await.result(cluster.memStore.store.initialize(dataset.ref), 5.seconds)
-  Await.result(cluster.memStore.store.truncate(dataset.ref), 5.seconds)
+  Await.result(cluster.memStore.store.initialize(dataset.ref, numShards), 5.seconds)
+  Await.result(cluster.memStore.store.truncate(dataset.ref, numShards), 5.seconds)
 
   cluster.join()
 
@@ -107,10 +107,8 @@ class QueryOnDemandBenchmark extends StrictLogging {
                         val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
                         Observable.fromIterable(data)
                       }
-                      // Just do a single flush at the end for all groups
-                      val combinedStream: Observable[DataOrCommand] = shardStream ++ FlushStream.allGroups(4)
                       Task.fromFuture(memStore.ingestStream
-                        (dataset.ref, shard, combinedStream, global, 3 * 86400, Task {}))
+                        (dataset.ref, shard, shardStream, global, Task {}))
                     }.countL.runAsync
   Await.result(producingFut, 30.seconds)
   Thread sleep 2000

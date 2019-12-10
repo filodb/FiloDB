@@ -66,6 +66,10 @@ object Util {
   implicit class ResultSetFutureOps(rsf: ResultSetFuture) {
     def toIterator: Future[Iterator[Row]] = rsf.toScalaFuture.map { rs => rs.iterator.asScala }
     def toOne: Future[Option[Row]] = rsf.toScalaFuture.map { rs => Option(rs.one()) }
+    def toObservable: Observable[Row] = {
+      val fut = rsf.toScalaFuture.map { rs => Observable.fromIterator(rs.iterator.asScala) }
+      Observable.fromFuture(fut).flatten
+    }
   }
 
   def unloggedBatch(statements: Seq[Statement]): Statement = {

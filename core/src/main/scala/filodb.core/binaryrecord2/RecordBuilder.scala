@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -23,38 +23,42 @@ import filodb.memory.format.vectors.Histogram
  * containers can then be 1) sent over the wire, with no further transformations needed, 2) obtained and maybe freed
  *
  * @param memFactory the MemFactory used to allocate containers for building BinaryRecords in
- * @param schema the RecordSchema for the BinaryRecord to build
  * @param containerSize the size of each container
  * @param reuseOneContainer if true, resets the container when we run out of container space.  Designed for scenario
  *                   where one copies the BinaryRecord somewhere else every time, and allocation is minimized by
  *                   reusing the same container over and over.
  */
-final class RecordBuilder(memFactory: MemFactory,
-                          val schema: RecordSchema,
-                          containerSize: Int = RecordBuilder.DefaultContainerSize,
-                          reuseOneContainer: Boolean = false,
-                          // Put fields here so scalac won't generate stupid and slow initialization check logic
-                          // Seriously this makes var updates like twice as fast
-                          private var curBase: Any = UnsafeUtils.ZeroPointer,
-                          private var fieldNo: Int = -1,
-                          private var curRecordOffset: Long = -1L,
-                          private var curRecEndOffset: Long = -1L,
-                          private var maxOffset: Long = -1L,
-                          private var mapOffset: Long = -1L,
-                          private var recHash: Int = -1) extends StrictLogging {
+class RecordBuilder(memFactory: MemFactory,
+                    containerSize: Int = RecordBuilder.DefaultContainerSize,
+                    reuseOneContainer: Boolean = false) extends StrictLogging {
   import RecordBuilder._
   import UnsafeUtils._
   require(containerSize >= RecordBuilder.MinContainerSize, s"RecordBuilder.containerSize < minimum")
 
+  private var curBase: Any = UnsafeUtils.ZeroPointer
+  private var fieldNo: Int = -1
+  private var curRecordOffset: Long = -1L
+  private var curRecEndOffset: Long = -1L
+  private var maxOffset: Long = -1L
+  private var mapOffset: Long = -1L
+  private var recHash: Int = -1
+
   private val containers = new collection.mutable.ArrayBuffer[RecordContainer]
-  private val firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
-  private val hashOffset = schema.fieldOffset(schema.numFields)
+  var schema: RecordSchema = _
+  var firstPartField = Int.MaxValue
+  private var hashOffset: Int = 0
 
   if (reuseOneContainer) newContainer()
+
+  /**
+    * Override to return a different clock, intended when running tests.
+    */
+  def currentTimeMillis: Long = System.currentTimeMillis()
 
   // Reset last container and all pointers
   def reset(): Unit = if (containers.nonEmpty) {
     resetContainerPointers()
+    containers.last.updateTimestamp(currentTimeMillis)
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -68,13 +72,28 @@ final class RecordBuilder(memFactory: MemFactory,
     curBase = containers.last.base
   }
 
+  private[binaryrecord2] def setSchema(newSchema: RecordSchema): Unit = if (newSchema != schema) {
+    schema = newSchema
+    hashOffset = newSchema.fieldOffset(newSchema.numFields)
+    firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
+  }
+
   /**
-   * Start building a new BinaryRecord.
+   * Start building a new BinaryRecord with a possibly new schema.
    * This must be called after a previous endRecord() or when the builder just started.
+   * NOTE: it's probably better to use an alternative startNewRecord with one of the schema types.
+   * @param recSchema the RecordSchema to use for this record
+   * @param schemaID the schemaID to use.  It may not be the same as the schema of the recSchema - for example
+   *        for partition keys.  However for ingestion records it would be the same.
    */
-  final def startNewRecord(): Unit = {
+  private[core] final def startNewRecord(recSchema: RecordSchema, schemaID: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
+
+    // Set schema, hashoffset, and write schema ID if needed
+    setSchema(recSchema)
     requireBytes(schema.variableAreaStart)
+
+    if (recSchema.partitionFieldStart.isDefined) { setShort(curBase, curRecordOffset + 4, schemaID.toShort) }
 
     // write length header and update RecEndOffset
     setInt(curBase, curRecordOffset, schema.variableAreaStart - 4)
@@ -83,6 +102,20 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo = 0
     recHash = HASH_INIT
   }
+
+  // startNewRecord when one uses a RecordSchema for say query results, or where schemaID is not needed.
+  final def startNewRecord(schema: RecordSchema): Unit = {
+    // TODO: use types to eliminate this check?
+    require(schema.partitionFieldStart.isEmpty, s"Cannot use schema $schema with no schemaID")
+    startNewRecord(schema, 0)
+  }
+
+  // startNewRecord for an ingestion schema.  Use this if creating an ingestion record, ensures right ID is used.
+  final def startNewRecord(schema: Schema): Unit =
+    startNewRecord(schema.ingestionSchema, schema.schemaHash)
+
+  final def startNewRecord(partSchema: PartitionSchema, schemaID: Int): Unit =
+    startNewRecord(partSchema.binSchema, schemaID)
 
   /**
    * Adds an integer to the record.  This must be called in the right order or the data might be corrupted.
@@ -151,11 +184,11 @@ final class RecordBuilder(memFactory: MemFactory,
     * If this method is used, then caller needs to also update the partitionHash manually.
     */
   private def addMap(base: Any, offset: Long, numBytes: Int): Unit = {
-    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
-    checkFieldAndMemory(numBytes + 4)
-    UnsafeUtils.setInt(curBase, curRecEndOffset, numBytes) // length of blob
-    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 4, numBytes)
-    updateFieldPointerAndLens(numBytes + 4)
+    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addMap")
+    checkFieldAndMemory(numBytes + 2)
+    UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
+    updateFieldPointerAndLens(numBytes + 2)
     fieldNo += 1
   }
 
@@ -193,7 +226,7 @@ final class RecordBuilder(memFactory: MemFactory,
   final def addPartKeyRecordFields(base: Any, offset: Long, partKeySchema: RecordSchema): Unit = {
     var id = 0
     partKeySchema.columns.foreach {
-      case ColumnInfo(_, MapColumn) => addLargeBlobFromBr(base, offset, id, partKeySchema); id += 1
+      case ColumnInfo(_, MapColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, StringColumn) => addBlobFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, LongColumn) => addLongFromBr(base, offset, id, partKeySchema); id += 1
       case ColumnInfo(_, DoubleColumn) => addDoubleFromBr(base, offset, id, partKeySchema); id += 1
@@ -230,16 +263,20 @@ final class RecordBuilder(memFactory: MemFactory,
    * Adds an entire record from a RowReader, with no boxing, using builderAdders
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
    */
-  final def addFromReader(row: RowReader): Long = {
-    startNewRecord()
+  final def addFromReader(row: RowReader, schema: RecordSchema, schemID: Int): Long = {
+    startNewRecord(schema, schemID)
     for { pos <- 0 until schema.numFields optimized } {
       schema.builderAdders(pos)(row, this)
     }
     endRecord()
   }
 
-  // Really only for testing. Very slow.
-  def addFromObjects(parts: Any*): Long = addFromReader(SeqRowReader(parts.toSeq))
+  final def addFromReader(row: RowReader, schema: Schema): Long =
+    addFromReader(row, schema.ingestionSchema, schema.schemaHash)
+
+  // Really only for testing. Very slow.  Only for partition keys
+  def partKeyFromObjects(schema: Schema, parts: Any*): Long =
+    addFromReader(SeqRowReader(parts.toSeq), schema.partKeySchema, schema.schemaHash)
 
   /**
    * Sorts and adds keys and values from a map.  The easiest way to add a map to a BinaryRecord.
@@ -262,10 +299,10 @@ final class RecordBuilder(memFactory: MemFactory,
    */
   final def startMap(): Unit = {
     require(mapOffset == -1L)
-    checkFieldAndMemory(4)   // 4 bytes for map length header
+    checkFieldAndMemory(2)   // 2 bytes for map length header
     mapOffset = curRecEndOffset
-    setInt(curBase, mapOffset, 0)
-    updateFieldPointerAndLens(4)
+    setShort(curBase, mapOffset, 0)
+    updateFieldPointerAndLens(2)
     // Don't update fieldNo, we'll be working on map for a while
   }
 
@@ -280,7 +317,7 @@ final class RecordBuilder(memFactory: MemFactory,
                            keyHash: Int = 7): Unit = {
     require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
     // check key size, must be < 60KB
-    require(keyLen < 60*1024, s"key is too large: ${keyLen} bytes")
+    require(keyLen < 192, s"key is too large: ${keyLen} bytes")
     require(valueLen < 64*1024, s"value is too large: $valueLen bytes")
 
     // Check if key is a predefined key
@@ -290,20 +327,22 @@ final class RecordBuilder(memFactory: MemFactory,
         val keyKey = RecordSchema.makeKeyKey(keyBytes, keyOffset, keyLen, keyHash)
         schema.predefKeyNumMap.getOrElse(keyKey, -1)
       }
-    val keyValueSize = if (predefKeyNum >= 0) { valueLen + 4 } else { keyLen + valueLen + 4 }
+    val keyValueSize = if (predefKeyNum >= 0) { valueLen + 3 } else { keyLen + valueLen + 3 }
     requireBytes(keyValueSize)
     if (predefKeyNum >= 0) {
-      setShort(curBase, curRecEndOffset, (0xF000 | predefKeyNum).toShort)
-      curRecEndOffset += 2
+      setByte(curBase, curRecEndOffset, (0x0C0 | predefKeyNum).toByte)
+      curRecEndOffset += 1
     } else {
-      UTF8StringMedium.copyByteArrayTo(keyBytes, keyOffset, keyLen, curBase, curRecEndOffset)
-      curRecEndOffset += keyLen + 2
+      UTF8StringShort.copyByteArrayTo(keyBytes, keyOffset, keyLen, curBase, curRecEndOffset)
+      curRecEndOffset += keyLen + 1
     }
     UTF8StringMedium.copyByteArrayTo(valueBytes, valueOffset, valueLen, curBase, curRecEndOffset)
     curRecEndOffset += valueLen + 2
 
     // update map length, BR length
-    setInt(curBase, mapOffset, (curRecEndOffset - mapOffset - 4).toInt)
+    val newMapLen = curRecEndOffset - mapOffset - 2
+    require(newMapLen < 65536, s"Map entries cannot total more than 64KB, but is now $newMapLen")
+    setShort(curBase, mapOffset, newMapLen.toShort)
     setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
   }
 
@@ -366,16 +405,18 @@ final class RecordBuilder(memFactory: MemFactory,
 
   /**
    * Used only internally by RecordComparator etc. to shortcut create a new BR by copying bytes from an existing BR.
+   * Namely, from an ingestion record (schema, fixed area) to a partition key only record.
    * You BETTER know what you are doing.
    */
-  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, numBytes: Int): Unit = {
+  private[binaryrecord2] def copyFixedAreasFrom(base: Any, offset: Long, fixedOffset: Int, numBytes: Int): Unit = {
     require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
-    requireBytes(numBytes + 4)
+    requireBytes(numBytes + 6)
 
     // write length header, copy bytes, and update RecEndOffset
-    setInt(curBase, curRecordOffset, numBytes)
-    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecordOffset + 4, numBytes)
-    curRecEndOffset = curRecordOffset + numBytes + 4
+    setInt(curBase, curRecordOffset, numBytes + 2)
+    UnsafeUtils.setShort(curBase, curRecordOffset + 4, UnsafeUtils.getShort(base, offset + 4))
+    UnsafeUtils.unsafe.copyMemory(base, offset + fixedOffset, curBase, curRecordOffset + 6, numBytes)
+    curRecEndOffset = curRecordOffset + numBytes + 6
   }
 
   // Extend current variable area with stuff from somewhere else
@@ -492,6 +533,7 @@ final class RecordBuilder(memFactory: MemFactory,
     curRecEndOffset = curRecordOffset
     container.updateLengthWithOffset(curRecordOffset)
     container.writeVersionWord()
+    container.updateTimestamp(currentTimeMillis)
     maxOffset = newOff + containerSize
   }
 
@@ -519,8 +561,9 @@ object RecordBuilder {
 
   // Please do not change this.  It should only be changed with a change in BinaryRecord and/or RecordContainer
   // format, and only then REALLY carefully.
-  val Version = 0
-  val ContainerHeaderLen = 8
+  val Version = 1
+  val ContainerHeaderLen = 16
+  val EmptyNumBytes = ContainerHeaderLen - 4
 
   val stringPairComparator = new java.util.Comparator[(String, String)] {
     def compare(pair1: (String, String), pair2: (String, String)): Int = pair1._1 compare pair2._1
@@ -530,9 +573,8 @@ object RecordBuilder {
     * Make is a convenience factory method to access from java.
     */
   def make(memFactory: MemFactory,
-           schema: RecordSchema,
            containerSize: Int = RecordBuilder.DefaultContainerSize): RecordBuilder = {
-    new RecordBuilder(memFactory, schema, containerSize)
+    new RecordBuilder(memFactory, containerSize)
   }
 
   /**
@@ -612,13 +654,13 @@ object RecordBuilder {
     * In order to ingest all these multiple time series of a single metric to the
     * same shard, we have to trim the suffixes while calculating shardKeyHash.
     *
-    * @param dataSet    - Current DataSet
+    * @param options - DatasetOptions
     * @param shardKeyColName  - ShardKey label name as String
     * @param shardKeyColValue - ShardKey label value as String
     * @return - Label value after removing the suffix
     */
-  final def trimShardColumn(dataSet: Dataset, shardKeyColName: String, shardKeyColValue: String): String = {
-    dataSet.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
+  final def trimShardColumn(options: DatasetOptions, shardKeyColName: String, shardKeyColValue: String): String = {
+    options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
       case Some(trimMetricSuffixColumn) => trimMetricSuffixColumn.find(shardKeyColValue.endsWith) match {
                                             case Some(s)  => shardKeyColValue.dropRight(s.length)
                                             case _        => shardKeyColValue
@@ -626,5 +668,4 @@ object RecordBuilder {
       case _                            => shardKeyColValue
     }
   }
-
 }

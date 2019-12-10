@@ -18,6 +18,7 @@ import filodb.coordinator.queryengine2.{EmptyFailureProvider, UnavailablePromQlQ
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
+import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -104,18 +105,18 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Stuff for directly executing queries ourselves
   import filodb.coordinator.queryengine2.QueryEngine
 
-  val engine = new QueryEngine(dataset, shardMapper, EmptyFailureProvider)
+  val engine = new QueryEngine(dataset.ref, Schemas(dataset.schema), shardMapper, EmptyFailureProvider)
 
   /**
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  val rawQuery = "heap_usage{_ns=\"App-2\"}"
-  val sumQuery = """sum_over_time(heap_usage{_ns="App-2"}[5m])"""
-  val sumRateQuery = """sum(rate(heap_usage{_ns="App-2"}[5m]))"""
+  val rawQuery = "heap_usage{_ws_=\"demo\",_ns_=\"App-2\"}"
+  val sumQuery = """sum_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m])"""
+  val sumRateQuery = """sum(rate(heap_usage{_ws_="demo",_ns_="App-2"}[5m]))"""
   val queries = Seq(rawQuery,  // raw time series
                     sumRateQuery,
-                    """quantile(0.75, heap_usage{_ns="App-2"})""",
+                    """quantile(0.75, heap_usage{_ws_="demo",_ns_="App-2"})""",
                     sumQuery)
   val queryTime = startTime + (7 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
@@ -187,13 +188,13 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedRawQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      execPlan.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
+      execPlan.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
   }
 
-  val minQuery = """min_over_time(heap_usage{_ns="App-2"}[5m])"""
+  val minQuery = """min_over_time(heap_usage{_ws_="demo",_ns_="App-2"}[5m])"""
   val minLP = Parser.queryRangeToLogicalPlan(minQuery, qParams)
   val minEP = engine.materialize(minLP, qOptions, UnavailablePromQlQueryParams).children.head
 
@@ -203,7 +204,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      minEP.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
+      minEP.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -219,7 +220,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      sumRateEP.execute(cluster.memStore, dataset, queryConfig)(querySched, 60.seconds)
+      sumRateEP.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

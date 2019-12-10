@@ -10,8 +10,8 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.ColumnFilter
 import filodb.core.store.ChunkSetInfo.emptySkips
 import filodb.core.Types.PartitionKey
+import filodb.memory.{UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
-import filodb.memory.UTF8StringMedium
 
 trait Indexer {
   def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit
@@ -35,7 +35,7 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
 
   class IndexingMapConsumer(partIndex: Int) extends MapItemConsumer {
     def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-      val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+      val keyUtf8 = new UTF8Str(keyBase, keyOffset + 1, UTF8StringShort.numBytes(keyBase, keyOffset))
       val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
       addIndexEntry(keyUtf8, valUtf8, partIndex)
     }
