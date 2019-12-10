@@ -161,9 +161,13 @@ extends Iterator[R] with StrictLogging {
       } catch {
         case e: Exception =>
           val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
+          val valReader = rv.partition.schema.data.reader(rv.valueColID,
+                                                          nextInfo.getValueVectorAccessor,
+                                                          nextInfo.getValueVectorAddr)
           qLogger.error(s"addChunks Exception: info.numRows=${nextInfo.numRows} " +
-                    s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
-                    s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)}")
+             s"info.endTime=${nextInfo.endTime} curWindowEnd=${wit.curWindowEnd} tsReader=$tsReader " +
+             s"timestampVectorLength=${tsReader.length(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)} " +
+             s"valueVectorLength=${valReader.length(nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr)}", e)
           throw e
       }
     }
