@@ -158,6 +158,11 @@ object PartitionSchema {
 
 /**
  * A Schema combines a PartitionSchema with a DataSchema, forming all the columns of a single ingestion record.
+ *
+ * The downsample member is a var because setting it at construction time can potentially result be impossible
+ * when downsample schema is same as raw schema
+ *
+ * Important Note: Serialization will be tricky since there may be loops in object graph. Avoid if possible.
  */
 final case class Schema(partition: PartitionSchema, data: DataSchema, var downsample: Option[Schema] = None) {
   val allColumns = data.columns ++ partition.columns
@@ -239,6 +244,12 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, var downsa
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[ColumnId]): Seq[ColumnInfo] =
     ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
+
+  override final def toString: String = {
+    s"Schema(partition=$partition, data=$data, downsample=${downsample.map(_.name)})"
+    // overriden since serializing downsample schema may result in infinite loop
+  }
+
 }
 
 final case class Schemas(part: PartitionSchema,
@@ -260,11 +271,6 @@ final case class Schemas(part: PartitionSchema,
   final def schemaName(id: Int): String = {
     val sch = apply(id)
     if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
-  }
-
-  override final def toString: String = {
-    s"Schemas(part=$part, schemas=${schemas.keySet}"
-    // overriden since downsample schema may result in infinite loop
   }
 }
 

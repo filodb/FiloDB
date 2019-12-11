@@ -282,7 +282,6 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       (1574272981500L, 1d),
 
       (1574273042000L, 20d)
-
     )
   }
 

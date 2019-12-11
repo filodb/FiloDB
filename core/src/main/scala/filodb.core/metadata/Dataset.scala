@@ -174,6 +174,7 @@ object Dataset {
 
   sealed trait BadSchema
   case class BadDownsampler(msg: String) extends BadSchema
+  case class BadDownsamplerPeriodMarker(msg: String) extends BadSchema
   case class BadColumnType(colType: String) extends BadSchema
   case class BadColumnName(colName: String, reason: String) extends BadSchema
   case class NotNameColonType(nameTypeString: String) extends BadSchema
@@ -239,10 +240,12 @@ object Dataset {
   def validatedDownsamplerPeriodMarker(marker: Option[String]): DownsamplePeriodMarker Or BadSchema = {
     try {
       val v = marker.map(m => DownsamplePeriodMarker.downsamplePeriodMarker(m))
-            .getOrElse(DownsamplePeriodMarker.defaultDownsamplePeriodMarker)
+            .getOrElse(DownsamplePeriodMarker.timeDownsamplePeriodMarker)
       Good(v)
     } catch {
-      case e: IllegalArgumentException => Bad(BadDownsampler(e.getMessage))
+      case e: IllegalArgumentException =>
+        e.printStackTrace()
+        Bad(BadDownsamplerPeriodMarker(e.getMessage))
     }
   }
 

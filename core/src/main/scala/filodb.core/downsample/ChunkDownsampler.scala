@@ -34,12 +34,17 @@ object DownsamplerName extends Enum[DownsamplerName] {
   case object LastH extends DownsamplerName("hLast", classOf[LastValueHDownsampler])
 }
 
+/**
+  * Enum of supported downsample period marker names
+  * @param entryName name of the marker
+  * @param periodMarkerClass its corresponding marker class used for instance construction
+  */
 sealed abstract class PeriodMarkerName(override val entryName: String, val periodMarkerClass: Class[_])
   extends EnumEntry
 
 object PeriodMarkerName extends Enum[PeriodMarkerName] {
   val values = findValues
-  case object Default extends PeriodMarkerName("default", classOf[DefaultDownsamplePeriodMarker])
+  case object Time extends PeriodMarkerName("time", classOf[TimeDownsamplePeriodMarker])
   case object Counter extends PeriodMarkerName("counter", classOf[CounterDownsamplePeriodMarker])
 }
 
@@ -79,7 +84,7 @@ trait DownsamplePeriodMarker {
     * Ids of Data Columns the marker works on.
     * The column id values are fed in via downsampling configuration of the dataset
     */
-  def inputColIds: Seq[Int]
+  def inputColId: Int
 
   /**
     * Places row numbers for the given chunkset which marks the
@@ -92,15 +97,17 @@ trait DownsamplePeriodMarker {
                  endRow: Int): Buffer[Int]
 }
 
-class DefaultDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends DownsamplePeriodMarker {
-  require(inputColIds == Nil)
-  // scalastyle:off parameter.number
+/**
+  * Time based downsample period marker, which returns row numbers of the last sample for each downsample period
+  * @param inputColId requires the timestamp column 0
+  */
+class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
+  require(inputColId == DataSchema.timestampColID)
   override def getPeriods(part: ReadablePartition,
                           chunkset: ChunkSetInfoReader,
                           resMillis: Long,
                           startRow: Int,
                           endRow: Int): Buffer[Int] = {
-
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -125,11 +132,17 @@ class DefaultDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends Downsampl
     }
     result
   }
-  override def name: PeriodMarkerName = PeriodMarkerName.Default
+  override def name: PeriodMarkerName = PeriodMarkerName.Time
 }
 
-class CounterDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends DownsamplePeriodMarker {
-  require(inputColIds.length == 1)
+/**
+  * Returns union of the following:
+  * (a) the results from TimeDownsamplePeriodMarker.
+  * (b) row number when counter drops
+  * (c) last row number before counter drops
+  * @param inputColId requires the counter column id
+  */
+class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
   override def name: PeriodMarkerName = PeriodMarkerName.Counter
   override def getPeriods(part: ReadablePartition,
                           chunkset: ChunkSetInfoReader,
@@ -138,10 +151,11 @@ class CounterDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends Downsampl
                           endRow: Int): Buffer[Int] = {
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
-    result ++= new DefaultDownsamplePeriodMarker(Nil).getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
-    val ctrVecAcc = chunkset.vectorAccessor(inputColIds.head)
-    val ctrVecPtr = chunkset.vectorAddress(inputColIds.head)
-    val ctrReader = part.chunkReader(inputColIds.head, ctrVecAcc, ctrVecPtr)
+    result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
+                 .getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
+    val ctrVecAcc = chunkset.vectorAccessor(inputColId)
+    val ctrVecPtr = chunkset.vectorAddress(inputColId)
+    val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)
     ctrReader match {
       case r: DoubleVectorDataReader =>
         if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
@@ -295,7 +309,7 @@ case class MinDownsampler(override val inputColIds: Seq[Int]) extends DoubleChun
 
 
 /**
-  * Downsamples by calculating min of values in one column
+  * Downsamples by using the last value of the double vector
   */
 case class LastValueDDownsampler(override val inputColIds: Seq[Int]) extends DoubleChunkDownsampler {
   require(inputColIds.length == 1, s"LastValue downsample requires only one column. Got ${inputColIds.length}")
@@ -312,7 +326,7 @@ case class LastValueDDownsampler(override val inputColIds: Seq[Int]) extends Dou
 }
 
 /**
-  * Downsamples by calculating min of values in one column
+  * Downsamples by using the last value of the histogram vector
   */
 case class LastValueHDownsampler(override val inputColIds: Seq[Int]) extends HistChunkDownsampler {
   require(inputColIds.length == 1, s"LastValue downsample requires only one column. Got ${inputColIds.length}")
@@ -480,15 +494,15 @@ object DownsamplePeriodMarker {
   def downsamplePeriodMarker(strNotation: String): DownsamplePeriodMarker = {
     val parts = strNotation.split("[()]")
     // TODO possibly better validation of string notation
-    require(parts.nonEmpty, s"DownsamplePeriodMarker '$strNotation' needs a name")
+    require(parts.length == 2, s"DownsamplePeriodMarker '$strNotation' needs a name and a column id")
     val name = parts(0)
-    val colIds = parts.drop(1).map(_.toInt)
+    val colId = parts(1).toInt
     PeriodMarkerName.withNameOption(name) match {
       case None    => throw new IllegalArgumentException(s"Unsupported downsample period marker $name")
-      case Some(d) => d.periodMarkerClass.getConstructor(classOf[Seq[Int]])
-        .newInstance(colIds.toSeq).asInstanceOf[DownsamplePeriodMarker]
+      case Some(d) => d.periodMarkerClass.getConstructor(classOf[Int])
+        .newInstance(Integer.valueOf(colId)).asInstanceOf[DownsamplePeriodMarker]
     }
   }
 
-  val defaultDownsamplePeriodMarker = new DefaultDownsamplePeriodMarker(Nil)
+  val timeDownsamplePeriodMarker = new TimeDownsamplePeriodMarker(DataSchema.timestampColID)
 }

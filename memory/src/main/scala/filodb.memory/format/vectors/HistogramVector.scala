@@ -552,7 +552,7 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
   }
 
   def dropPositions(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): debox.Buffer[Int] = {
-    ???
+    ??? // implement later when needed
   }
 
   def updateCorrection(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr,
