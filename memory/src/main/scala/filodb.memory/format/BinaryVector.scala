@@ -176,6 +176,11 @@ trait CounterVectorReader extends VectorDataReader {
    * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
    */
   def updateCorrection(acc: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+
+  /**
+    * Identifies row numbers at which histogram or counter has dropped
+    */
+  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int]
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go

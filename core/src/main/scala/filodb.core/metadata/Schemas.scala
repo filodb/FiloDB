@@ -7,7 +7,7 @@ import org.scalactic._
 import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.ChunkDownsampler
+import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.BinaryRegion
@@ -28,7 +28,8 @@ final case class DataSchema private(name: String,
                                     downsamplers: Seq[ChunkDownsampler],
                                     hash: Int,
                                     valueColumn: ColumnId,
-                                    downsampleSchema: Option[String] = None) {
+                                    downsampleSchema: Option[String] = None,
+                                    downsamplePeriodMarker: DownsamplePeriodMarker) {
   val timestampColumn  = columns.head
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID
@@ -78,15 +79,18 @@ object DataSchema {
   def make(name: String,
            dataColNameTypes: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
+           dowsamplerPeriodMarker: Option[String] = None,
            valueColumn: String,
            downsampleSchema: Option[String] = None): DataSchema Or BadSchema = {
 
     for { dataColumns  <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
           downsamplers <- validateDownsamplers(downsamplerNames, downsampleSchema)
+          periodMarker <- validatedDownsamplerPeriodMarker(dowsamplerPeriodMarker)
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns), valueColID, downsampleSchema)
+      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns),
+        valueColID, downsampleSchema, periodMarker)
     }
   }
 
@@ -110,6 +114,7 @@ object DataSchema {
     make(schemaName,
          conf.as[Seq[String]]("columns"),
          conf.as[Seq[String]]("downsamplers"),
+         conf.as[Option[String]]("downsample-period-marker"),
          conf.getString("value-column"),
          conf.as[Option[String]]("downsample-schema"))
 }

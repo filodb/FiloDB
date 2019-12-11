@@ -127,6 +127,10 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
             listRegisteredDatasets(Client.standaloneClient(system, server, args.port))
           }
 
+        case Some("truncate") =>
+          client.truncateDataset(getRef(args), timeout)
+          println(s"Truncated data for ${getRef(args)} with no errors")
+
         case Some("indexnames") =>
           val (remote, ref) = getClientAndRef(args)
           val names = remote.getIndexNames(ref)

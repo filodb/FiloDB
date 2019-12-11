@@ -57,7 +57,6 @@ trait ChunkSetInfoReader {
   private[store] var tsReader: LongVectorDataReader = _
   private[store] var valueReader: VectorDataReader = _
 
-
   def getTsVectorAccessor: MemoryReader = tsVectorAccessor
   def getTsVectorAddr: BinaryVector.BinaryVectorPtr = tsVectorAddr
   def getValueVectorAccessor: MemoryReader = valueVectorAccessor
