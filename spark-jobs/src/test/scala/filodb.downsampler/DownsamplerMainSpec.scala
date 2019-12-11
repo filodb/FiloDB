@@ -37,7 +37,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
                   |shard-mem-size = 1MB
                 """.stripMargin))
 
-  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter), Map.empty, 100, storeConfig)
+  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram),
+                                     Map.empty, 100, storeConfig)
   var gaugePartKeyBytes: Array[Byte] = _
   var counterPartKeyBytes: Array[Byte] = _
   val lastSampleTime = 1574273042000L
@@ -144,6 +145,52 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+  }
+
+  it ("should write prom histogram data to cassandra") {
+
+//    val rawDataset = Dataset("prometheus", Schemas.promCounter)
+//
+//    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+//    val seriesName = "myCounter"
+//    val seriesTags = Map("k".utf8 -> "v".utf8)
+//    val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, seriesName, seriesTags)
+//
+//    val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
+//      0, offheapMem.bufferPools(Schemas.promHistogram.schemaHash), shardStats,
+//      offheapMem.nativeMemoryManager, 1)
+//
+//    counterPartKeyBytes = part.partKeyBytes
+//
+//    val rawSamples = Stream(
+//      Seq(1574272801000L, 3d, seriesName, seriesTags),
+//      Seq(1574272801500L, 4d, seriesName, seriesTags),
+//      Seq(1574272802000L, 5d, seriesName, seriesTags),
+//
+//      Seq(1574272861000L, 9d, seriesName, seriesTags),
+//      Seq(1574272861500L, 10d, seriesName, seriesTags),
+//      Seq(1574272862000L, 11d, seriesName, seriesTags),
+//
+//      Seq(1574272921000L, 2d, seriesName, seriesTags),
+//      Seq(1574272921500L, 7d, seriesName, seriesTags),
+//      Seq(1574272922000L, 15d, seriesName, seriesTags),
+//
+//      Seq(1574272981000L, 17d, seriesName, seriesTags),
+//      Seq(1574272981500L, 1d, seriesName, seriesTags),
+//      Seq(1574272982000L, 15d, seriesName, seriesTags),
+//
+//      Seq(1574273041000L, 18d, seriesName, seriesTags),
+//      Seq(1574273042000L, 20d, seriesName, seriesTags)
+//    )
+//
+//    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+//      val rr = new BinaryRecordRowReader(Schemas.promCounter.ingestionSchema, base, offset)
+//      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+//    }
+//    part.switchBuffers(offheapMem.blockMemFactory, true)
+//    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+//
+//    colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
   it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {

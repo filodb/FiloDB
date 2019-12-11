@@ -2,15 +2,12 @@ package filodb.core.downsample
 
 import java.lang.{Double => JLDouble}
 
-import debox.Buffer
 import enumeratum.{Enum, EnumEntry}
-import scalaxy.loops._
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.DataSchema
 import filodb.core.store.{ChunkSetInfoReader, ReadablePartition}
-import filodb.memory.format.{vectors => bv, PrimitiveVectorReader}
-import filodb.memory.format.vectors.{CorrectingDoubleVectorReader, DoubleVectorDataReader}
+import filodb.memory.format.{vectors => bv}
+
 /**
   * Enum of supported downsampling function names
   * @param entryName name of the function
@@ -32,20 +29,6 @@ object DownsamplerName extends Enum[DownsamplerName] {
   case object TimeT extends DownsamplerName("tTime", classOf[TimeDownsampler])
   case object LastD extends DownsamplerName("dLast", classOf[LastValueDDownsampler])
   case object LastH extends DownsamplerName("hLast", classOf[LastValueHDownsampler])
-}
-
-/**
-  * Enum of supported downsample period marker names
-  * @param entryName name of the marker
-  * @param periodMarkerClass its corresponding marker class used for instance construction
-  */
-sealed abstract class PeriodMarkerName(override val entryName: String, val periodMarkerClass: Class[_])
-  extends EnumEntry
-
-object PeriodMarkerName extends Enum[PeriodMarkerName] {
-  val values = findValues
-  case object Time extends PeriodMarkerName("time", classOf[TimeDownsamplePeriodMarker])
-  case object Counter extends PeriodMarkerName("counter", classOf[CounterDownsamplePeriodMarker])
 }
 
 /**
@@ -73,104 +56,6 @@ trait ChunkDownsampler {
     * String representation of the downsampler for human readability and string encoding.
     */
   def encoded: String = s"${name.entryName}(${inputColIds.mkString("@")})"
-}
-
-
-trait DownsamplePeriodMarker {
-
-  def name: PeriodMarkerName
-
-  /**
-    * Ids of Data Columns the marker works on.
-    * The column id values are fed in via downsampling configuration of the dataset
-    */
-  def inputColId: Int
-
-  /**
-    * Places row numbers for the given chunkset which marks the
-    * periods to downsample into the result buffer param
-    */
-  def getPeriods(part: ReadablePartition,
-                 chunkset: ChunkSetInfoReader,
-                 resMillis: Long,
-                 startRow: Int,
-                 endRow: Int): Buffer[Int]
-}
-
-/**
-  * Time based downsample period marker, which returns row numbers of the last sample for each downsample period
-  * @param inputColId requires the timestamp column 0
-  */
-class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
-  require(inputColId == DataSchema.timestampColID)
-  override def getPeriods(part: ReadablePartition,
-                          chunkset: ChunkSetInfoReader,
-                          resMillis: Long,
-                          startRow: Int,
-                          endRow: Int): Buffer[Int] = {
-    val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
-    val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
-    val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
-
-    val startTime = tsReader.apply(tsAcc, tsPtr, startRow)
-    val endTime = tsReader.apply(tsAcc, tsPtr, endRow)
-
-    val result = debox.Buffer.empty[Int]
-    // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
-    // Hence subtract - 1 below from chunk startTime to find the first downsample period.
-    // + 1 is needed since the startTime is inclusive. We don't want pStart to be 4:55:00:000;
-    // instead we want 4:55:00:001
-    var pStart = ((startTime - 1) / resMillis) * resMillis + 1
-    var pEnd = pStart + resMillis // end is inclusive
-    // for each downsample period
-    while (pStart <= endTime) {
-      // fix the boundary row numbers for the downsample period by looking up the timestamp column
-      val endRowNum = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, pEnd), chunkset.numRows - 1)
-      result += endRowNum
-      pStart += resMillis
-      pEnd += resMillis
-    }
-    result
-  }
-  override def name: PeriodMarkerName = PeriodMarkerName.Time
-}
-
-/**
-  * Returns union of the following:
-  * (a) the results from TimeDownsamplePeriodMarker.
-  * (b) row number when counter drops
-  * (c) last row number before counter drops
-  * @param inputColId requires the counter column id
-  */
-class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
-  override def name: PeriodMarkerName = PeriodMarkerName.Counter
-  override def getPeriods(part: ReadablePartition,
-                          chunkset: ChunkSetInfoReader,
-                          resMillis: Long,
-                          startRow: Int,
-                          endRow: Int): Buffer[Int] = {
-    val result = debox.Set.empty[Int]
-    result += startRow // need to add start of every chunk
-    result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
-                 .getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
-    val ctrVecAcc = chunkset.vectorAccessor(inputColId)
-    val ctrVecPtr = chunkset.vectorAddress(inputColId)
-    val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)
-    ctrReader match {
-      case r: DoubleVectorDataReader =>
-        if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
-          val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
-          for {i <- 0 until drops.length optimized} {
-            result += drops(i) - 1
-            result += drops(i)
-          }
-        }
-      case _ =>
-        throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
-    }
-    import spire.std.int._
-    result.toSortedBuffer
-  }
 }
 
 /**
@@ -483,26 +368,4 @@ object ChunkDownsampler {
   }
 
   def downsamplers(str: Seq[String]): Seq[ChunkDownsampler] = str.map(downsampler(_))
-}
-
-object DownsamplePeriodMarker {
-
-  /**
-    * Parses single downsampler from string notation such as
-    * "counter(2)" where "counter" is the downsample period marker name, 2 is the column IDs to be used by the function
-    */
-  def downsamplePeriodMarker(strNotation: String): DownsamplePeriodMarker = {
-    val parts = strNotation.split("[()]")
-    // TODO possibly better validation of string notation
-    require(parts.length == 2, s"DownsamplePeriodMarker '$strNotation' needs a name and a column id")
-    val name = parts(0)
-    val colId = parts(1).toInt
-    PeriodMarkerName.withNameOption(name) match {
-      case None    => throw new IllegalArgumentException(s"Unsupported downsample period marker $name")
-      case Some(d) => d.periodMarkerClass.getConstructor(classOf[Int])
-        .newInstance(Integer.valueOf(colId)).asInstanceOf[DownsamplePeriodMarker]
-    }
-  }
-
-  val timeDownsamplePeriodMarker = new TimeDownsamplePeriodMarker(DataSchema.timestampColID)
 }
