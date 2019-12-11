@@ -17,7 +17,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
     "memstore_flushes_success_total,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,url=http://localhost:9095 gauge=5 1536628260000000000",
-    "span_processing_time_seconds,error=false,host=MacBook-Pro-229.local,operation=memstore-recover-index-latency +Inf=2,0.005=0,0.01=0,0.025=0,0.05=0,0.075=0,0.1=1,0.25=2,0.5=2,0.75=2,1=2,10=2,2.5=2,5=2,7.5=2,count=2,sum=0.230162432 1536790212000000000"
+    "span_processing_time_seconds,error=false,host=MacBook-Pro-229.local,operation=memstore-recover-index-latency 0.075=37,2.5=47,5=47,sum=6.287654912,0.025=8,0.05=25,0.75=47,+Inf=47,count=5,0.5=42,0.25=40,0.1=40 1536790212000000000"
   )
 
   val schema = Schemas.promCounter
@@ -141,16 +141,19 @@ class InfluxRecordSpec extends FunSpec with Matchers {
         metric shouldEqual "span_processing_time_seconds"
 
         // sum
-        reader.getDouble(1) shouldEqual 0.230162432 +- 0.00000001
+        reader.getDouble(1) shouldEqual 6.287654912 +- 0.00000001
         // count
-        reader.getDouble(2) shouldEqual 2
+        reader.getDouble(2) shouldEqual 5
 
         val hist = reader.getHistogram(3)
-        hist.numBuckets shouldEqual 15
-        hist.bucketTop(0) shouldEqual 0.005 +- 0.000001
-        hist.bucketValue(0) shouldEqual 0
-        hist.bucketTop(5) shouldEqual 0.1 +- 0.000001
-        hist.bucketValue(5) shouldEqual 1
+        hist.numBuckets shouldEqual 10
+        // 0.075=37,2.5=47,5=47,sum=6.287654912,0.025=8,0.05=25,0.75=47,+Inf=47,count=5,0.5=42,0.25=40,0.1=40
+        val expectedTops = Seq(0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 2.5, 5, Double.PositiveInfinity)
+        (0 until hist.numBuckets).foreach { n =>
+          hist.bucketTop(n) shouldEqual expectedTops(n) +- 0.000001
+        }
+        hist.bucketValue(2) shouldEqual 37
+        hist.bucketValue(4) shouldEqual 40
       }
     }
   }

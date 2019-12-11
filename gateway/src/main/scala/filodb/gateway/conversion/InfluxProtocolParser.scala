@@ -24,7 +24,7 @@ class StringKVVisitor extends KVVisitor {
  * A KVVisitor that parses Influx format field values into the right types and invokes the right callback
  * based on the type of the detected field.
  */
-trait InfluxFieldVisitor extends KVVisitor {
+trait InfluxFieldVisitor extends KVVisitor with StrictLogging {
   def doubleValue(bytes: Array[Byte], keyIndex: Int, keyLen: Int, value: Double): Unit
   def stringValue(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueOffset: Int, valueLen: Int): Unit
   final def apply(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueIndex: Int, valueLen: Int): Unit = {
@@ -42,6 +42,7 @@ trait InfluxFieldVisitor extends KVVisitor {
         doubleValue(bytes, keyIndex, keyLen, InfluxProtocolParser.parseDouble(bytes, valueIndex, numBytesToParse))
       } catch {
         case e: Exception =>
+          logger.error(s"Could not parse [${new String(bytes, valueIndex, numBytesToParse)}] as number!", e)
           stringValue(bytes, keyIndex, keyLen, valueIndex, valueLen)
       }
     }

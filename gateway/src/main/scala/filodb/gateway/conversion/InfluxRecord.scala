@@ -177,7 +177,7 @@ class HistogramFieldVisitor(numFields: Int) extends InfluxFieldVisitor {
   var gotInf = false
   var sum = Double.NaN
   var count = Double.NaN
-  val bucketTops = Array.fill(numFields - 2)(Double.PositiveInfinity)  // to ensure binarySearch works
+  val bucketTops = new Array[Double](numFields - 2)
   val bucketVals = new Array[Long](numFields - 2)
   var numBuckets = 0
 
@@ -195,14 +195,16 @@ class HistogramFieldVisitor(numFields: Int) extends InfluxFieldVisitor {
       // Find position to insert top and value in bucket.  Buckets must be sorted
       val pos = if (numBuckets == 0) 0
                 else {
-                  val binSearchRes = java.util.Arrays.binarySearch(bucketTops, top)
+                  val binSearchRes = java.util.Arrays.binarySearch(bucketTops, 0, numBuckets, top)
                   if (binSearchRes < 0) (-binSearchRes - 1) else binSearchRes
                 }
       // insert/shift over array elements and insert
       assert(numBuckets < (numFields - 2))
-      System.arraycopy(bucketTops, pos, bucketTops, pos + 1, numBuckets - pos)
+      if (numBuckets > pos) {
+        System.arraycopy(bucketTops, pos, bucketTops, pos + 1, numBuckets - pos)
+        System.arraycopy(bucketVals, pos, bucketVals, pos + 1, numBuckets - pos)
+      }
       bucketTops(pos) = top
-      System.arraycopy(bucketVals, pos, bucketVals, pos + 1, numBuckets - pos)
       bucketVals(pos) = value.toLong
       numBuckets += 1
     }
@@ -210,7 +212,7 @@ class HistogramFieldVisitor(numFields: Int) extends InfluxFieldVisitor {
 
   def stringValue(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueOffset: Int, valueLen: Int): Unit = {
     _log.warn(s"Got non numeric field in histogram record: key=${new String(bytes, keyIndex, keyLen)} " +
-                s"value=[${new String(bytes, valueOffset, valueLen)}]")
+      s"value=[${new String(bytes, valueOffset, valueLen)}]\nline=[${new String(bytes, 0, valueOffset + valueLen)}]")
   }
 }
 
