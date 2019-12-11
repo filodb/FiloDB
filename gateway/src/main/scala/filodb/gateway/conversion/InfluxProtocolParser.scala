@@ -8,6 +8,7 @@ import org.jboss.netty.buffer.ChannelBuffer
 import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.memory.format.UnsafeUtils
 
 trait KVVisitor {
   def apply(bytes: Array[Byte], keyIndex: Int, keyLen: Int, valueIndex: Int, valueLen: Int): Unit
@@ -68,6 +69,8 @@ object InfluxProtocolParser extends StrictLogging {
   val Escape = '\\'.toByte
   val Equals = '='.toByte
   val Quote = '"'.toByte
+
+  val CounterKey = "counter".getBytes
 
   /**
    * Read from a Netty ChannelBuffer and write an escape-corrected array of bytes,
@@ -156,8 +159,8 @@ object InfluxProtocolParser extends StrictLogging {
       Some(InfluxPromSingleRecord(bytes, measurementLen, tagOffsets,
                                   fieldOffsets, timeIndex - 1, timestamp))
     } else {
-      Some(InfluxPromHistogramRecord(bytes, measurementLen, tagOffsets,
-                                     fieldOffsets, timeIndex - 1, timestamp))
+      Some(InfluxHistogramRecord(bytes, measurementLen, tagOffsets,
+                                 fieldOffsets, timeIndex - 1, timestamp))
     }
   }
 
@@ -171,6 +174,15 @@ object InfluxProtocolParser extends StrictLogging {
       val valueOffset = valOffset(curOffsetInt)
       visitor(bytes, keyOffset(curOffsetInt), keyLen(curOffsetInt), valueOffset, fieldEnd - valueOffset)
     }
+  }
+
+  // Compares the FIRST key to some bytes
+  def firstKeyEquals(bytes: Array[Byte], offsets: Buffer[Int], compareTo: Array[Byte]): Boolean = {
+    require(offsets.nonEmpty)
+    val firstKeyOffset = keyOffset(offsets(0))
+    val firstKeyLen = valOffset(offsets(0)) - 1 - firstKeyOffset
+    UnsafeUtils.equate(bytes, UnsafeUtils.arayOffset + firstKeyOffset,
+                       compareTo, UnsafeUtils.arayOffset, firstKeyLen)
   }
 
   def debugKeyValues(bytes: Array[Byte], offsets: Buffer[Int], endOffset: Int): String = {

@@ -3,7 +3,7 @@ package filodb.gateway.conversion
 import org.jboss.netty.buffer.ChannelBuffers
 import org.scalatest.{FunSpec, Matchers}
 
-import filodb.core.binaryrecord2.{RecordBuilder, StringifyMapItemConsumer}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema, StringifyMapItemConsumer}
 import filodb.core.metadata.Schemas
 import filodb.memory.MemFactory
 
@@ -16,7 +16,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1 counter=0 1536790212000000000",
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=0,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
     "num_partitions,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,_ws_=demo,_ns_=filodb counter=0 1536790212000000000",
-    "memstore_flushes_success_total,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,url=http://localhost:9095 counter=0 1536628260000000000",
+    "memstore_flushes_success_total,dataset=timeseries,host=MacBook-Pro-229.local,shard=1,url=http://localhost:9095 gauge=5 1536628260000000000",
     "span_processing_time_seconds,error=false,host=MacBook-Pro-229.local,operation=memstore-recover-index-latency +Inf=2,0.005=0,0.01=0,0.025=0,0.05=0,0.075=0,0.1=1,0.25=2,0.5=2,0.75=2,1=2,10=2,2.5=2,5=2,7.5=2,count=2,sum=0.230162432 1536790212000000000"
   )
 
@@ -44,10 +44,12 @@ class InfluxRecordSpec extends FunSpec with Matchers {
       val recordOpts = convertToRecords(rawInfluxLPs take 2)
       recordOpts(0).isDefined shouldEqual true
       recordOpts(0).get.nonMetricShardValues shouldEqual Seq("filodb")
+      recordOpts(0).get.schema shouldEqual Schemas.promCounter
 
       // app not in tags, return nothing
       recordOpts(1).isDefined shouldEqual true
       recordOpts(1).get.nonMetricShardValues shouldEqual Nil
+      recordOpts(1).get.schema shouldEqual Schemas.promCounter
     }
 
     it("should return varying results for shard key and partition hashes") {
@@ -76,6 +78,7 @@ class InfluxRecordSpec extends FunSpec with Matchers {
       // println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
       builder.allContainers.head.foreach { case (base, offset) =>
+        RecordSchema.schemaID(base, offset) shouldEqual Schemas.promCounter.schemaHash
         schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
         schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
         schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.0
@@ -89,32 +92,65 @@ class InfluxRecordSpec extends FunSpec with Matchers {
                                                    "_ws_" -> "demo",
                                                    "_ns_" -> "filodb")
       }
+
+      builder.reset()
+      val recordOpts2 = convertToRecords(rawInfluxLPs drop 4 take 1)
+      recordOpts2(0).get.addToBuilder(builder)
+      builder.allContainers.head.foreach { case (base, offset) =>
+        RecordSchema.schemaID(base, offset) shouldEqual Schemas.gauge.schemaHash
+        schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
+        schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536628260000L
+        schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 5.0
+
+        schema.ingestionSchema.asJavaString(base, offset, 2) shouldEqual "memstore_flushes_success_total"
+
+        val consumer = new StringifyMapItemConsumer()
+        schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
+        consumer.stringPairs.toMap shouldEqual Map("dataset" -> "timeseries",
+                                                   "host" -> "MacBook-Pro-229.local",
+                                                   "shard" -> "1",
+                                                   "url" -> "http://localhost:9095")
+      }
     }
   }
 
-  describe("InfluxPromHistogramRecord") {
-    it("should create multiple BinaryRecordV2s with addToBuilder, one for each bucket") {
+  describe("InfluxHistogramRecord") {
+    it("should create single BinaryRecordV2s with addToBuilder with FiloDB histogram") {
       val recordOpts = convertToRecords(rawInfluxLPs drop 5)
       val builder = new RecordBuilder(MemFactory.onHeapFactory)
       println(recordOpts(0).get)
       recordOpts(0).get.addToBuilder(builder)
-      builder.allContainers.head.countRecords shouldEqual 17
+      builder.allContainers.head.countRecords shouldEqual 1
+
+      val ingSchema = Schemas.promHistogram.ingestionSchema
       builder.allContainers.head.foreach { case (base, offset) =>
-        schema.ingestionSchema.partitionHash(base, offset) should not equal (7)
-        schema.ingestionSchema.getLong(base, offset, 0) shouldEqual 1536790212000L
+        RecordSchema.schemaID(base, offset) shouldEqual Schemas.promHistogram.schemaHash
+        ingSchema.partitionHash(base, offset) should not equal (7)
+
         val consumer = new StringifyMapItemConsumer()
-        schema.ingestionSchema.consumeMapItems(base, offset, 3, consumer)
+        ingSchema.consumeMapItems(base, offset, 5, consumer)
         val map = consumer.stringPairs.toMap
         map("operation") shouldEqual "memstore-recover-index-latency"
-        (map.keySet - "le") shouldEqual Set("operation", "host", "error")
+        map.keySet shouldEqual Set("operation", "host", "error")
+      }
 
-        val metric = schema.ingestionSchema.asJavaString(base, offset, 2)
-        metric should startWith ("span_processing_time_seconds")
-        metric.drop("span_processing_time_seconds".length) match {
-          case "_sum"    => schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 0.230162432 +- 0.00000001
-          case "_count"  => schema.ingestionSchema.getDouble(base, offset, 1) shouldEqual 2
-          case "_bucket" => map.contains("le") shouldEqual true
-        }
+      builder.allContainers.head.iterate(ingSchema).foreach { reader =>
+        reader.getLong(0) shouldEqual 1536790212000L
+
+        val metric = reader.getString(4)
+        metric shouldEqual "span_processing_time_seconds"
+
+        // sum
+        reader.getDouble(1) shouldEqual 0.230162432 +- 0.00000001
+        // count
+        reader.getDouble(2) shouldEqual 2
+
+        val hist = reader.getHistogram(3)
+        hist.numBuckets shouldEqual 15
+        hist.bucketTop(0) shouldEqual 0.005 +- 0.000001
+        hist.bucketValue(0) shouldEqual 0
+        hist.bucketTop(5) shouldEqual 0.1 +- 0.000001
+        hist.bucketValue(5) shouldEqual 1
       }
     }
   }
