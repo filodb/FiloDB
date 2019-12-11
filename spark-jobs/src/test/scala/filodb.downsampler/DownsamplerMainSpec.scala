@@ -17,6 +17,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{CustomRangeVectorKey, RawDataRangeVector}
 import filodb.core.store.{AllChunkScan, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.BatchDownsampler.shardStats
+import filodb.memory.format.PrimitiveVectorReader
 import filodb.memory.format.ZeroCopyUTF8String._
 
 /**
@@ -36,8 +37,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
                   |shard-mem-size = 1MB
                 """.stripMargin))
 
-  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge), Map.empty, 100, storeConfig)
-  var partKeyBytes: Array[Byte] = _
+  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter), Map.empty, 100, storeConfig)
+  var gaugePartKeyBytes: Array[Byte] = _
+  var counterPartKeyBytes: Array[Byte] = _
   val lastSampleTime = 1574273042000L
   val downsampler = new Downsampler
 
@@ -56,7 +58,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     downsampler.shutdown()
   }
 
-  it ("should write data to cassandra") {
+  it ("should write gauge data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.gauge)
 
@@ -69,7 +71,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       0, offheapMem.bufferPools(Schemas.gauge.schemaHash), shardStats,
       offheapMem.nativeMemoryManager, 1)
 
-    partKeyBytes = part.partKeyBytes
+    gaugePartKeyBytes = part.partKeyBytes
 
     val rawSamples = Stream(
       Seq(1574272801000L, 3d, seriesName, seriesTags),
@@ -98,6 +100,52 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
+  it ("should write prom counter data to cassandra") {
+
+    val rawDataset = Dataset("prometheus", Schemas.promCounter)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val seriesName = "myCounter"
+    val seriesTags = Map("k".utf8 -> "v".utf8)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, seriesName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey,
+      0, offheapMem.bufferPools(Schemas.promCounter.schemaHash), shardStats,
+      offheapMem.nativeMemoryManager, 1)
+
+    counterPartKeyBytes = part.partKeyBytes
+
+    val rawSamples = Stream(
+      Seq(1574272801000L, 3d, seriesName, seriesTags),
+      Seq(1574272801500L, 4d, seriesName, seriesTags),
+      Seq(1574272802000L, 5d, seriesName, seriesTags),
+
+      Seq(1574272861000L, 9d, seriesName, seriesTags),
+      Seq(1574272861500L, 10d, seriesName, seriesTags),
+      Seq(1574272862000L, 11d, seriesName, seriesTags),
+
+      Seq(1574272921000L, 2d, seriesName, seriesTags),
+      Seq(1574272921500L, 7d, seriesName, seriesTags),
+      Seq(1574272922000L, 15d, seriesName, seriesTags),
+
+      Seq(1574272981000L, 17d, seriesName, seriesTags),
+      Seq(1574272981500L, 1d, seriesName, seriesTags),
+      Seq(1574272982000L, 15d, seriesName, seriesTags),
+
+      Seq(1574273041000L, 18d, seriesName, seriesTags),
+      Seq(1574273042000L, 20d, seriesName, seriesTags)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.promCounter.ingestionSchema, base, offset)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+  }
+
   it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
@@ -109,17 +157,17 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     // TODO in future PR
   }
 
-  it("should read and verify data in cassandra using PagedReadablePartition for 1-min downsampled data") {
+  it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
     val downsampledPartData1 = colStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
       0,
-      SinglePartitionScan(partKeyBytes))
+      SinglePartitionScan(gaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
 
-    downsampledPart1.partKeyBytes shouldEqual partKeyBytes
+    downsampledPart1.partKeyBytes shouldEqual gaugePartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
 
@@ -137,16 +185,56 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     )
   }
 
-  it("should read and verify data in cassandra using PagedReadablePartition for 5-min downsampled data") {
+  it("should read and verify prom counter data in cassandra using PagedReadablePartition for 1-min downsampled data") {
+
+    val downsampledPartData1 = colStore.readRawPartitions(
+      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
+      0,
+      SinglePartitionScan(counterPartKeyBytes))
+      .toListL.runAsync.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0, downsampledPartData1)
+
+    downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1))
+
+    val downsampledData1 = rv1.rows.map { r =>
+      (r.getLong(0), r.getDouble(1))
+    }.toList
+
+    // time, counter
+    downsampledData1 shouldEqual Seq(
+      (1574272801000L, 3d),
+      (1574272802000L, 5d),
+
+      (1574272862000L, 11d),
+
+      (1574272921000L, 2d),
+      (1574272922000L, 15d),
+
+      (1574272981000L, 17d),
+      (1574272981500L, 1d),
+      (1574272982000L, 15d),
+
+      (1574273042000L, 20d)
+
+    )
+  }
+
+  it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
     val downsampledPartData2 = colStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
       0,
-      SinglePartitionScan(partKeyBytes))
+      SinglePartitionScan(gaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData2)
 
-    downsampledPart2.partKeyBytes shouldEqual partKeyBytes
+    downsampledPart2.partKeyBytes shouldEqual gaugePartKeyBytes
 
     val rv2 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart2, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
 
@@ -157,6 +245,44 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     // time, min, max, sum, count, avg
     downsampledData2 shouldEqual Seq(
       (1574273042000L, 3.0, 17.0, 112.0, 10.0, 11.2)
+    )
+  }
+
+
+  it("should read and verify prom counter data in cassandra using PagedReadablePartition for 5-min downsampled data") {
+
+    val downsampledPartData1 = colStore.readRawPartitions(
+      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
+      0,
+      SinglePartitionScan(counterPartKeyBytes))
+      .toListL.runAsync.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.promCounter.downsample.get, 0, 0, downsampledPartData1)
+
+    downsampledPart1.partKeyBytes shouldEqual counterPartKeyBytes
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1))
+
+    val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
+    PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(1), ctrChunkInfo.vectorAddress(1)) shouldEqual true
+
+    val downsampledData1 = rv1.rows.map { r =>
+      (r.getLong(0), r.getDouble(1))
+    }.toList
+
+    // time, counter
+    downsampledData1 shouldEqual Seq(
+      (1574272801000L, 3d),
+
+      (1574272862000L, 11d),
+
+      (1574272921000L, 2d),
+
+      (1574272981000L, 17d),
+      (1574272981500L, 1d),
+
+      (1574273042000L, 20d)
+
     )
   }
 
