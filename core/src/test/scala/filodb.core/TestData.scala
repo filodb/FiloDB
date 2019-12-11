@@ -430,6 +430,7 @@ object CustomMetricsData {
                         partitionColumns,
                         columns,
                         Seq.empty,
+                        None,
                         DatasetOptions(Seq("metric", "_ns_", "_ws_"), "metric", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
@@ -440,6 +441,7 @@ object CustomMetricsData {
                         partitionColumns2,
                         columns,
                         Seq.empty,
+                        None,
                         DatasetOptions(Seq("__name__"), "__name__", true)).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
@@ -452,6 +454,7 @@ object MetricsTestData {
                                   Seq("tags:map"),
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq.empty,
+                                  None,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
   val timeseriesSchemas = Schemas(timeseriesSchema)

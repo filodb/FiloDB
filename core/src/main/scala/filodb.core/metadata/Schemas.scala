@@ -159,7 +159,7 @@ object PartitionSchema {
 /**
  * A Schema combines a PartitionSchema with a DataSchema, forming all the columns of a single ingestion record.
  */
-final case class Schema(partition: PartitionSchema, data: DataSchema, downsample: Option[Schema]) {
+final case class Schema(partition: PartitionSchema, data: DataSchema, var downsample: Option[Schema] = None) {
   val allColumns = data.columns ++ partition.columns
   val ingestionSchema = new RecordSchema(allColumns.map(c => ColumnInfo(c.name, c.columnType)),
                                          Some(data.columns.length),
@@ -261,6 +261,11 @@ final case class Schemas(part: PartitionSchema,
     val sch = apply(id)
     if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
   }
+
+  override final def toString: String = {
+    s"Schemas(part=$part, schemas=${schemas.keySet}"
+    // overriden since downsample schema may result in infinite loop
+  }
 }
 
 /**
@@ -317,11 +322,11 @@ object Schemas {
       if (uniqueHashes.size == schemas.length) Pass
       else Fail(Seq(("", HashConflict(s"${schemas.length - uniqueHashes.size + 1} schemas have the same hash"))))
     }.filter { schemas =>
-      // check that downsample-schemas point to valid schemas (and should not point at itself, no loops!)
+      // check that downsample-schemas point to valid schemas
       // TODO: also check that the downsample schema matches downsamplers
       val schemaMap = schemas.map { s => s.name -> s }.toMap
       val badDsSchemas = schemas.filterNot { s =>
-        s.downsampleSchema.map(ds => ds != s.name && schemaMap.contains(ds)).getOrElse(true)
+        s.downsampleSchema.forall(ds => schemaMap.contains(ds))
       }
       if (badDsSchemas.isEmpty) Pass
       else Fail(badDsSchemas.map { s =>
@@ -340,7 +345,7 @@ object Schemas {
     def addSchema(part: PartitionSchema, schemaName: String, datas: Seq[DataSchema]): Schema = {
       val data = datas.find(_.name == schemaName).get
       schemas.getOrElseUpdate(data.name, {
-        Schema(part, data, data.downsampleSchema.map(dsName => addSchema(part, dsName, datas)))
+        Schema(part, data, None)
       })
     }
 
@@ -350,6 +355,9 @@ object Schemas {
       dataSchemas <- validateDataSchemas(config.as[Map[String, Config]]("schemas"))
     } yield {
       dataSchemas.foreach { schema => addSchema(partSchema, schema.name, dataSchemas) }
+      schemas.values.foreach { s =>
+        s.downsample = s.data.downsampleSchema.map(dsName => schemas(dsName))
+      }
       Schemas(partSchema, schemas.toMap)
     }
   }

@@ -39,8 +39,8 @@ sealed abstract class PeriodMarkerName(override val entryName: String, val perio
 
 object PeriodMarkerName extends Enum[PeriodMarkerName] {
   val values = findValues
-  case object Default extends PeriodMarkerName("def", classOf[DefaultDownsamplePeriodMarker])
-  case object Counter extends PeriodMarkerName("hLast", classOf[CounterDownsamplePeriodMarker])
+  case object Default extends PeriodMarkerName("default", classOf[DefaultDownsamplePeriodMarker])
+  case object Counter extends PeriodMarkerName("counter", classOf[CounterDownsamplePeriodMarker])
 }
 
 /**
@@ -128,8 +128,9 @@ class DefaultDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends Downsampl
   override def name: PeriodMarkerName = PeriodMarkerName.Default
 }
 
-class CounterDownsamplePeriodMarker(inputColIds: Seq[Int]) extends DefaultDownsamplePeriodMarker(inputColIds) {
+class CounterDownsamplePeriodMarker(val inputColIds: Seq[Int]) extends DownsamplePeriodMarker {
   require(inputColIds.length == 1)
+  override def name: PeriodMarkerName = PeriodMarkerName.Counter
   override def getPeriods(part: ReadablePartition,
                           chunkset: ChunkSetInfoReader,
                           resMillis: Long,
@@ -137,7 +138,7 @@ class CounterDownsamplePeriodMarker(inputColIds: Seq[Int]) extends DefaultDownsa
                           endRow: Int): Buffer[Int] = {
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
-    result ++= super.getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
+    result ++= new DefaultDownsamplePeriodMarker(Nil).getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
     val ctrVecAcc = chunkset.vectorAccessor(inputColIds.head)
     val ctrVecPtr = chunkset.vectorAddress(inputColIds.head)
     val ctrReader = part.chunkReader(inputColIds.head, ctrVecAcc, ctrVecPtr)
@@ -483,7 +484,7 @@ object DownsamplePeriodMarker {
     val name = parts(0)
     val colIds = parts.drop(1).map(_.toInt)
     PeriodMarkerName.withNameOption(name) match {
-      case None    => throw new IllegalArgumentException(s"Unsupported downsampling function $name")
+      case None    => throw new IllegalArgumentException(s"Unsupported downsample period marker $name")
       case Some(d) => d.periodMarkerClass.getConstructor(classOf[Seq[Int]])
         .newInstance(colIds.toSeq).asInstanceOf[DownsamplePeriodMarker]
     }
