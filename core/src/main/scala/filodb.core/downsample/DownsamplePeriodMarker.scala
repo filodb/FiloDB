@@ -32,8 +32,8 @@ trait DownsamplePeriodMarker {
   def name: PeriodMarkerName
 
   /**
-    * Ids of Data Columns the marker works on.
-    * The column id values are fed in via downsampling configuration of the dataset
+    * Id of Data Column the marker works on.
+    * The column id value is fed in via downsampling configuration of the dataset
     */
   def inputColId: Int
 
@@ -41,11 +41,11 @@ trait DownsamplePeriodMarker {
     * Places row numbers for the given chunkset which marks the
     * periods to downsample into the result buffer param
     */
-  def getPeriods(part: ReadablePartition,
-                 chunkset: ChunkSetInfoReader,
-                 resMillis: Long,
-                 startRow: Int,
-                 endRow: Int): Buffer[Int]
+  def periods(part: ReadablePartition,
+              chunkset: ChunkSetInfoReader,
+              resMillis: Long,
+              startRow: Int,
+              endRow: Int): Buffer[Int]
 }
 
 /**
@@ -54,11 +54,11 @@ trait DownsamplePeriodMarker {
   */
 class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
   require(inputColId == DataSchema.timestampColID)
-  override def getPeriods(part: ReadablePartition,
-                          chunkset: ChunkSetInfoReader,
-                          resMillis: Long,
-                          startRow: Int,
-                          endRow: Int): Buffer[Int] = {
+  override def periods(part: ReadablePartition,
+                       chunkset: ChunkSetInfoReader,
+                       resMillis: Long,
+                       startRow: Int,
+                       endRow: Int): Buffer[Int] = {
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -89,21 +89,23 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
 /**
   * Returns union of the following:
   * (a) the results from TimeDownsamplePeriodMarker.
-  * (b) row number when counter drops
-  * (c) last row number before counter drops
+  * (b) the first sample of chunk. This is needed to cover for drop detection across chunks
+  * (c) row numbers when counter drops. This is needed to account for highest correction value before drop
+  * (d) last row numbers before counter drops. This is needed for downsample queries to detect drop
+  *
   * @param inputColId requires the counter column id
   */
 class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMarker {
   override def name: PeriodMarkerName = PeriodMarkerName.Counter
-  override def getPeriods(part: ReadablePartition,
-                          chunkset: ChunkSetInfoReader,
-                          resMillis: Long,
-                          startRow: Int,
-                          endRow: Int): Buffer[Int] = {
+  override def periods(part: ReadablePartition,
+                       chunkset: ChunkSetInfoReader,
+                       resMillis: Long,
+                       startRow: Int,
+                       endRow: Int): Buffer[Int] = {
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
     result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
-      .getPeriods(part, chunkset, resMillis, startRow + 1, endRow)
+      .periods(part, chunkset, resMillis, startRow + 1, endRow)
     val ctrVecAcc = chunkset.vectorAccessor(inputColId)
     val ctrVecPtr = chunkset.vectorAddress(inputColId)
     val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)

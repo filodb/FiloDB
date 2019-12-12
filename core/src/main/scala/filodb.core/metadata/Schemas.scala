@@ -90,7 +90,7 @@ object DataSchema {
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
       DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns),
-        valueColID, downsampleSchema, periodMarker)
+                 valueColID, downsampleSchema, periodMarker)
     }
   }
 

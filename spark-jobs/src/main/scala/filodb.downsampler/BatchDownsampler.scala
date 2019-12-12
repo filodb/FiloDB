@@ -221,7 +221,7 @@ object BatchDownsampler extends StrictLogging with Instance {
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
         val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEnd), chunkset.numRows - 1)
-        val downsamplePeriods = periodMarker.getPeriods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
+        val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
 
         // for each downsample period
         var first = startRow
