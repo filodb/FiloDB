@@ -492,8 +492,8 @@ object MetricsTestData {
     MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
       .flatMap { record =>
         val timestamp = record(0)
-        val tags = record(4).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-        val metricName = tags("__name__".utf8).toString
+        val tags = record(5).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metricName = record(4).toString
         val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
                            tags + ("__name__".utf8 -> (metricName + "_count").utf8))
         val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,

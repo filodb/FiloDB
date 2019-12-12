@@ -118,9 +118,6 @@ object BatchDownsampler extends StrictLogging with Instance {
           downsampledChunksToPersist, userTimeStart, userTimeEnd)
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
-    } catch { case ex: Exception =>
-      logger.error(s"Encountered exception when " +
-        s"processing batchSize=${rawPartsBatch.size} partitions. Moving on", ex)
     } finally {
       // free off-heap memory
       offHeapMem.free()
@@ -194,14 +191,14 @@ object BatchDownsampler extends StrictLogging with Instance {
     *
     * @param rawPartToDownsample raw partition to downsample
     * @param downsamplers chunk downsamplers to use to downsample
-    * @param downsampledParts the downsample parts in which to ingest downsampled data
+    * @param downsampleResToPart the downsample parts in which to ingest downsampled data
     */
   // scalastyle:off method.length
   private def downsampleChunks(offHeapMem: OffHeapMemory,
                                rawPartToDownsample: ReadablePartition,
                                downsamplers: Seq[ChunkDownsampler],
                                periodMarker: DownsamplePeriodMarker,
-                               downsampledParts: Map[FiniteDuration, TimeSeriesPartition],
+                               downsampleResToPart: Map[FiniteDuration, TimeSeriesPartition],
                                userTimeStart: Long,
                                userTimeEnd: Long) = {
     val timestampCol = 0
@@ -211,6 +208,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     val downsampleRow = new Array[Any](downsamplers.size)
     val downsampleRowReader = SeqRowReader(downsampleRow)
 
+    // for each chunk
     while (rawChunksets.hasNext) {
       val chunkset = rawChunksets.nextInfoReader
       val tsPtr = chunkset.vectorAddress(timestampCol)
@@ -218,13 +216,14 @@ object BatchDownsampler extends StrictLogging with Instance {
       val tsReader = rawPartToDownsample.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
 
       // for each downsample resolution
-      downsampledParts.foreach { case (resolution, part) =>
+      downsampleResToPart.foreach { case (resolution, part) =>
         val resMillis = resolution.toMillis
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
         val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEnd), chunkset.numRows - 1)
         val downsamplePeriods = periodMarker.getPeriods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
 
+        // for each downsample period
         var first = startRow
         for { i <- 0 until downsamplePeriods.length optimized } {
           val last = downsamplePeriods(i)
@@ -232,8 +231,8 @@ object BatchDownsampler extends StrictLogging with Instance {
           for {col <- downsamplers.indices optimized} {
             val downsampler = downsamplers(col)
             downsampler match {
-              case d: TimeChunkDownsampler =>
-                downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, first, last)
+              case t: TimeChunkDownsampler =>
+                downsampleRow(col) = t.downsampleChunk(rawPartToDownsample, chunkset, first, last)
               case d: DoubleChunkDownsampler =>
                 downsampleRow(col) = d.downsampleChunk(rawPartToDownsample, chunkset, first, last)
               case h: HistChunkDownsampler =>
