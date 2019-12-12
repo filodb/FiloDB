@@ -166,7 +166,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = Stream( // time, sum, count, hist, name, tags
-      Seq(1574272801000L, 0d, 0d, MutableHistogram(bucketScheme, Array(0d, 0d, 0d)), seriesName, seriesTags),
+      Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d)), seriesName, seriesTags),
       Seq(1574272801500L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 2d, 2d)), seriesName, seriesTags),
       Seq(1574272802000L, 5d, 5d, MutableHistogram(bucketScheme, Array(2d, 3d, 5d)), seriesName, seriesTags),
 
@@ -194,6 +194,10 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+  }
+
+  it ("should free all offheap memory") {
+    offheapMem.free()
   }
 
   it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {
@@ -291,7 +295,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
 
-    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1))
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3))
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getHistogram(3))
@@ -300,7 +304,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      Seq(1574272801000L, 0d, 0d, MutableHistogram(bucketScheme, Array(0d, 0d, 0d))),
+      Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
       Seq(1574272802000L, 5d, 5d, MutableHistogram(bucketScheme, Array(2d, 3d, 5d))),
 
       Seq(1574272862000L, 11d, 11d, MutableHistogram(bucketScheme, Array(2d, 8d, 11d))),
@@ -392,7 +396,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val ctrChunkInfo = downsampledPart1.infos(AllChunkScan).nextInfoReader
     PrimitiveVectorReader.dropped(ctrChunkInfo.vectorAccessor(2), ctrChunkInfo.vectorAddress(2)) shouldEqual true
 
-    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1))
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3))
 
     val downsampledData1 = rv1.rows.map { r =>
       (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getHistogram(3))
@@ -401,7 +405,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      Seq(1574272801000L, 0d, 0d, MutableHistogram(bucketScheme, Array(0d, 0d, 0d))),
+      Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
       Seq(1574272862000L, 11d, 11d, MutableHistogram(bucketScheme, Array(2d, 8d, 11d))),
       Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d))),
       Seq(1574272981000L, 17d, 17d, MutableHistogram(bucketScheme, Array(2d, 15d, 17d))),

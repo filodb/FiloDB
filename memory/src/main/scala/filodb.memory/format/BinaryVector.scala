@@ -131,7 +131,7 @@ trait VectorDataReader extends AvailableReader {
     * Used only for testing. When using in production be careful of unnecessary allocation
     * when backing memory is already on heap.
     */
-  def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
+  def toBytes(acc: MemoryReader, vector: BinaryVectorPtr): Array[Byte] = {
     val numByts = numBytes(acc, vector) + 4
     val bytes = new Array[Byte](numByts)
     acc.copy(vector, MemoryAccessor.fromArray(bytes), 0, numByts)
