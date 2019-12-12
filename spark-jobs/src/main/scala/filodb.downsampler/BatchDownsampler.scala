@@ -94,13 +94,13 @@ object BatchDownsampler extends StrictLogging with Instance {
     */
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
-                      userTimeEnd: Long): Unit = {
+                      userTimeEndExclusive: Long): Unit = {
 
     import java.time.Instant._
 
     logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEndExclusive)}")
 
     val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
@@ -116,7 +116,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     try {
       rawPartsBatch.foreach { rawPart =>
         downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
-          downsampledChunksToPersist, userTimeStart, userTimeEnd, dsRecordBuilder)
+          downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
@@ -149,7 +149,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                              downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                              userTimeStart: Long,
-                             userTimeEnd: Long,
+                             userTimeEndExclusive: Long,
                              dsRecordBuilder: RecordBuilder) = {
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
@@ -172,7 +172,7 @@ object BatchDownsampler extends StrictLogging with Instance {
         }.toMap
 
         downsampleChunks(offHeapMem, rawReadablePart, downsamplers, periodMarker,
-                         downsampledParts, userTimeStart, userTimeEnd, dsRecordBuilder)
+                         downsampledParts, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
 
         pagedPartsToFree += rawReadablePart
         downsampledPartsToFree ++= downsampledParts.values
@@ -202,7 +202,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                                periodMarker: DownsamplePeriodMarker,
                                downsampleResToPart: Map[FiniteDuration, TimeSeriesPartition],
                                userTimeStart: Long,
-                               userTimeEnd: Long,
+                               userTimeEndExclusive: Long,
                                dsRecordBuilder: RecordBuilder) = {
     val timestampCol = 0
     val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
@@ -219,7 +219,8 @@ object BatchDownsampler extends StrictLogging with Instance {
         val resMillis = resolution.toMillis
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
-        val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEnd), chunkset.numRows - 1)
+        // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
+        val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEndExclusive - 1), chunkset.numRows - 1)
         val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
 
         // for each downsample period
@@ -246,7 +247,9 @@ object BatchDownsampler extends StrictLogging with Instance {
         dsRecordBuilder.allContainers.foreach{ c =>
           c.consumeRecords(new BinaryRegionConsumer {
             override def onNext(base: Any, offset: Long): Unit = {
-              part.ingest(userTimeStart, new BinaryRecordRowReader(part.schema.ingestionSchema, base, offset),
+              // Important: use userTimeEndExclusive as ingestion time so that the downsample chunks are idempotent
+              // when job is rerun for the same time period
+              part.ingest(userTimeEndExclusive, new BinaryRecordRowReader(part.schema.ingestionSchema, base, offset),
                 offHeapMem.blockMemFactory)
             }
           })

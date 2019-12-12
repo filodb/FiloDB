@@ -160,7 +160,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   /**
     * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
-    * ** User/Ingestion End times are exclusive **
+    *
+    * Important Detail: User End time is exclusive. Important since we should not downsample one sample in two job runs
     */
   // scalastyle:off parameter.number
   def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
@@ -168,7 +169,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                                     ingestionTimeStart: Long,
                                     ingestionTimeEnd: Long,
                                     userTimeStart: Long,
-                                    userTimeEnd: Long,
+                                    endTimeExclusive: Long,
                                     maxChunkTime: Long,
                                     batchSize: Int,
                                     batchTime: FiniteDuration): Observable[Seq[RawPartData]] = {
@@ -186,10 +187,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunksTable = getOrCreateChunkTable(datasetRef)
     partKeys.bufferTimedAndCounted(batchTime, batchSize).map { parts =>
       logger.debug(s"Querying cassandra for chunks from ${parts.size} partitions userTimeStart=$userTimeStart " +
-        s"userTimeEnd=$userTimeEnd maxChunkTime=$maxChunkTime")
+        s"endTimeExclusive=$endTimeExclusive maxChunkTime=$maxChunkTime")
       // TODO evaluate if we can increase parallelism here. This needs to be tuneable
       // based on how much faster downsampling should run, and how much additional read load cassandra can take.
-      chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, userTimeEnd).toIterator().toSeq
+      chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, endTimeExclusive).toIterator().toSeq
     }
   }
 
