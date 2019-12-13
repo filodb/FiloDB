@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
@@ -39,6 +39,8 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
 
+  private var nextPartitionID = 0
+
   private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
@@ -63,12 +65,27 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   }
 
   def recoverIndex(): Future[Unit] = {
-    // TODO:
-    // Recover lucene index by loading data from the cass table representing
-    // the datasetref with highest downsample retention
+    val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref,
+                                     GlobalScheduler.globalImplicitScheduler){ _ => createPartitionID() }
+      .map { _ =>
+        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum")
+      }
+  }
 
-    // Recover index for the dataset `indexDataset` member of this class
-    Future.successful(Unit)
+  /**
+    * Returns a new non-negative partition ID which isn't used by any existing parition. A negative
+    * partition ID wouldn't work with bitmaps.
+    */
+  private def createPartitionID(): Int = {
+    this.synchronized {
+      val id = nextPartitionID
+      nextPartitionID += 1
+      if (nextPartitionID < 0) {
+        throw new IllegalStateException("Too many partitions. Reached int capacity")
+      }
+      id
+    }
   }
 
   def refreshPartKeyIndexBlocking(): Unit = {}
