@@ -540,7 +540,6 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
       } else { meta }
   }
 
-  private val _drops = debox.Buffer.empty[Int] // to track counter drop positions
   // code to go through and build a list of corrections and corresponding index values.. (dropIndex, correction)
   private lazy val corrections = {
     var index = 0
@@ -552,7 +551,11 @@ class SectDeltaHistogramReader(acc2: MemoryReader, histVect: Ptr.U8)
   }
 
   def dropPositions(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): debox.Buffer[Int] = {
-    ??? // implement later when needed
+    val res = debox.Buffer.empty[Int]
+    corrections.foreach { case (dropPos, hist) =>
+      res += dropPos
+    }
+    res
   }
 
   def updateCorrection(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr,

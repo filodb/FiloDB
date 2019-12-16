@@ -167,23 +167,23 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = Stream( // time, sum, count, hist, name, tags
       Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d)), seriesName, seriesTags),
-      Seq(1574272801500L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 2d, 2d)), seriesName, seriesTags),
-      Seq(1574272802000L, 5d, 5d, MutableHistogram(bucketScheme, Array(2d, 3d, 5d)), seriesName, seriesTags),
+      Seq(1574272801500L, 2d, 3d, MutableHistogram(bucketScheme, Array(0d, 2d, 3d)), seriesName, seriesTags),
+      Seq(1574272802000L, 5d, 6d, MutableHistogram(bucketScheme, Array(2d, 5d, 6d)), seriesName, seriesTags),
 
       Seq(1574272861000L, 9d, 9d, MutableHistogram(bucketScheme, Array(2d, 5d, 9d)), seriesName, seriesTags),
       Seq(1574272861500L, 10d, 10d, MutableHistogram(bucketScheme, Array(2d, 5d, 10d)), seriesName, seriesTags),
-      Seq(1574272862000L, 11d, 11d, MutableHistogram(bucketScheme, Array(2d, 8d, 11d)), seriesName, seriesTags),
+      Seq(1574272862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d)), seriesName, seriesTags),
 
       Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d)), seriesName, seriesTags),
-      Seq(1574272921500L, 7d, 7d, MutableHistogram(bucketScheme, Array(1d, 7d, 7d)), seriesName, seriesTags),
-      Seq(1574272922000L, 15d, 15d, MutableHistogram(bucketScheme, Array(1d, 15d, 15d)), seriesName, seriesTags),
+      Seq(1574272921500L, 7d, 9d, MutableHistogram(bucketScheme, Array(1d, 7d, 9d)), seriesName, seriesTags),
+      Seq(1574272922000L, 15d, 19d, MutableHistogram(bucketScheme, Array(1d, 15d, 19d)), seriesName, seriesTags),
 
-      Seq(1574272981000L, 17d, 17d, MutableHistogram(bucketScheme, Array(2d, 15d, 17d)), seriesName, seriesTags),
+      Seq(1574272981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d)), seriesName, seriesTags),
       Seq(1574272981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d)), seriesName, seriesTags),
       Seq(1574272982000L, 15d, 15d, MutableHistogram(bucketScheme, Array(0d, 15d, 15d)), seriesName, seriesTags),
 
-      Seq(1574273041000L, 18d, 18d, MutableHistogram(bucketScheme, Array(1d, 15d, 18d)), seriesName, seriesTags),
-      Seq(1574273042000L, 20d, 20d, MutableHistogram(bucketScheme, Array(4d, 20d, 20d)), seriesName, seriesTags)
+      Seq(1574273041000L, 18d, 19d, MutableHistogram(bucketScheme, Array(1d, 16d, 19d)), seriesName, seriesTags),
+      Seq(1574273042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)), seriesName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -305,18 +305,18 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
       Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
-      Seq(1574272802000L, 5d, 5d, MutableHistogram(bucketScheme, Array(2d, 3d, 5d))),
+      Seq(1574272802000L, 5d, 6d, MutableHistogram(bucketScheme, Array(2d, 5d, 6d))),
 
-      Seq(1574272862000L, 11d, 11d, MutableHistogram(bucketScheme, Array(2d, 8d, 11d))),
+      Seq(1574272862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d))),
 
       Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d))),
-      Seq(1574272922000L, 15d, 15d, MutableHistogram(bucketScheme, Array(1d, 15d, 15d))),
+      Seq(1574272922000L, 15d, 19d, MutableHistogram(bucketScheme, Array(1d, 15d, 19d))),
 
-      Seq(1574272981000L, 17d, 17d, MutableHistogram(bucketScheme, Array(2d, 15d, 17d))),
+      Seq(1574272981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d))),
       Seq(1574272981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d))),
       Seq(1574272982000L, 15d, 15d, MutableHistogram(bucketScheme, Array(0d, 15d, 15d))),
 
-      Seq(1574273042000L, 20d, 20d, MutableHistogram(bucketScheme, Array(4d, 20d, 20d)))
+      Seq(1574273042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)))
     )
   }
 
@@ -406,11 +406,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
       Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
-      Seq(1574272862000L, 11d, 11d, MutableHistogram(bucketScheme, Array(2d, 8d, 11d))),
+      Seq(1574272862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d))),
       Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d))),
-      Seq(1574272981000L, 17d, 17d, MutableHistogram(bucketScheme, Array(2d, 15d, 17d))),
+      Seq(1574272981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d))),
       Seq(1574272981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d))),
-      Seq(1574273042000L, 20d, 20d, MutableHistogram(bucketScheme, Array(4d, 20d, 20d)))
+      Seq(1574273042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)))
     )
   }
 
