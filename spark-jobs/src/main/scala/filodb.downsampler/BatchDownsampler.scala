@@ -13,12 +13,12 @@ import scalaxy.loops._
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
-import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge, MemFactory}
+import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -244,15 +244,11 @@ object BatchDownsampler extends StrictLogging with Instance {
           dsRecordBuilder.endRecord(false)
           first = last + 1 // first row for next downsample period is last + 1
         }
-        dsRecordBuilder.allContainers.foreach{ c =>
-          c.consumeRecords(new BinaryRegionConsumer {
-            override def onNext(base: Any, offset: Long): Unit = {
-              // Important: use userTimeEndExclusive as ingestion time so that the downsample chunks are idempotent
-              // when job is rerun for the same time period
-              part.ingest(userTimeEndExclusive, new BinaryRecordRowReader(part.schema.ingestionSchema, base, offset),
-                offHeapMem.blockMemFactory)
-            }
-          })
+
+        for { c   <- dsRecordBuilder.allContainers
+              row <- c.iterate(part.schema.ingestionSchema)
+        } {
+          part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
         }
         dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
       }

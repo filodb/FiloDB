@@ -25,8 +25,7 @@ class HistogramVectorTest extends NativeVectorTest {
 
   def verifyHistogram(h: Histogram, itemNo: Int,
                       rawBuckets: Seq[Array[Double]] = rawHistBuckets,
-                      bucketScheme: HistogramBuckets = bucketScheme
-                     ): Unit = {
+                      bucketScheme: HistogramBuckets = bucketScheme ): Unit = {
     h.numBuckets shouldEqual bucketScheme.numBuckets
     for { i <- 0 until bucketScheme.numBuckets } {
       h.bucketTop(i) shouldEqual bucketScheme.bucketTop(i)
