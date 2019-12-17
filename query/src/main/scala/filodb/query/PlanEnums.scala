@@ -74,6 +74,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
   case object Rate extends RangeFunctionId("rate")
 
+  case object Last extends RangeFunctionId("last")
+
   case object Resets extends RangeFunctionId("resets")
 
   case object StdDevOverTime extends RangeFunctionId("stddev_over_time")

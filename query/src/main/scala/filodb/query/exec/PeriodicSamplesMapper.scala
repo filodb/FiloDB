@@ -149,7 +149,7 @@ extends Iterator[R] with StrictLogging {
       val nextInfo = ChunkSetInfo(queryInfo.infoPtr)
       try {
         rangeFunction.addChunks(queryInfo.tsVector, queryInfo.tsReader, queryInfo.valueVector, queryInfo.valueReader,
-                                wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
+                                wit.curWindowStart, wit.curWindowEnd, window, nextInfo, queryConfig)
       } catch {
         case e: Exception =>
           val timestampVector = nextInfo.vectorPtr(rv.timestampColID)
@@ -255,7 +255,7 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
       windowSamplesPool.putBack(removed)
     }
     // apply function on window samples
-    rangeFunction.apply(curWindowStart, curWindowEnd, windowSamples, sampleToEmit, queryConfig)
+    rangeFunction.apply(curWindowStart, curWindowEnd, window, windowSamples, sampleToEmit, queryConfig)
     curWindowEnd = curWindowEnd + step
     sampleToEmit
   }

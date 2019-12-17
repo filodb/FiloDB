@@ -4,6 +4,7 @@ import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.query.RangeFunctionId
 import filodb.query.exec.rangefn.{RangeFunction, RawDataWindowingSpec}
+import filodb.query.RangeFunctionId.Last
 
 /**
  * Tests both the SlidingWindowIterator and the ChunkedWindowIterator
@@ -247,6 +248,57 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
     }
 
+  }
+
+  it ("should calculate lastSampleInWindow when ingested samples are more than 3 minutes apart") {
+    val samples = Seq(
+      1540832354000L->1d,
+      1540835954000L->2d,
+      1540839554000L->3d,
+      1540843154000L->4d,
+      1540846754000L->237d,
+      1540850354000L->330d
+    )
+    val rv = timeValueRV(samples)
+
+    val windowResults = Seq(
+      1540846755000L->237,
+      1540846770000L->237,
+      1540846785000L->237,
+      1540846800000L->237,
+      1540846815000L->237,
+      1540846830000L->237,
+      1540846845000L->237,
+      1540846860000L->237,
+      1540846875000L->237,
+      1540846890000L->237,
+      1540846905000L->237,
+      1540846920000L->237, // note that value 237 becomes stale at this point (older than 3 minutes). No samples with 237 anymore.
+      1540850355000L->330,
+      1540850370000L->330,
+      1540850385000L->330,
+      1540850400000L->330,
+      1540850415000L->330,
+      1540850430000L->330,
+      1540850445000L->330,
+      1540850460000L->330,
+      1540850475000L->330,
+      1540850490000L->330,
+      1540850505000L->330,
+      1540850520000L->330) // 330 becomes stale now.
+
+    val slidingWinIterator = new SlidingWindowIterator(rv.rows, 1540845090000L,
+      15000, 1540855905000L, 180000,
+      RangeFunction(MetricsTestData.timeseriesDataset,
+        Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
+      queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
+
+    val chunkedWinIt = new ChunkedWindowIteratorD(rv, 1540845090000L,
+      15000, 1540855905000L, 180000,
+      RangeFunction(MetricsTestData.timeseriesDataset,
+        Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+    chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
 
   it ("should calculate lastSample when ingested samples are more than 5 minutes apart") {
