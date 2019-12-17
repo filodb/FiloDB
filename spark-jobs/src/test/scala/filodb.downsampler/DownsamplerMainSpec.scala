@@ -297,26 +297,29 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3))
 
+    val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
-      (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getHistogram(3))
+      val h = r.getHistogram(3)
+      h.numBuckets shouldEqual 3
+      (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), (0 until h.numBuckets).map(i => h.bucketValue(i)))
     }.toList
 
-    val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
-      Seq(1574272802000L, 5d, 6d, MutableHistogram(bucketScheme, Array(2d, 5d, 6d))),
+      (1574272801000L, 0d, 1d, Seq(0d, 0d, 1d)),
+      (1574272802000L, 5d, 6d, Seq(2d, 5d, 6d)),
 
-      Seq(1574272862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d))),
+      (1574272862000L, 11d, 14d, Seq(2d, 8d, 14d)),
 
-      Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d))),
-      Seq(1574272922000L, 15d, 19d, MutableHistogram(bucketScheme, Array(1d, 15d, 19d))),
+      (1574272921000L, 2d, 2d, Seq(0d, 0d, 2d)),
+      (1574272922000L, 15d, 19d, Seq(1d, 15d, 19d)),
 
-      Seq(1574272981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d))),
-      Seq(1574272981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d))),
-      Seq(1574272982000L, 15d, 15d, MutableHistogram(bucketScheme, Array(0d, 15d, 15d))),
+      (1574272981000L, 17d, 21d, Seq(2d, 16d, 21d)),
+      (1574272981500L, 1d, 1d, Seq(0d, 1d, 1d)),
+      (1574272982000L, 15d, 15d, Seq(0d, 15d, 15d)),
 
-      Seq(1574273042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)))
+      (1574273042000L, 20d, 25d, Seq(4d, 20d, 25d))
     )
   }
 
@@ -398,20 +401,24 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3))
 
+    val bucketScheme = Seq(3d, 10d, Double.PositiveInfinity)
     val downsampledData1 = rv1.rows.map { r =>
-      (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getHistogram(3))
+      val h = r.getHistogram(3)
+      h.numBuckets shouldEqual 3
+      (0 until h.numBuckets).map(i => h.bucketTop(i)) shouldEqual bucketScheme
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), (0 until h.numBuckets).map(i => h.bucketValue(i)))
     }.toList
 
-    val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      Seq(1574272801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d))),
-      Seq(1574272862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d))),
-      Seq(1574272921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d))),
-      Seq(1574272981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d))),
-      Seq(1574272981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d))),
-      Seq(1574273042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)))
+      (1574272801000L, 0d, 1d, Seq(0d, 0d, 1d)),
+      (1574272862000L, 11d, 14d, Seq(2d, 8d, 14d)),
+      (1574272921000L, 2d, 2d, Seq(0d, 0d, 2d)),
+      (1574272981000L, 17d, 21d, Seq(2d, 16d, 21d)),
+      (1574272981500L, 1d, 1d, Seq(0d, 1d, 1d)),
+      (1574273042000L, 20d, 25d, Seq(4d, 20d, 25d))
     )
+
   }
 
   it("should read and verify part key migration in cassandra for 5-min downsampled data") {

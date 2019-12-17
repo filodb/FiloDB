@@ -148,6 +148,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   var base: Array[Byte] = _
   var baseOffset: Long = _
   var length: Int = _
+  val origBufPos = buf.position()
 
   // TODO check bounds of array before accessing
   require (!buf.isDirect, "buf arg cannot be a DirectBuffer")
@@ -163,7 +164,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   }
 
   override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
-    dBuf.wrap(buf, addr.toInt, length)
+    dBuf.wrap(buf, origBufPos + addr.toInt, length)
   }
 
 }
