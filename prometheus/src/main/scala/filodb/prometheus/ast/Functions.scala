@@ -28,7 +28,7 @@ trait Functions extends Base with Operators with Vectors {
       name.equalsIgnoreCase("scalar") ||
       name.equalsIgnoreCase("time")
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val vectorFn = VectorFunctionId.withNameInsensitiveOption(name)
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
@@ -37,7 +37,7 @@ trait Functions extends Base with Operators with Vectors {
         allParams.head match {
           case num: ScalarExpression => val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
                                         VectorPlan(ScalarFixedDoublePlan(num.toScalar, params))
-          case function: Function    => val nestedPlan = function.toPeriodicSeriesPlan(timeParams)
+          case function: Function    => val nestedPlan = function.toSeriesPlan(timeParams)
                                         nestedPlan match {
                                           case scalarPlan: ScalarPlan => VectorPlan(scalarPlan)
                                           case _                      => throw new UnsupportedOperationException()
@@ -55,13 +55,13 @@ trait Functions extends Base with Operators with Vectors {
                        val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
                        ScalarFixedDoublePlan(num.toScalar, params)
                      case function: Function if (function.name.equalsIgnoreCase("scalar")) =>
-                       function.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]
+                       function.toSeriesPlan(timeParams).asInstanceOf[ScalarVaryingDoublePlan]
                      case _ =>
                        throw new IllegalArgumentException("Parameters can be a string, number or scalar function")
                    }
         if (instantFunctionIdOpt.isDefined) {
           val instantFunctionId = instantFunctionIdOpt.get
-          val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+          val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
           ApplyInstantFunction(periodicSeriesPlan, instantFunctionId, otherParams)
           // Special FiloDB functions to extract things like chunk metadata
         } else if (filoFunctionIdOpt.isDefined) {
@@ -75,11 +75,11 @@ trait Functions extends Base with Operators with Vectors {
             case FiloFunctionId.ChunkMetaAll =>   // Just get the raw chunk metadata
               RawChunkMeta(rangeSelector, filters, column.getOrElse(""))
           }
-        } else toPeriodicSeriesPlanMisc(seriesParam, otherParams, timeParams)
+        } else toSeriesPlanMisc(seriesParam, otherParams, timeParams)
       }
     }
 
-    def toPeriodicSeriesPlanMisc(seriesParam: Series,
+    def toSeriesPlanMisc(seriesParam: Series,
                                  otherParams: Seq[FunctionArgsPlan],
                                  timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
@@ -93,15 +93,15 @@ trait Functions extends Base with Operators with Vectors {
 
       if (miscellaneousFunctionIdOpt.isDefined) {
         val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
       } else if (scalarFunctionIdOpt.isDefined) {
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
         ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, params)
       } else if (sortFunctionIdOpt.isDefined) {
         val sortFunctionId = sortFunctionIdOpt.get
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         ApplySortFunction(periodicSeriesPlan, sortFunctionId)
       } else if (absentFunctionIdOpt.isDefined) {
         val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
@@ -114,7 +114,7 @@ trait Functions extends Base with Operators with Vectors {
         val offsetMillis : Long = rangeExpression.offset.map(_.millis).getOrElse(0)
 
         PeriodicSeriesWithWindowing(
-          rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
+          rangeExpression.toSeriesPlan(timeParams, isRoot = false),
           timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
           rangeExpression.window.millis,
           rangeFunctionId, otherParams, rangeExpression.offset.map(_.millis))

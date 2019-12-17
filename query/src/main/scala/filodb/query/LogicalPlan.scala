@@ -2,6 +2,7 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams}
 
+//scalastyle:off number.of.types
 sealed trait LogicalPlan {
   /**
     * Execute failure routing
@@ -9,10 +10,12 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 }
 
+sealed trait SeriesPlan extends LogicalPlan
+
 /**
   * Super class for a query that results in range vectors with raw samples
   */
-sealed trait RawSeriesPlan extends LogicalPlan {
+sealed trait RawSeriesPlan extends SeriesPlan {
   override def isRoutable: Boolean = false
 }
 
@@ -24,7 +27,7 @@ sealed trait NonLeafLogicalPlan extends LogicalPlan {
   * Super class for a query that results in range vectors with samples
   * in regular steps
   */
-sealed trait PeriodicSeriesPlan extends LogicalPlan
+sealed trait PeriodicSeriesPlan extends SeriesPlan
 
 sealed trait MetadataQueryPlan extends LogicalPlan{
   override def isRoutable: Boolean = false
@@ -95,7 +98,7 @@ case class PeriodicSeries(rawSeries: RawSeriesPlan,
   * Applies a range function on raw windowed data before
   * sampling data at regular intervals.
   */
-case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
+case class PeriodicSeriesWithWindowing(rawSeries: SeriesPlan,
                                        start: Long,
                                        step: Long,
                                        end: Long,
@@ -154,7 +157,7 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
 /**
   * Apply Instant Vector Function to a collection of RangeVectors
   */
-case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
+case class ApplyInstantFunction(vectors: SeriesPlan,
                                 function: InstantFunctionId,
                                 functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
