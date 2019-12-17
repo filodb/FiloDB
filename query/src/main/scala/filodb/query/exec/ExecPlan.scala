@@ -13,7 +13,6 @@ import monix.reactive.observables.ConnectableObservable
 import filodb.core.DatasetRef
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
-import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
@@ -119,8 +118,7 @@ trait ExecPlan extends QueryCommand {
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resSchemaForTransformer = if ((allTransformers.size > 0 &&
         allTransformers.head.isInstanceOf[AbsentFunctionMapper])) {
-         ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-          ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+        allTransformers.head.schema(resSchema)
       } else
         resSchema
       val resultTask = if (resSchemaForTransformer == ResultSchema.empty) {

@@ -255,7 +255,7 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
-      case lp: ApplyAbsentFunction         =>  materializeAbsentFunction(queryId, submitTime, options, lp,
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(queryId, submitTime, options, lp,
                                                spreadProvider)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
@@ -526,7 +526,7 @@ class QueryEngine(dsRef: DatasetRef,
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer((AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
-        dsOptions.metricColumn)))
+        PromMetricLabel)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,

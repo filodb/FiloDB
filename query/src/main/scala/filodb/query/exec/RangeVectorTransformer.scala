@@ -334,7 +334,6 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
     source.map { rv =>
       new RangeVector {
         override def key: RangeVectorKey = rv.key
-
         override def rows: Iterator[RowReader] = rv.rows
       }
     }
@@ -348,38 +347,44 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
   protected[exec] def args: String =
     s"columnFilter=$columnFilter rangeParams=$rangeParams metricColumn=$metricColumn"
 
+  def keysFromFilter : RangeVectorKey = {
+    val labelsFromFilter = columnFilter.filter(_.filter.isInstanceOf[Equals]).
+      filterNot(_.column.equals(metricColumn)).map { c =>
+      ZeroCopyUTF8String(c.column) -> ZeroCopyUTF8String(c.filter.valuesStrings.head.asInstanceOf[String])
+    }.toMap
+    CustomRangeVectorKey(labelsFromFilter)
+  }
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
-    val resultRv = source.countL.map { l =>
-      if (l == 0) {
-        Seq(new RangeVector {
-          override def key: RangeVectorKey = {
-            val labelsFromFilter = columnFilter.filter(_.filter.isInstanceOf[Equals]).
-              filterNot(_.column.equals(metricColumn)).map { c =>
-                ZeroCopyUTF8String(c.column) -> ZeroCopyUTF8String(c.filter.valuesStrings.head.asInstanceOf[String])
-              }.toMap
-            CustomRangeVectorKey(labelsFromFilter)
-          }
-
-          override def rows: Iterator[RowReader] = {
-            val rowList = new ListBuffer[TransientRow]()
-            for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
-              rowList += new TransientRow(i * 1000, 1)
-            }
-            rowList.iterator
-          }
-        })
+    val resultRv = source.toListL.map { rvs =>
+      val nonNanTimestamps = if (sourceSchema.isHistDouble) {
+        rvs.flatMap(_.rows.filter(x => x.getHistogram(1).topBucketValue > 0)).map(_.getLong(0))
+      } else {
+        rvs.flatMap(_.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)))
       }
-      else {
+      val rowList = new ListBuffer[TransientRow]()
+      for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+        if (!nonNanTimestamps.contains( i * 1000))
+          rowList += new TransientRow(i * 1000, 1)
+      }
+      if (rowList.isEmpty) {
         Seq.empty[RangeVector]
+      } else {
+        Seq(new RangeVector {
+          override def key: RangeVectorKey = keysFromFilter
+          override def rows: Iterator[RowReader] = rowList.iterator
+        })
       }
     }.map(Observable.fromIterable)
 
     Observable.fromTask(resultRv).flatten
   }
   override def funcParams: Seq[FuncArgs] = Nil
+  override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
+    ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 }

@@ -87,9 +87,9 @@ trait Functions extends Base with Operators with Vectors {
       val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
       val absentFunctionIdOpt = AbsentFunctionId.withNameInsensitiveOption(name)
       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
-      val stringParam = allParams.filter(!_.equals(seriesParam)).
-        filter(_.isInstanceOf[InstantExpression]).
-        map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
+      val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
+        case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+      }
 
       if (miscellaneousFunctionIdOpt.isDefined) {
         val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
