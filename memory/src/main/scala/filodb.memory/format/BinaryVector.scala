@@ -131,7 +131,7 @@ trait VectorDataReader extends AvailableReader {
     * Used only for testing. When using in production be careful of unnecessary allocation
     * when backing memory is already on heap.
     */
-  def toBytes(acc: MemoryAccessor, vector: BinaryVectorPtr): Array[Byte] = {
+  def toBytes(acc: MemoryReader, vector: BinaryVectorPtr): Array[Byte] = {
     val numByts = numBytes(acc, vector) + 4
     val bytes = new Array[Byte](numByts)
     acc.copy(vector, MemoryAccessor.fromArray(bytes), 0, numByts)
@@ -176,6 +176,11 @@ trait CounterVectorReader extends VectorDataReader {
    * @param meta CorrectionMeta with total running correction info.  lastValue is ignored
    */
   def updateCorrection(acc: MemoryReader, vector: BinaryVectorPtr, meta: CorrectionMeta): CorrectionMeta
+
+  /**
+    * Identifies row numbers at which histogram or counter has dropped
+    */
+  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int]
 }
 
 // An efficient iterator for the bitmap mask, rotating a mask as we go

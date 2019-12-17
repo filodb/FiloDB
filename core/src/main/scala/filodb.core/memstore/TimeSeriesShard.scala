@@ -327,7 +327,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * TSP.ingesting is MUCH faster than bit.get(i) but we need the bitmap for faster operations
     * for all partitions of shard (like ingesting cardinality counting, rollover of time buckets etc).
     */
-  private[memstore] final val activelyIngesting = new EWAHCompressedBitmap
+  private[memstore] final val activelyIngesting = debox.Set.empty[Int]
 
   private val numFlushIntervalsDuringRetention = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
 
@@ -594,8 +594,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     partId.foreach { partId =>
       partKeyIndex.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
       activelyIngesting.synchronized {
-        if (pk.endTime == Long.MaxValue) activelyIngesting.set(partId)
-        else activelyIngesting.clear(partId)
+        if (pk.endTime == Long.MaxValue) activelyIngesting += partId
+        else activelyIngesting -= partId
       }
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
@@ -819,8 +819,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.indexEntries.set(partKeyIndex.indexNumEntries)
     shardStats.indexBytes.set(partKeyIndex.indexRamBytes)
     shardStats.numPartitions.set(numActivePartitions)
-    val cardinality = activelyIngesting.synchronized { activelyIngesting.cardinality() }
-    shardStats.numActivelyIngestingParts.set(cardinality)
+    val numIngesting = activelyIngesting.synchronized { activelyIngesting.size }
+    shardStats.numActivelyIngestingParts.set(numIngesting)
 
     // Also publish MemFactory stats. Instance is expected to be shared, but no harm in
     // publishing a little more often than necessary.
@@ -1014,7 +1014,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
         updatePartEndTimeInIndex(p, endTime)
         dirtyParts += p.partID
-        activelyIngesting.clear(p.partID)
+        activelyIngesting -= p.partID
         p.ingesting = false
       }
     }
@@ -1134,7 +1134,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       }
       dirtyPartitionsForIndexFlush += partId // marks this part as dirty so startTime is flushed
       activelyIngesting.synchronized {
-        activelyIngesting.set(partId)
+        activelyIngesting += partId
         newPart.ingesting = true
       }
       val stamp = partSetLock.writeLock()
@@ -1179,7 +1179,7 @@ class TimeSeriesShard(val ref: DatasetRef,
               // time series was inactive and has just started re-ingesting
               updatePartEndTimeInIndex(part.asInstanceOf[TimeSeriesPartition], Long.MaxValue)
               dirtyPartitionsForIndexFlush += part.partID
-              activelyIngesting.set(part.partID)
+              activelyIngesting += part.partID
               tsp.ingesting = true
             }
           }

@@ -3,7 +3,7 @@
 if [[ $# -ne 4 ]]; then
     echo "Usage: $0 <FILO_ADMIN_KEYSPACE> <FILO_KEYSPACE> <DATASET> <NUM_SHARDS>"
     echo "First Run: $0 filodb_admin filodb prometheus 4 > ddl.cql"
-    echo "Then Run: cql -f ddl.cql"
+    echo "Then Run: cql --request-timeout 3000 -f ddl.cql"
     exit 1
 fi
 
