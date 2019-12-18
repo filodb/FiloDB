@@ -78,7 +78,6 @@ trait RangeFunction extends BaseRangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
 
-
 }
 
 /**
@@ -426,7 +425,7 @@ object LastSampleInWindowFunction extends RangeFunction {
 abstract class LastSampleChunkedFunction[R <: MutableRowReader](var timestamp: Long = -1L)
 extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
-  def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                       startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
@@ -521,15 +520,23 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
   }
 }
 
-// Return the last sample within the window
-class LastSampleInWindowChunkedFunctionD extends LastSampleChunkedFunctionD {
+class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val longReader = valReader.asLongReader
+    timestamp = ts
+    value = longReader(valVector, endRowNum).toDouble
+  }
+}
 
+// Below classes are for supporting Last Sample function in a time-window. This implementation is in contract to the
+// above stack where sample is included if the time is within stale sample period
 
+abstract class LastSampleInWindowChunkedFunction[R <: MutableRowReader](var timestamp: Long = -1L)
+  extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
-  final override def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                               valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                               startTime: Long, endTime: Long,
-                               info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
@@ -543,12 +550,90 @@ class LastSampleInWindowChunkedFunctionD extends LastSampleChunkedFunctionD {
         updateValue(ts, valueVector, valueReader, endRowNum)
     }
   }
+
+  def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit
 }
 
-class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
+// LastSample functions with double value, based on TransientRow
+abstract class LastSampleInWindowChunkedFuncDblVal(var value: Double = Double.NaN)
+  extends LastSampleInWindowChunkedFunction[TransientRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+}
+
+// LastSample function for Histogram columns
+class LastSampleInWindowChunkedFunctionH(var value: bv.HistogramWithBuckets = bv.Histogram.empty)
+  extends LastSampleInWindowChunkedFunction[TransientHistRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+  }
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    timestamp = ts
+    value = valReader.asHistReader(endRowNum)
+  }
+}
+
+class LastSampleInWindowChunkedFunctionHMax(maxColID: Int,
+                                    var timestamp: Long = -1L,
+                                    var value: bv.HistogramWithBuckets = bv.Histogram.empty,
+                                    var max: Double = Double.NaN) extends ChunkedRangeFunction[TransientHistMaxRow] {
+  override final def reset(): Unit = { timestamp = -1L; value = bv.Histogram.empty; max = Double.NaN }
+  final def apply(endTimestamp: Long, sampleToEmit: TransientHistMaxRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
+    sampleToEmit.setDouble(2, max)
+  }
+
+  // Add each chunk and update timestamp and value such that latest sample wins
+  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
+    // Just in case timestamp vectors are a bit longer than others.
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
+
+    // update timestamp only if
+    //   1) endRowNum >= 0 (timestamp within chunk)
+    //   2) timestamp is within window; AND
+    //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
+    if (endRowNum >= 0) {
+      val ts = tsReader(tsVector, endRowNum)
+      if (ts >= startTime && ts > timestamp) {
+        val maxVect = info.vectorPtr(maxColID)
+        timestamp = ts
+        value = valueReader.asHistReader(endRowNum)
+        max = bv.DoubleVector(maxVect)(maxVect, endRowNum)
+      }
+    }
+  }
+}
+
+class LastSampleInWindowChunkedFunctionD extends LastSampleInWindowChunkedFuncDblVal() {
+  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
+    val dblReader = valReader.asDoubleReader
+    val doubleVal = dblReader(valVector, endRowNum)
+    // If the last value is NaN, that may be Prometheus end of time series marker.
+    // In that case try to get the sample before last.
+    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
+    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
+    if (java.lang.Double.isNaN(doubleVal)) {
+      if (endRowNum > 0) {
+        timestamp = ts
+        value = dblReader(valVector, endRowNum - 1)
+      }
+    } else {
+      timestamp = ts
+      value = doubleVal
+    }
+  }
+}
+
+class LastSampleInWindowChunkedFunctionL extends LastSampleInWindowChunkedFuncDblVal() {
   final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
     val longReader = valReader.asLongReader
     timestamp = ts
     value = longReader(valVector, endRowNum).toDouble
   }
 }
+
