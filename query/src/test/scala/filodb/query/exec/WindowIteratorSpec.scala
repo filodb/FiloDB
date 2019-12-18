@@ -273,7 +273,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540846875000L->237,
       1540846890000L->237,
       1540846905000L->237,
-      1540846920000L->237, // note that value 237 becomes stale at this point (older than 3 minutes). No samples with 237 anymore.
+      1540846920000L->237, // note that value 237 becomes stale at this point. No samples with 237 anymore.
       1540850355000L->330,
       1540850370000L->330,
       1540850385000L->330,

@@ -78,14 +78,7 @@ trait RangeFunction extends BaseRangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
 
-  def apply(startTimestamp: Long,
-            endTimestamp: Long,
-            windowSize: Long,
-            window: Window,
-            sampleToEmit: TransientRow,
-            queryConfig: QueryConfig): Unit = {
-    this.apply(startTimestamp, endTimestamp, window, sampleToEmit, queryConfig)
-  }
+
 }
 
 /**
@@ -111,28 +104,6 @@ trait ChunkedRangeFunction[R <: MutableRowReader] extends BaseRangeFunction {
   def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit
-
-  /**
-    * This is a modified version of above method, adds windowSize parameter
-    * @param tsVector raw pointer to the timestamp BinaryVector
-    * @param tsReader a LongVectorDataReader for parsing the tsVector
-    * @param valueVector a raw pointer to the value BinaryVector
-    * @param valueReader a VectorDataReader for the value BinaryVector. Method must cast to appropriate type.
-    * @param startTime starting timestamp in millis since Epoch for time window, inclusive
-    * @param endTime ending timestamp in millis since Epoch for time window, inclusive
-    * @param windowSize window size in milliseconds
-    * @param info chunk info
-    * @param queryConfig query execution configuration
-    */
-  // scalastyle:off parameter.number
-  def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                startTime: Long, endTime: Long, windowSize: Long,
-                info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
-    addChunks(tsVector, tsReader, valueVector, valueReader, startTime, endTime, info, queryConfig)
-  }
-
-
 
   /**
    * Return the computed result in sampleToEmit for the given window.
@@ -389,7 +360,7 @@ object RangeFunction {
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
     case None                   => () => LastSampleFunction
-    case Some(Last)             => () => LastSampleWindowedFunction
+    case Some(Last)             => () => LastSampleInWindowFunction
     case Some(Rate)             => () => RateFunction
     case Some(Increase)         => () => IncreaseFunction
     case Some(Delta)            => () => DeltaFunction
@@ -427,29 +398,20 @@ object LastSampleFunction extends RangeFunction {
   }
 }
 
-object LastSampleWindowedFunction extends RangeFunction {
+object LastSampleInWindowFunction extends RangeFunction {
   override def needsLastSample: Boolean = true
   def addedToWindow(row: TransientRow, window: Window): Unit = {}
   def removedFromWindow(row: TransientRow, window: Window): Unit = {}
-  def apply(startTimestamp: Long,
-            endTimestamp: Long,
-            window: Window,
-            sampleToEmit: TransientRow,
-            queryConfig: QueryConfig): Unit = {
-    this.apply(startTimestamp, endTimestamp, queryConfig.staleSampleAfterMs, window, sampleToEmit, queryConfig)
-  }
 
   override def apply(startTimestamp: Long,
             endTimestamp: Long,
-            windowSize: Long,
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
-
     if (window.size > 1)
       throw new IllegalStateException(s"Window had more than 1 sample. Possible out of order samples. Window: $window")
     // if no sample found in the window, set the value to NaN
-    if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > windowSize) {
+    if (window.size == 0 || startTimestamp > window.head.getLong(0)) {
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     } else {
       sampleToEmit.setValues(endTimestamp, window.head.getDouble(1))
@@ -464,7 +426,7 @@ object LastSampleWindowedFunction extends RangeFunction {
 abstract class LastSampleChunkedFunction[R <: MutableRowReader](var timestamp: Long = -1L)
 extends ChunkedRangeFunction[R] {
   // Add each chunk and update timestamp and value such that latest sample wins
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+  def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                       valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                       startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
@@ -559,58 +521,26 @@ class LastSampleChunkedFunctionD extends LastSampleChunkedFuncDblVal() {
   }
 }
 
-class LastSampleInWindowChunkedFunctionD[R <: MutableRowReader](var value: Double = Double.NaN,
-                                                                var timestamp: Long = -1L)
-  extends ChunkedRangeFunction[TransientRow] {
+// Return the last sample within the window
+class LastSampleInWindowChunkedFunctionD extends LastSampleChunkedFunctionD {
 
-  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, value)
-  }
-
-  // Add each chunk and update timestamp and value such that latest sample wins
-  final def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
-                      valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                      startTime: Long, endTime: Long, info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
-    addChunks(tsVector, tsReader, valueVector, valueReader, startTime,
-      endTime, queryConfig.staleSampleAfterMs, info, queryConfig)
-  }
 
   // Add each chunk and update timestamp and value such that latest sample wins
   final override def addChunks(tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                                valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
-                               startTime: Long, endTime: Long, windowSize: Long,
+                               startTime: Long, endTime: Long,
                                info: ChunkSetInfo, queryConfig: QueryConfig): Unit = {
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVector, endTime), info.numRows - 1)
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
+    //   2) timestamp is within window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVector, endRowNum)
-      if ((endTime - ts) <= windowSize && ts > timestamp)
+      if (ts >= startTime && ts > timestamp)
         updateValue(ts, valueVector, valueReader, endRowNum)
-    }
-  }
-
-  override final def reset(): Unit = { timestamp = -1L; value = Double.NaN }
-
-  final def updateValue(ts: Long, valVector: BinaryVectorPtr, valReader: VectorDataReader, endRowNum: Int): Unit = {
-    val dblReader = valReader.asDoubleReader
-    val doubleVal = dblReader(valVector, endRowNum)
-    // If the last value is NaN, that may be Prometheus end of time series marker.
-    // In that case try to get the sample before last.
-    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
-    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
-    if (java.lang.Double.isNaN(doubleVal)) {
-      if (endRowNum > 0) {
-        timestamp = ts
-        value = dblReader(valVector, endRowNum - 1)
-      }
-    } else {
-      timestamp = ts
-      value = doubleVal
     }
   }
 }
