@@ -292,6 +292,7 @@ object RangeFunction {
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
+      case Some(Last)           => () => new LastSampleInWindowChunkedFunctionL
       case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionL
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
@@ -344,6 +345,8 @@ object RangeFunction {
                           maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
     case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
     case None                 => () => new LastSampleChunkedFunctionH
+    case Some(Last) if maxCol.isDefined => () => new LastSampleInWindowChunkedFunctionHMax(maxCol.get)
+    case Some(Last)           => () => new LastSampleInWindowChunkedFunctionH
     case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
