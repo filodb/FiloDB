@@ -280,6 +280,18 @@ The following will scrape metrics from FiloDB using its Prometheus metrics endpo
 
 Now, metrics from the application having a Prom endpoint at port 9095 will be streamed into Kafka and FiloDB.
 
+Querying the total number of ingesting time series for the last 5 minutes, every 10 seconds:
+
+    ./filo-cli  --host 127.0.0.1 --dataset prometheus --promql 'sum(num_ingesting_partitions{_ws_="local_test",_ns_="filodb"})' --minutes 5
+
+Note that histograms are ingested using FiloDB's optimized histogram format, which leads to very large savings in space.  For example, querying the 90%-tile for the size of chunks written to Cassandra, last 5 minutes:
+
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'histogram_quantile(0.9, sum(rate(chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}[3m])))' --minutes 5
+
+Here is how you display the raw histogram data for the same:
+
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset prometheus --promql 'chunk_bytes_per_call{_ws_="local_test",_ns_="filodb"}' --minutes 5
+
 #### Multiple Servers using Consul
 
 The original example used a static IP to form a cluster, but a more realistic example is to use a registration service like Consul.
