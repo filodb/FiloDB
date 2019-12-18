@@ -77,7 +77,6 @@ trait RangeFunction extends BaseRangeFunction {
             window: Window,
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
-
 }
 
 /**
@@ -227,10 +226,10 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
-
+  // scalastyle:off cyclomatic.complexity
   def downsampleColsFromRangeFunction(dataset: Dataset, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
-      case None | Some(Last)      => Seq("avg")
+      case None                   => Seq("avg")
       case Some(Rate)             => Seq(dataset.options.valueColumn)
       case Some(Irate)            => Seq(dataset.options.valueColumn)
       case Some(Increase)         => Seq(dataset.options.valueColumn)
@@ -249,6 +248,7 @@ object RangeFunction {
       case Some(QuantileOverTime) => Seq("avg")
       case Some(MinOverTime)      => Seq("min")
       case Some(MaxOverTime)      => Seq("max")
+      case Some(Last)             => Seq("avg")
     }
   }
   /**
