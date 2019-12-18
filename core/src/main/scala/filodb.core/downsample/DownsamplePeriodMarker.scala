@@ -2,6 +2,7 @@ package filodb.core.downsample
 
 import debox.Buffer
 import enumeratum.{Enum, EnumEntry}
+import java.util
 import scalaxy.loops._
 
 import filodb.core.metadata.DataSchema
@@ -38,8 +39,8 @@ trait DownsamplePeriodMarker {
   def inputColId: Int
 
   /**
-    * Places row numbers for the given chunkset which marks the
-    * periods to downsample into the result buffer param
+    * Returns sorted collection of row numbers for the given chunkset that mark the
+    * periods to downsample
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,
@@ -121,8 +122,15 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
       case _ =>
         throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
     }
-    import spire.std.int._
-    result.toSortedBuffer
+
+    // It would have been nice to use this piece of code which is more efficient, but
+    // it results in spire library version conflicts with Spark. :(
+//    import spire.std.int._
+//    result.toSortedBuffer
+
+    val res = result.toArray()
+    util.Arrays.sort(res)
+    debox.Buffer.fromArray(res)
   }
 }
 
