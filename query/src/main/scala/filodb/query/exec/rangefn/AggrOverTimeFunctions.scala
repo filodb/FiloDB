@@ -5,12 +5,13 @@ import java.lang.{Double => JLDouble}
 import debox.Buffer
 import java.util
 
+import filodb.core.query.{TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
 import filodb.query.QueryConfig
-import filodb.query.exec.{TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
@@ -618,13 +619,14 @@ class ChangesChunkedFunctionL extends ChangesChunkedFunction with
   }
 }
 
-abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
+abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[FuncArgs],
                                                var quantileResult: Double = Double.NaN,
                                                var values: Buffer[Double] = Buffer.empty[Double])
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = { quantileResult = Double.NaN; values = Buffer.empty[Double] }
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     if (!quantileResult.equals(Double.NegativeInfinity) || !quantileResult.equals(Double.PositiveInfinity)) {
       val counter = values.length
       values.sort(spire.algebra.Order.fromOrdering[Double])
@@ -644,16 +646,19 @@ abstract class QuantileOverTimeChunkedFunction(funcParams: Seq[Any],
   }
 }
 
-class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOverTimeChunkedFunction(funcParams)
+class QuantileOverTimeChunkedFunctionD(funcParams: Seq[FuncArgs]) extends QuantileOverTimeChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
-  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
   final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
                                 doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    //Only support StaticFuncArgs for now as we don't have time to get value from scalar vector
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    var counter = 0
+
     if (q < 0) quantileResult = Double.NegativeInfinity
     else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
@@ -671,16 +676,16 @@ class QuantileOverTimeChunkedFunctionD(funcParams: Seq[Any]) extends QuantileOve
   }
 }
 
-class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
+class QuantileOverTimeChunkedFunctionL(funcParams: Seq[FuncArgs])
   extends QuantileOverTimeChunkedFunction(funcParams) with ChunkedLongRangeFunction {
   require(funcParams.size == 1, "quantile_over_time function needs a single quantile argument")
-  require(funcParams.head.isInstanceOf[Number], "quantile parameter must be a number")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "quantile parameter must be a number")
   final def addTimeLongChunks(longVectAcc: MemoryReader,
                               longVect: BinaryVector.BinaryVectorPtr,
                               longReader: bv.LongVectorDataReader,
                               startRowNum: Int,
                               endRowNum: Int): Unit = {
-    val q = funcParams.head.asInstanceOf[Number].doubleValue()
+    val q = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
     if (q < 0) quantileResult = Double.NegativeInfinity
     else if (q > 1) quantileResult = Double.PositiveInfinity
     else {
@@ -695,7 +700,7 @@ class QuantileOverTimeChunkedFunctionL(funcParams: Seq[Any])
   }
 }
 
-abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
+abstract class HoltWintersChunkedFunction(funcParams: Seq[FuncArgs],
                                           var b0: Double = Double.NaN,
                                           var s0: Double = Double.NaN,
                                           var nextvalue: Double = Double.NaN,
@@ -707,12 +712,12 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
                                        nextvalue = Double.NaN
                                        smoothedResult = Double.NaN }
 
-  def parseParameters(funcParams: Seq[Any]): (Double, Double) = {
+  def parseParameters(funcParams: Seq[FuncArgs]): (Double, Double) = {
     require(funcParams.size == 2, "Holt winters needs 2 parameters")
-    require(funcParams.head.isInstanceOf[Number], "sf parameter must be a number")
-    require(funcParams(1).isInstanceOf[Number], "tf parameter must be a number")
-    val sf = funcParams.head.asInstanceOf[Number].doubleValue()
-    val tf = funcParams(1).asInstanceOf[Number].doubleValue()
+    require(funcParams.head.isInstanceOf[StaticFuncArgs], "sf parameter must be a number")
+    require(funcParams(1).isInstanceOf[StaticFuncArgs], "tf parameter must be a number")
+    val sf = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    val tf = funcParams(1).asInstanceOf[StaticFuncArgs].scalar
     require(sf >= 0 & sf <= 1, "Sf should be in between 0 and 1")
     require(tf >= 0 & tf <= 1, "tf should be in between 0 and 1")
     (sf, tf)
@@ -727,7 +732,7 @@ abstract class HoltWintersChunkedFunction(funcParams: Seq[Any],
   * @param funcParams - Additional required function parameters
   * Refer https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing
   */
-class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+class HoltWintersChunkedFunctionD(funcParams: Seq[FuncArgs]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedDoubleRangeFunction {
 
   val (sf, tf) = parseParameters(funcParams)
@@ -775,7 +780,7 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
     }
     if (!JLDouble.isNaN(b0)) {
       while (rowNum <= endRowNum) {
-        // There are many possible values of NaN.  Use a function to ignore them reliably.
+        // There are many possible values of NaN. Use a function to ignore them reliably.
         if (!JLDouble.isNaN(nextvalue)) {
           val _s0  = sf*nextvalue + (1-sf)*(s0 + b0)
           b0 = tf*(_s0 - s0) + (1-tf)*b0
@@ -789,7 +794,7 @@ class HoltWintersChunkedFunctionD(funcParams: Seq[Any]) extends HoltWintersChunk
   }
 }
 
-class HoltWintersChunkedFunctionL(funcParams: Seq[Any]) extends HoltWintersChunkedFunction(funcParams)
+class HoltWintersChunkedFunctionL(funcParams: Seq[FuncArgs]) extends HoltWintersChunkedFunction(funcParams)
   with ChunkedLongRangeFunction {
 
   val (sf, tf) = parseParameters(funcParams)

@@ -73,7 +73,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
                                       dummyContext, true)
 
   before {
-    colStore.truncate(dataset1.ref).futureValue
+    colStore.truncate(dataset1.ref, 4).futureValue
   }
 
   it("should be able to read immediately after ingesting one row") {

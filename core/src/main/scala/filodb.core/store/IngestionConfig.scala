@@ -34,7 +34,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
                              // filters on ingested records to log in detail
-                             traceFilters: Map[String, String]) {
+                             traceFilters: Map[String, String],
+                             maxQueryMatches: Int) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -56,6 +57,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
+                               "max-query-matches" -> maxQueryMatches,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity).asJava)
 }
 
@@ -69,6 +71,7 @@ object StoreConfig {
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
+                                           |max-query-matches = 250000
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
@@ -113,7 +116,8 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
-                config.as[Map[String, String]]("trace-filters"))
+                config.as[Map[String, String]]("trace-filters"),
+                config.getInt("max-query-matches"))
   }
 }
 

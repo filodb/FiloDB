@@ -10,7 +10,6 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.downsample.DownsampleConfig
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.{Column, DataSchema, Schemas}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.ColumnFilter
@@ -24,11 +23,9 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
 sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
-final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
-final case class FlushIndexTimeBuckets(timeBucket: Int)
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long,
-                            flushTimeBuckets: Option[FlushIndexTimeBuckets])
+                            dirtyPartsToFlush: debox.Buffer[Int])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
@@ -43,6 +40,9 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
+
+  def isReadOnly: Boolean
+
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
     * read from this store on demand as needed for recovery purposes.
@@ -58,7 +58,7 @@ trait MemStore extends ChunkSource {
    * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
    *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @param downsampleConfig configuration for downsampling operation. By default it is disabled.
-   * @throws ShardAlreadySetup
+   * @throws filodb.core.memstore.ShardAlreadySetup
    */
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int,
             storeConf: StoreConfig,
@@ -95,7 +95,6 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushSched the Scheduler to use to schedule flush tasks
-   * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes the stream ends.  It is up to the caller to ensure this.
    */
@@ -207,7 +206,7 @@ trait MemStore extends ChunkSource {
    *          in any underlying ChunkSink too.
    * @return Success, or some ErrorResponse
    */
-  def truncate(dataset: DatasetRef): Future[Response]
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response]
 
   /**
    * Resets the state of the MemStore. Usually used for testing.

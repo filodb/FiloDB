@@ -93,6 +93,8 @@ object FiloBuild extends Build {
     .in(file("spark-jobs"))
     .settings(commonSettings: _*)
     .settings(name := "spark-jobs")
+    .settings(fork in Test := true)
+    .settings(baseDirectory in Test := file(".")) // since we have a config using FiloDB project root as relative path
     .settings(assemblySettings: _*)
     .settings(scalacOptions += "-language:postfixOps")
     .settings(libraryDependencies ++= sparkJobsDeps)
@@ -238,8 +240,10 @@ object FiloBuild extends Build {
   )
 
   lazy val sparkJobsDeps = commonDeps ++ Seq(
-    "org.apache.spark"       %%      "spark-core" % sparkVersion % "provided",
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % "provided",
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test,
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test,
     scalaxyDep
   )
 

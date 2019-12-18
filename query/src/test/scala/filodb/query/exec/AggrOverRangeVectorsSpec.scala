@@ -241,7 +241,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     compareIter(result8(0).rows.map(_.getDouble(1)), Seq(1.5625d, 0.27555555555556d).iterator)
   }
 
-  it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
+  it ("should be able to serialize to and deserialize t-digest from SerializedRangeVector") {
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L, Double.NaN), (2L, 5.6d))),
       toRv(Seq((1L, 4.6d), (2L, 4.4d))),
@@ -255,10 +255,10 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result7 = resultObs7.toListL.runAsync.futureValue
     result7.size shouldEqual 1
 
-    val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
-    val builder = SerializableRangeVector.newBuilder()
-    val srv = SerializableRangeVector(result7(0), builder, recSchema, "Unit-Test")
+    val builder = SerializedRangeVector.newBuilder()
+    val srv = SerializedRangeVector(result7(0), builder, recSchema, "Unit-Test")
 
     val resultObs7b = RangeVectorAggregator.present(agg7, Observable.now(srv), 1000)
     val finalResult = resultObs7b.toListL.runAsync.futureValue
@@ -290,6 +290,31 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result4(0).key shouldEqual noKey
     // prior to this fix, test was returning List(NaN, NaN, NaN, NaN, NaN, 1.0, 1.0)
     result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+  }
+
+  it("stdvar should work for with NaN Test case 2") {
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L, 3247.0), (2L, 3297.0))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, 5173.0), (2L, 5173.0))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN))),
+      toRv(Seq((1L, 11583.0), (2L, 11583.0))),
+      toRv(Seq((1L, Double.NaN), (2L, Double.NaN)))
+    )
+
+    // Stdvar
+    val agg = RowAggregator(AggregationOperator.Stdvar, Nil, tvSchema)
+    val resultObsA = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, true, resultObsA, rv => rv.key)
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+    compareIter(result(0).rows.map(_.getDouble(1)), Seq(12698496.88888889d, 12585030.222222222d).iterator)
   }
 
   it("should return NaN when all values are NaN for a timestamp ") {

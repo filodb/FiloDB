@@ -1,12 +1,12 @@
 package filodb.query.exec.rangefn
 
 import scala.util.Random
-
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.memstore.{TimeSeriesPartition, WriteBufferPool}
 import filodb.core.metadata.Dataset
+import filodb.core.query.TransientRow
 import filodb.memory.format.vectors.MutableHistogram
-import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow, TransientRow}
+import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow}
 import filodb.query.util.IndexedArrayQueue
 
 class RateFunctionsSpec extends RawDataWindowingSpec {

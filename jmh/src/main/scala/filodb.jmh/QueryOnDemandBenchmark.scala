@@ -68,8 +68,8 @@ class QueryOnDemandBenchmark extends StrictLogging {
 
   Await.result(cluster.metaStore.initialize(), 3.seconds)
   Await.result(cluster.metaStore.clearAllData(), 5.seconds)  // to clear IngestionConfig
-  Await.result(cluster.memStore.store.initialize(dataset.ref), 5.seconds)
-  Await.result(cluster.memStore.store.truncate(dataset.ref), 5.seconds)
+  Await.result(cluster.memStore.store.initialize(dataset.ref, numShards), 5.seconds)
+  Await.result(cluster.memStore.store.truncate(dataset.ref, numShards), 5.seconds)
 
   cluster.join()
 

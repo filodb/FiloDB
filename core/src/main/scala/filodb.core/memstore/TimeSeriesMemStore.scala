@@ -12,7 +12,6 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
-import filodb.core.memstore.TimeSeriesShard.PartKey
 import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
@@ -44,6 +43,8 @@ extends MemStore with StrictLogging {
   private val partEvictionPolicy = evictionPolicy.getOrElse {
     new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
+
+  def isReadOnly: Boolean = false
 
   private def makeAndStartPublisher(downsample: DownsampleConfig): DownsamplePublisher = {
     val pub = downsample.makePublisher()
@@ -249,9 +250,9 @@ extends MemStore with StrictLogging {
     store.reset()
   }
 
-  def truncate(dataset: DatasetRef): Future[Response] = {
+  def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
     datasets.get(dataset).foreach(_.values.asScala.foreach(_.reset()))
-    store.truncate(dataset)
+    store.truncate(dataset, numShards)
   }
 
   def removeShard(dataset: DatasetRef, shardNum: Int, shard: TimeSeriesShard): Boolean = {

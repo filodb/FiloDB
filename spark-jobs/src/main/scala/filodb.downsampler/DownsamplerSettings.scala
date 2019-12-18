@@ -28,11 +28,15 @@ object DownsamplerSettings extends StrictLogging {
 
   val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
+  logger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
+
   val rawDatasetIngestionConfig = filodbSettings.streamConfigs.map { config =>
         IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
       }.find(_.ref.toString == rawDatasetName).get
 
-  val rawSchemaNames = downsamplerConfig.as[Seq[String]]("raw-schema-names")
+  logger.info(s"DatasetConfig for dataset $rawDatasetName was $rawDatasetIngestionConfig")
+
+  val rawSchemaNames = rawDatasetIngestionConfig.downsampleConfig.schemas
 
   val downsampleResolutions = rawDatasetIngestionConfig.downsampleConfig.resolutions
 
@@ -48,15 +52,11 @@ object DownsamplerSettings extends StrictLogging {
 
   val splitsPerNode = downsamplerConfig.getInt("splits-per-node")
 
-  val blockMemorySize = downsamplerConfig.getMemorySize("off-heap-block-memory-size").toBytes
-
-  val nativeMemManagerSize = downsamplerConfig.getMemorySize("off-heap-native-memory-size").toBytes
-
   val cassWriteTimeout = downsamplerConfig.as[FiniteDuration]("cassandra-write-timeout")
 
   val widenIngestionTimeRangeBy = downsamplerConfig.as[FiniteDuration]("widen-ingestion-time-range-by")
 
-  val chunkDuration = downsampleStoreConfig.flushInterval.toMillis
+  val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
 }
 
