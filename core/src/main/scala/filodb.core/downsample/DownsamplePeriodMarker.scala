@@ -39,8 +39,8 @@ trait DownsamplePeriodMarker {
   def inputColId: Int
 
   /**
-    * Places sorted collection of row numbers for the given chunkset which marks the
-    * periods to downsample into the result buffer param
+    * Returns sorted collection of row numbers for the given chunkset that mark the
+    * periods to downsample
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,
@@ -130,7 +130,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
 
     val res = result.toArray()
     util.Arrays.sort(res)
-    debox.Buffer(res: _*)
+    debox.Buffer.fromArray(res)
   }
 }
 
