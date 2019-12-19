@@ -115,17 +115,13 @@ trait ExecPlan extends QueryCommand {
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
       FiloSchedulers.assertThreadName(QuerySchedName)
+      val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
-      val resSchemaForTransformer = if ((allTransformers.size > 0 &&
-        allTransformers.head.isInstanceOf[AbsentFunctionMapper])) {
-        allTransformers.head.schema(resSchema)
-      } else
-        resSchema
-      val resultTask = if (resSchemaForTransformer == ResultSchema.empty) {
+      val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
         qLogger.debug(s"Empty plan $this, returning empty results")
-        Task.eval(QueryResult(id, resSchemaForTransformer, Nil))
+        Task.eval(QueryResult(id, resSchema, Nil))
       } else {
-        val finalRes = allTransformers.foldLeft((res.rvs, resSchemaForTransformer)) { (acc, transf) =>
+        val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))

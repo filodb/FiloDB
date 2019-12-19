@@ -81,7 +81,6 @@ class AbsentFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val absentFunctionMapper = exec.AbsentFunctionMapper(columnFilter, RangeParams(1, 20, 1), "metric")
     val resultObs = absentFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val result = resultObs.toListL.runAsync.futureValue
-    result.isEmpty shouldEqual (true)
     val keys = result.map(_.key.labelValues)
     val rows = result.flatMap(_.rows.map(_.getDouble(1)).toList)
     rows.isEmpty shouldEqual true

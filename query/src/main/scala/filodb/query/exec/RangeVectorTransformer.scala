@@ -47,6 +47,7 @@ trait RangeVectorTransformer extends java.io.Serializable {
     * DO NOT change to a val. Increases heap usage.
     */
   protected[exec] def args: String
+  def canHandleEmptySchemas: Boolean = false
 }
 
 object RangeVectorTransformer {
@@ -361,30 +362,29 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
 
-    val resultRv = source.toListL.map { rvs =>
-      val nonNanTimestamps = if (sourceSchema.isHistDouble) {
-        rvs.flatMap(_.rows.filter(x => x.getHistogram(1).topBucketValue > 0)).map(_.getLong(0))
-      } else {
-        rvs.flatMap(_.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)))
-      }
-      val rowList = new ListBuffer[TransientRow]()
-      for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
-        if (!nonNanTimestamps.contains( i * 1000))
-          rowList += new TransientRow(i * 1000, 1)
-      }
-      if (rowList.isEmpty) {
-        Seq.empty[RangeVector]
-      } else {
-        Seq(new RangeVector {
-          override def key: RangeVectorKey = keysFromFilter
-          override def rows: Iterator[RowReader] = rowList.iterator
-        })
-      }
-    }.map(Observable.fromIterable)
+    def addNonNanTimestamps(res: List[Long], cur: RangeVector) : List[Long]  = {
+      res ++ cur.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
+    }
+    val nonNanTimestamps = source.foldLeftL(List[Long]())(addNonNanTimestamps)
 
-    Observable.fromTask(resultRv).flatten
+    val resultRv = nonNanTimestamps.map {
+      t =>
+        val rowList = new ListBuffer[TransientRow]()
+        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+          if (!t.contains(i * 1000))
+            rowList += new TransientRow(i * 1000, 1)
+        }
+        new RangeVector {
+          override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
+          override def rows: Iterator[RowReader] = rowList.iterator
+          }
+        }
+
+    Observable.fromTask(resultRv)
   }
   override def funcParams: Seq[FuncArgs] = Nil
   override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
     ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+
+  override def canHandleEmptySchemas: Boolean = true
 }
