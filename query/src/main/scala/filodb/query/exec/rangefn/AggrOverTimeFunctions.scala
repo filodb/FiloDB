@@ -831,6 +831,10 @@ class HoltWintersChunkedFunctionL(funcParams: Seq[FuncArgs]) extends HoltWinters
   }
 }
 
+/**
+  * Predicts the value of time series t seconds from now based on range vector
+  * Refer https://en.wikipedia.org/wiki/Simple_linear_regression
+**/
 abstract class PredictLinearChunkedFunction(funcParams: Seq[Any],
                                             var sumX: Double = Double.NaN,
                                             var sumY: Double = Double.NaN,
