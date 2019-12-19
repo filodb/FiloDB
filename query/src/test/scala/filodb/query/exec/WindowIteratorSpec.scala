@@ -3,8 +3,8 @@ package filodb.query.exec
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.query.RangeFunctionId
-import filodb.query.exec.rangefn.{RangeFunction, RawDataWindowingSpec}
 import filodb.query.RangeFunctionId.Last
+import filodb.query.exec.rangefn.{RangeFunction, RawDataWindowingSpec}
 
 /**
  * Tests both the SlidingWindowIterator and the ChunkedWindowIterator
