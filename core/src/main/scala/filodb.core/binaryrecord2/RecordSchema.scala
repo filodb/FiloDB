@@ -236,7 +236,9 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
                                 resultMap ++= consumer.stringPairs
-      case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
+      case (BinaryRecordColumn, i) => resultMap ++= brSchema(i).toStringPairs(base, offset)
+                                resultMap += ("_type_" ->
+                                              Schemas.global.schemaName(RecordSchema.schemaID(base, offset)))
       case (HistogramColumn, i) =>
         resultMap += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }

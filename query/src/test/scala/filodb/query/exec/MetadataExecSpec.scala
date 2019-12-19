@@ -32,8 +32,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Seq(
-    Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService"),
-    Map("__name__"->"http_resp_time", "instance"->"someHost:8787", "job"->"myCoolService")
+    Map("__name__"->"http_req_total", "instance"->"someHost:8787", "job"->"myCoolService", "_type_"->"schemaID:35859"),
+    Map("__name__"->"http_resp_time", "instance"->"someHost:8787", "job"->"myCoolService", "_type_"->"schemaID:35859")
   )
 
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
