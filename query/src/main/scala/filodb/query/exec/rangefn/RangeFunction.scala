@@ -226,7 +226,7 @@ trait ChunkedLongRangeFunction extends TimeRangeFunction[TransientRow] {
 object RangeFunction {
   type RangeFunctionGenerator = () => BaseRangeFunction
 
-
+  // scalastyle:off cyclomatic.complexity
   def downsampleColsFromRangeFunction(dataset: Dataset, f: Option[RangeFunctionId]): Seq[String] = {
     f match {
       case None                   => Seq("avg")
@@ -248,6 +248,7 @@ object RangeFunction {
       case Some(QuantileOverTime) => Seq("avg")
       case Some(MinOverTime)      => Seq("min")
       case Some(MaxOverTime)      => Seq("max")
+      case Some(Last)             => Seq("avg")
     }
   }
   /**
@@ -291,6 +292,7 @@ object RangeFunction {
                           funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
       case None                 => () => new LastSampleChunkedFunctionL
+      case Some(Last)           => () => new LastSampleChunkedFunctionL
       case Some(CountOverTime)  => () => if (dataset.options.hasDownsampledData) new SumOverTimeChunkedFunctionL
                                          else new CountOverTimeChunkedFunction()
       case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionL
@@ -316,7 +318,8 @@ object RangeFunction {
                             config: QueryConfig,
                             funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
     func match {
-      case None                 => () => new LastSampleChunkedFunctionD
+      case None          => () => new LastSampleChunkedFunctionD
+      case Some(Last)    => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
@@ -342,6 +345,8 @@ object RangeFunction {
                           maxCol: Option[Int] = None): RangeFunctionGenerator = func match {
     case None if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
     case None                 => () => new LastSampleChunkedFunctionH
+    case Some(Last) if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
+    case Some(Last)           => () => new LastSampleChunkedFunctionH
     case Some(SumOverTime) if maxCol.isDefined => () => new SumAndMaxOverTimeFuncHD(maxCol.get)
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
@@ -357,6 +362,7 @@ object RangeFunction {
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
     case None                   => () => LastSampleFunction
+    case Some(Last)             => () => LastSampleFunction
     case Some(Rate)             => () => RateFunction
     case Some(Increase)         => () => IncreaseFunction
     case Some(Delta)            => () => DeltaFunction
@@ -409,11 +415,11 @@ extends ChunkedRangeFunction[R] {
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
+    //   2) timestamp is within window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVector, endRowNum)
-      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
+      if (ts >= startTime && ts > timestamp)
         updateValue(ts, valueVector, valueReader, endRowNum)
     }
   }
@@ -462,11 +468,11 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
+    //   2) timestamp is within window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVector, endRowNum)
-      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
+      if (ts >= startTime && ts > timestamp) {
         val maxVect = info.vectorPtr(maxColID)
         timestamp = ts
         value = valueReader.asHistReader(endRowNum)
@@ -503,3 +509,4 @@ class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
     value = longReader(valVector, endRowNum).toDouble
   }
 }
+
