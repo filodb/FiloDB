@@ -255,6 +255,7 @@ object RangeFunction {
       case Some(MinOverTime)      => Seq("min")
       case Some(MaxOverTime)      => Seq("max")
       case other                  => Seq(schema.data.valueColName)
+      case Some(Last)             => Seq("avg")
     }
   }
 
@@ -318,6 +319,7 @@ object RangeFunction {
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
       case _                      => iteratingFunction(func, funcParams)
+      case Some(Last)           => () => new LastSampleChunkedFunctionL
     }
   }
 
@@ -331,6 +333,7 @@ object RangeFunction {
                             funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionD
+      case Some(Last)    => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
@@ -369,6 +372,8 @@ object RangeFunction {
                                  () => new LastSampleChunkedFunctionHMax(schema.colIDs(2))
     case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
                                  () => new SumAndMaxOverTimeFuncHD(schema.colIDs(2))
+    case Some(Last) if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
+    case Some(Last)           => () => new LastSampleChunkedFunctionH
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
     case Some(Increase)       => () => new HistIncreaseFunction
@@ -383,6 +388,7 @@ object RangeFunction {
                         funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
     // when no window function is asked, use last sample for instant
     case None                   => () => LastSampleFunction
+    case Some(Last)             => () => LastSampleFunction
     case Some(Rate)             => () => RateFunction
     case Some(Increase)         => () => IncreaseFunction
     case Some(Delta)            => () => DeltaFunction
@@ -436,7 +442,7 @@ extends ChunkedRangeFunction[R] {
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
+    //   2) timestamp is within window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
@@ -492,7 +498,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
 
     // update timestamp only if
     //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
+    //   2) timestamp is within window; AND
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
@@ -556,4 +562,3 @@ class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedR
     sampleToEmit.setValues(endTimestamp, value)
   }
 }
-

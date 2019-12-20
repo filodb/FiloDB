@@ -211,6 +211,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("time()")
     parseSuccessfully("floor(some_metric{foo!=\"bar\"})")
     parseSuccessfully("rate(some_metric[5m])")
+    parseSuccessfully("last(some_metric[5m])")
     parseSuccessfully("round(some_metric)")
     parseSuccessfully("round(some_metric, 5)")
 
@@ -409,6 +410,8 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Deriv,List(),None)",
       "rate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Rate,List(),None)",
+      "last(jvm_memory{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(jvm_memory))),List()),1524855988000,1000000,1524855988000,300000,Last,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
         "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
       "http_requests_total::sum{job=\"prometheus\"}[5m]" ->
