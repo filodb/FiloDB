@@ -270,7 +270,7 @@ final case class Schemas(part: PartitionSchema,
    */
   final def schemaName(id: Int): String = {
     val sch = apply(id)
-    if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
+    if (sch == Schemas.UnknownSchema) s"schemaID:$id" else sch.name
   }
 }
 

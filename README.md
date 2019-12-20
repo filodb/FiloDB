@@ -457,6 +457,8 @@ Example of debugging chunk metadata using the CLI:
 
     ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{_ws_="demo",_ns_="App-0"})' --start XX --end YY
 
+There is also a special filter, `_type_="gauge"`, to filter on only a particular type of metric or schema.  Normally, this is not necessary unless a user changes the type of metric in their application, for example from a gauge to a histogram.  The types are found in the configuration `schemas` section, and by default are `gauge`, `prom-counter`, `prom-histogram`, and `untyped`.
+
 ### First-Class Histogram Support
 
 One major difference FiloDB has from the Prometheus data model is that FiloDB supports histograms as a first-class entity.  In Prometheus, histograms are stored with each bucket in its own time series differentiated by the `le` tag.  In FiloDB, there is a `HistogramColumn` which stores all the buckets together for significantly improved compression, especially over the wire during ingestion, as well as significantly faster query speeds (up to two orders of magnitude).  There is no "le" tag or individual time series for each bucket.  Here are the differences users need to be aware of when using `HistogramColumn`:
