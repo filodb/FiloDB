@@ -215,7 +215,7 @@ object QueryRoutingPlanner extends RoutingPlanner {
   /**
     * Used to change rangeSelector of RawSeriesPlan
     */
-  def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: RawSeriesPlan, timeRange: TimeRange, lookBackTime: Long):
+  def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: SeriesPlan, timeRange: TimeRange, lookBackTime: Long):
   RawSeries = {
     rawSeriesPlan match {
       case rs: RawSeries => rs.rangeSelector match {
