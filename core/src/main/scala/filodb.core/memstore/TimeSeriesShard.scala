@@ -17,7 +17,7 @@ import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
-import monix.reactive.{Observable, OverflowStrategy}
+import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
@@ -525,30 +525,22 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    val tracer = Kamon.buildSpan("memstore-recover-index-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum).start()
-
-    val fut = colStore.scanPartKeys(ref, shardNum)
-      .asyncBoundary(OverflowStrategy.Default)
-      .executeOn(ingestSched)
-      .map { pk => addPartKey(pk) }
-      .completedL.runAsync(ingestSched)
-    fut.map { _ =>
-      completeIndexRecovery()
-      tracer.finish()
-    }(ingestSched)
+    val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref, ingestSched)(bootstrapPartKey)
+                     .map { _ =>
+                        startFlushingIndex()
+                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum")
+                     }
   }
 
-  def completeIndexRecovery(): Unit = {
-    assertThreadName(IngestSchedName)
-    refreshPartKeyIndexBlocking()
-    startFlushingIndex() // start flushing index now that we have recovered
-    logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum")
-  }
-
+  /**
+    * Handles actions to be performed for the shard upon bootstrapping
+    * a partition key from index store
+    * @param pk partKey
+    * @return partId assigned to key
+    */
   // scalastyle:off method.length
-  private[memstore] def addPartKey(pk: PartKeyRecord): Unit = {
+  private[memstore] def bootstrapPartKey(pk: PartKeyRecord): Int = {
     assertThreadName(IngestSchedName)
     val partId = if (pk.endTime == Long.MaxValue) {
       // this is an actively ingesting partition
@@ -563,13 +555,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         if (part == OutOfMemPartition) {
           logger.error("Could not accommodate partKey while recovering index. " +
             "WriteBuffer size may not be configured correctly")
-          None
+          -1
         } else {
           val stamp = partSetLock.writeLock()
           try {
             partSet.add(part) // createNewPartition doesn't add part to partSet
             part.ingesting = true
-            Some(part.partID)
+            part.partID
           } finally {
             partSetLock.unlockWrite(stamp)
           }
@@ -577,7 +569,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       } else {
         logger.info(s"Ignoring part key with unknown schema ID $schemaId")
         shardStats.unknownSchemaDropped.increment
-        None
+        -1
       }
     } else {
       // partition assign a new partId to non-ingesting partition,
@@ -587,18 +579,15 @@ class TimeSeriesShard(val ref: DatasetRef,
         require(!evictedPartKeysDisposed)
         evictedPartKeys.add(PartKey(pk.partKey, UnsafeUtils.arayOffset))
       }
-      Some(createPartitionID())
+      createPartitionID()
     }
 
-    // add newly assigned partId to lucene index
-    partId.foreach { partId =>
-      partKeyIndex.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
-      activelyIngesting.synchronized {
-        if (pk.endTime == Long.MaxValue) activelyIngesting += partId
-        else activelyIngesting -= partId
-      }
+    activelyIngesting.synchronized {
+      if (pk.endTime == Long.MaxValue) activelyIngesting += partId
+      else activelyIngesting -= partId
     }
     shardStats.indexRecoveryNumRecordsProcessed.increment()
+    partId
   }
 
   def indexNames(limit: Int): Seq[String] = partKeyIndex.indexNames(limit)
