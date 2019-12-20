@@ -250,7 +250,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
   }
 
-  it ("should calculate lastSampleInWindow when ingested samples are more than 3 minutes apart") {
+  it ("should calculate last sample when ingested samples are more than 3 minutes apart") {
     val samples = Seq(
       1540832354000L->1d,
       1540835954000L->2d,
@@ -286,13 +286,6 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540850490000L->330,
       1540850505000L->330,
       1540850520000L->330) // 330 becomes stale now.
-
-    val slidingWinIterator = new SlidingWindowIterator(rv.rows, 1540845090000L,
-      15000, 1540855905000L, 180000,
-      RangeFunction(MetricsTestData.timeseriesDataset,
-        Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = false).asSliding,
-      queryConfig)
-    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
 
     val chunkedWinIt = new ChunkedWindowIteratorD(rv, 1540845090000L,
       15000, 1540855905000L, 180000,
