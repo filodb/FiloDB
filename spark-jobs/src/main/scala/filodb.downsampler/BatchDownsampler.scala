@@ -47,8 +47,11 @@ object BatchDownsampler extends StrictLogging with Instance {
                                               createInstance[FiloSessionProvider](clazz, args).get
                                             }
 
-  private[downsampler] val cassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider)(writeSched)
+  private[downsampler] val downsampleCassandraColStore =
+    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider, true)(writeSched)
+
+  private[downsampler] val rawCassandraColStore =
+    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
   private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
@@ -271,7 +274,7 @@ object BatchDownsampler extends StrictLogging with Instance {
         numChunks += 1
         c.copy(listener = _ => {})
       }
-      cassandraColStore.write(downsampleDatasetRefs(res),
+      downsampleCassandraColStore.write(downsampleDatasetRefs(res),
         Observable.fromIterator(chunksToPersist), settings.ttlByResolution(res))
     }
 

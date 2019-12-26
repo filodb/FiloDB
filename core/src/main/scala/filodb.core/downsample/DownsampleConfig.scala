@@ -17,7 +17,7 @@ final case class DownsampleConfig(config: Config) {
   /**
     * TTL for downsampled data for the resolutions in same order
     */
-  val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls").map(_.toSeconds.toInt)
+  val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls")
              else Seq.empty
   require(resolutions.length == ttls.length)
 

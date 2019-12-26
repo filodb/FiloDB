@@ -1,12 +1,10 @@
 package filodb.core.downsample
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
-import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.core.binaryrecord2.RecordSchema
@@ -21,17 +19,14 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
                                  val schemas: Schemas,
                                  colStore: ColumnStore,
                                  shardNum: Int,
-                                 filodbConfig: Config)
+                                 filodbConfig: Config,
+                                 downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
 
-  val downsamplerConfig = filodbConfig.getConfig("downsampler")
-  val downsampleResolutions = downsamplerConfig.as[Seq[FiniteDuration]]("resolutions")
-  val downsampleTtls = downsamplerConfig.as[Seq[FiniteDuration]]("ttls")
-  require(downsampleResolutions.sorted == downsampleResolutions, "Resolutions not sorted")
-  require(downsampleResolutions.length == downsampleTtls.length,
-    "Invalid configuration. Downsample resolutions and ttl have different length")
+  val downsampleResolutions = downsampleConfig.resolutions
+  val downsampleTtls = downsampleConfig.ttls
   val indexResolution = downsampleResolutions(downsampleTtls.indexOf(downsampleTtls.max))
   val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
   val indexDataset = downsampledDatasetRefs(indexResolution)

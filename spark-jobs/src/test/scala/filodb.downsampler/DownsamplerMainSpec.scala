@@ -31,7 +31,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   System.setProperty("config.file", "conf/timeseries-filodb-server.conf")
 
-  val colStore = BatchDownsampler.cassandraColStore
+  val rawColStore = BatchDownsampler.rawCassandraColStore
+  val downsampleColStore = BatchDownsampler.downsampleCassandraColStore
 
   val storeConfig = StoreConfig(ConfigFactory.parseString( """
                   |flush-interval = 1h
@@ -48,12 +49,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   override def beforeAll(): Unit = {
     BatchDownsampler.downsampleDatasetRefs.values.foreach { ds =>
-      colStore.initialize(ds, 4).futureValue
-      colStore.truncate(ds, 4).futureValue
-
+      downsampleColStore.initialize(ds, 4).futureValue
+      downsampleColStore.truncate(ds, 4).futureValue
     }
-    colStore.initialize(BatchDownsampler.rawDatasetRef, 4).futureValue
-    colStore.truncate(BatchDownsampler.rawDatasetRef, 4).futureValue
+    rawColStore.initialize(BatchDownsampler.rawDatasetRef, 4).futureValue
+    rawColStore.truncate(BatchDownsampler.rawDatasetRef, 4).futureValue
   }
 
   override def afterAll(): Unit = {
@@ -100,7 +100,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
   it ("should write prom counter data to cassandra") {
@@ -146,7 +146,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
   it ("should write prom histogram data to cassandra") {
@@ -193,7 +193,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     part.switchBuffers(offheapMem.blockMemFactory, true)
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
-    colStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
   }
 
   it ("should free all offheap memory") {
@@ -213,7 +213,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val downsampledPartData1 = colStore.readRawPartitions(
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(gaugePartKeyBytes))
@@ -241,7 +241,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify prom counter data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val downsampledPartData1 = colStore.readRawPartitions(
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
@@ -282,7 +282,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify prom histogram data in cassandra using " +
     "PagedReadablePartition for 1-min downsampled data") {
 
-    val downsampledPartData1 = colStore.readRawPartitions(
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
@@ -324,7 +324,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
-    val downsampledPartData2 = colStore.readRawPartitions(
+    val downsampledPartData2 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(gaugePartKeyBytes))
@@ -349,7 +349,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify prom counter data in cassandra using PagedReadablePartition for 5-min downsampled data") {
 
-    val downsampledPartData1 = colStore.readRawPartitions(
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
@@ -386,7 +386,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify prom histogram data in cassandra using " +
     "PagedReadablePartition for 5-min downsampled data") {
 
-    val downsampledPartData1 = colStore.readRawPartitions(
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
