@@ -158,9 +158,10 @@ sbt standalone/assembly cli/assembly gateway/assembly
 
 First initialize the keyspaces and tables in Cassandra. 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
+./scripts/schema-create.sh filodb_admin filodb filodb_downsample prometheus 4 1,5 > /tmp/ddl.cql
+cqlsh -f /tmp/ddl.cql
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+Verify that tables were created in `filodb`, `filodb_downsample` and `filodb-admin` keyspaces using `cqlsh`:
 First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
@@ -173,7 +174,6 @@ The script below brings up the FiloDB Dev Standalone server, and then sets up th
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
 file refers to the following datasets that will be loaded on bootstrap:
 * `conf/timeseries-dev-source.conf`
-* `conf/timeseries-ds-1m-dev-source.conf`
 
 For queries to work properly you'll want to start a second server to serve all the shards:
 
@@ -319,10 +319,21 @@ Start first FiloDB server
 ```
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 1
 ```
-And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. Add the `-s` option to 
-the last server, so data setup is initiated after all servers come up.
+And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. 
 ```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p -s
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p
+```
+
+### Downsample Filo Cluster
+
+To bring up local cluster for serving downsampled data
+
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 1
+```
+Subsequent servers. Change log file suffix with the `-l` option for each server.
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 2 -p
 ```
 
 #### Local Scale Testing
