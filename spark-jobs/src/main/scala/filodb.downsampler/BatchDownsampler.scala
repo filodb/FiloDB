@@ -118,8 +118,20 @@ object BatchDownsampler extends StrictLogging with Instance {
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
     try {
       rawPartsBatch.foreach { rawPart =>
-        downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
-          downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+        val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
+        val pkPairs = schemas(rawSchemaId).partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
+        if (isEligibleForDownsample(pkPairs)) {
+          logger.debug(s"Downsampling partition $pkPairs")
+          try {
+            downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
+              downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+          } catch { case e: Exception =>
+              logger.error(s"Error occurred when downsampling partition $pkPairs", e)
+              // TODO there certain exceptions caused by data that should not abort the job
+              // Rerun of such batches will not help unless data is fixed.
+              throw e
+          }
+        }
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
@@ -158,8 +170,6 @@ object BatchDownsampler extends StrictLogging with Instance {
     val rawPartSchema = schemas(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
-        logger.debug(s"Downsampling partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} ")
-
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
@@ -285,6 +295,20 @@ object BatchDownsampler extends StrictLogging with Instance {
         logger.error(s"Got response $response when writing to Cassandra")
     }
     numChunks
+  }
+
+  /**
+    * Two conditions should satisfy for eligibility:
+    * (a) If whitelist is nonEmpty partKey should match a filter in the whitelist.
+    * (b) It should not match any filter in blacklist
+    */
+  private def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
+    import DownsamplerSettings._
+    if (whitelist.nonEmpty && !whitelist.exists(w => w.forall(pkPairs.contains))) {
+      false
+    } else {
+      blacklist.forall(w => !w.forall(pkPairs.contains))
+    }
   }
 
 }

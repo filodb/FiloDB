@@ -58,5 +58,9 @@ object DownsamplerSettings extends StrictLogging {
 
   val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
 
+  val whitelist = downsamplerConfig.as[Seq[Map[String, String]]]("whitelist-filters").map(_.toSeq)
+
+  val blacklist = downsamplerConfig.as[Seq[Map[String, String]]]("blacklist-filters").map(_.toSeq)
+
 }
 
