@@ -86,10 +86,8 @@ object BatchDownsampler extends StrictLogging with Instance {
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  private[downsampler] val downsampleDatasetRefs =
-    settings.downsampleResolutions.map { res =>
-      res -> DownsampledTimeSeriesStore.downsampleDatasetRef(rawDatasetRef, res)
-    }.toMap
+  private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
+                .zip(settings.downsampledDatasetRefs).toMap
 
   private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
@@ -285,7 +283,7 @@ object BatchDownsampler extends StrictLogging with Instance {
         numChunks += 1
         c.copy(listener = _ => {})
       }
-      downsampleCassandraColStore.write(downsampleDatasetRefs(res),
+      downsampleCassandraColStore.write(downsampleRefsByRes(res),
         Observable.fromIterator(chunksToPersist), settings.ttlByResolution(res))
     }
 

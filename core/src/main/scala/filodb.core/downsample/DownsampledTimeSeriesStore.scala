@@ -2,7 +2,6 @@ package filodb.core.downsample
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -17,13 +16,6 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
-
-object DownsampledTimeSeriesStore {
-  def downsampleDatasetRef(rawDatasetRef: DatasetRef,
-                           res: FiniteDuration): DatasetRef = {
-    DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
-  }
-}
 
 class DownsampledTimeSeriesStore(val store: ColumnStore,
                                  val metastore: MetaStore,

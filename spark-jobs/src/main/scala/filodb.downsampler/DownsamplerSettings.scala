@@ -42,6 +42,8 @@ object DownsamplerSettings extends StrictLogging {
 
   val downsampleTtls = rawDatasetIngestionConfig.downsampleConfig.ttls.map(_.toSeconds.toInt)
 
+  val downsampledDatasetRefs = rawDatasetIngestionConfig.downsampleConfig.downsampleDatasetRefs(rawDatasetName)
+
   val downsampleStoreConfig = StoreConfig(downsamplerConfig.getConfig("downsample-store-config"))
 
   val ttlByResolution = downsampleResolutions.zip(downsampleTtls).toMap

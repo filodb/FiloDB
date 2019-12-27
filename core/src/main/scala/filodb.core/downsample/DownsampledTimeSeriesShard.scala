@@ -27,18 +27,18 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   val downsampleResolutions = downsampleConfig.resolutions
   val downsampleTtls = downsampleConfig.ttls
-  val downsampledDatasetRefs = downsampleResolutions.map { res =>
-    DownsampledTimeSeriesStore.downsampleDatasetRef(ref, res)
-  }
+  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(ref.dataset)
+
   val indexResolution = downsampleResolutions.last
   val indexDataset = downsampledDatasetRefs.last
+  val indexTtl = downsampleTtls.last
 
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
 
   private var nextPartitionID = 0
 
-  private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
+  private final val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtl)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 

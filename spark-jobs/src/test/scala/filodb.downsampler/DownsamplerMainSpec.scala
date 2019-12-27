@@ -48,7 +48,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val downsampler = new Downsampler
 
   override def beforeAll(): Unit = {
-    BatchDownsampler.downsampleDatasetRefs.values.foreach { ds =>
+    BatchDownsampler.downsampleRefsByRes.values.foreach { ds =>
       downsampleColStore.initialize(ds, 4).futureValue
       downsampleColStore.truncate(ds, 4).futureValue
     }
@@ -223,7 +223,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(gaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
@@ -251,7 +251,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify prom counter data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
       .toListL.runAsync.futureValue.head
@@ -292,7 +292,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     "PagedReadablePartition for 1-min downsampled data") {
 
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(1, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
       .toListL.runAsync.futureValue.head
@@ -334,7 +334,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(gaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
@@ -359,7 +359,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify prom counter data in cassandra using PagedReadablePartition for 5-min downsampled data") {
 
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(counterPartKeyBytes))
       .toListL.runAsync.futureValue.head
@@ -396,7 +396,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     "PagedReadablePartition for 5-min downsampled data") {
 
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
-      BatchDownsampler.downsampleDatasetRefs(FiniteDuration(5, "min")),
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
       SinglePartitionScan(histPartKeyBytes))
       .toListL.runAsync.futureValue.head
