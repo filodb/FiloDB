@@ -259,7 +259,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] = {
+                    partKeys: Observable[PartKeyRecord],
+                    diskTTLSeconds: Int): Future[Response] = {
     val table = getOrCreatePartitionKeysTable(ref, shard)
     val span = Kamon.buildSpan("write-part-keys").start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>

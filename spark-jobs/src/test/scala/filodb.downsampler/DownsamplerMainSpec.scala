@@ -15,7 +15,7 @@ import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{CustomRangeVectorKey, RawDataRangeVector}
-import filodb.core.store.{AllChunkScan, SinglePartitionScan, StoreConfig}
+import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.BatchDownsampler.shardStats
 import filodb.memory.format.PrimitiveVectorReader
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -67,7 +67,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val seriesName = "myGauge"
-    val seriesTags = Map("k".utf8 -> "v".utf8)
+    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
+                         "_ns_".utf8 -> "myNs".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
@@ -101,6 +102,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(gaugePartKeyBytes, 1574272801000L, 1574273042000L)
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200)
   }
 
   it ("should write prom counter data to cassandra") {
@@ -109,7 +112,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val seriesName = "myCounter"
-    val seriesTags = Map("k".utf8 -> "v".utf8)
+    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
+                         "_ns_".utf8 -> "myNs".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey,
@@ -147,6 +151,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(counterPartKeyBytes, 1574272801000L, 1574273042000L)
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200)
   }
 
   it ("should write prom histogram data to cassandra") {
@@ -155,7 +161,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val seriesName = "myHistogram"
-    val seriesTags = Map("k".utf8 -> "v".utf8)
+    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
+                         "_ns_".utf8 -> "myNs".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
@@ -194,6 +201,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(histPartKeyBytes, 1574272801000L, 1574273042000L)
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200)
   }
 
   it ("should free all offheap memory") {

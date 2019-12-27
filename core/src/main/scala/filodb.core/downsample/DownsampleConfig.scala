@@ -20,6 +20,8 @@ final case class DownsampleConfig(config: Config) {
   val ttls = if (config.hasPath ("ttls")) config.as[Seq[FiniteDuration]]("ttls")
              else Seq.empty
   require(resolutions.length == ttls.length)
+  require(ttls.sorted == ttls, "Downsample TTLs are not sorted")
+  require(resolutions.sorted == resolutions, "Downsample Resolutions are not sorted")
 
   /**
     * Schemas to downsample

@@ -15,7 +15,7 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesShard(ref: DatasetRef,
-                                 storeConfig: StoreConfig,
+                                 val storeConfig: StoreConfig,
                                  val schemas: Schemas,
                                  colStore: ColumnStore,
                                  shardNum: Int,
@@ -27,9 +27,11 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   val downsampleResolutions = downsampleConfig.resolutions
   val downsampleTtls = downsampleConfig.ttls
-  val indexResolution = downsampleResolutions(downsampleTtls.indexOf(downsampleTtls.max))
-  val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
-  val indexDataset = downsampledDatasetRefs(indexResolution)
+  val downsampledDatasetRefs = downsampleResolutions.map { res =>
+    DownsampledTimeSeriesStore.downsampleDatasetRef(ref, res)
+  }
+  val indexResolution = downsampleResolutions.last
+  val indexDataset = downsampledDatasetRefs.last
 
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
@@ -61,10 +63,10 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   def recoverIndex(): Future[Unit] = {
     val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref,
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset,
                                      GlobalScheduler.globalImplicitScheduler){ _ => createPartitionID() }
-      .map { _ =>
-        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum")
+      .map { count =>
+        logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }
   }
 
@@ -145,11 +147,10 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = {
     chunkScanMethod match {
-      case AllChunkScan => downsampledDatasetRefs(downsampleTtls.last)
+      case AllChunkScan => downsampledDatasetRefs.last // since it is the highest resolution/ttl
       case TimeRangeChunkScan(startTime, _) =>
-        val res = downsampleTtls.find(t => startTime > System.currentTimeMillis() - t.toMillis)
-                                .getOrElse(downsampleTtls.last)
-        downsampledDatasetRefs(res)
+        val ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
+        downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }

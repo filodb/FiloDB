@@ -336,6 +336,13 @@ Subsequent servers. Change log file suffix with the `-l` option for each server.
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 2 -p
 ```
 
+If you had run the unit test `DownsamplerMainSpec` which populates data into the downsample
+dataset, you can query downsample results by visiting the following URL: 
+
+```
+curl "http://localhost:8080/promql/prometheus/api/v1/query_range?query=myGuage\{_ws_='myWs',_ns_='myNs'\}&start=1574272801&end=1574273042&step=10&verbose=true&spread=2"
+```
+
 #### Local Scale Testing
 
 Follow the same steps as in original setup, but do this first to clear out existing metadata:

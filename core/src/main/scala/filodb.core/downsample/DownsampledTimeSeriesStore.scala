@@ -19,11 +19,9 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 object DownsampledTimeSeriesStore {
-  def downsampleDatasetRefs(rawDatasetRef: DatasetRef,
-                            downsampleResolutions: Seq[FiniteDuration]): Map[FiniteDuration, DatasetRef] = {
-    downsampleResolutions.map { res =>
-      res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
-    }.toMap
+  def downsampleDatasetRef(rawDatasetRef: DatasetRef,
+                           res: FiniteDuration): DatasetRef = {
+    DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
   }
 }
 
@@ -124,7 +122,8 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
-  def groupsInDataset(ref: DatasetRef): Int = throw new UnsupportedOperationException()
+  def groupsInDataset(ref: DatasetRef): Int =
+    datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     throw new UnsupportedOperationException()

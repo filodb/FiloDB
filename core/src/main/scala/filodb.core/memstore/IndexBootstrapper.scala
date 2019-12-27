@@ -28,7 +28,7 @@ trait IndexBootstrapper {
                      shardNum: Int,
                      ref: DatasetRef,
                      ingestSched: Scheduler)
-                     (addPartKey: PartKeyRecord => Int): Future[Unit] = {
+                     (addPartKey: PartKeyRecord => Int): Future[Long] = {
     val tracer = Kamon.buildSpan("memstore-recover-index-latency")
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum).start()
@@ -40,10 +40,11 @@ trait IndexBootstrapper {
         val partId = addPartKey(pk)
         index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
       }
-      .completedL.runAsync(ingestSched)
-      .map { _ =>
+      .countL.runAsync(ingestSched)
+      .map { count =>
         index.refreshReadersBlocking()
         tracer.finish()
+        count
       }(ingestSched)
   }
 
