@@ -4,6 +4,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import java.util.Arrays
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, GlobalScheduler}
@@ -202,11 +203,15 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   }
 
   /**
-    * retrieve partKey for a given PartId
+    * Retrieve partKey for a given PartId by looking up index
     */
   private def partKeyFromPartId(partId: Int): Array[Byte] = {
-    val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
-    if (partKeyByteBuf.isDefined) partKeyByteBuf.get.bytes
+    val partKeyBytes = partKeyIndex.partKeyFromPartId(partId)
+    if (partKeyBytes.isDefined)
+      // make a copy because BytesRef from lucene can have additional length bytes in its array
+      // TODO small optimization for some other day
+      Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
+        partKeyBytes.get.offset + partKeyBytes.get.length)
     else throw new IllegalStateException("This is not an expected behavior." +
       " PartId should always have a corresponding PartKey!")
   }

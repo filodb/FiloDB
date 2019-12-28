@@ -66,9 +66,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val rawDataset = Dataset("prometheus", Schemas.gauge)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
-    val seriesName = "myGauge"
-    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
-                         "_ns_".utf8 -> "myNs".utf8)
+    val seriesName = "my_gauge"
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+                         "_ns_".utf8 -> "my_ns".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
@@ -111,9 +111,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val rawDataset = Dataset("prometheus", Schemas.promCounter)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
-    val seriesName = "myCounter"
-    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
-                         "_ns_".utf8 -> "myNs".utf8)
+    val seriesName = "my_counter"
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+                         "_ns_".utf8 -> "my_ns".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promCounter, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.promCounter, partKey,
@@ -160,9 +160,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
 
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
-    val seriesName = "myHistogram"
-    val seriesTags = Map("_ws_".utf8 -> "myWs".utf8,
-                         "_ns_".utf8 -> "myNs".utf8)
+    val seriesName = "my_histogram"
+    val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8,
+                         "_ns_".utf8 -> "my_ns".utf8)
     val partKey = partBuilder.partKeyFromObjects(Schemas.promHistogram, seriesName, seriesTags)
 
     val part = new TimeSeriesPartition(0, Schemas.promHistogram, partKey,
@@ -432,5 +432,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify part key migration in cassandra for 5-min downsampled data") {
     // TODO in future PR
+  }
+
+  it("should bring up DownsampledTimeSeriesShard and be able to read data using SelectRawPartitionsExec") {
+    // TODO in future PR when index migration is done
   }
 }
