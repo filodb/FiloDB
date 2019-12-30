@@ -11,7 +11,7 @@ trait BaseDatasetTable extends StrictLogging {
   // The suffix for the dataset table, ie chunks, index, filter, etc.
   def dataset: DatasetRef
   def suffix: String
-  lazy val keyspace = dataset.database.getOrElse(connector.keyspace)
+  lazy val keyspace = connector.keyspace
   lazy val tableString = s"${keyspace}.${dataset.dataset + s"_$suffix"}"
   lazy val session = connector.session
 
