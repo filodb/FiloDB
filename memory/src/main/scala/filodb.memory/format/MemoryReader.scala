@@ -60,6 +60,8 @@ sealed trait MemoryReader {
   final def getLongVolatile(addr: Long): Long = unsafe.getLongVolatile(base, baseOffset + addr)
   final def getDouble(addr: Long): Double = unsafe.getDouble(base, baseOffset + addr)
   final def getFloat(addr: Long): Double = unsafe.getFloat(base, baseOffset + addr)
+  final def copy(fromAddr: Long, toAcc: MemoryAccessor, toAddr: Long, numBytes: Int): Unit =
+    UnsafeUtils.copy(base, baseOffset + fromAddr, toAcc.base, toAcc.baseOffset + toAddr, numBytes)
 }
 
 /**
@@ -100,8 +102,6 @@ sealed trait MemoryAccessor extends MemoryReader {
   final def setLong(addr: Long, l: Long): Unit = unsafe.putLong(base, baseOffset + addr, l)
   final def setDouble(addr: Long, d: Double): Unit = unsafe.putDouble(base, baseOffset + addr, d)
   final def setFloat(addr: Long, f: Float): Unit = unsafe.putFloat(base, baseOffset + addr, f)
-  final def copy(fromAddr: Long, toAcc: MemoryAccessor, toAddr: Long, numBytes: Int): Unit =
-    UnsafeUtils.copy(base, baseOffset + fromAddr, toAcc.base, toAcc.baseOffset + toAddr, numBytes)
   //  def wordCompare(thisOffset: Long, destObj: MemoryBase, destOffset: Long, n: Int): Int
   //  def compareTo(offset1: Long, numBytes1: Int, base2: MemoryBase, offset2: Long, numBytes2: Int): Int
 }
@@ -148,6 +148,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   var base: Array[Byte] = _
   var baseOffset: Long = _
   var length: Int = _
+  val origBufPos = buf.position()
 
   // TODO check bounds of array before accessing
   require (!buf.isDirect, "buf arg cannot be a DirectBuffer")
@@ -163,7 +164,7 @@ class OnHeapByteBufferAccessor(buf: ByteBuffer) extends MemoryAccessor {
   }
 
   override def wrapInto(dBuf: DirectBuffer, addr: Long, length: Int): Unit = {
-    dBuf.wrap(buf, addr.toInt, length)
+    dBuf.wrap(buf, origBufPos + addr.toInt, length)
   }
 
 }

@@ -23,7 +23,9 @@ class HistogramVectorTest extends NativeVectorTest {
 
   val buffer = new UnsafeBuffer(new Array[Byte](4096))
 
-  def verifyHistogram(h: Histogram, itemNo: Int, rawBuckets: Seq[Array[Double]] = rawHistBuckets): Unit = {
+  def verifyHistogram(h: Histogram, itemNo: Int,
+                      rawBuckets: Seq[Array[Double]] = rawHistBuckets,
+                      bucketScheme: HistogramBuckets = bucketScheme ): Unit = {
     h.numBuckets shouldEqual bucketScheme.numBuckets
     for { i <- 0 until bucketScheme.numBuckets } {
       h.bucketTop(i) shouldEqual bucketScheme.bucketTop(i)
@@ -102,7 +104,6 @@ class HistogramVectorTest extends NativeVectorTest {
     appender.length shouldEqual 0
   }
 
-
   it("should be able to read from on-heap Histogram Vector") {
     val appender = HistogramVector.appending(memFactory, 1024)
     rawLongBuckets.foreach { rawBuckets =>
@@ -138,7 +139,6 @@ class HistogramVectorTest extends NativeVectorTest {
     }
   }
 
-
   val lastIncrHist = LongHistogram(bucketScheme, incrHistBuckets.last.map(_.toLong))
 
   it("should append, optimize, and query SectDelta histograms") {
@@ -171,6 +171,64 @@ class HistogramVectorTest extends NativeVectorTest {
       HistogramCorrection(lastIncrHist, LongHistogram.empty(bucketScheme))
     oReader2.updateCorrection(acc, optimized, HistogramCorrection(lastIncrHist, correction1.copy)) shouldEqual
       HistogramCorrection(lastIncrHist, correction1)
+  }
+
+  it("should work for the downsampling round trip of a histogram vector") {
+
+    val myBucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
+    // time, sum, count, histogram
+    val bucketData = Seq(
+      Array(0d, 0d, 1d),
+      Array(0d, 2d, 3d),
+      Array(2d, 5d, 6d),
+      Array(2d, 5d, 9d),
+      Array(2d, 5d, 10d),
+      Array(2d, 8d, 14d),
+      Array(0d, 0d, 2d),
+      Array(1d, 7d, 9d),
+      Array(1d, 15d, 19d),
+      Array(2d, 16d, 21d),
+      Array(0d, 1d, 1d),
+      Array(0d, 15d, 15d),
+      Array(1d, 16d, 19d),
+      Array(4d, 20d, 25d)
+    )
+
+    val appender = HistogramVector.appendingSect(memFactory, 1024)
+    bucketData.foreach { rawBuckets =>
+      BinaryHistogram.writeDelta(myBucketScheme, rawBuckets.map(_.toLong), buffer)
+      appender.addData(buffer) shouldEqual Ack
+    }
+
+    appender.length shouldEqual bucketData.length
+
+    val reader = appender.reader.asInstanceOf[SectDeltaHistogramReader]
+    reader.length shouldEqual bucketData.length
+
+    reader.dropPositions(MemoryAccessor.nativePtrAccessor, appender.addr) shouldEqual debox.Buffer(6, 10)
+
+    (0 until bucketData.length).foreach { i =>
+      verifyHistogram(reader(i), i, bucketData, myBucketScheme)
+    }
+
+    val optimized = appender.optimize(memFactory)
+
+    val optReader = HistogramVector(BinaryVector.asBuffer(optimized))
+
+    val bytes = optReader.toBytes(acc, optimized)
+
+    val onHeapAcc = Seq(MemoryReader.fromArray(bytes),
+      MemoryReader.fromByteBuffer(BinaryVector.asBuffer(optimized)),
+      MemoryReader.fromByteBuffer(ByteBuffer.wrap(bytes)))
+
+    onHeapAcc.foreach { a =>
+      val readerH = HistogramVector(a, 0).asInstanceOf[SectDeltaHistogramReader]
+      readerH.dropPositions(a, 0) shouldEqual debox.Buffer(6, 10)
+      (0 until bucketData.length).foreach { i =>
+        val h = readerH(i)
+        verifyHistogram(h, i, bucketData, myBucketScheme)
+      }
+    }
   }
 
   it("SectDelta vectors should detect and handle drops correctly") {

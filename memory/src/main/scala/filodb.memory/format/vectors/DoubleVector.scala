@@ -198,6 +198,9 @@ trait DoubleVectorDataReader extends CounterVectorReader {
     case DoubleCorrection(_, corr) => apply(acc, vector, n) + corr
     case NoCorrection              => apply(acc, vector, n)
   }
+
+  // Default implementation with no drops detected
+  def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int] = debox.Buffer.empty[Int]
 }
 
 /**
@@ -299,7 +302,8 @@ extends DoubleVectorDataReader {
               start: Int, end: Int, prev: Double, ignorePrev: Boolean = false): (Double, Double) =
     inner.changes(acc2, vector, start, end, prev)
 
-  var _correction = 0.0
+  private var _correction = 0.0
+  private val _drops = debox.Buffer.empty[Int] // to track counter drop positions
   // Lazily correct - not all queries want corrected data
   lazy val corrected = {
     // if asked, lazily create corrected values and resets list
@@ -310,11 +314,18 @@ extends DoubleVectorDataReader {
       val nextVal = it.next
       if (nextVal < last) {   // reset!
         _correction += last
+        _drops += pos
       }
       _corrected(pos) = nextVal + _correction
       last = nextVal
     }
     _corrected
+  }
+
+  override def dropPositions(acc2: MemoryReader, vector: BinaryVectorPtr): debox.Buffer[Int] = {
+    assert(vector == vect && acc == acc2)
+    corrected // access it since it is lazy
+    _drops
   }
 
   override def correctedValue(acc2: MemoryReader, vector: BinaryVectorPtr,

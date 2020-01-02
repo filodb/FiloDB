@@ -69,15 +69,15 @@ class Downsampler extends StrictLogging {
     // by default assume a time in the previous downsample period
 
     val userTimeStart: Long = (userTimeInPeriod / downsampleChunkDuration) * downsampleChunkDuration
-    val userTimeEnd: Long = userTimeStart + downsampleChunkDuration
+    val userTimeEndExclusive: Long = userTimeStart + downsampleChunkDuration
     val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
-    val ingestionTimeEnd: Long = userTimeEnd + widenIngestionTimeRangeBy.toMillis
+    val ingestionTimeEnd: Long = userTimeEndExclusive + widenIngestionTimeRangeBy.toMillis
 
     logger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
       s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
       s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEnd)}")
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
 
     val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
     logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
@@ -91,12 +91,12 @@ class Downsampler extends StrictLogging {
         rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
-          userTimeStart = userTimeStart, userTimeEnd = userTimeEnd,
+          userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
           maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
           batchSize = batchSize, batchTime = batchTime).toIterator()
       }
       .foreach { rawPartsBatch =>
-        downsampleBatch(rawPartsBatch, userTimeStart, userTimeEnd)
+        downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
     spark.sparkContext.stop()
 

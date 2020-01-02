@@ -250,20 +250,31 @@ Look here for examples of [RangeFunctions](../query/exec/rangefn/RangeFunction.s
 
 ### ChunkedWindowIterator Details
 
-The `ChunkedWindowIterator` applies `ChunkedRangeFunctions` to each time window, outputting a computed value for each window.  It works as follows:
+The `ChunkedWindowIterator` applies `ChunkedRangeFunctions` to each time window, outputting a computed value for each 
+window.  It works as follows:
 
 ![](mermaid/chunked-iteration.png)
 
 1. `ChunkedWindowIterator` advances to the next window
 2. it first calls `reset` on the `ChunkedRangeFunction`
-2. It then loops through each relevant chunk within the window, calling the `addChunk` method of the range function to update its result for each chunk.  The range function is free to use any method from the raw chunk data, usually this is pretty fast compared to row-wise iteration.
-3. Finally, the `apply` method is called on the range function to present result for that time window from all the intermediate results from the chunks.
+2. It then loops through each relevant chunk within the window, calling the `addChunk` method of the range function to 
+update its result for each chunk.  The range function is free to use any method from the raw chunk data, usually this 
+is pretty fast compared to row-wise iteration.
+3. Finally, the `apply` method is called on the range function to present result for that time window from all the 
+intermediate results from the chunks.
 
-Note that `ChunkedWindowIterator` support different types of `RowReader` outputs for different types of output columns.  One version is for `TransientRow` which has Double values, and another is for `TransientHistRow` which supports Histogram values as output.
+Note that `ChunkedWindowIterator` support different types of `RowReader` outputs for different types of output columns.
+One version is for `TransientRow` which has Double values, and another is for `TransientHistRow` which supports 
+Histogram values as output.
 
 ### Efficient Counter Correction and Rate Calculation
 
-The naive way to do counter correction would be to iterate through each sample of the entire time series data covering all windows, and detect and correct the samples one by one.  This however costs O(n) with every query.  We take an alternative approach where we detect any corrections or resets at ingestion time and store some metadata with each chunk of data.  Then, at query time, a quick check is done on the chunk to see if it needs correction or not.  Corrections are carried over and adjusted from chunk to chunk.  This allows us to do corrections at query time only for chunks that actually need correction.
+The naive way to do counter correction would be to iterate through each sample of the entire time series data 
+covering all windows, and detect and correct the samples one by one.  This however costs O(n) with every query.  
+We take an alternative approach where we detect any corrections or resets at ingestion time and store some metadata 
+with each chunk of data.  Then, at query time, a quick check is done on the chunk to see if it needs correction or 
+not.  Corrections are carried over and adjusted from chunk to chunk.  This allows us to do corrections at query time 
+only for chunks that actually need correction.
 In addition, the rate is calculated quickly by examining the start and end of the time window within each chunk.
 
 ### Aggregation across Range Vectors

@@ -830,3 +830,99 @@ class HoltWintersChunkedFunctionL(funcParams: Seq[FuncArgs]) extends HoltWinters
     }
   }
 }
+
+/**
+  * Predicts the value of time series t seconds from now based on range vector
+  * Refer https://en.wikipedia.org/wiki/Simple_linear_regression
+**/
+abstract class PredictLinearChunkedFunction(funcParams: Seq[Any],
+                                            var sumX: Double = Double.NaN,
+                                            var sumY: Double = Double.NaN,
+                                            var sumXY: Double = Double.NaN,
+                                            var sumX2: Double = Double.NaN,
+                                            var counter: Int = 0)
+  extends ChunkedRangeFunction[TransientRow] {
+  override final def reset(): Unit = { sumX = Double.NaN; sumY = Double.NaN;
+    sumXY = Double.NaN; sumX2 = Double.NaN;
+    counter = 0}
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    val duration = funcParams.head.asInstanceOf[StaticFuncArgs].scalar
+    val covXY = sumXY - sumX*sumY/counter
+    val varX = sumX2 - sumX*sumX/counter
+    val slope = covXY / varX
+    val intercept = sumY/counter - slope*sumX/counter // keeping it, needed for predict_linear function = slope*duration + intercept
+    if (counter >= 2) {
+      sampleToEmit.setValues(endTimestamp, slope*duration + intercept)
+    } else {
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
+    }
+  }
+}
+
+class PredictLinearChunkedFunctionD(funcParams: Seq[Any]) extends PredictLinearChunkedFunction(funcParams)
+  with ChunkedRangeFunction[TransientRow] {
+  require(funcParams.size == 1, "predict_linear function needs a single time argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "duration parameter must be a number")
+  final def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVector.BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVectorAcc: MemoryReader, valueVector: BinaryVector.BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    var startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    val itTimestamp = tsReader.asLongReader.iterate(tsVectorAcc, tsVector, startRowNum)
+    val it = valueReader.asDoubleReader.iterate(valueVectorAcc, valueVector, startRowNum)
+    while (startRowNum <= endRowNum) {
+      val nextvalue = it.next
+      val nexttime = itTimestamp.next
+      // There are many possible values of NaN.  Use a function to ignore them reliably.
+      if (!JLDouble.isNaN(nextvalue)) {
+        val x = (nexttime-endTime)/1000.0
+        if (sumY.isNaN) {
+          sumY = nextvalue
+          sumX = x
+          sumXY = x * nextvalue
+          sumX2 = x * x
+        } else {
+          sumY += nextvalue
+          sumX += x
+          sumXY += x * nextvalue
+          sumX2 += x * x
+        }
+        counter += 1
+      }
+      startRowNum += 1
+    }
+  }
+}
+
+
+class PredictLinearChunkedFunctionL(funcParams: Seq[Any]) extends PredictLinearChunkedFunction(funcParams)
+  with ChunkedRangeFunction[TransientRow] {
+  require(funcParams.size == 1, "predict_linear function needs a single duration argument")
+  require(funcParams.head.isInstanceOf[StaticFuncArgs], "duration parameter must be a number")
+  final def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVector.BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                      valueVectorAcc: MemoryReader, valueVector: BinaryVector.BinaryVectorPtr, valueReader: VectorDataReader,
+                      startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    var startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+    val itTimestamp = tsReader.asLongReader.iterate(tsVectorAcc, tsVector, startRowNum)
+    val it = valueReader.asLongReader.iterate(valueVectorAcc, valueVector, startRowNum)
+    while (startRowNum <= endRowNum) {
+      val nextvalue = it.next
+      val nexttime = itTimestamp.next
+      val x = (nexttime-endTime)/1000.0
+      if (sumY.isNaN) {
+        sumY = nextvalue
+        sumX = x
+        sumXY = x * nextvalue
+        sumX2 = x * x
+      } else {
+        sumY += nextvalue
+        sumX += x
+        sumXY += x * nextvalue
+        sumX2 += x * x
+      }
+      counter += 1
+      startRowNum += 1
+    }
+  }
+}

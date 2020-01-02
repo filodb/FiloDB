@@ -6,6 +6,7 @@ import filodb.query._
 
 object Vectors {
   val PromMetricLabel = "__name__"
+  val TypeLabel       = "_type_"
 }
 
 trait Vectors extends Scalars with TimeUnits with Base {

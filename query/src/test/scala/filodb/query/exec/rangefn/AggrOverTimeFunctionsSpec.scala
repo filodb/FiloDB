@@ -1,6 +1,7 @@
 package filodb.query.exec.rangefn
 
 import scala.util.Random
+import scala.collection.mutable.ArrayBuffer
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
@@ -424,7 +425,6 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       }
     }
 
-
     var rv = timeValueRV(positiveTrendData2)
     val chunkedIt2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
       new HoltWintersChunkedFunctionD(params), queryConfig)
@@ -468,6 +468,55 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
           aggregated2(i) shouldBe (res(i) +- 0.0000000001)
         }
       }
+    }
+  }
+
+  it("should correctly calculate predict_linear") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    val duration = 50
+    val params = Seq(StaticFuncArgs(50, RangeParams(100,20,500)))
+
+    def predict_linear(s: Seq[Double], interceptTime: Long, startTime: Long): Double = {
+      val n = s.length.toDouble
+      var sumY = 0.0
+      var sumX = 0.0
+      var sumXY = 0.0
+      var sumX2 = 0.0
+      var x = 0.0
+      if (n >= 2) {
+        for (i <- 0 until n.toInt) {
+          x = (startTime + i * pubFreq - interceptTime) / 1000.0
+          sumY += s(i)
+          sumX += x
+          sumXY += x * s(i)
+          sumX2 += x * x
+        }
+        val covXY = sumXY - (sumX * sumY) / n.toDouble
+        val varX = sumX2 - (sumX * sumX) / n.toDouble
+        val slope = covXY.toDouble / varX.toDouble
+        val intercept = sumY / n - (slope * sumX) / n.toDouble
+        slope * duration + intercept
+      } else {
+        Double.NaN
+      }
+    }
+
+    val step = rand.nextInt(50) + 5
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      info(s" iteration $x  windowSize=$windowSize step=$step")
+      val ChunkedIt = chunkedWindowIt(data, rv2, new PredictLinearChunkedFunctionD(params), windowSize, step)
+      val aggregated2 = ChunkedIt.map(_.getDouble(1)).toBuffer
+      var res = new ArrayBuffer[Double]
+      var startTime = defaultStartTS + pubFreq
+      var endTime = startTime + (windowSize - 2) * pubFreq
+      for (item <- data.sliding(windowSize, step).map(_.drop(1))) {
+        res += predict_linear(item, endTime, startTime)
+        startTime += step * pubFreq
+        endTime += step * pubFreq
+      }
+      aggregated2 shouldEqual(res)
     }
   }
 }
