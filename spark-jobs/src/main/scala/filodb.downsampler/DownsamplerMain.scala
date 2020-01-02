@@ -45,7 +45,8 @@ class Downsampler extends StrictLogging {
   import java.time.Instant._
 
   def shutdown(): Unit = {
-    cassandraColStore.shutdown()
+    rawCassandraColStore.shutdown()
+    downsampleCassandraColStore.shutdown()
   }
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
@@ -79,7 +80,7 @@ class Downsampler extends StrictLogging {
       s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
       s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
 
-    val splits = cassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
+    val splits = rawCassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
     logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
       s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
 
@@ -87,7 +88,7 @@ class Downsampler extends StrictLogging {
       .makeRDD(splits)
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
-        val rawDataSource = cassandraColStore
+        val rawDataSource = rawCassandraColStore
         rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,

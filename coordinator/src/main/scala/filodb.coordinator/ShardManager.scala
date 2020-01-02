@@ -159,7 +159,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         publishChanges(dataset)
       }
     }
-    logger.info(s"Completed addMember for coordinator $coordinator")
+    logAllMappers(s"Completed addMember for coordinator $coordinator. Status Map:")
   }
 
   /** Called on MemberRemoved, new status already updated. */
@@ -168,6 +168,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       logger.info(s"Initiated removeMember for coordinator=$coordinator on $address")
       _coordinators remove address
       removeCoordinator(coordinator)
+      logAllMappers(s"Completed removeMember for coordinator $address")
       coordinator
     }
   }
@@ -272,6 +273,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
                   s"for dataset=${shardStopReq.datasetRef} ")
     val answer: Response = validateRequestAndStopShards(shardStopReq, ackTo)
                             .fold(_ => SuccessResponse, errorResponse => errorResponse)
+    logAllMappers(s"Completed stopShards $shardStopReq")
     ackTo ! answer
   }
 
@@ -315,6 +317,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     val answer: Response = validateRequestAndStartShards(shardStartReq.datasetRef,
                                                          shardStartReq.assignmentConfig, ackTo)
                               .fold(_ => SuccessResponse, errorResponse => errorResponse)
+    logAllMappers(s"Completed startShards $shardStartReq")
     ackTo ! answer
   }
 
@@ -360,7 +363,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       removeCoordinator(coord)
     }
     updateShardMetrics()
-    logAllMappers("After removing stale coordinators")
+    logAllMappers("Finished removing stale coordinators")
   }
 
   private def removeCoordinator(coordinator: ActorRef): Unit = {
@@ -403,7 +406,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Add dataset to subscribers and send initial ShardMapper snapshot
         _subscriptions :+= ShardSubscription(dataset.ref, Set.empty)
         _subscriptions.watchers foreach (subscribe(_, dataset.ref))
-        logger.info(s"Completed Setup for dataset=${dataset.ref}")
+        logAllMappers(s"Completed setup for dataset=${dataset.ref}")
         ackTo.foreach(_ ! DatasetVerified)
         assignments
     }
@@ -435,7 +438,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     _datasetInfo remove dataset
     _shardMappers remove dataset
     _subscriptions = _subscriptions - dataset
-    logger.info(s"Completed removal for dataset=$dataset")
+    logAllMappers(s"Completed removal of dataset=$dataset")
   }
 
   /**
@@ -490,8 +493,10 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
               if (assignments.valuesIterator.flatten.contains(event.shard)) {
                 setShardReassignmentTime(event.ref, event.shard, now)
                 info.metrics.numErrorReassignmentsDone.increment()
+                logAllMappers(s"Successfully reassigned dataset=${event.ref} shard=${event.shard}")
               } else {
                 info.metrics.numErrorReassignmentsSkipped.increment()
+                logAllMappers(s"Could not reassign dataset=${event.ref} shard=${event.shard}")
                 logger.warn(s"Shard=${event.shard} from dataset=${event.ref} was NOT reassigned possibly " +
                   s"because no other node was available")
               }
