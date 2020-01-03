@@ -2,7 +2,6 @@ package filodb.core.downsample
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -17,15 +16,6 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
-
-object DownsampledTimeSeriesStore {
-  def downsampleDatasetRefs(rawDatasetRef: DatasetRef,
-                            downsampleResolutions: Seq[FiniteDuration]): Map[FiniteDuration, DatasetRef] = {
-    downsampleResolutions.map { res =>
-      res -> DatasetRef(s"${rawDatasetRef}_ds_${res.toMinutes}")
-    }.toMap
-  }
-}
 
 class DownsampledTimeSeriesStore(val store: ColumnStore,
                                  val metastore: MetaStore,
@@ -47,7 +37,7 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store, shard, filodbConfig)
+      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store, shard, filodbConfig, downsample)
       shards.put(shard, tsdb)
     }
   }
@@ -124,7 +114,8 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
-  def groupsInDataset(ref: DatasetRef): Int = throw new UnsupportedOperationException()
+  def groupsInDataset(ref: DatasetRef): Int =
+    datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     throw new UnsupportedOperationException()

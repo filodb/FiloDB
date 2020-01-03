@@ -126,7 +126,7 @@ final case class SelectRawPartitionsExec(id: String,
                 queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")}" +
+    Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")} " +
       s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)

@@ -35,9 +35,7 @@ trait FiloCassandraConnector extends StrictLogging {
 
   implicit def ec: ExecutionContext
 
-  lazy val defaultKeySpace = config.getString("keyspace")
-
-  def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace)
+  def keyspace: String
 
   def createKeyspace(keyspace: String): Unit = {
     val replOptions = config.getString("keyspace-replication-options")

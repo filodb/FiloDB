@@ -13,6 +13,7 @@ import akka.event.LoggingReceive
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, Iterators}
@@ -174,6 +175,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         _ <- memStore.recoverIndex(ref, shard)
       } yield {
         streamSubscriptions(shard) = CancelableFuture.never // simulate ingestion happens continuously
+        streams(shard) = IngestionStream(Observable.never)
       }
     } else {
       for {
