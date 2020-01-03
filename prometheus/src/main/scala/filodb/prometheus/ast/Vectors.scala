@@ -169,15 +169,15 @@ trait Vectors extends Scalars with TimeUnits with Base {
       SeriesKeysByFilters(getColFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
 
-    def toPeriodicSeriesWithWindowingPlan(timeParams: TimeRangeParams, function: RangeFunctionId): PeriodicSeriesPlan = {
-      // we start from 5 minutes earlier that provided start time in order to include last sample for the
-      // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
-      PeriodicSeriesWithWindowing(
-        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
-          getColFilters, columns),
-        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0, function
-      )
-    }
+//    def toPeriodicSeriesWithWindowingPlan(timeParams: TimeRangeParams, function: RangeFunctionId): PeriodicSeriesPlan = {
+//      // we start from 5 minutes earlier that provided start time in order to include last sample for the
+//      // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
+//      PeriodicSeriesWithWindowing(
+//        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
+//          getColFilters, columns),
+//        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0, function
+//      )
+//    }
   }
 
   /**
