@@ -14,7 +14,7 @@ CONFIG=conf/timeseries-filodb-server.conf
 LOG_SUFFIX=1
 AKKA_PORT_ARG=""
 
-while getopts "hc:l:ps" opt; do
+while getopts "hc:l:p" opt; do
     case "$opt" in
     h|\?) showHelp
         exit 1
