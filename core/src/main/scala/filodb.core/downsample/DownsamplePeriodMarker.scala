@@ -40,7 +40,7 @@ trait DownsamplePeriodMarker {
 
   /**
     * Returns sorted collection of row numbers for the given chunkset that mark the
-    * periods to downsample
+    * periods to downsample. startRow and endRow are inclusive
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,
@@ -115,8 +115,10 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
         if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
           val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
           for {i <- 0 until drops.length optimized} {
-            result += drops(i) - 1
-            result += drops(i)
+            if (drops(i) <= endRow) {
+              result += drops(i) - 1
+              result += drops(i)
+            }
           }
         }
       case _ =>

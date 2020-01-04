@@ -235,32 +235,43 @@ object BatchDownsampler extends StrictLogging with Instance {
         val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEndExclusive - 1), chunkset.numRows - 1)
         val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
 
-        // for each downsample period
-        var first = startRow
-        for { i <- 0 until downsamplePeriods.length optimized } {
-          val last = downsamplePeriods(i)
+        try {
+          // for each downsample period
+          var first = startRow
+          for {i <- 0 until downsamplePeriods.length optimized} {
+            val last = downsamplePeriods(i)
 
-          dsRecordBuilder.startNewRecord(part.schema)
-          // for each column, add downsample column value
-          for {col <- 0 until downsamplers.length optimized} {
-            val downsampler = downsamplers(col)
-            downsampler match {
-              case t: TimeChunkDownsampler =>
-                dsRecordBuilder.addLong(t.downsampleChunk(rawPartToDownsample, chunkset, first, last))
-              case d: DoubleChunkDownsampler =>
-                dsRecordBuilder.addDouble(d.downsampleChunk(rawPartToDownsample, chunkset, first, last))
-              case h: HistChunkDownsampler =>
-                dsRecordBuilder.addBlob(h.downsampleChunk(rawPartToDownsample, chunkset, first, last).serialize())
+            dsRecordBuilder.startNewRecord(part.schema)
+            // for each column, add downsample column value
+            for {col <- 0 until downsamplers.length optimized} {
+              val downsampler = downsamplers(col)
+              downsampler match {
+                case t: TimeChunkDownsampler =>
+                  dsRecordBuilder.addLong(t.downsampleChunk(rawPartToDownsample, chunkset, first, last))
+                case d: DoubleChunkDownsampler =>
+                  dsRecordBuilder.addDouble(d.downsampleChunk(rawPartToDownsample, chunkset, first, last))
+                case h: HistChunkDownsampler =>
+                  dsRecordBuilder.addBlob(h.downsampleChunk(rawPartToDownsample, chunkset, first, last).serialize())
+              }
             }
+            dsRecordBuilder.endRecord(false)
+            first = last + 1 // first row for next downsample period is last + 1
           }
-          dsRecordBuilder.endRecord(false)
-          first = last + 1 // first row for next downsample period is last + 1
-        }
 
-        for { c   <- dsRecordBuilder.allContainers
-              row <- c.iterate(part.schema.ingestionSchema)
-        } {
-          part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
+          for {c <- dsRecordBuilder.allContainers
+               row <- c.iterate(part.schema.ingestionSchema)
+          } {
+            part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
+          }
+        } catch { case e: Exception =>
+          logger.error(s"Error downsampling partition ${rawPartToDownsample.stringPartition} " +
+            s"resolution=$resolution " +
+            s"startRow=$startRow " +
+            s"endRow=$endRow " +
+            s"downsamplePeriods=$downsamplePeriods " +
+            s"chunkset=${chunkset.debugString(rawPartToDownsample.schema)}", e)
+            // log debugging information and re-throw
+            throw e
         }
         dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
       }
