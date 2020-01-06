@@ -162,7 +162,11 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   /**
     * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
     *
-    * Important Detail: User End time is exclusive. Important since we should not downsample one sample in two job runs
+    * Important Details:
+    * 1. User End time is exclusive. Important since we should not downsample one sample in two job runs
+    * 2. Since we do a query based on maxChunkTime which is usually configured to be slightly greater than
+    *    flush interval, results can include chunks that are before the requested range. Callers need to
+    *    handle this case.
     */
   // scalastyle:off parameter.number
   def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
