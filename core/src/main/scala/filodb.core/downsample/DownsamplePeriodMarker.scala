@@ -60,6 +60,7 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
+    require(startRow <= endRow)
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -103,6 +104,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
+    require(startRow <= endRow)
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
     result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
