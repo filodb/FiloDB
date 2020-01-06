@@ -60,7 +60,8 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
-    require(startRow <= endRow)
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
+      s"chunkset: ${chunkset.debugString(part.schema)}")
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -104,7 +105,8 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
-    require(startRow <= endRow)
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
+      s"chunkset: ${chunkset.debugString(part.schema)}")
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
     result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
@@ -127,8 +129,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
         throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
     }
 
-    // It would have been nice to use this piece of code which is more efficient, but
-    // it results in spire library version conflicts with Spark. :(
+    // Note: following alternative avoids copies, but results in spire library version conflicts with Spark. :(
 //    import spire.std.int._
 //    result.toSortedBuffer
 
@@ -137,7 +138,6 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
     debox.Buffer.fromArray(res)
   }
 }
-
 
 object DownsamplePeriodMarker {
 
