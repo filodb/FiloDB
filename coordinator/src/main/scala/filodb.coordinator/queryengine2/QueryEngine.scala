@@ -365,7 +365,7 @@ class QueryEngine(dsRef: DatasetRef,
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
-    lp.offset.map(x  => rawSeries.plans.foreach(_.addRangeVectorTransformer(OffsetFunctionMapper(x))))
+    lp.offset.map(x => rawSeries.plans.foreach(_.addRangeVectorTransformer(OffsetFunctionMapper(x))))
     rawSeries
   }
 
