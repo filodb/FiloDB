@@ -536,14 +536,10 @@ class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
   }
 }
 
-class TimestampChunkedFunction (var value: Double = Double.NaN)
-  extends ChunkedRangeFunction[TransientRow] {
-  // Add each chunk and update timestamp and value such that latest sample wins
-  // scalastyle:off parameter.number
+class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
   def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
                 valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
                 startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
-    // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
     if (endRowNum >= 0) {
