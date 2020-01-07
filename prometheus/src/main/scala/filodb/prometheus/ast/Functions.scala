@@ -120,4 +120,3 @@ trait Functions extends Base with Operators with Vectors {
     }
   }
 }
-
