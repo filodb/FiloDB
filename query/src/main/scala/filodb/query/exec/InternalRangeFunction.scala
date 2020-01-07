@@ -70,7 +70,7 @@ object InternalRangeFunction {
     case RangeFunctionId.StdDevOverTime   => StdDevOverTime
     case RangeFunctionId.StdVarOverTime   => StdVarOverTime
     case RangeFunctionId.SumOverTime      => SumOverTime
-    case RangeFunctionId.Timestamp        =>  Timestamp
+    case RangeFunctionId.Timestamp        => Timestamp
   }
 }
 

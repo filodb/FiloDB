@@ -156,17 +156,6 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     private[prometheus] val (columnFilters, column) = labelMatchesToFilters(mergeNameToLabels)
 
-//    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
-//
-//      // we start from 5 minutes earlier that provided start time in order to include last sample for the
-//      // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
-//      PeriodicSeries(
-//        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
-//          columnFilters, column.toSeq),
-//        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000
-//      )
-//    }
-
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
                              function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
 
@@ -182,7 +171,6 @@ trait Vectors extends Scalars with TimeUnits with Base {
     def toMetadataPlan(timeParams: TimeRangeParams): SeriesKeysByFilters = {
       SeriesKeysByFilters(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
-
   }
 
   /**
