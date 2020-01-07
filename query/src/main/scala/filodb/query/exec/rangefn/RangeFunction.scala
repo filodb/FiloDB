@@ -435,7 +435,6 @@ extends ChunkedRangeFunction[R] {
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
-      println(" LastSampleChunkedFunction ts:" + ts);
       if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
         updateValue(ts, valueVectorAcc, valueVector, valueReader, endRowNum)
     }
@@ -543,16 +542,9 @@ class TimestampChunkedFunction (var value: Double = Double.NaN)
     // Just in case timestamp vectors are a bit longer than others.
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
 
-    // update timestamp only if
-    //   1) endRowNum >= 0 (timestamp within chunk)
-    //   2) timestamp is within stale window; AND
-    //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
-      println("TimestampChunkedFunction ts:" + ts);
-      value = ts
-//      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
-//        updateValue(ts, valueVectorAcc, valueVector, valueReader, endRowNum)
+      value = (ts.toDouble / 1000f)
     }
   }
 
