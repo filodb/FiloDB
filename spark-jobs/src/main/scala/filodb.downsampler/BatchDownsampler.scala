@@ -102,7 +102,7 @@ object BatchDownsampler extends StrictLogging with Instance {
 
     logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEnd=${ofEpochMilli(userTimeEndExclusive)}")
+      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
 
     val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
@@ -120,7 +120,6 @@ object BatchDownsampler extends StrictLogging with Instance {
         val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
         val pkPairs = schemas(rawSchemaId).partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
         if (isEligibleForDownsample(pkPairs)) {
-          logger.debug(s"Downsampling partition $pkPairs")
           try {
             downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
               downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
@@ -170,6 +169,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
+        logger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
@@ -222,58 +222,72 @@ object BatchDownsampler extends StrictLogging with Instance {
     // for each chunk
     while (rawChunksets.hasNext) {
       val chunkset = rawChunksets.nextInfoReader
-      val tsPtr = chunkset.vectorAddress(timestampCol)
-      val tsAcc = chunkset.vectorAccessor(timestampCol)
-      val tsReader = rawPartToDownsample.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
-
-      // for each downsample resolution
-      downsampleResToPart.foreach { case (resolution, part) =>
-        val resMillis = resolution.toMillis
+      // Cassandra query to fetch eligible chunks is broader because of the increased maxChunkTime
+      // Hence additional check is needed to ensure that chunk indeed overlaps with the downsample
+      // user time range
+      if (chunkset.startTime < userTimeEndExclusive && userTimeStart <= chunkset.endTime) {
+        val tsPtr = chunkset.vectorAddress(timestampCol)
+        val tsAcc = chunkset.vectorAccessor(timestampCol)
+        val tsReader = rawPartToDownsample.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
         // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
         val endRow = Math.min(tsReader.ceilingIndex(tsAcc, tsPtr, userTimeEndExclusive - 1), chunkset.numRows - 1)
-        val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
 
-        try {
-          // for each downsample period
-          var first = startRow
-          for {i <- 0 until downsamplePeriods.length optimized} {
-            val last = downsamplePeriods(i)
+        if (startRow <= endRow) {
+          // for each downsample resolution
+          downsampleResToPart.foreach { case (resolution, part) =>
+            val resMillis = resolution.toMillis
 
-            dsRecordBuilder.startNewRecord(part.schema)
-            // for each column, add downsample column value
-            for {col <- 0 until downsamplers.length optimized} {
-              val downsampler = downsamplers(col)
-              downsampler match {
-                case t: TimeChunkDownsampler =>
-                  dsRecordBuilder.addLong(t.downsampleChunk(rawPartToDownsample, chunkset, first, last))
-                case d: DoubleChunkDownsampler =>
-                  dsRecordBuilder.addDouble(d.downsampleChunk(rawPartToDownsample, chunkset, first, last))
-                case h: HistChunkDownsampler =>
-                  dsRecordBuilder.addBlob(h.downsampleChunk(rawPartToDownsample, chunkset, first, last).serialize())
+            val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
+            try {
+              // for each downsample period
+              var first = startRow
+              for {i <- 0 until downsamplePeriods.length optimized} {
+                val last = downsamplePeriods(i)
+
+                dsRecordBuilder.startNewRecord(part.schema)
+                // for each column, add downsample column value
+                for {col <- 0 until downsamplers.length optimized} {
+                  val downsampler = downsamplers(col)
+                  downsampler match {
+                    case t: TimeChunkDownsampler =>
+                      dsRecordBuilder.addLong(t.downsampleChunk(rawPartToDownsample, chunkset, first, last))
+                    case d: DoubleChunkDownsampler =>
+                      dsRecordBuilder.addDouble(d.downsampleChunk(rawPartToDownsample, chunkset, first, last))
+                    case h: HistChunkDownsampler =>
+                      dsRecordBuilder.addBlob(h.downsampleChunk(rawPartToDownsample, chunkset, first, last).serialize())
+                  }
+                }
+                dsRecordBuilder.endRecord(false)
+                first = last + 1 // first row for next downsample period is last + 1
               }
-            }
-            dsRecordBuilder.endRecord(false)
-            first = last + 1 // first row for next downsample period is last + 1
-          }
 
-          for {c <- dsRecordBuilder.allContainers
-               row <- c.iterate(part.schema.ingestionSchema)
-          } {
-            part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
+              for {c <- dsRecordBuilder.allContainers
+                   row <- c.iterate(part.schema.ingestionSchema)
+              } {
+                part.ingest(userTimeEndExclusive, row, offHeapMem.blockMemFactory)
+              }
+            } catch {
+              case e: Exception =>
+                logger.error(s"Error downsampling partition ${rawPartToDownsample.stringPartition} " +
+                  s"resolution=$resolution " +
+                  s"startRow=$startRow " +
+                  s"endRow=$endRow " +
+                  s"downsamplePeriods=$downsamplePeriods " +
+                  s"chunkset: ${chunkset.debugString(rawPartToDownsample.schema)}", e)
+                // log debugging information and re-throw
+                throw e
+            }
+            dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
           }
-        } catch { case e: Exception =>
-          logger.error(s"Error downsampling partition ${rawPartToDownsample.stringPartition} " +
-            s"resolution=$resolution " +
+        } else {
+          logger.warn(s"Skipping since startRow lessThan endRow when downsampling " +
+            s"partition ${rawPartToDownsample.stringPartition} " +
             s"startRow=$startRow " +
             s"endRow=$endRow " +
-            s"downsamplePeriods=$downsamplePeriods " +
-            s"chunkset=${chunkset.debugString(rawPartToDownsample.schema)}", e)
-            // log debugging information and re-throw
-            throw e
+            s"chunkset: ${chunkset.debugString(rawPartToDownsample.schema)}")
         }
-        dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
       }
     }
   }

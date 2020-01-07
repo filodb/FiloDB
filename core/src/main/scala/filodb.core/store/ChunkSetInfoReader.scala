@@ -71,7 +71,7 @@ trait ChunkSetInfoReader {
         .toHexString(vectorAccessor(c), vectorAddress(c))
     }
     s"${getClass.getSimpleName}(id=$id numRows=$numRows startTime=$startTime endTime=$endTime) " +
-      s"vectors=$vectors"
+      s"vectors: $vectors EOM"
   }
 }
 
