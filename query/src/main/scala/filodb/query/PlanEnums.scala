@@ -10,8 +10,6 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object Abs extends InstantFunctionId("abs")
 
-  case object Absent extends InstantFunctionId("absent")
-
   case object Ceil extends InstantFunctionId("ceil")
 
   case object ClampMax extends InstantFunctionId("clamp_max")
@@ -268,6 +266,13 @@ sealed abstract class VectorFunctionId(override val entryName: String) extends E
 object VectorFunctionId extends Enum[VectorFunctionId] {
   val values = findValues
   case object Vector extends VectorFunctionId("vector")
+}
+
+sealed abstract class AbsentFunctionId(override val entryName: String) extends EnumEntry
+
+object AbsentFunctionId extends Enum[AbsentFunctionId] {
+  val values = findValues
+  case object Absent extends AbsentFunctionId("absent")
 }
 
 

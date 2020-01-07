@@ -115,8 +115,9 @@ trait ExecPlan extends QueryCommand {
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
       FiloSchedulers.assertThreadName(QuerySchedName)
+      val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
-      val resultTask = if (resSchema == ResultSchema.empty) {
+      val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
         qLogger.debug(s"Empty plan $this, returning empty results")
         Task.eval(QueryResult(id, resSchema, Nil))
       } else {
