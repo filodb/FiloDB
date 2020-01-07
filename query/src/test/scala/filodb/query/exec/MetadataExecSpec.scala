@@ -38,7 +38,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
   val typeLabel = "_type_" -> "prom-counter"
   val expectedLabelValues = partKeyLabelValues.map { case (metric, tags) =>
-    tags + typeLabel + ("metric" -> metric)
+    tags + typeLabel + ("_metric_" -> metric)
   }
 
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
@@ -81,7 +81,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
