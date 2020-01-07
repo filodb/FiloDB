@@ -252,7 +252,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     partKeysWritten shouldEqual numPartKeysWritten + 10 // 10 set1 series started
     0.until(10).foreach{i => tsShard.partitions.get(i).ingesting shouldEqual true}
-    0.until(10).foreach{i => tsShard.activelyIngesting.get(i) shouldEqual true}
+    0.until(10).foreach{i => tsShard.activelyIngesting(i) shouldEqual true}
 
     val startTime2 = startTime1 + 1000 * numSamples
 
@@ -268,9 +268,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // 10 Set1 series started + 10 Set1 series ended + 10 Set2 series started
     partKeysWritten shouldEqual numPartKeysWritten + 30
     0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
-    0.until(10).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual false}
+    0.until(10).foreach {i => tsShard.activelyIngesting(i) shouldEqual false}
     10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
-    10.until(20).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual true}
+    10.until(20).foreach {i => tsShard.activelyIngesting(i) shouldEqual true}
 
     val startTime3 = startTime2 + 1000 * numSamples
 
@@ -287,9 +287,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // 10 set1 series restarted
     partKeysWritten shouldEqual numPartKeysWritten + 50
     0.until(10).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual true}
-    0.until(10).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual true}
+    0.until(10).foreach {i => tsShard.activelyIngesting(i) shouldEqual true}
     10.until(20).foreach {i => tsShard.partitions.get(i).ingesting shouldEqual false}
-    10.until(20).foreach {i => tsShard.activelyIngesting.get(i) shouldEqual false}
+    10.until(20).foreach {i => tsShard.activelyIngesting(i) shouldEqual false}
   }
 
   it("should recover index data from col store correctly") {
@@ -347,7 +347,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val range = TimeRangeChunkScan(105000L, 2000000L)
     val res = memStore.lookupPartitions(dataset2.ref, FilteredPartitionScan(split, Seq(filter)), range)
     res.firstSchemaId shouldEqual Some(schema2.schemaHash)
-    res.partsInMemory.cardinality() shouldEqual 2   // two partitions should match
+    res.partsInMemory.length shouldEqual 2   // two partitions should match
     res.shard shouldEqual 0
     res.chunkMethod shouldEqual range
     res.partIdsMemTimeGap shouldEqual debox.Map(7 -> 107000L)
@@ -402,6 +402,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   private def partKeysWritten = memStore.store.sinkStats.partKeysWritten.get()
 
   // returns the "endTime" or last sample time of evicted partitions
+  // used for testing only
   def markPartitionsForEviction(partIDs: Seq[Int]): Long = {
     val shard = memStore.getShardE(dataset1.ref, 0)
     val blockFactory = shard.overflowBlockFactory
@@ -420,7 +421,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1.ref, schemas1, 0, TestData.storeConf)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
-    val data = records(dataset1, linearMultiSeries().take(10))
+    val data = records(dataset1, linearMultiSeries(numSeries = 10).take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
     memStore.refreshIndexForTesting(dataset1.ref)
@@ -440,14 +441,21 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
+    import collection.JavaConverters._
 
     memStore.refreshIndexForTesting(dataset1.ref)
+
+    // 0 and 1 are evicted
+    memStore.getShardE(dataset1.ref, 0).partitions.keySet().asScala shouldEqual (2 to 21).toSet
+    // but they should still stay in the index
+    memStore.getShardE(dataset1.ref, 0).partKeyIndex.indexNumEntries shouldEqual 22
+
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val parts = memStore.scanPartitions(dataset1.ref, Seq(0, 1), FilteredPartitionScan(split))
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet  ++ Set(0)
+    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet ++ Set(0)
     // Above query will ODP evicted partition 0 back in, but there is no space for evicted part 1,
     // so it will not be returned as part of query :(
   }

@@ -11,7 +11,7 @@ trait MiscellaneousFunction {
   def execute(source: Observable[RangeVector]): Observable[RangeVector]
 }
 
-case class LabelReplaceFunction(funcParams: Seq[Any])
+case class LabelReplaceFunction(funcParams: Seq[String])
   extends MiscellaneousFunction {
 
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
@@ -20,10 +20,10 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
     "Cannot use LabelReplace without function parameters: " +
       "instant-vector, dst_label string, replacement string, src_label string, regex string")
 
-  val dstLabel: String = funcParams(0).asInstanceOf[String]
-  val replacementString: String = funcParams(1).asInstanceOf[String]
-  val srcLabel: String = funcParams(2).asInstanceOf[String]
-  val regexString: String = funcParams(3).asInstanceOf[String]
+  val dstLabel: String = funcParams(0)
+  val replacementString: String = funcParams(1)
+  val srcLabel: String = funcParams(2)
+  val regexString: String = funcParams(3)
 
   require(dstLabel.matches(labelIdentifier), "Invalid destination label name")
 
@@ -79,7 +79,7 @@ case class LabelReplaceFunction(funcParams: Seq[Any])
   }
 }
 
-case class LabelJoinFunction(funcParams: Seq[Any])
+case class LabelJoinFunction(funcParams: Seq[String])
   extends MiscellaneousFunction {
 
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
@@ -87,15 +87,15 @@ case class LabelJoinFunction(funcParams: Seq[Any])
   require(funcParams.size >= 2,
     "expected at least 3 argument(s) in call to label_join")
 
-  val dstLabel: String = funcParams(0).asInstanceOf[String]
-  val separator: String = funcParams(1).asInstanceOf[String]
+  val dstLabel: String = funcParams(0)
+  val separator: String = funcParams(1)
 
   require(dstLabel.asInstanceOf[String].matches(labelIdentifier), "Invalid destination label name in label_join()")
   var srcLabel =
     funcParams.drop(2).map { x =>
-      require(x.asInstanceOf[String].matches(labelIdentifier),
+      require(x.matches(labelIdentifier),
         "Invalid source label name in label_join()")
-      x.asInstanceOf[String]
+      x
     }
 
   override def execute(source: Observable[RangeVector]): Observable[RangeVector] = {

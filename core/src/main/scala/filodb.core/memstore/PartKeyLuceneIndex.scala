@@ -19,6 +19,7 @@ import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.{BytesRef, InfoStream}
+import org.apache.lucene.util.automaton.RegExp
 import scalaxy.loops._
 
 import filodb.core.{concurrentCache, DatasetRef}
@@ -159,7 +160,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     * Find partitions that ended ingesting before a given timestamp. Used to identify partitions that can be purged.
     * @return matching partIds
     */
-  def partIdsEndedBefore(endedBefore: Long): EWAHCompressedBitmap = {
+  def partIdsEndedBefore(endedBefore: Long): debox.Buffer[Int] = {
     val collector = new PartIdCollector()
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
 
@@ -179,12 +180,10 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   /**
     * Delete partitions with given partIds
     */
-  def removePartKeys(partIds: EWAHCompressedBitmap): Unit = {
+  def removePartKeys(partIds: debox.Buffer[Int]): Unit = {
     val terms = new util.ArrayList[BytesRef]()
-    val iter = partIds.intIterator()
-    while (iter.hasNext) {
-      val pId = iter.next()
-      terms.add(new BytesRef(pId.toString.getBytes))
+    for { i <- 0 until partIds.length optimized } {
+      terms.add(new BytesRef(partIds(i).toString.getBytes))
     }
     indexWriter.deleteDocuments(new TermInSetQuery(PART_ID, terms))
   }
@@ -434,13 +433,13 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     filter match {
       case EqualsRegex(value) =>
         val term = new Term(column, value.toString)
-        new RegexpQuery(term)
+        new RegexpQuery(term, RegExp.NONE)
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
         val booleanQuery = new BooleanQuery.Builder
         booleanQuery.add(allDocs, Occur.FILTER)
-        booleanQuery.add(new RegexpQuery(term), Occur.MUST_NOT)
+        booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
         val term = new Term(column, value.toString)
@@ -471,13 +470,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
 
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
-                         endTime: Long): IntIterator = {
-    partIdsFromFilters2(columnFilters, startTime, endTime).intIterator()
-  }
-
-  def partIdsFromFilters2(columnFilters: Seq[ColumnFilter],
-                         startTime: Long,
-                         endTime: Long): EWAHCompressedBitmap = {
+                         endTime: Long): debox.Buffer[Int] = {
     val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum)
@@ -628,7 +621,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 }
 
 class PartIdCollector extends SimpleCollector {
-  val result = new EWAHCompressedBitmap()
+  val result: debox.Buffer[Int] = debox.Buffer.empty[Int]
   private var partIdDv: NumericDocValues = _
 
   override def needsScores(): Boolean = false
@@ -640,13 +633,11 @@ class PartIdCollector extends SimpleCollector {
 
   override def collect(doc: Int): Unit = {
     if (partIdDv.advanceExact(doc)) {
-      result.set(partIdDv.longValue().toInt)
+      result += partIdDv.longValue().toInt
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
     }
   }
-
-  def intIterator(): IntIterator = result.intIterator()
 }
 
 class PartIdStartTimeCollector extends SimpleCollector {

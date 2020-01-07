@@ -28,7 +28,7 @@ trait Base {
   trait Series
 
   trait PeriodicSeries extends Series {
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams, function: Option[RangeFunctionId] = None): PeriodicSeriesPlan
   }
 
   trait SimpleSeries extends Series {

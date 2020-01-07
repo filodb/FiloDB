@@ -55,7 +55,8 @@ final case class ReduceAggregateExec(id: String,
 final case class AggregateMapReduce(aggrOp: AggregationOperator,
                                     aggrParams: Seq[Any],
                                     without: Seq[String],
-                                    by: Seq[String]) extends RangeVectorTransformer {
+                                    by: Seq[String],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   require(without == Nil || by == Nil, "Cannot specify both without and by clause")
   val withoutLabels = without.map(ZeroCopyUTF8String(_)).toSet
   val byLabels = by.map(ZeroCopyUTF8String(_)).toSet
@@ -66,7 +67,8 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
@@ -97,14 +99,16 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 }
 
 final case class AggregatePresenter(aggrOp: AggregationOperator,
-                                    aggrParams: Seq[Any]) extends RangeVectorTransformer {
+                                    aggrParams: Seq[Any],
+                                    funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }
@@ -350,6 +354,7 @@ object RowAggregator {
       case BottomK  => new TopBottomKRowAggregator(params(0).asInstanceOf[Double].toInt, true)
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
       case Stdvar   => StdvarRowAggregator
+      case Stddev   => StddevRowAggregator
       case _     => ???
     }
   }
@@ -612,7 +617,7 @@ object StdvarRowAggregator extends RowAggregator {
                      var stdVar: Double = Double.NaN,
                      var mean: Double = Double.NaN,
                      var count: Long = 0) extends AggregateHolder {
-    val row = new StdvarAggTransientRow()
+    val row = new StdValAggTransientRow()
     def toRowReader: MutableRowReader = {
       row.setLong(0, timestamp)
       row.setDouble(1, stdVar)
@@ -624,7 +629,7 @@ object StdvarRowAggregator extends RowAggregator {
   }
   type AggHolderType = StdvarHolder
   def zero: StdvarHolder = new StdvarHolder()
-  def newRowToMapInto: MutableRowReader = new StdvarAggTransientRow()
+  def newRowToMapInto: MutableRowReader = new StdValAggTransientRow()
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0, item.getLong(0))
     mapInto.setDouble(1, 0L)
@@ -634,7 +639,8 @@ object StdvarRowAggregator extends RowAggregator {
   }
   def reduceAggregate(acc: StdvarHolder, aggRes: RowReader): StdvarHolder = {
     acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
+
+    if (!aggRes.getDouble(1).isNaN && !aggRes.getDouble(2).isNaN) {
       if (acc.mean.isNaN) acc.mean = 0d
       if (acc.stdVar.isNaN) acc.stdVar = 0d
 
@@ -647,6 +653,70 @@ object StdvarRowAggregator extends RowAggregator {
       val aggSquareSum = (aggStdvar + math.pow(aggMean, 2)) * aggCount
       val newStdVar = (accSquareSum + aggSquareSum) / (acc.count + aggCount) - math.pow(newMean, 2)
       acc.stdVar = newStdVar
+      acc.mean = newMean
+      acc.count += aggCount
+    }
+    acc
+  }
+  // ignore last two column. we rely on schema change
+  def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
+  def reductionSchema(source: ResultSchema): ResultSchema = {
+    source.copy(source.columns :+ ColumnInfo("mean", ColumnType.DoubleColumn)
+      :+ ColumnInfo("count", ColumnType.LongColumn))
+  }
+  def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
+    // drop last two column with mean and count
+    reductionSchema.copy(reductionSchema.columns.dropRight(2))
+  }
+}
+
+/**
+  * Map: Every sample is mapped to three values: (a) the stddev value "0" and (b) the value itself
+  * (c) and its count value "1"
+  * ReduceAggregate: Similar as reduceAggregate for stdvar, since stddev = sqrt(stdvar)
+  * ReduceMappedRow: Same as ReduceAggregate
+  * Present: The current stddev is presented. Mean and Count value is dropped from presentation
+  */
+object StddevRowAggregator extends RowAggregator {
+  class StddevHolder(var timestamp: Long = 0L,
+                     var stddev: Double = Double.NaN,
+                     var mean: Double = Double.NaN,
+                     var count: Long = 0) extends AggregateHolder {
+    val row = new StdValAggTransientRow()
+    def toRowReader: MutableRowReader = {
+      row.setLong(0, timestamp)
+      row.setDouble(1, stddev)
+      row.setDouble(2, mean)
+      row.setLong(3, count)
+      row
+    }
+    def resetToZero(): Unit = { count = 0; mean = Double.NaN; stddev = Double.NaN }
+  }
+  type AggHolderType = StddevHolder
+  def zero: StddevHolder = new StddevHolder()
+  def newRowToMapInto: MutableRowReader = new StdValAggTransientRow()
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    mapInto.setLong(0, item.getLong(0))
+    mapInto.setDouble(1, 0L)
+    mapInto.setDouble(2, item.getDouble(1))
+    mapInto.setLong(3, if (item.getDouble(1).isNaN) 0L else 1L)
+    mapInto
+  }
+  def reduceAggregate(acc: StddevHolder, aggRes: RowReader): StddevHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    if (!aggRes.getDouble(1).isNaN && !aggRes.getDouble(2).isNaN) {
+      if (acc.mean.isNaN) acc.mean = 0d
+      if (acc.stddev.isNaN) acc.stddev = 0d
+
+      val aggStddev = aggRes.getDouble(1)
+      val aggMean = aggRes.getDouble(2)
+      val aggCount = aggRes.getLong(3)
+
+      val newMean = (acc.mean * acc.count + aggMean * aggCount) / (acc.count + aggCount)
+      val accSquareSum = (Math.pow(acc.stddev, 2) + math.pow(acc.mean, 2)) * acc.count
+      val aggSquareSum = (Math.pow(aggStddev, 2) + math.pow(aggMean, 2)) * aggCount
+      val newStddev = Math.pow((accSquareSum + aggSquareSum) / (acc.count + aggCount) - math.pow(newMean, 2), 0.5)
+      acc.stddev = newStddev
       acc.mean = newMean
       acc.count += aggCount
     }
@@ -737,7 +807,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
     val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
-    val recSchema = SerializableRangeVector.toSchema(colSchema)
+    val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
@@ -750,7 +820,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
         while (row.notNull(i)) {
           if (row.filoUTF8String(i) != CustomRangeVectorKey.emptyAsZcUtf8) {
             val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-            val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.newBuilder())
+            val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
             builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))
             builder.addDouble(row.getDouble(i + 1))
@@ -764,7 +834,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum
-      new SerializableRangeVector(key, numRows, builder.allContainers, recSchema, 0)
+      new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }
 

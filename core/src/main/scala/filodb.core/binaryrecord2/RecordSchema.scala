@@ -226,21 +226,23 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
     */
   def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
     import Column.ColumnType._
-    val resultMap = new collection.mutable.ArrayBuffer[(String, String)]()
+    val result = new collection.mutable.ArrayBuffer[(String, String)]()
     columnTypes.zipWithIndex.map {
-      case (IntColumn, i)    => resultMap += ((colNames(i), getInt(base, offset, i).toString))
-      case (LongColumn, i)   => resultMap += ((colNames(i), getLong(base, offset, i).toString))
-      case (DoubleColumn, i) => resultMap += ((colNames(i), getDouble(base, offset, i).toString))
-      case (StringColumn, i) => resultMap += ((colNames(i), asJavaString(base, offset, i).toString))
-      case (TimestampColumn, i) => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (IntColumn, i)    => result += ((colNames(i), getInt(base, offset, i).toString))
+      case (LongColumn, i)   => result += ((colNames(i), getLong(base, offset, i).toString))
+      case (DoubleColumn, i) => result += ((colNames(i), getDouble(base, offset, i).toString))
+      case (StringColumn, i) => result += ((colNames(i), asJavaString(base, offset, i).toString))
+      case (TimestampColumn, i) => result += ((colNames(i), getLong(base, offset, i).toString))
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
-                                resultMap ++= consumer.stringPairs
-      case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
+                                result ++= consumer.stringPairs
+      case (BinaryRecordColumn, i) => result ++= brSchema(i).toStringPairs(base, offset)
+                                result += ("_type_" ->
+                                              Schemas.global.schemaName(RecordSchema.schemaID(base, offset)))
       case (HistogramColumn, i) =>
-        resultMap += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
+        result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
-    resultMap
+    result
   }
 
   /**

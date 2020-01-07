@@ -2,9 +2,10 @@ package filodb.query.exec
 
 import java.util.concurrent.ThreadLocalRandom
 
+import filodb.core.query.TransientRow
+
 import scala.concurrent.duration._
 import scala.util.Random
-
 import filodb.query.exec.rangefn.{LastSampleChunkedFunctionD, LastSampleFunction, RawDataWindowingSpec}
 
 class LastSampleFunctionSpec extends RawDataWindowingSpec {
@@ -31,50 +32,6 @@ class LastSampleFunctionSpec extends RawDataWindowingSpec {
       validateLastSamples(samples, chunkedIter, start, end, step)
     }
   }
-
-  it ("test") {
-//    val step = 2000
-////    (-20000 to 20000).by(2500).foreach{ diff =>
-//      val start = now + 1000
-//      val end = start + 100000L
-//
-//      println(s" rv:")
-////      val lastSamplesIter = new SlidingWindowItera
-////      tor(rv.rows, start, step, end, 0, LastSampleFunction, queryConfig)
-////      validateLastSamples(samples, lastSamplesIter, start, end, step)
-//      val chunkedIter = new ChunkedWindowIteratorD(rv, start, step, end, w, chunkedLSFunc, queryConfig)
-var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
-    val rv = timeValueRV(data)
-    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
-    println("input list:" + list)
-
-
-    val windowSize = 100
-    val step = 20
-
-    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 5000, 120000, 30000,
-      new LastSampleChunkedFunctionD, queryConfig)
-
-    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-    println("aggregated:" + aggregated)
-
-      //validateLastSamples(samples, chunkedIter, start, end, step)
-//    }
-  }
-
-//  it("should correctly do changes") {
-//    var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
-//    val rv = timeValueRV(data)
-//    val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
-//
-//    val windowSize = 100
-////    val step = 20
-//
-//    val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-//      new ChangesChunkedFunctionD(), queryConfig)
-//    val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
-//    aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
-//  }
 
   it ("should work for various steps") {
     val start = now

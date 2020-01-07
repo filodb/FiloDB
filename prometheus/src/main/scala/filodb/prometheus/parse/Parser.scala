@@ -350,7 +350,7 @@ object Parser extends Expression {
 
     expressionWithPrecedence match {
       case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)
-      case r: SimpleSeries => r.toRawSeriesPlan(timeParams, isRoot = true)
+      case r: SimpleSeries   => r.toRawSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
     }
   }

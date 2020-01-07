@@ -65,12 +65,12 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
 
   def printHelp(): Unit = {
     println("filo-cli help:")
-    println("  commands: init create importcsv list truncate clearMetadata")
+    println("  commands: init create importcsv list clearMetadata")
     println("  dataColumns/partitionColumns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bitmap,ts,map")
     println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
-    println("\n  NOTE: truncate and clearMetadata should NOT be used while FiloDB instances are up\n")
+    println("\n  NOTE: clearMetadata should NOT be used while FiloDB instances are up\n")
     println("\nStandalone client commands:")
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset> --shards SS")
@@ -271,7 +271,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
-            case QueryResult(_, schema, result) => println(s"Number of Range Vectors: ${result.size}")
+            case QueryResult(_, schema, result) => println(s"Output schema: $schema")
+                                                   println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case QueryError(_,ex)               => println(s"QueryError: ${ex.getClass.getSimpleName} ${ex.getMessage}")
           }

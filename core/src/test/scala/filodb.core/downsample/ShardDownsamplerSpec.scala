@@ -3,7 +3,8 @@ package filodb.core.downsample
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 
-import filodb.core.{TestData, MachineMetricsData => MMD}
+import filodb.core.{MachineMetricsData => MMD}
+import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer, StringifyMapItemConsumer}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats, WriteBufferPool}
 import filodb.core.metadata._
@@ -11,7 +12,8 @@ import filodb.core.metadata.Column.ColumnType._
 import filodb.core.query.RawDataRangeVector
 import filodb.core.store.AllChunkScan
 import filodb.memory._
-import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String, vectors => bv}
+import filodb.memory.format.{vectors => bv}
+import filodb.memory.format.{TupleRowReader, ZeroCopyUTF8String}
 
 // scalastyle:off null
 class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll {
@@ -20,6 +22,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     Seq("someStr:string", "tags:map"),
     Seq("timestamp:ts", "value:double"),
     Seq("tTime(0)", "dMin(1)", "dMax(1)", "dSum(1)", "dCount(1)", "dAvg(1)"),
+    None,
     DatasetOptions(Seq("__name__", "job"), "__name__", true),
     dsSchema = Some("ds")).get
   val promSchema = promDataset.schema
@@ -35,8 +38,9 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   val customDataset = Dataset.make("custom2",
     Seq("name:string", "namespace:string", "instance:string"),
-    Seq("timestamp:ts", "count:double", "min:double", "max:double", "total:double", "avg:double", "h:hist:counter=false"),
+    Seq("timestamp:ts", "count:double", "min:double", "max:double", "sum:double", "avg:double", "h:hist:counter=false"),
     Seq("tTime(0)", "dSum(1)", "dMin(2)", "dMax(3)", "dSum(4)", "dAvgAc(5@1)", "hSum(6)"),
+    None,
     DatasetOptions(Seq("name", "namespace"), "name", true),
     dsSchema = Some("custom2")).get
   val customSchema = customDataset.schema
@@ -131,13 +135,13 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val expectedMaxes = (100000d to 195000d by 5000).map(_ * 5) ++ Seq(995000d)
     downsampledData1.map(_._3) shouldEqual expectedMaxes
     // sums = (min to max).sum
-    val expectedSums = expectedMins.zip(expectedMaxes).map { case (min,max) => (min to max by 5000d).sum }
+    val expectedSums = expectedMins.zip(expectedMaxes).map { case (min, max) => (min to max by 5000d).sum }
     downsampledData1.map(_._4) shouldEqual expectedSums
     // counts
     val expectedCounts = Seq(1d) ++ Seq.fill(19)(5d) ++ Seq(4d)
     downsampledData1.map(_._5) shouldEqual expectedCounts
     // avg
-    val expectedAvgs = expectedSums.zip(expectedCounts).map { case (sum,count) => sum/count }
+    val expectedAvgs = expectedSums.zip(expectedCounts).map { case (sum, count) => sum/count }
     downsampledData1.map(_._6) shouldEqual expectedAvgs
 
     // with resolution 10000
@@ -176,13 +180,13 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val expectedMaxes2 = (100000d to 195000d by 10000).map(_ * 5) ++ Seq(995000d)
     downsampledData2.map(_._3) shouldEqual expectedMaxes2
     // sums = (min to max).sum
-    val expectedSums2 = expectedMins2.zip(expectedMaxes2).map { case (min,max) => (min to max by 5000d).sum }
+    val expectedSums2 = expectedMins2.zip(expectedMaxes2).map { case (min, max) => (min to max by 5000d).sum }
     downsampledData2.map(_._4) shouldEqual expectedSums2
     // counts
     val expectedCounts2 = Seq(1d) ++ Seq.fill(9)(10d) ++ Seq(9d)
     downsampledData2.map(_._5) shouldEqual expectedCounts2
     // avg
-    val expectedAvgs2 = expectedSums2.zip(expectedCounts2).map { case (sum,count) => sum/count }
+    val expectedAvgs2 = expectedSums2.zip(expectedCounts2).map { case (sum, count) => sum/count }
     downsampledData2.map(_._6) shouldEqual expectedAvgs2
   }
 

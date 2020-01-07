@@ -2,7 +2,7 @@ package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schema
-import filodb.core.query.ResultSchema
+import filodb.core.query.{MutableRowReader, ResultSchema, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
@@ -273,7 +273,7 @@ object RangeFunction {
             func: Option[InternalRangeFunction],
             columnType: ColumnType,
             config: QueryConfig,
-            funcParams: Seq[Any] = Nil,
+            funcParams: Seq[FuncArgs] = Nil,
             useChunked: Boolean): BaseRangeFunction =
     generatorFor(schema, func, columnType, config, funcParams, useChunked)()
 
@@ -284,7 +284,7 @@ object RangeFunction {
                    func: Option[InternalRangeFunction],
                    columnType: ColumnType,
                    config: QueryConfig,
-                   funcParams: Seq[Any] = Nil,
+                   funcParams: Seq[FuncArgs] = Nil,
                    useChunked: Boolean = true): RangeFunctionGenerator = {
     if (useChunked) columnType match {
       case ColumnType.DoubleColumn => doubleChunkedFunction(schema, func, config, funcParams)
@@ -302,7 +302,7 @@ object RangeFunction {
    */
   def longChunkedFunction(schema: ResultSchema,
                           func: Option[InternalRangeFunction],
-                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+                          funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionL
       case Some(CountOverTime)    => () => new CountOverTimeChunkedFunction()
@@ -316,6 +316,7 @@ object RangeFunction {
       case Some(StdVarOverTime)   => () => new StdVarOverTimeChunkedFunctionL
       case Some(Changes)          => () => new ChangesChunkedFunctionL
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
+      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
@@ -323,10 +324,11 @@ object RangeFunction {
   /**
    * Returns a function to generate a ChunkedRangeFunction for Double columns
    */
+  // scalastyle:off cyclomatic.complexity
   def doubleChunkedFunction(schema: ResultSchema,
                             func: Option[InternalRangeFunction],
                             config: QueryConfig,
-                            funcParams: Seq[Any] = Nil): RangeFunctionGenerator = {
+                            funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
@@ -345,9 +347,11 @@ object RangeFunction {
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
       case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
       case Some(Timestamp)        => () => new TimestampChunkedFunction()
+      case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
       case _                      => iteratingFunction(func, funcParams)
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   def histMaxRangeFunction(f: Option[InternalRangeFunction]): Option[InternalRangeFunction] =
     f match {
@@ -358,7 +362,7 @@ object RangeFunction {
 
   def histChunkedFunction(schema: ResultSchema,
                           func: Option[InternalRangeFunction],
-                          funcParams: Seq[Any] = Nil): RangeFunctionGenerator = func match {
+                          funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = func match {
     case None                 => () => new LastSampleChunkedFunctionH
     case Some(LastSampleHistMax) => require(schema.columns(2).name == "max")
                                  () => new LastSampleChunkedFunctionHMax(schema.colIDs(2))

@@ -1,5 +1,6 @@
 package filodb.prometheus.ast
 
+import filodb.core.query.RangeParams
 import filodb.query._
 
 
@@ -27,25 +28,44 @@ trait Expressions extends Aggregates with Functions {
     if (vectorMatch.isDefined) {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
-
-
-    override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    // scalastyle:off method.length
+    override def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
+                                      function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
       }
 
-      lhs match {
-        case expression: ScalarExpression if rhs.isInstanceOf[PeriodicSeries] =>
-          val scalar = expression.toScalar
-          val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+      (lhs, rhs) match {
+        case (lh: Function, rh: Function) if lh.isScalarFunction() && rh.isScalarFunction() =>
+          val scalar = lh.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+          val seriesPlanRhs = rh.toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
+
+        case (lh: ScalarExpression, rh: PeriodicSeries) =>
+          val scalar = ScalarFixedDoublePlan(lh.toScalar,
+            RangeParams(timeParams.start, timeParams.step, timeParams.end))
+          val seriesPlan = rh.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
-        case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
-          val scalar = rhs.asInstanceOf[ScalarExpression].toScalar
-          val seriesPlan = series.toPeriodicSeriesPlan(timeParams)
+
+        case (lh: PeriodicSeries, rh: ScalarExpression) =>
+          val scalar = ScalarFixedDoublePlan(rh.toScalar, RangeParams(timeParams.start, timeParams.step,
+            timeParams.end))
+          val seriesPlan = lh.toPeriodicSeriesPlan(timeParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
-        case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>
-          val seriesPlanLhs = series.toPeriodicSeriesPlan(timeParams)
-          val seriesPlanRhs = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+
+        case (lh: Function, rh: PeriodicSeries) if lh.isScalarFunction() =>
+          val scalar = lh.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+          val seriesPlanRhs = rh.toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
+
+        case (lh: PeriodicSeries, rh: Function) if rh.isScalarFunction =>
+          val scalar = rh.toPeriodicSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
+          val seriesPlanlhs = lh.toPeriodicSeriesPlan(timeParams)
+          ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
+
+        case (lh: PeriodicSeries, rh: PeriodicSeries) =>
+          val seriesPlanLhs = lh.toPeriodicSeriesPlan(timeParams)
+          val seriesPlanRhs = rh.toPeriodicSeriesPlan(timeParams)
           val cardinality = if (operator.getPlanOperator.isInstanceOf[SetOperator])
             Cardinality.ManyToMany
           else
@@ -58,9 +78,11 @@ trait Expressions extends Aggregates with Functions {
           BinaryJoin(seriesPlanLhs, operator.getPlanOperator, cardinality, seriesPlanRhs,
             onLabels.getOrElse(Nil), ignoringLabels.getOrElse(Nil),
             vectorMatch.flatMap(_.grouping).map(_.labels).getOrElse(Nil))
+
+        case _ => throw new UnsupportedOperationException("Invalid operands")
       }
     }
+    // scalastyle:on method.length
   }
-
 
 }

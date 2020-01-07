@@ -5,10 +5,9 @@ import akka.testkit.TestProbe
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
+
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.ConfigFactory
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, MetricsTestData, SpreadChange}

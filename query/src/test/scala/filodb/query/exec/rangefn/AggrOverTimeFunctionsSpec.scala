@@ -1,16 +1,15 @@
 package filodb.query.exec.rangefn
 
 import scala.util.Random
-
+import scala.collection.mutable.ArrayBuffer
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.query.RawDataRangeVector
+import filodb.core.query.{RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.AllChunkScan
-import filodb.core.{MachineMetricsData => MMD, MetricsTestData, TestData}
+import filodb.core.{MetricsTestData, TestData, MachineMetricsData => MMD}
 import filodb.memory._
-import filodb.memory.format.{vectors => bv, TupleRowReader}
+import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.query.QueryConfig
 import filodb.query.exec._
 
@@ -314,8 +313,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val twoSampleData = Seq(0.0, 1.0)
     val threeSampleData = Seq(1.0, 0.0, 2.0)
     val unevenSampleData = Seq(0.0, 1.0, 4.0)
+    val  rangeParams = RangeParams(100,20, 500)
 
-    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2)
+    val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2).map(x => StaticFuncArgs(x, rangeParams))
     val twoSampleDataResponses = Seq(0, 0.5, 0.75, 0.8, 1, Double.NegativeInfinity, Double.PositiveInfinity)
     val threeSampleDataResponses = Seq(0, 1, 1.5, 1.6, 2, Double.NegativeInfinity, Double.PositiveInfinity)
     val unevenSampleDataResponses = Seq(0, 1, 2.5, 2.8, 4, Double.NegativeInfinity, Double.PositiveInfinity)
@@ -343,7 +343,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val emptyData = Seq()
     var rv = timeValueRV(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
-      new QuantileOverTimeChunkedFunctionD(Seq(0.5)), queryConfig)
+      new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), queryConfig)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
     aggregatedEmpty(0) isNaN
 
@@ -359,7 +359,9 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(50) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-      val minChunkedIt = chunkedWindowIt(data, rv2, new QuantileOverTimeChunkedFunctionD(Seq(0.5)), windowSize, step)
+      val minChunkedIt = chunkedWindowIt(data, rv2,  new QuantileOverTimeChunkedFunctionD
+      (Seq(StaticFuncArgs(0.5, rangeParams))), windowSize, step)
+
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
     }
@@ -385,11 +387,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val aggregated2 = changesChunked.map(_.getDouble(1)).toBuffer
 
       data.sliding(windowSize, step).map(_.length - 2).toBuffer.zip(aggregated2).foreach {
-        case(val1, val2) => if (val1 == -1 ) {
-                               val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
-                             } else {
-                               val1 shouldEqual (val2)
-                             }
+        case (val1, val2) => if (val1 == -1) {
+                                val2.isNaN shouldEqual (true) // window does not have any element so changes will be NaN
+                              } else {
+                                val1 shouldEqual (val2)
+                              }
       }
     }
   }
@@ -400,6 +402,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val positiveTrendData4 = Seq(31800.0, 31840.0, 31880.0, 31920.0, 31960.0, 32000.0)
 
     val negativeTrendData2 = Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0)
+    val params = Seq(StaticFuncArgs(0.01, RangeParams(100,20,500)), StaticFuncArgs(0.1, RangeParams(100,20,500)))
 
     def holt_winters(arr: Seq[Double]): Double = {
       val sf = 0.01
@@ -424,25 +427,25 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
     var rv = timeValueRV(positiveTrendData2)
     val chunkedIt2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated2 = chunkedIt2.map(_.getDouble(1)).toBuffer
     aggregated2(0) shouldEqual holt_winters(positiveTrendData2)
 
     rv = timeValueRV(positiveTrendData3)
     val chunkedIt3 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated3 = chunkedIt3.map(_.getDouble(1)).toBuffer
     aggregated3(0) shouldEqual holt_winters(positiveTrendData3)
 
     rv = timeValueRV(positiveTrendData4)
     val chunkedIt4 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregated4 = chunkedIt4.map(_.getDouble(1)).toBuffer
     aggregated4(0) shouldEqual holt_winters(positiveTrendData4)
 
     rv = timeValueRV(negativeTrendData2)
     val chunkedItNeg2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), queryConfig)
+      new HoltWintersChunkedFunctionD(params), queryConfig)
     val aggregatedNeg2 = chunkedItNeg2.map(_.getDouble(1)).toBuffer
     aggregatedNeg2(0) shouldEqual holt_winters(negativeTrendData2)
 
@@ -454,7 +457,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val step = rand.nextInt(75) + 5
       info(s"  iteration $x  windowSize=$windowSize step=$step")
 
-      val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(Seq(0.01, 0.1)), windowSize, step)
+      val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(params), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
       val res = data.sliding(windowSize, step).map(_.drop(1)).map(holt_winters).toBuffer
       for (i <- res.indices) {
@@ -465,6 +468,55 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
           aggregated2(i) shouldBe (res(i) +- 0.0000000001)
         }
       }
+    }
+  }
+
+  it("should correctly calculate predict_linear") {
+    val data = (1 to 500).map(_.toDouble)
+    val rv2 = timeValueRV(data)
+    val duration = 50
+    val params = Seq(StaticFuncArgs(50, RangeParams(100,20,500)))
+
+    def predict_linear(s: Seq[Double], interceptTime: Long, startTime: Long): Double = {
+      val n = s.length.toDouble
+      var sumY = 0.0
+      var sumX = 0.0
+      var sumXY = 0.0
+      var sumX2 = 0.0
+      var x = 0.0
+      if (n >= 2) {
+        for (i <- 0 until n.toInt) {
+          x = (startTime + i * pubFreq - interceptTime) / 1000.0
+          sumY += s(i)
+          sumX += x
+          sumXY += x * s(i)
+          sumX2 += x * x
+        }
+        val covXY = sumXY - (sumX * sumY) / n.toDouble
+        val varX = sumX2 - (sumX * sumX) / n.toDouble
+        val slope = covXY.toDouble / varX.toDouble
+        val intercept = sumY / n - (slope * sumX) / n.toDouble
+        slope * duration + intercept
+      } else {
+        Double.NaN
+      }
+    }
+
+    val step = rand.nextInt(50) + 5
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      info(s" iteration $x  windowSize=$windowSize step=$step")
+      val ChunkedIt = chunkedWindowIt(data, rv2, new PredictLinearChunkedFunctionD(params), windowSize, step)
+      val aggregated2 = ChunkedIt.map(_.getDouble(1)).toBuffer
+      var res = new ArrayBuffer[Double]
+      var startTime = defaultStartTS + pubFreq
+      var endTime = startTime + (windowSize - 2) * pubFreq
+      for (item <- data.sliding(windowSize, step).map(_.drop(1))) {
+        res += predict_linear(item, endTime, startTime)
+        startTime += step * pubFreq
+        endTime += step * pubFreq
+      }
+      aggregated2 shouldEqual(res)
     }
   }
 }
