@@ -46,7 +46,8 @@ import filodb.memory.BinaryRegionLarge
  * @param sched A Scheduler for writes
  */
 class CassandraColumnStore(val config: Config, val readEc: Scheduler,
-                           val filoSessionProvider: Option[FiloSessionProvider] = None)
+                           val filoSessionProvider: Option[FiloSessionProvider] = None,
+                           val downsampledData: Boolean = false)
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
   import collection.JavaConverters._
@@ -161,7 +162,11 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   /**
     * Reads chunks by querying partitions by ingestion time range and subsequently filtering by user time range.
     *
-    * Important Detail: User End time is exclusive. Important since we should not downsample one sample in two job runs
+    * Important Details:
+    * 1. User End time is exclusive. Important since we should not downsample one sample in two job runs
+    * 2. Since we do a query based on maxChunkTime which is usually configured to be slightly greater than
+    *    flush interval, results can include chunks that are before the requested range. Callers need to
+    *    handle this case.
     */
   // scalastyle:off parameter.number
   def getChunksByIngestionTimeRange(datasetRef: DatasetRef,
@@ -206,7 +211,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
    * @return each split will have token_start, token_end, replicas filled in
    */
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = {
-    val keyspace = clusterConnector.keySpaceName(dataset)
+    val keyspace = clusterConnector.keyspace
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
     val tokenRanges = unwrapTokenRanges(clusterMeta.getTokenRanges.asScala.toSeq)
@@ -258,7 +263,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] = {
+                    partKeys: Observable[PartKeyRecord],
+                    diskTTLSeconds: Int): Future[Response] = {
     val table = getOrCreatePartitionKeysTable(ref, shard)
     val span = Kamon.buildSpan("write-part-keys").start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
@@ -289,6 +295,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   val stats = new ChunkSourceStats
 
+  def downsampledData: Boolean
+
   val cassandraConfig = config.getConfig("cassandra")
   val ingestionConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("ingestion-consistency-level"))
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
@@ -302,7 +310,10 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     def config: Config = cassandraConfig
     def ec: ExecutionContext = readEc
     val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
-  }
+
+    val keyspace: String = if (!downsampledData) config.getString("keyspace")
+                           else config.getString("downsample-keyspace")
+}
 
   val partParallelism = 4
 
@@ -356,7 +367,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                                     { dataset: DatasetRef =>
                                       new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
   }
-
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {
     val map = partitionKeysTableCache.getOrElseUpdate(dataset, { _ =>

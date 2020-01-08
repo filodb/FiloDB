@@ -158,9 +158,10 @@ sbt standalone/assembly cli/assembly gateway/assembly
 
 First initialize the keyspaces and tables in Cassandra. 
 ```
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
+./scripts/schema-create.sh filodb_admin filodb filodb_downsample prometheus 4 1,5 > /tmp/ddl.cql
+cqlsh -f /tmp/ddl.cql
 ```
-Verify that tables were created in `filodb` and `filodb-admin` keyspaces using `cqlsh`:
+Verify that tables were created in `filodb`, `filodb_downsample` and `filodb-admin` keyspaces using `cqlsh`:
 First type `cqlsh` to start the cassandra cli. Then check the keyspaces by entering `DESCRIBE keyspaces`.
 
 
@@ -173,7 +174,6 @@ The script below brings up the FiloDB Dev Standalone server, and then sets up th
 Note that the above script starts the server with configuration at `conf/timeseries-filodb-server.conf`. This config
 file refers to the following datasets that will be loaded on bootstrap:
 * `conf/timeseries-dev-source.conf`
-* `conf/timeseries-ds-1m-dev-source.conf`
 
 For queries to work properly you'll want to start a second server to serve all the shards:
 
@@ -319,10 +319,28 @@ Start first FiloDB server
 ```
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 1
 ```
-And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. Add the `-s` option to 
-the last server, so data setup is initiated after all servers come up.
+And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. 
 ```
-./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p -s
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p
+```
+
+### Downsample Filo Cluster
+
+To bring up local cluster for serving downsampled data
+
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 1
+```
+Subsequent servers. Change log file suffix with the `-l` option for each server.
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-ds.conf -l 2 -p
+```
+
+If you had run the unit test `DownsamplerMainSpec` which populates data into the downsample
+dataset, you can query downsample results by visiting the following URL: 
+
+```
+curl "http://localhost:8080/promql/prometheus/api/v1/query_range?query=my_counter\{_ws_='my_ws',_ns_='my_ns'\}&start=1574272801&end=1574273042&step=10&verbose=true&spread=2"
 ```
 
 #### Local Scale Testing
@@ -430,7 +448,7 @@ The number of shards in each dataset is preconfigured in the source config.  Ple
 
 Metrics are routed to shards based on factors:
 
-1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_`, `metric` labels are mandatory to calculate shard key along with `metric` column.
+1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_` labels are mandatory to calculate shard key along with `_metric_` column.
 2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
 ## Querying FiloDB

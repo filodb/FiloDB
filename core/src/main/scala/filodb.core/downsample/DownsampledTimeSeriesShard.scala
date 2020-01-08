@@ -1,12 +1,11 @@
 package filodb.core.downsample
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import java.util.Arrays
 import monix.reactive.Observable
-import net.ceedubs.ficus.Ficus._
 
 import filodb.core.{DatasetRef, GlobalScheduler}
 import filodb.core.binaryrecord2.RecordSchema
@@ -17,31 +16,30 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesShard(ref: DatasetRef,
-                                 storeConfig: StoreConfig,
+                                 val storeConfig: StoreConfig,
                                  val schemas: Schemas,
                                  colStore: ColumnStore,
                                  shardNum: Int,
-                                 filodbConfig: Config)
+                                 filodbConfig: Config,
+                                 downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
   val shardStats = new TimeSeriesShardStats(ref, shardNum)
 
-  val downsamplerConfig = filodbConfig.getConfig("downsampler")
-  val downsampleResolutions = downsamplerConfig.as[Seq[FiniteDuration]]("resolutions")
-  val downsampleTtls = downsamplerConfig.as[Seq[FiniteDuration]]("ttls")
-  require(downsampleResolutions.sorted == downsampleResolutions, "Resolutions not sorted")
-  require(downsampleResolutions.length == downsampleTtls.length,
-    "Invalid configuration. Downsample resolutions and ttl have different length")
-  val indexResolution = downsampleResolutions(downsampleTtls.indexOf(downsampleTtls.max))
-  val downsampledDatasetRefs = DownsampledTimeSeriesStore.downsampleDatasetRefs(ref, downsampleResolutions)
-  val indexDataset = downsampledDatasetRefs(indexResolution)
+  val downsampleResolutions = downsampleConfig.resolutions
+  val downsampleTtls = downsampleConfig.ttls
+  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(ref.dataset)
+
+  val indexResolution = downsampleResolutions.last
+  val indexDataset = downsampledDatasetRefs.last
+  val indexTtl = downsampleTtls.last
 
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
 
   private var nextPartitionID = 0
 
-  private final val partKeyIndex = new PartKeyLuceneIndex(ref, schemas.part, shardNum, downsampleTtls.max)
+  private final val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtl)
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -66,10 +64,10 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   def recoverIndex(): Future[Unit] = {
     val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref,
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset,
                                      GlobalScheduler.globalImplicitScheduler){ _ => createPartitionID() }
-      .map { _ =>
-        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum")
+      .map { count =>
+        logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }
   }
 
@@ -150,11 +148,10 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
 
   private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = {
     chunkScanMethod match {
-      case AllChunkScan => downsampledDatasetRefs(downsampleTtls.last)
+      case AllChunkScan => downsampledDatasetRefs.last // since it is the highest resolution/ttl
       case TimeRangeChunkScan(startTime, _) =>
-        val res = downsampleTtls.find(t => startTime > System.currentTimeMillis() - t.toMillis)
-                                .getOrElse(downsampleTtls.last)
-        downsampledDatasetRefs(res)
+        val ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
+        downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }
@@ -206,11 +203,15 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   }
 
   /**
-    * retrieve partKey for a given PartId
+    * Retrieve partKey for a given PartId by looking up index
     */
   private def partKeyFromPartId(partId: Int): Array[Byte] = {
-    val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
-    if (partKeyByteBuf.isDefined) partKeyByteBuf.get.bytes
+    val partKeyBytes = partKeyIndex.partKeyFromPartId(partId)
+    if (partKeyBytes.isDefined)
+      // make a copy because BytesRef from lucene can have additional length bytes in its array
+      // TODO small optimization for some other day
+      Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
+        partKeyBytes.get.offset + partKeyBytes.get.length)
     else throw new IllegalStateException("This is not an expected behavior." +
       " PartId should always have a corresponding PartKey!")
   }

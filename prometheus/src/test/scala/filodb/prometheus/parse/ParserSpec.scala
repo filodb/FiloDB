@@ -297,10 +297,6 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Increase,List(),None)",
       "sum(http_requests_total{method=\"GET\"} offset 5m)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855388000,1524855688000),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855688000,1000000,1524855688000,Some(300000)),List(),List(),List())",
-      "absent(nonexistent{job=\"myjob\",instance=~\".*\"})" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(instance,EqualsRegex(.*)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000000,1524855988000,None),Absent,List())",
-      "absent(sum(nonexistent{job=\"myjob\"}))" ->
-        "ApplyInstantFunction(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000000,1524855988000,None),List(),List(),List()),Absent,List())",
       """{__name__="foo\\\"\n\t",job="myjob"}[5m]""" ->
         "RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(foo\\\"\n\t)), ColumnFilter(job,Equals(myjob))),List())",
       "{__name__=\"foo\",job=\"myjob\"}" ->
@@ -358,7 +354,8 @@ class ParserSpec extends FunSpec with Matchers {
       "sort(http_requests_total)" ->
         "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),Sort)",
       "sort_desc(http_requests_total)" ->
-        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),SortDesc)"
+        "ApplySortFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),SortDesc)",
+      "absent(http_requests_total{host=\"api-server\"})" -> "ApplyAbsentFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),RangeParams(1524855988,1000,1524855988),List())"
     )
 
     val qts: Long = 1524855988L

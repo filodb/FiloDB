@@ -14,7 +14,8 @@ trait Functions extends Base with Operators with Vectors {
       FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       ScalarFunctionId.withNameInsensitiveOption(name.toLowerCase).isEmpty &&
-      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+      AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
 
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
@@ -84,10 +85,11 @@ trait Functions extends Base with Operators with Vectors {
       val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
       val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
       val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
+      val absentFunctionIdOpt = AbsentFunctionId.withNameInsensitiveOption(name)
       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
-      val stringParam = allParams.filter(!_.equals(seriesParam)).
-                        filter(_.isInstanceOf[InstantExpression]).
-                        map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
+      val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
+        case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+      }
 
       if (miscellaneousFunctionIdOpt.isDefined) {
         val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
@@ -97,11 +99,15 @@ trait Functions extends Base with Operators with Vectors {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
         val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
         ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, params)
-      }
-      else if (sortFunctionIdOpt.isDefined) {
+      } else if (sortFunctionIdOpt.isDefined) {
         val sortFunctionId = sortFunctionIdOpt.get
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
         ApplySortFunction(periodicSeriesPlan, sortFunctionId)
+      } else if (absentFunctionIdOpt.isDefined) {
+        val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
+          timeParams.end))
       } else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]

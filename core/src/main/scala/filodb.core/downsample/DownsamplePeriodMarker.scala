@@ -40,7 +40,7 @@ trait DownsamplePeriodMarker {
 
   /**
     * Returns sorted collection of row numbers for the given chunkset that mark the
-    * periods to downsample
+    * periods to downsample. startRow and endRow are inclusive
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,
@@ -60,6 +60,8 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
+      s"chunkset: ${chunkset.debugString(part.schema)}")
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -103,28 +105,33 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): Buffer[Int] = {
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
+      s"chunkset: ${chunkset.debugString(part.schema)}")
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
-    result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
-      .periods(part, chunkset, resMillis, startRow + 1, endRow)
-    val ctrVecAcc = chunkset.vectorAccessor(inputColId)
-    val ctrVecPtr = chunkset.vectorAddress(inputColId)
-    val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)
-    ctrReader match {
-      case r: DoubleVectorDataReader =>
-        if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
-          val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
-          for {i <- 0 until drops.length optimized} {
-            result += drops(i) - 1
-            result += drops(i)
+    if (startRow < endRow) { // there is more than 1 row
+      result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
+        .periods(part, chunkset, resMillis, startRow + 1, endRow)
+      val ctrVecAcc = chunkset.vectorAccessor(inputColId)
+      val ctrVecPtr = chunkset.vectorAddress(inputColId)
+      val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)
+      ctrReader match {
+        case r: DoubleVectorDataReader =>
+          if (PrimitiveVectorReader.dropped(ctrVecAcc, ctrVecPtr)) { // counter dip detected
+            val drops = r.asInstanceOf[CorrectingDoubleVectorReader].dropPositions(ctrVecAcc, ctrVecPtr)
+            for {i <- 0 until drops.length optimized} {
+              if (drops(i) <= endRow) {
+                result += drops(i) - 1
+                result += drops(i)
+              }
+            }
           }
-        }
-      case _ =>
-        throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
+        case _ =>
+          throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
+      }
     }
 
-    // It would have been nice to use this piece of code which is more efficient, but
-    // it results in spire library version conflicts with Spark. :(
+    // Note: following alternative avoids copies, but results in spire library version conflicts with Spark. :(
 //    import spire.std.int._
 //    result.toSortedBuffer
 
@@ -133,7 +140,6 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
     debox.Buffer.fromArray(res)
   }
 }
-
 
 object DownsamplePeriodMarker {
 

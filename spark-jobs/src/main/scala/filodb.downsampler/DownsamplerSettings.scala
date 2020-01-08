@@ -40,7 +40,9 @@ object DownsamplerSettings extends StrictLogging {
 
   val downsampleResolutions = rawDatasetIngestionConfig.downsampleConfig.resolutions
 
-  val downsampleTtls = rawDatasetIngestionConfig.downsampleConfig.ttls
+  val downsampleTtls = rawDatasetIngestionConfig.downsampleConfig.ttls.map(_.toSeconds.toInt)
+
+  val downsampledDatasetRefs = rawDatasetIngestionConfig.downsampleConfig.downsampleDatasetRefs(rawDatasetName)
 
   val downsampleStoreConfig = StoreConfig(downsamplerConfig.getConfig("downsample-store-config"))
 
@@ -57,6 +59,10 @@ object DownsamplerSettings extends StrictLogging {
   val widenIngestionTimeRangeBy = downsamplerConfig.as[FiniteDuration]("widen-ingestion-time-range-by")
 
   val downsampleChunkDuration = downsampleStoreConfig.flushInterval.toMillis
+
+  val whitelist = downsamplerConfig.as[Seq[Map[String, String]]]("whitelist-filters").map(_.toSeq)
+
+  val blacklist = downsamplerConfig.as[Seq[Map[String, String]]]("blacklist-filters").map(_.toSeq)
 
 }
 
