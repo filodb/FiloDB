@@ -196,9 +196,9 @@ object QueryRoutingPlanner extends RoutingPlanner {
                                lookBackTime: Long): PeriodicSeriesPlan = {
     logicalPlan match {
       case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis, end = timeRange.endInMillis,
-        rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime))
+        rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime).asInstanceOf[RawSeries])
       case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis, end =
-        timeRange.endInMillis, rawSeries = copyRawSeriesWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime))
+        timeRange.endInMillis, series = copyNonPeriodicWithUpdatedTimeRange(lp.series, timeRange, lookBackTime))
       case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
       case lp: Aggregate => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
       case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange, lookBackTime), rhs =
@@ -215,14 +215,18 @@ object QueryRoutingPlanner extends RoutingPlanner {
   /**
     * Used to change rangeSelector of RawSeriesPlan
     */
-  def copyRawSeriesWithUpdatedTimeRange(rawSeriesPlan: SeriesPlan, timeRange: TimeRange, lookBackTime: Long):
-  RawSeries = {
-    rawSeriesPlan match {
+  def copyNonPeriodicWithUpdatedTimeRange(plan: NonPeriodicSeriesPlan,
+                                          timeRange: TimeRange,
+                                          lookBackTime: Long): NonPeriodicSeriesPlan = {
+    plan match {
       case rs: RawSeries => rs.rangeSelector match {
         case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,
           timeRange.endInMillis))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
+      case p: ApplyInstantFunctionRaw =>
+        p.copy(vectors = copyNonPeriodicWithUpdatedTimeRange(p.vectors, timeRange, lookBackTime)
+                           .asInstanceOf[RawSeries])
       case _ => throw new UnsupportedOperationException("Copy supported only for RawSeries")
     }
   }

@@ -206,7 +206,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
-    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): SeriesPlan = {
+    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): NonPeriodicSeriesPlan = {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
@@ -216,7 +216,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
         val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
-        ApplyInstantFunction(rs, InstantFunctionId.HistogramBucket, Seq(param))
+        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
       }.getOrElse(rs)
     }
 

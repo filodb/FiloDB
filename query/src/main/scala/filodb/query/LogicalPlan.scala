@@ -10,12 +10,12 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 }
 
-sealed trait SeriesPlan extends LogicalPlan
+sealed trait NonPeriodicSeriesPlan extends LogicalPlan
 
 /**
   * Super class for a query that results in range vectors with raw samples
   */
-sealed trait RawSeriesPlan extends SeriesPlan {
+sealed trait RawSeriesPlan extends NonPeriodicSeriesPlan {
   override def isRoutable: Boolean = false
 }
 
@@ -27,9 +27,9 @@ sealed trait NonLeafLogicalPlan extends LogicalPlan {
   * Super class for a query that results in range vectors with samples
   * in regular steps
   */
-sealed trait PeriodicSeriesPlan extends SeriesPlan
+sealed trait PeriodicSeriesPlan extends LogicalPlan
 
-sealed trait MetadataQueryPlan extends LogicalPlan{
+sealed trait MetadataQueryPlan extends LogicalPlan {
   override def isRoutable: Boolean = false
 }
 
@@ -95,10 +95,10 @@ case class PeriodicSeries(rawSeries: RawSeriesPlan,
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
   *
-  * Applies a range function on raw windowed data before
+  * Applies a range function on raw windowed data (perhaps with instant function applied) before
   * sampling data at regular intervals.
   */
-case class PeriodicSeriesWithWindowing(rawSeries: SeriesPlan,
+case class PeriodicSeriesWithWindowing(series: NonPeriodicSeriesPlan,
                                        start: Long,
                                        step: Long,
                                        end: Long,
@@ -106,7 +106,7 @@ case class PeriodicSeriesWithWindowing(rawSeries: SeriesPlan,
                                        function: RangeFunctionId,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
                                        offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
-  override def children: Seq[LogicalPlan] = Seq(rawSeries)
+  override def children: Seq[LogicalPlan] = Seq(series)
 }
 
 /**
@@ -155,11 +155,23 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
 }
 
 /**
-  * Apply Instant Vector Function to a collection of RangeVectors
+  * Apply Instant Vector Function to a collection of periodic RangeVectors,
+  * returning another set of periodic vectors
   */
-case class ApplyInstantFunction(vectors: SeriesPlan,
+case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
                                 functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+}
+
+/**
+  * Apply Instant Vector Function to a collection of raw RangeVectors,
+  * returning another set of non-periodic vectors
+  */
+case class ApplyInstantFunctionRaw(vectors: RawSeriesPlan,
+                                   function: InstantFunctionId,
+                                   functionArgs: Seq[FunctionArgsPlan] = Nil) extends NonPeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
