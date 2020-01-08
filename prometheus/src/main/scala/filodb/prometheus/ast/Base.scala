@@ -42,6 +42,8 @@ trait Base {
   /**
    * Converts a TimeRangeParams into a RangeSelector at timeParam.start - startOffset
    * timeParam.start is in seconds, startOffset is in millis
+   * @param startOffset lookback time
+   * @param offset offset function time
    */
   def timeParamToSelector(timeParam: TimeRangeParams, startOffset: Long, offset: Long = 0): RangeSelector =
     timeParam match {
