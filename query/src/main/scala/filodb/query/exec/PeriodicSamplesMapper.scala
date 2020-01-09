@@ -91,12 +91,19 @@ final case class PeriodicSamplesMapper(start: Long,
               rangeFuncGen().asSliding, queryConfig))
         }
     }
+
+    // Adds offset to timestamp to generate output of offset function, since the time should be according to query
+    // time parameters
     offset.map(o => rvs.map { rv =>
       new RangeVector {
+        val row = new TransientRow()
+
         override def key: RangeVectorKey = rv.key
 
         override def rows: Iterator[RowReader] = rv.rows.map { r =>
-          new TransientRow(r.getLong(0) + o, r.getDouble(1))
+          row.setLong(0, r.getLong(0) + o)
+          row.setDouble(1, r.getDouble(1))
+          row
         }
       }
     }).getOrElse(rvs)
