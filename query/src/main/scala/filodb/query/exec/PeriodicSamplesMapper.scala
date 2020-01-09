@@ -26,7 +26,8 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
-                                       funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
+                                       funcParams: Seq[FuncArgs] = Nil,
+                                       offset: Option[Long] = None) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
@@ -60,7 +61,7 @@ final case class PeriodicSamplesMapper(start: Long,
     // so that it returns value present at time - staleSampleAfterMs
     val windowLength = window.getOrElse(if (isLastFn) queryConfig.staleSampleAfterMs + 1 else 0L)
 
-    sampleRangeFunc match {
+    val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
         source.map { rv =>
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
@@ -90,6 +91,22 @@ final case class PeriodicSamplesMapper(start: Long,
               rangeFuncGen().asSliding, queryConfig))
         }
     }
+
+    // Adds offset to timestamp to generate output of offset function, since the time should be according to query
+    // time parameters
+    offset.map(o => rvs.map { rv =>
+      new RangeVector {
+        val row = new TransientRow()
+
+        override def key: RangeVectorKey = rv.key
+
+        override def rows: Iterator[RowReader] = rv.rows.map { r =>
+          row.setLong(0, r.getLong(0) + o)
+          row.setDouble(1, r.getDouble(1))
+          row
+        }
+      }
+    }).getOrElse(rvs)
   }
   //scalastyle:on method.length
 

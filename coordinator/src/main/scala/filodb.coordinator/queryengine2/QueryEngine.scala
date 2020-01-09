@@ -354,17 +354,17 @@ class QueryEngine(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), paramsExec)))
+      lp.end, Some(lp.window), Some(execRangeFn), paramsExec, lp.offset)))
     rawSeries
   }
 
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
-                                       options: QueryOptions,
-                                       lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
+                                        options: QueryOptions,
+                                        lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
-      None, None, Nil)))
+      None, None, Nil, lp.offset)))
     rawSeries
   }
 
