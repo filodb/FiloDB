@@ -1107,9 +1107,12 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private def addPartitionForIngestion(recordBase: Any, recordOff: Long, schema: Schema, group: Int) = {
     assertThreadName(IngestSchedName)
-    logger.debug(s"Adding part key XXX: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
+    // TODO: remove when no longer needed - or figure out how to log only for tracing partitions
+    logger.debug(s"Adding ingestion record details: ${schema.ingestionSchema.debugString(recordBase, recordOff)}")
     val partKeyOffset = schema.comparator.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
     val previousPartId = lookupPreviouslyAssignedPartId(partKeyArray, partKeyOffset)
+    // TODO: remove when no longer needed
+    logger.debug(s"Adding part key details: ${schema.partKeySchema.debugString(partKeyArray, partKeyOffset)}")
     val newPart = createNewPartition(partKeyArray, partKeyOffset, group, previousPartId, schema)
     if (newPart != OutOfMemPartition) {
       val partId = newPart.partID
