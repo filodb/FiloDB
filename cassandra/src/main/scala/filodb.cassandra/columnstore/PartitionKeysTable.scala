@@ -5,7 +5,7 @@ import java.lang.{Integer => JInt, Long => JLong}
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.ConsistencyLevel
+import com.datastax.driver.core.{ConsistencyLevel, Row}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -56,11 +56,15 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
         s"WHERE TOKEN(partKey) >= $start AND TOKEN(partKey) < $end "
     val it = tokens.iterator.flatMap { case (start, end) =>
       session.execute(cql(start, end)).iterator.asScala
-        .map { row => PartKeyRecord(row.getBytes("partKey").array(),
-          row.getLong("startTime"), row.getLong("endTime")) }
+        .map(PartitionKeysTable.rowToPartKeyRecord)
     }
     Observable.fromIterator(it).handleObservableErrors
   }
-
 }
 
+object PartitionKeysTable {
+  private[columnstore] def rowToPartKeyRecord(row: Row) = {
+    PartKeyRecord(row.getBytes("partKey").array(),
+      row.getLong("startTime"), row.getLong("endTime"), None)
+  }
+}

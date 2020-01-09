@@ -490,6 +490,40 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     partKeySpan.finish()
     collector.result
   }
+
+  def partIdFromPartKeySlow(partKeyBase: Any,
+                            partKeyOffset: Long): Option[Int] = {
+
+    val columnFilters = schema.binSchema.toStringPairs(partKeyBase, partKeyOffset)
+      .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
+
+    val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum)
+      .start()
+    val booleanQuery = new BooleanQuery.Builder
+    columnFilters.foreach { filter =>
+      val q = leafFilter(filter.column, filter.filter)
+      booleanQuery.add(q, Occur.FILTER)
+    }
+    val query = booleanQuery.build()
+    logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
+    var chosenPartId: Option[Int] = None
+    def handleMatch(partId: Int, candidate: BytesRef): Unit = {
+      if (schema.binSchema.equals(partKeyBase, partKeyOffset,
+        candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
+        logger.debug(s"There is already a partId=$partId assigned for " +
+          s"${schema.binSchema.stringify(partKeyBase, partKeyOffset)} in" +
+          s" dataset=$ref shard=$shardNum")
+        chosenPartId = chosenPartId.orElse(Some(partId))
+      }
+    }
+    val collector = new ActionCollector(handleMatch)
+    withNewSearcher(s => s.search(query, collector))
+    partKeySpan.finish()
+    chosenPartId
+  }
+
 }
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {

@@ -18,6 +18,7 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesStore(val store: ColumnStore,
+                                 rawColStore: ColumnStore,
                                  val metastore: MetaStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
@@ -37,7 +38,8 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store, shard, filodbConfig, downsample)
+      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store,
+                                                rawColStore, shard, filodbConfig, downsample)
       shards.put(shard, tsdb)
     }
   }
@@ -104,9 +106,6 @@ extends MemStore with StrictLogging {
     shard.scanPartitions(lookupRes)
 
   }
-
-  def shardMetrics(dataset: DatasetRef, shard: Int): TimeSeriesShardStats =
-    getShard(dataset, shard).get.shardStats
 
   def activeShards(dataset: DatasetRef): Seq[Int] =
     datasets.get(dataset).map(_.keySet.asScala.map(_.toInt).toSeq).getOrElse(Nil)

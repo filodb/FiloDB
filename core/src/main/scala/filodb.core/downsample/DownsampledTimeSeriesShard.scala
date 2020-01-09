@@ -1,10 +1,13 @@
 package filodb.core.downsample
 
+import java.util.Arrays
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import java.util.Arrays
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, GlobalScheduler}
@@ -15,20 +18,19 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class DownsampledTimeSeriesShard(ref: DatasetRef,
+class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  val storeConfig: StoreConfig,
                                  val schemas: Schemas,
-                                 colStore: ColumnStore,
+                                 store: ColumnStore, // downsample colStore
+                                 rawColStore: ColumnStore,
                                  shardNum: Int,
                                  filodbConfig: Config,
                                  downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
-  val shardStats = new TimeSeriesShardStats(ref, shardNum)
-
   val downsampleResolutions = downsampleConfig.resolutions
   val downsampleTtls = downsampleConfig.ttls
-  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(ref.dataset)
+  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
 
   val indexResolution = downsampleResolutions.last
   val indexDataset = downsampledDatasetRefs.last
@@ -37,9 +39,16 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
 
-  private var nextPartitionID = 0
+  private val nextPartitionID = new AtomicInteger(0)
 
   private final val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtl)
+
+  private val indexUpdatedHour = new AtomicLong(0)
+
+  val indexBootstrapper = new IndexBootstrapper(store)
+  val indexRefresher = new IndexBootstrapper(rawColStore)
+
+  var indexUpdateFuture: Future[Unit] = _
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -62,13 +71,39 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     }
   }
 
+  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
+
   def recoverIndex(): Future[Unit] = {
-    val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset,
-                                     GlobalScheduler.globalImplicitScheduler){ _ => createPartitionID() }
+    indexUpdatedHour.set(hour() - 1)
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
-      }
+      }.map { _ =>
+      startIndexUpdateTask()
+    }.runAsync(GlobalScheduler.globalImplicitScheduler)
+  }
+
+  def startIndexUpdateTask(): Unit = {
+    logger.info(s"Starting Index Refresh task for downsample dataset=$rawDatasetRef shard=$shardNum ")
+    indexUpdateFuture = Observable.intervalWithFixedDelay(1.hour, 1.hour).mapAsync { i =>
+      val toHour = hour() - 1
+      val fromHour = indexUpdatedHour.get() + 1
+      logger.info(s"Refreshing downsample index for dataset=$rawDatasetRef shard=$shardNum " +
+        s"fromHour=$fromHour toHour=$toHour")
+      indexRefresher.updateIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+        .onErrorHandle { e =>
+          logger.error(s"Error occurred when refreshing downsample index " +
+            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+          0
+        }
+    }.completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
+
+    // TODO cleanup / stop future when shard is down
+  }
+
+  def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
+    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset)
+      .getOrElse(createPartitionID())
   }
 
   /**
@@ -76,14 +111,11 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     * partition ID wouldn't work with bitmaps.
     */
   private def createPartitionID(): Int = {
-    this.synchronized {
-      val id = nextPartitionID
-      nextPartitionID += 1
-      if (nextPartitionID < 0) {
-        throw new IllegalStateException("Too many partitions. Reached int capacity")
-      }
-      id
+    val next = nextPartitionID.incrementAndGet()
+    if (next == 0) {
+      throw new IllegalStateException("Too many partitions. Reached int capacity")
     }
+    next
   }
 
   def refreshPartKeyIndexBlocking(): Unit = {}
@@ -116,7 +148,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     // Step 1: Choose the downsample level depending on the range requested
     val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-    // Step 2: Query Cassandra table for that downsample level using colStore
+    // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
@@ -129,7 +161,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
-        colStore.readRawPartitions(downsampledDataset,
+        store.readRawPartitions(downsampledDataset,
                                    storeConfig.maxChunkTime.toMillis,
                                    SinglePartitionScan(partBytes, shardNum),
                                    lookup.chunkMethod)
