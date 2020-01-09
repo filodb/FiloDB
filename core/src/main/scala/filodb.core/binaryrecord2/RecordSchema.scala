@@ -223,6 +223,38 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
 
   /**
+   * Extremely detailed breakdown of this BinaryRecord, including offset numbers and bytes possibly.
+   */
+  def debugString(base: Any, offset: Long): String = {
+    def varOffset(i: Int): Int = UnsafeUtils.getInt(base, offset + offsets(i))
+
+    import Column.ColumnType._
+    val schemaStr = if (partitionFieldStart.isEmpty) "" else {
+                      val id = RecordSchema.schemaID(base, offset)
+                      s"  schemaID: $id (${Schemas.global.schemaName(id)})\n"
+                    }
+    val partHashStr = if (partitionFieldStart.isEmpty) "" else s"  partitionHash: ${partitionHash(base, offset)}\n"
+    val colDetails = columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => f"  +${offsets(i)}%05d ${colNames(i)}%14s I ${getInt(base, offset, i)}"
+      case (LongColumn, i)   => f"  +${offsets(i)}%05d ${colNames(i)}%14s L ${getLong(base, offset, i)}"
+      case (DoubleColumn, i) => f"  +${offsets(i)}%05d ${colNames(i)}%14s D ${getDouble(base, offset, i)}"
+      case (StringColumn, i) =>
+        f"  +${offsets(i)}%05d ${colNames(i)}%14s S -> +${varOffset(i)}%05d\n" +
+        s"\t${blobNumBytes(base, offset, i)} bytes: [${asJavaString(base, offset, i)}]"
+      case (TimestampColumn, i) => f"  +${offsets(i)}%05d ${colNames(i)}%14s L ${getLong(base, offset, i)}"
+      case (MapColumn, i)    => val consumer = new DebugStringMapItemConsumer(offset)
+                                consumeMapItems(base, offset, i, consumer)
+                                f"  +${offsets(i)}%05d ${colNames(i)}%14s M -> +${varOffset(i)}%05d\n" +
+                                  consumer.lines.mkString("\n")
+      case (BinaryRecordColumn, i)  => s"${colNames(i)}=${brSchema(i).stringify(base, offset)}"
+      case (HistogramColumn, i) =>
+        f"  +${offsets(i)}%05d ${colNames(i)}%14s H -> +${varOffset(i)}%05d\n" +
+        s"\t${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
+    }
+    s"BRDEBUG: ${numBytes(base, offset)} bytes, $numFields fields\n$schemaStr$partHashStr" + colDetails.mkString("\n")
+  }
+
+  /**
     * EXPENSIVE to do at server side. Creates a stringified map with contents of this BinaryRecord.
     */
   def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
@@ -361,6 +393,18 @@ class StringifyMapItemConsumer extends MapItemConsumer {
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     stringPairs += (UTF8StringShort.toString(keyBase, keyOffset) ->
                     UTF8StringMedium.toString(valueBase, valueOffset))
+  }
+}
+
+// Used for debugPrint only
+class DebugStringMapItemConsumer(baseOffset: Long) extends MapItemConsumer {
+  val lines = new collection.mutable.ArrayBuffer[String]
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    // TODO: emit actual bytes
+    val keyPrefix = if (keyBase == valueBase) f"+${keyOffset - baseOffset}%05d"
+                    else f"Predef: 0x${UnsafeUtils.getByte(valueBase, valueOffset - 1)}%02x"
+    lines += f"\tKey: $keyPrefix [${UTF8StringShort.toString(keyBase, keyOffset)}] " +
+             f"Value: +${valueOffset - baseOffset}%05d [${UTF8StringMedium.toString(valueBase, valueOffset)}]"
   }
 }
 
