@@ -2,7 +2,6 @@ package filodb.cassandra.columnstore
 
 import java.lang.{Integer => JInt, Long => JLong}
 
-import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.ConsistencyLevel
@@ -45,12 +44,13 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
       toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
   }
 
+  val readCql = session.prepare(s"SELECT * FROM $tableString " +
+    s"WHERE shard = ? AND updateHour = ? AND split = ? ")
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
-    val cql = s"SELECT * FROM ${tableString} " +
-              s"WHERE shard = $shard AND updateHour = $updateHour AND split = $split "
-    val it = session.execute(cql).iterator.asScala
-        .map(PartitionKeysTable.rowToPartKeyRecord)
-    Observable.fromIterator(it).handleObservableErrors
+    val fut: Future[Iterator[PartKeyRecord]] =
+      session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt)).toIterator.handleErrors
+             .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
+    Observable.fromFuture(fut).flatMap(Observable.fromIterator)
   }
 
 }

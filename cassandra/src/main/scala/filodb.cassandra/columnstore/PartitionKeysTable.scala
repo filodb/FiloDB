@@ -2,10 +2,10 @@ package filodb.cassandra.columnstore
 
 import java.lang.{Integer => JInt, Long => JLong}
 
-import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.{ConsistencyLevel, Row}
+import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -50,15 +50,18 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     }
   }
 
+  val scanCql = session.prepare(s"SELECT * FROM ${tableString} WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
-    def cql(start: String, end: String): String =
-      s"SELECT * FROM ${tableString} " +
-        s"WHERE TOKEN(partKey) >= $start AND TOKEN(partKey) < $end "
-    val it = tokens.iterator.flatMap { case (start, end) =>
-      session.execute(cql(start, end)).iterator.asScala
-        .map(PartitionKeysTable.rowToPartKeyRecord)
-    }
-    Observable.fromIterator(it).handleObservableErrors
+    val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
+      .mapAsync { range =>
+        val fut = session.executeAsync(scanCql.bind(range._1, range._2)).toIterator.handleErrors
+                         .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
+        Task.fromFuture(fut)
+      }
+    for {
+      pkRecs <- res
+      pk <- Observable.fromIterator(pkRecs)
+    } yield pk
   }
 }
 
