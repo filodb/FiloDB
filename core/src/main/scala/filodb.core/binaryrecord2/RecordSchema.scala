@@ -419,22 +419,35 @@ object RecordSchema {
                                                        MapColumn -> 4,
                                                        HistogramColumn -> 4)
 
+  private val tlKeyBuf = new ThreadLocal[Array[Byte]]()
+  private[binaryrecord2] def keyBuf: Array[Byte] = tlKeyBuf.get match {
+    case UnsafeUtils.ZeroPointer => val buf = new Array[Byte](8)
+                                    tlKeyBuf.set(buf)
+                                    buf
+    case b: Array[Byte]          => b
+  }
+
+  // Creates a Long by copying no more than 8 bytes from the bytes array, and zeroing out the rest
+  private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
+    val buf = keyBuf
+    java.util.Arrays.fill(buf, 0.toByte)
+    System.arraycopy(bytes, index, buf, 0, Math.min(len, 8))
+    UnsafeUtils.getLong(bytes, UnsafeUtils.arayOffset)
+  }
+
   /**
    * Creates a "unique" Long key for each incoming predefined key for quick lookup.  This will not be perfect
    * but probably good enough for the beginning.
-   * TODO: improve on this.  One reason for difficulty is that we need custom hashCode and equals functions and
-   * we don't want to box.
-   * In the output, the lower 32 bits is the hashcode of the bytes.
+   * If the key is 8 or less bytes, we just directly convert the bytes to a long for exact match.
+   * If the key is > 8 bytes, we use XXHash to compute a 64-bit hash.
    */
-  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long = {
-    val hash = BinaryRegion.hasher32.hash(strBytes, 0, strBytes.size, BinaryRegion.Seed)
-    (UnsafeUtils.getInt(strBytes, UnsafeUtils.arayOffset).toLong << 32) | hash
-  }
+  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long =
+    makeKeyKey(strBytes, 0, strBytes.size, 7)
 
   private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
-    val hash = if (keyHash != 7) { keyHash }
-               else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
-    (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
+    if (keyHash != 7) keyHash
+    else if (len <= 8) { eightBytesToLong(strBytes, index, len) }
+    else { BinaryRegion.hasher64.hash(strBytes, index, len, BinaryRegion.Seed) }
   }
 
   /**
