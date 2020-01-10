@@ -4,10 +4,10 @@ import java.util.Arrays
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.execution.CancelableFuture
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, GlobalScheduler}
@@ -48,7 +48,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   val indexBootstrapper = new IndexBootstrapper(store)
   val indexRefresher = new IndexBootstrapper(rawColStore)
 
-  var indexUpdateFuture: Future[Unit] = _
+  var indexUpdateFuture: CancelableFuture[Unit] = _
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -79,8 +79,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
-      startIndexRefreshTask()
-    }.runAsync(GlobalScheduler.globalImplicitScheduler)
+        startIndexRefreshTask()
+      }.runAsync(GlobalScheduler.globalImplicitScheduler)
   }
 
   def startIndexRefreshTask(): Unit = {
@@ -252,6 +252,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         partKeyBytes.get.offset + partKeyBytes.get.length)
     else throw new IllegalStateException("This is not an expected behavior." +
       " PartId should always have a corresponding PartKey!")
+  }
+
+  def cleanup(): Unit = {
+    Option(indexUpdateFuture).foreach(_.cancel())
   }
 
 }

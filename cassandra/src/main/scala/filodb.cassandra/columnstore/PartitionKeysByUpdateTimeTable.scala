@@ -28,20 +28,21 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
        |    partKey blob,
        |    startTime bigint,
        |    endTime bigint,
-       |    PRIMARY KEY ((shard, epochHour, split), partKey)
+       |    PRIMARY KEY ((shard, epochHour, split), partKey))
        |    WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
       // TODO time window compaction since we have time component in the primary key
 
   lazy val writePartitionKeyCql =
     session.prepare(
       s"INSERT INTO ${tableString} (shard, epochHour, split, partKey, startTime, endTime) " +
-        s"VALUES (?, ?, ?) USING TTL ?")
+        s"VALUES (?, ?, ?, ?, ?, ?) USING TTL ?")
       .setConsistencyLevel(ConsistencyLevel.ONE)
 
-  def writePartKey(shard: Int, updateHour: Long, split: Int, pk: PartKeyRecord): Future[Response] = {
+  def writePartKey(shard: Int, updateHour: Long, split: Int,
+                   pk: PartKeyRecord, ttlSeconds: Int): Future[Response] = {
     connector.execStmtWithRetries(writePartitionKeyCql.bind(
-      shard: JInt, updateHour: JLong,
-      toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
+      shard: JInt, updateHour: JLong, split: JInt,
+      toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, ttlSeconds: JInt))
   }
 
   lazy val readCql = session.prepare(s"SELECT * FROM $tableString " +

@@ -40,13 +40,13 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  def writePartKey(pk: PartKeyRecord, diskTimeToLive: Int): Future[Response] = {
-    if (diskTimeToLive <= 0) {
+  def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Int): Future[Response] = {
+    if (diskTimeToLiveSeconds <= 0) {
       connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
         toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
     } else {
       connector.execStmtWithRetries(writePartitionCql.bind(
-        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLive: JInt))
+        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLiveSeconds: JInt))
     }
   }
 
