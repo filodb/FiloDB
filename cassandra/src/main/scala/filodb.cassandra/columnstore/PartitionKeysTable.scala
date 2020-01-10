@@ -50,11 +50,13 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     }
   }
 
-  val scanCql = session.prepare(s"SELECT * FROM ${tableString} WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
+  lazy val scanCql = session.prepare(s"SELECT * FROM ${tableString} " +
+                                      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
     val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
       .mapAsync { range =>
-        val fut = session.executeAsync(scanCql.bind(range._1, range._2)).toIterator.handleErrors
+        val fut = session.executeAsync(scanCql.bind(range._1.toLong: JLong, range._2.toLong: JLong))
+                         .toIterator.handleErrors
                          .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
         Task.fromFuture(fut)
       }

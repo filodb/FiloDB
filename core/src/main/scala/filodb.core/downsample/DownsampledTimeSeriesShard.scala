@@ -79,13 +79,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
-      startIndexUpdateTask()
+      startIndexRefreshTask()
     }.runAsync(GlobalScheduler.globalImplicitScheduler)
   }
 
-  def startIndexUpdateTask(): Unit = {
-    logger.info(s"Starting Index Refresh task for downsample dataset=$rawDatasetRef shard=$shardNum ")
-    indexUpdateFuture = Observable.intervalWithFixedDelay(1.hour, 1.hour).mapAsync { i =>
+  def startIndexRefreshTask(): Unit = {
+    // Run index refresh at same frequency of raw dataset's flush interval.
+    // This is important because each partition's start/end time can be updated only once
+    // in cassandra per flush interval. Less frequent update can result in multiple events
+    // per partKey, and order (which we have  not persisted) would become important.
+    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
+      s"every ${storeConfig.flushInterval}")
+    indexUpdateFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
+                                                          storeConfig.flushInterval).mapAsync { i =>
       val toHour = hour() - 1
       val fromHour = indexUpdatedHour.get() + 1
       logger.info(s"Refreshing downsample index for dataset=$rawDatasetRef shard=$shardNum " +

@@ -17,7 +17,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
 
   import filodb.cassandra.Util._
 
-  val suffix = s"_partitionKeysByUpdateTime"
+  val suffix = s"partitionkeys_by_update_time"
 
   val createCql =
     s"""
@@ -44,13 +44,13 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
       toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
   }
 
-  val readCql = session.prepare(s"SELECT * FROM $tableString " +
+  lazy val readCql = session.prepare(s"SELECT * FROM $tableString " +
     s"WHERE shard = ? AND updateHour = ? AND split = ? ")
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
     val fut: Future[Iterator[PartKeyRecord]] =
       session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt)).toIterator.handleErrors
              .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
-    Observable.fromFuture(fut).flatMap(Observable.fromIterator)
+    Observable.fromFuture(fut).flatMap(it => Observable.fromIterator(it))
   }
 
 }
