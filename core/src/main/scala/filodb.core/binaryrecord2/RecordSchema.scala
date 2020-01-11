@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
+import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
@@ -419,20 +420,13 @@ object RecordSchema {
                                                        MapColumn -> 4,
                                                        HistogramColumn -> 4)
 
-  private val tlKeyBuf = new ThreadLocal[Array[Byte]]()
-  private[binaryrecord2] def keyBuf: Array[Byte] = tlKeyBuf.get match {
-    case UnsafeUtils.ZeroPointer => val buf = new Array[Byte](8)
-                                    tlKeyBuf.set(buf)
-                                    buf
-    case b: Array[Byte]          => b
-  }
-
-  // Creates a Long by copying no more than 8 bytes from the bytes array, and zeroing out the rest
+  // Creates a Long from a byte array
   private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
-    val buf = keyBuf
-    java.util.Arrays.fill(buf, 0.toByte)
-    System.arraycopy(bytes, index, buf, 0, Math.min(len, 8))
-    UnsafeUtils.getLong(bytes, UnsafeUtils.arayOffset)
+    var num = 0L
+    for { i <- 0 until len optimized } {
+      num = (num << 8) | bytes(index + i)
+    }
+    num
   }
 
   /**
