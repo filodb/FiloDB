@@ -424,7 +424,7 @@ object RecordSchema {
   private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
     var num = 0L
     for { i <- 0 until len optimized } {
-      num = (num << 8) | bytes(index + i)
+      num = (num << 8) ^ (bytes(index + i) & 0x00ff)
     }
     num
   }
