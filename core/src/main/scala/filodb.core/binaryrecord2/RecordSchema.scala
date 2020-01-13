@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
+import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
@@ -419,22 +420,28 @@ object RecordSchema {
                                                        MapColumn -> 4,
                                                        HistogramColumn -> 4)
 
+  // Creates a Long from a byte array
+  private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
+    var num = 0L
+    for { i <- 0 until len optimized } {
+      num = (num << 8) ^ (bytes(index + i) & 0x00ff)
+    }
+    num
+  }
+
   /**
    * Creates a "unique" Long key for each incoming predefined key for quick lookup.  This will not be perfect
    * but probably good enough for the beginning.
-   * TODO: improve on this.  One reason for difficulty is that we need custom hashCode and equals functions and
-   * we don't want to box.
-   * In the output, the lower 32 bits is the hashcode of the bytes.
+   * If the key is 8 or less bytes, we just directly convert the bytes to a long for exact match.
+   * If the key is > 8 bytes, we use XXHash to compute a 64-bit hash.
    */
-  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long = {
-    val hash = BinaryRegion.hasher32.hash(strBytes, 0, strBytes.size, BinaryRegion.Seed)
-    (UnsafeUtils.getInt(strBytes, UnsafeUtils.arayOffset).toLong << 32) | hash
-  }
+  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long =
+    makeKeyKey(strBytes, 0, strBytes.size, 7)
 
   private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
-    val hash = if (keyHash != 7) { keyHash }
-               else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
-    (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
+    if (keyHash != 7) keyHash
+    else if (len <= 8) { eightBytesToLong(strBytes, index, len) }
+    else { BinaryRegion.hasher64.hash(strBytes, index, len, BinaryRegion.Seed) }
   }
 
   /**
