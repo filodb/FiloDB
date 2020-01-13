@@ -96,7 +96,11 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       val fromHour = indexUpdatedHour.get() + 1
       logger.info(s"Refreshing downsample index for dataset=$rawDatasetRef shard=$shardNum " +
         s"fromHour=$fromHour toHour=$toHour")
-      indexRefresher.updateIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+      // Gotcha: Index loading is not single threaded. This is possible only
+      // because we are sure that in one raw dataset flush period, we wont get two updated part key
+      // records with same part key
+      indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef,
+                                  fromHour, toHour)(lookupOrCreatePartId)
         .onErrorHandle { e =>
           logger.error(s"Error occurred when refreshing downsample index " +
             s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)

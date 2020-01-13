@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import kamon.Kamon
 import monix.eval.Task
-import monix.reactive.{Observable, OverflowStrategy}
+import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.store.{ColumnStore, PartKeyRecord}
@@ -43,11 +43,12 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
   }
 
-  def updateIndex(index: PartKeyLuceneIndex,
-                  shardNum: Int,
-                  ref: DatasetRef,
-                  fromHour: Long,
-                  toHour: Long)
+  def refreshIndex(index: PartKeyLuceneIndex,
+                   shardNum: Int,
+                   ref: DatasetRef,
+                   fromHour: Long,
+                   toHour: Long,
+                   parallelism: Int = Runtime.getRuntime.availableProcessors())
                   (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
     val tracer = Kamon.buildSpan("downsample-store-update-index-latency")
       .withTag("dataset", ref.dataset)
@@ -55,10 +56,11 @@ class IndexBootstrapper(colStore: ColumnStore) {
 
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
-    }.asyncBoundary(OverflowStrategy.Default)
-     .map { pk =>
+    }.mapAsync(parallelism) { pk =>
+      Task {
         val partId = lookUpOrAssignPartId(pk)
         index.upsertPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+      }
      }
      .countL
      .map { count =>
