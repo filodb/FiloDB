@@ -380,6 +380,9 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
       addToBuilder(builder, data, dataset3.schema)
+      builder.currentContainer.get.foreach { case (base, offset) =>
+        println(schemaWithPredefKeys.debugString(base, offset))
+      }
 
       val containers = builder.allContainers
       containers should have length (1)
