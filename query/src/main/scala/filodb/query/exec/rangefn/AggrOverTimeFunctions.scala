@@ -927,14 +927,19 @@ class PredictLinearChunkedFunctionL(funcParams: Seq[Any]) extends PredictLinearC
   }
 }
 
+/**
+  * It represents the distance between the raw score and the population mean in units of the standard deviation.
+  * Refer https://en.wikipedia.org/wiki/Standard_score#Calculation to understand how to calculate
+  **/
+
 abstract class ZScoreChunkedFunction(var stdOverTimeChunkedFunction: StdDevOverTimeChunkedFunctionD = null,
                                      var avgOverTimeChunkedFunction: AvgOverTimeChunkedFunctionD = null,
                                      var lastSampleChunkedFunction: LastSampleChunkedFunctionWithNanD = null)
   extends ChunkedRangeFunction[TransientRow] {
 
   override final def reset(): Unit = { stdOverTimeChunkedFunction = new StdDevOverTimeChunkedFunctionD()
-    avgOverTimeChunkedFunction = new AvgOverTimeChunkedFunctionD()
-    lastSampleChunkedFunction = new LastSampleChunkedFunctionWithNanD() }
+                                       avgOverTimeChunkedFunction = new AvgOverTimeChunkedFunctionD()
+                                       lastSampleChunkedFunction = new LastSampleChunkedFunctionWithNanD() }
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     val stdDevTransientRow, avgTransientRow, lastSampleTransientRow = new TransientRow()
@@ -961,11 +966,11 @@ class ZScoreChunkedFunctionD() extends ZScoreChunkedFunction()
     val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
     val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
     stdOverTimeChunkedFunction.addTimeDoubleChunks(valueVectorAcc, valueVector, valueReader.asDoubleReader,
-      startRowNum, endRowNum)
+                                                   startRowNum, endRowNum)
     avgOverTimeChunkedFunction.addTimeDoubleChunks(valueVectorAcc, valueVector, valueReader.asDoubleReader,
-      startRowNum, endRowNum)
+                                                   startRowNum, endRowNum)
     lastSampleChunkedFunction.addChunks(tsVectorAcc, tsVector, tsReader, valueVectorAcc, valueVector, valueReader,
-      startTime, endTime, info, queryConfig)
+                                        startTime, endTime, info, queryConfig)
 
   }
 }
