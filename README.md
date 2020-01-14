@@ -457,6 +457,8 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
+FiloDB supports computing Z-score queries. It represents the distance between the raw score and the population mean in units of the standard deviation. This can be used for anomaly detection.
+ 
 Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using a `::columnName` suffix in the metric name, like this request which pulls out the "min" column:
 
     http_req_timer::min{_ws_="demo", _ns_="foo"}
