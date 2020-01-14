@@ -70,6 +70,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
   case object HoltWinters extends RangeFunctionId("holt_winters")
 
+  case object ZScore extends RangeFunctionId("z_score")
+
   case object Idelta extends RangeFunctionId("idelta")
 
   case object Increase extends RangeFunctionId("increase")

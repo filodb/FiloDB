@@ -18,6 +18,8 @@ object InternalRangeFunction {
 
   case object HoltWinters extends InternalRangeFunction
 
+  case object ZScore extends InternalRangeFunction
+
   case object Idelta extends InternalRangeFunction
 
   case object Increase extends InternalRangeFunction
@@ -56,6 +58,7 @@ object InternalRangeFunction {
     case RangeFunctionId.Delta         => Delta
     case RangeFunctionId.Deriv         => Deriv
     case RangeFunctionId.HoltWinters   => HoltWinters
+    case RangeFunctionId.ZScore        => ZScore
     case RangeFunctionId.Idelta        => Idelta
     case RangeFunctionId.Increase      => Increase
     case RangeFunctionId.Irate         => Irate
