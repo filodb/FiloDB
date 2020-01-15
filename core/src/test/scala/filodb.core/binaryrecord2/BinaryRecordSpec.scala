@@ -380,6 +380,9 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       val data = withMap(linearMultiSeries(), extraTags=extraTags).take(3)
       addToBuilder(builder, data, dataset3.schema)
+      builder.currentContainer.get.foreach { case (base, offset) =>
+        println(schemaWithPredefKeys.debugString(base, offset))
+      }
 
       val containers = builder.allContainers
       containers should have length (1)
@@ -474,6 +477,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   }
 
   describe("RecordComparator") {
+    // NOTE: dataset3 is dataset2 from MachineMetricsData: series, tags just like official partition key
     val comparator2 = dataset3.schema.comparator
     val partSchema2 = comparator2.partitionKeySchema
 
@@ -552,7 +556,10 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     it("should copy ingest BRs to partition key BRs correctly when data columns have a blob/histogram") {
       val ingestBuilder = new RecordBuilder(MemFactory.onHeapFactory)
       val data = linearHistSeries().take(3)
-      data.foreach { row => ingestBuilder.addFromReader(SeqRowReader(row), histDataset.schema) }
+      data.foreach { row =>
+        val offset = ingestBuilder.addFromReader(SeqRowReader(row), histDataset.schema)
+        println(histDataset.schema.ingestionSchema.debugString(ingestBuilder.curContainerBase, offset))
+      }
 
       records.clear()
       ingestBuilder.allContainers.head.consumeRecords(consumer)

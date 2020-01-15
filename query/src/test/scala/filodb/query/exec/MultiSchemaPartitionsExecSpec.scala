@@ -48,7 +48,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   val metric = "http_req_total"
   val partKeyLabelValues = Map("job" -> "myCoolService", "instance" -> "someHost:8787")
-  val partKeyKVWithMetric = partKeyLabelValues ++ Map("metric" -> metric)
+  val partKeyKVWithMetric = partKeyLabelValues ++ Map("_metric_" -> metric)
   val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
@@ -97,7 +97,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   it ("should read raw samples from Memstore using AllChunksSelector") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
       dsRef, 0, filters, AllChunkScan)
@@ -114,7 +114,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   it ("should read raw samples from Memstore using IntervalSelector") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     // read from an interval of 100000ms, resulting in 11 samples
     val startTime = now - numRawSamples * reportingInterval
@@ -134,7 +134,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   it("should get empty schema if query returns no results") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("not_a_metric!".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("not_a_metric!".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
       dsRef, 0, filters, AllChunkScan)
@@ -165,7 +165,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     import ZeroCopyUTF8String._
 
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
-                      ColumnFilter("metric", Filter.Equals("request-latency".utf8)))
+                      ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
     val execPlan = MultiSchemaPartitionsExec("id1", now, numRawSamples, dummyDispatcher, dsRef, 0,
                                              filters, TimeRangeChunkScan(100000L, 150000L), colName=Some("h"))
 
@@ -180,7 +180,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   it ("should read periodic samples from Memstore") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
                                              dsRef, 0, filters, AllChunkScan)
@@ -237,7 +237,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
   it ("should read periodic Histogram samples from Memstore") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
-                      ColumnFilter("metric", Filter.Equals("request-latency".utf8)))
+                      ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
     val execPlan = MultiSchemaPartitionsExec("id1", now, numRawSamples, dummyDispatcher, dsRef, 0,
                                              filters, AllChunkScan)   // should default to h column
 
@@ -354,7 +354,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
   }
 
   it("should return chunk metadata from MemStore") {
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     // TODO: SelectChunkInfos should not require a raw schema
     val execPlan = SelectChunkInfosExec("someQueryId", now, numRawSamples, dummyDispatcher,
@@ -383,7 +383,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
   it ("should fail with exception BadQueryException") {
     import ZeroCopyUTF8String._
-    val filters = Seq (ColumnFilter("metric", Filter.Equals("http_req_total".utf8)),
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     // Query returns n ("numRawSamples") samples - Applying Limit (n-1) to fail the query execution
