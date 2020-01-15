@@ -50,7 +50,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    toHour: Long,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                   (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
-    val tracer = Kamon.buildSpan("downsample-store-update-index-latency")
+    val tracer = Kamon.buildSpan("downsample-store-refresh-index-latency")
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum).start()
 

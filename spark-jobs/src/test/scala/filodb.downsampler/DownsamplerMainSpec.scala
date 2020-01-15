@@ -49,9 +49,18 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram),
                                      Map.empty, 100, rawDataStoreConfig)
+  val gaugeName = "my_gauge"
   var gaugePartKeyBytes: Array[Byte] = _
+
+  val counterName = "my_counter"
   var counterPartKeyBytes: Array[Byte] = _
+
+  val histName = "my_histogram"
   var histPartKeyBytes: Array[Byte] = _
+
+  val gaugeLowFreqName = "my_gauge_low_freq"
+  var gaugeLowFreqPartKeyBytes: Array[Byte] = _
+
   val lastSampleTime = 1574273042000L
   val downsampler = new Downsampler
 
@@ -69,7 +78,6 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     downsampler.shutdown()
   }
 
-  val gaugeName = "my_gauge"
   it ("should write gauge data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.gauge)
@@ -112,7 +120,46 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
   }
 
-  val counterName = "my_counter"
+  it ("should write low freq gauge data to cassandra") {
+
+    val rawDataset = Dataset("prometheus", Schemas.gauge)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, gaugeLowFreqName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.gauge, partKey,
+      0, offheapMem.bufferPools(Schemas.gauge.schemaHash), shardStats,
+      offheapMem.nativeMemoryManager, 1)
+
+    gaugeLowFreqPartKeyBytes = part.partKeyBytes
+
+    val rawSamples = Stream(
+      Seq(1574272801000L, 3d, gaugeName, seriesTags),
+      Seq(1574272802000L, 5d, gaugeName, seriesTags),
+
+      // skip next minute
+
+      Seq(1574272921000L, 13d, gaugeName, seriesTags),
+      Seq(1574272922000L, 15d, gaugeName, seriesTags),
+
+      // skip next minute
+
+      Seq(1574273041000L, 13d, gaugeName, seriesTags),
+      Seq(1574273042000L, 11d, gaugeName, seriesTags)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.gauge.ingestionSchema, base, offset)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 1574272801000L, 1574273042000L, Some(150))
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
+  }
+
   it ("should write prom counter data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promCounter)
@@ -159,7 +206,6 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
   }
 
-  val histName = "my_histogram"
   it ("should write prom histogram data to cassandra") {
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
@@ -217,14 +263,14 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
     downsampler.run(sparkConf)
   }
-
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
     // TODO add spark job in future PR
     // For now write part keys manually
     val dsDataset5Min = BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min"))
     val pks = Seq( PartKeyRecord(histPartKeyBytes, 1574272801000L, 1574273042000L, Some(199)),
                    PartKeyRecord(counterPartKeyBytes, 1574272801000L, 1574273042000L, Some(1)),
-                   PartKeyRecord(gaugePartKeyBytes, 1574272801000L, 1574273042000L, Some(150)))
+                   PartKeyRecord(gaugePartKeyBytes, 1574272801000L, 1574273042000L, Some(150)),
+                   PartKeyRecord(gaugeLowFreqPartKeyBytes, 1574272801000L, 1574273042000L, Some(345)))
 
     downsampleColStore.writePartKeys(dsDataset5Min, 0, Observable.fromIterable(pks), 259200).futureValue
 
@@ -254,6 +300,32 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       (1574272862000L, 9.0, 11.0, 20.0, 2.0, 10.0),
       (1574272922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
       (1574272982000L, 15.0, 17.0, 32.0, 2.0, 16.0),
+      (1574273042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
+    )
+  }
+
+  it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
+
+    val downsampledPartData1 = downsampleColStore.readRawPartitions(
+      BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
+      0,
+      SinglePartitionScan(gaugeLowFreqPartKeyBytes))
+      .toListL.runAsync.futureValue.head
+
+    val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
+
+    downsampledPart1.partKeyBytes shouldEqual gaugeLowFreqPartKeyBytes
+
+    val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
+
+    val downsampledData1 = rv1.rows.map { r =>
+      (r.getLong(0), r.getDouble(1), r.getDouble(2), r.getDouble(3), r.getDouble(4), r.getDouble(5))
+    }.toList
+
+    // time, min, max, sum, count, avg
+    downsampledData1 shouldEqual Seq(
+      (1574272802000L, 3.0, 5.0, 8.0, 2.0, 4.0),
+      (1574272922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
       (1574273042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
     )
   }
@@ -452,7 +524,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
 
-    Seq(gaugeName, counterName, histName).foreach { metricName =>
+    Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec("someId", System.currentTimeMillis(),
         1000, InProcessPlanDispatcher(), BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
