@@ -255,8 +255,9 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp, spreadProvider)
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(queryId, submitTime, options, lp,
+                                               spreadProvider)
       case _                               => throw new BadQueryException("Invalid logical plan")
-
     }
   }
 
@@ -353,18 +354,17 @@ class QueryEngine(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), paramsExec)))
+      lp.end, Some(lp.window), Some(execRangeFn), paramsExec, lp.offset)))
     rawSeries
   }
 
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
-                                       options: QueryOptions,
-                                       lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
+                                        options: QueryOptions,
+                                        lp: PeriodicSeries, spreadProvider : SpreadProvider): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
-    val execRangeFn = if (lp.function.isDefined) Some(InternalRangeFunction.lpToInternalFunc(lp.function.get)) else None
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
-      None, execRangeFn, Nil)))
+      None, None, Nil, lp.offset)))
     rawSeries
   }
 
@@ -511,6 +511,25 @@ class QueryEngine(dsRef: DatasetRef,
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(SortFunctionMapper(lp.function)))
+      vectors
+    }
+  }
+
+  private def materializeAbsentFunction(queryId: String,
+                                        submitTime: Long,
+                                        options: QueryOptions,
+                                        lp: ApplyAbsentFunction,
+                                        spreadProvider: SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    if (vectors.plans.length > 1) {
+      val targetActor = pickDispatcher(vectors.plans)
+      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      topPlan.addRangeVectorTransformer((AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
+        PromMetricLabel)))
+      PlanResult(Seq(topPlan), vectors.needsStitch)
+    } else {
+      vectors.plans.foreach(_.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
+        dsOptions.metricColumn )))
       vectors
     }
   }

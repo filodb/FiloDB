@@ -156,15 +156,16 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     private[prometheus] val (columnFilters, column) = labelMatchesToFilters(mergeNameToLabels)
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
-                             function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
 
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
-        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
+        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000, offsetMillis),
           columnFilters, column.toSeq),
-        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, function
+        timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
+        offset.map(_.millis)
       )
     }
 
@@ -192,7 +193,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
-      RawSeries(timeParamToSelector(timeParams, window.millis), columnFilters, column.toSeq)
+      RawSeries(timeParamToSelector(timeParams, window.millis, offset.map(_.millis).getOrElse(0)), columnFilters,
+        column.toSeq)
     }
 
   }

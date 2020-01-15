@@ -1,6 +1,6 @@
 package filodb.prometheus.ast
 
-import filodb.query.{Aggregate, AggregationOperator, PeriodicSeriesPlan, RangeFunctionId}
+import filodb.query.{Aggregate, AggregationOperator, PeriodicSeriesPlan}
 
 
 trait Aggregates extends Vectors with TimeUnits with Base {
@@ -66,8 +66,7 @@ trait Aggregates extends Vectors with TimeUnits with Base {
     }
 
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
-                             function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val periodicSeriesPlan = series.toPeriodicSeriesPlan(timeParams)
 
       aggregateGrouping match {

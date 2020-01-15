@@ -448,7 +448,7 @@ The number of shards in each dataset is preconfigured in the source config.  Ple
 
 Metrics are routed to shards based on factors:
 
-1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_`, `metric` labels are mandatory to calculate shard key along with `metric` column.
+1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency. Currently `_ws_`, `_ns_` labels are mandatory to calculate shard key along with `_metric_` column.
 2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
 ## Querying FiloDB

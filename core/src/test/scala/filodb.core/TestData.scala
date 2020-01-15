@@ -425,13 +425,13 @@ object CustomMetricsData {
   val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
 
   //Partition Key with multiple string columns
-  val partitionColumns = Seq("metric:string", "app:string")
+  val partitionColumns = Seq("_metric_:string", "app:string")
   val metricdataset = Dataset.make("tsdbdata",
                         partitionColumns,
                         columns,
                         Seq.empty,
                         None,
-                        DatasetOptions(Seq("metric", "_ns_", "_ws_"), "metric", true)).get
+                        DatasetOptions(Seq("_metric_", "_ns_", "_ws_"), "_metric_", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
