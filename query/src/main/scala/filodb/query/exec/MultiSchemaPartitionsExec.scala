@@ -5,6 +5,7 @@ import scala.concurrent.duration.FiniteDuration
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
+import filodb.core.metadata.Schemas
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.query.Query.qLogger
@@ -43,14 +44,15 @@ final case class MultiSchemaPartitionsExec(id: String,
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
-    val dataSchema = schema.map { s => schemas.schemas(s) }
-                           .getOrElse(schemas(
-                             lookupRes.firstSchemaId.getOrElse(schemas.schemas.values.head.schemaHash)))
 
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
+    // Also warn if unknown schema is found.  This is not supposed to happen since ingestion filters out unknown schemas
     schema.map { s => schemas.schemas(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
-          .map { sch =>
+          .filter { sch =>
+            if (sch == Schemas.UnknownSchema) qLogger.warn(s"Unknown schema ID ${lookupRes.firstSchemaId} skipped")
+            sch != Schemas.UnknownSchema
+          }.map { sch =>
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
             val newxformers = newXFormersForHistMax(sch, newxformers1)
