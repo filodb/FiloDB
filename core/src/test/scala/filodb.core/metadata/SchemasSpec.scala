@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core._
@@ -13,13 +13,13 @@ class SchemasSpec extends FunSpec with Matchers {
 
   describe("DataSchema") {
     it("should return NotNameColonType if column specifiers not name:type format") {
-      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "column2", Nil, "first")
+      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "column2", Nil, None, "first")
       resp1.isBad shouldEqual true
       resp1.swap.get shouldEqual ColumnErrors(Seq(NotNameColonType("column2")))
     }
 
     it("should return BadColumnParams if name:type:params portion not valid key=value pairs") {
-      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "column2:a:b", Nil, "first")
+      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "column2:a:b", Nil, None, "first")
       resp1.isBad shouldEqual true
       resp1.swap.get shouldBe a[ColumnErrors]
       val errors = resp1.swap.get.asInstanceOf[ColumnErrors].errs
@@ -28,14 +28,14 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return BadColumnParams if required param config not specified") {
-      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "h:hist:foo=bar", Nil, "first")
+      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "h:hist:foo=bar", Nil, None, "first")
       resp1.isBad shouldEqual true
       resp1.swap.get shouldBe a[ColumnErrors]
       val errors = resp1.swap.get.asInstanceOf[ColumnErrors].errs
       errors should have length 1
       errors.head shouldBe a[BadColumnParams]
 
-      val resp2 = DataSchema.make("dataset", dataColSpecs :+ "h:hist:counter=bar", Nil, "first")
+      val resp2 = DataSchema.make("dataset", dataColSpecs :+ "h:hist:counter=bar", Nil, None, "first")
       resp2.isBad shouldEqual true
       resp2.swap.get shouldBe a[ColumnErrors]
       val errors2 = resp2.swap.get.asInstanceOf[ColumnErrors].errs
@@ -44,7 +44,7 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return BadColumnName if illegal chars in column name") {
-      val resp1 = DataSchema.make("dataset", Seq("col, umn1:string"), Nil, "first")
+      val resp1 = DataSchema.make("dataset", Seq("col, umn1:string"), Nil, None, "first")
       resp1.isBad shouldEqual true
       val errors = resp1.swap.get match {
         case ColumnErrors(errs) => errs
@@ -55,7 +55,7 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return BadColumnType if unsupported type specified in column spec") {
-      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "part:linkedlist", Nil, "first")
+      val resp1 = DataSchema.make("dataset", dataColSpecs :+ "part:linkedlist", Nil, None, "first")
       resp1.isBad shouldEqual true
       val errors = resp1.swap.get match {
         case ColumnErrors(errs) => errs
@@ -78,7 +78,7 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return multiple column spec errors") {
-      val resp1 = DataSchema.make("dataset", Seq("first:str", "age:long", "la(st):int"), Nil, "first")
+      val resp1 = DataSchema.make("dataset", Seq("first:str", "age:long", "la(st):int"), Nil, None, "first")
       resp1.isBad shouldEqual true
       val errors = resp1.swap.get match {
         case ColumnErrors(errs) => errs
@@ -101,7 +101,7 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     it("should return NoTimestampRowKey if non timestamp used for row key / first column") {
-      val ds1 = DataSchema.make("dataset", Seq("first:string", "age:long"), Nil, "first")
+      val ds1 = DataSchema.make("dataset", Seq("first:string", "age:long"), Nil, None, "first")
       ds1.isBad shouldEqual true
       ds1.swap.get shouldBe a[NoTimestampRowKey]
     }
@@ -272,7 +272,7 @@ class SchemasSpec extends FunSpec with Matchers {
       errors.map(_._1) shouldEqual Seq("prom")
     }
 
-    def schemasFromString(partConf: String) = ConfigFactory.parseString(s"""
+    def schemasFromString(partConf: String): Config = ConfigFactory.parseString(s"""
                   {
                     partition-schema $partConf
                     schemas {
@@ -314,14 +314,14 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     val partSchemaStr2 = """{
-                        columns = ["metric:string", "tags:map"]
+                        columns = ["_metric_:string", "tags:map"]
                         predefined-keys = ["_ns", "app", "__name__", "instance", "dc"]
                         options {
                           copyTags = {}
                           ignoreShardKeyColumnSuffixes = {}
                           ignoreTagsOnPartitionKeyHash = ["le"]
-                          metricColumn = "metric"
-                          shardKeyColumns = ["metric", "_ns"]
+                          metricColumn = "_metric_"
+                          shardKeyColumns = ["_metric_", "_ns"]
                         }
                       }"""
 
