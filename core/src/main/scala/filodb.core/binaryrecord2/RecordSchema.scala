@@ -4,6 +4,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import org.agrona.DirectBuffer
 import org.agrona.concurrent.UnsafeBuffer
+import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.metadata.Column.ColumnType.{LongColumn, MapColumn, TimestampColumn}
@@ -222,25 +223,59 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
 
   /**
+   * Extremely detailed breakdown of this BinaryRecord, including offset numbers and bytes possibly.
+   */
+  def debugString(base: Any, offset: Long): String = {
+    def varOffset(i: Int): Int = UnsafeUtils.getInt(base, offset + offsets(i))
+
+    import Column.ColumnType._
+    val schemaStr = if (partitionFieldStart.isEmpty) "" else {
+                      val id = RecordSchema.schemaID(base, offset)
+                      s"  schemaID: $id (${Schemas.global.schemaName(id)})\n"
+                    }
+    val partHashStr = if (partitionFieldStart.isEmpty) "" else s"  partitionHash: ${partitionHash(base, offset)}\n"
+    val colDetails = columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => f"  +${offsets(i)}%05d ${colNames(i)}%14s I ${getInt(base, offset, i)}"
+      case (LongColumn, i)   => f"  +${offsets(i)}%05d ${colNames(i)}%14s L ${getLong(base, offset, i)}"
+      case (DoubleColumn, i) => f"  +${offsets(i)}%05d ${colNames(i)}%14s D ${getDouble(base, offset, i)}"
+      case (StringColumn, i) =>
+        f"  +${offsets(i)}%05d ${colNames(i)}%14s S -> +${varOffset(i)}%05d\n" +
+        s"\t${blobNumBytes(base, offset, i)} bytes: [${asJavaString(base, offset, i)}]"
+      case (TimestampColumn, i) => f"  +${offsets(i)}%05d ${colNames(i)}%14s L ${getLong(base, offset, i)}"
+      case (MapColumn, i)    => val consumer = new DebugStringMapItemConsumer(offset)
+                                consumeMapItems(base, offset, i, consumer)
+                                f"  +${offsets(i)}%05d ${colNames(i)}%14s M -> +${varOffset(i)}%05d\n" +
+                                  consumer.lines.mkString("\n")
+      case (BinaryRecordColumn, i)  => s"${colNames(i)}=${brSchema(i).stringify(base, offset)}"
+      case (HistogramColumn, i) =>
+        f"  +${offsets(i)}%05d ${colNames(i)}%14s H -> +${varOffset(i)}%05d\n" +
+        s"\t${bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i))}"
+    }
+    s"BRDEBUG: ${numBytes(base, offset)} bytes, $numFields fields\n$schemaStr$partHashStr" + colDetails.mkString("\n")
+  }
+
+  /**
     * EXPENSIVE to do at server side. Creates a stringified map with contents of this BinaryRecord.
     */
   def toStringPairs(base: Any, offset: Long): Seq[(String, String)] = {
     import Column.ColumnType._
-    val resultMap = new collection.mutable.ArrayBuffer[(String, String)]()
+    val result = new collection.mutable.ArrayBuffer[(String, String)]()
     columnTypes.zipWithIndex.map {
-      case (IntColumn, i)    => resultMap += ((colNames(i), getInt(base, offset, i).toString))
-      case (LongColumn, i)   => resultMap += ((colNames(i), getLong(base, offset, i).toString))
-      case (DoubleColumn, i) => resultMap += ((colNames(i), getDouble(base, offset, i).toString))
-      case (StringColumn, i) => resultMap += ((colNames(i), asJavaString(base, offset, i).toString))
-      case (TimestampColumn, i) => resultMap += ((colNames(i), getLong(base, offset, i).toString))
+      case (IntColumn, i)    => result += ((colNames(i), getInt(base, offset, i).toString))
+      case (LongColumn, i)   => result += ((colNames(i), getLong(base, offset, i).toString))
+      case (DoubleColumn, i) => result += ((colNames(i), getDouble(base, offset, i).toString))
+      case (StringColumn, i) => result += ((colNames(i), asJavaString(base, offset, i).toString))
+      case (TimestampColumn, i) => result += ((colNames(i), getLong(base, offset, i).toString))
       case (MapColumn, i)    => val consumer = new StringifyMapItemConsumer
                                 consumeMapItems(base, offset, i, consumer)
-                                resultMap ++= consumer.stringPairs
-      case (BinaryRecordColumn, i)  => resultMap ++= brSchema(i).toStringPairs(base, offset)
+                                result ++= consumer.stringPairs
+      case (BinaryRecordColumn, i) => result ++= brSchema(i).toStringPairs(base, offset)
+                                result += ("_type_" ->
+                                              Schemas.global.schemaName(RecordSchema.schemaID(base, offset)))
       case (HistogramColumn, i) =>
-        resultMap += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
+        result += ((colNames(i), bv.BinaryHistogram.BinHistogram(blobAsBuffer(base, offset, i)).toString))
     }
-    resultMap
+    result
   }
 
   /**
@@ -361,6 +396,18 @@ class StringifyMapItemConsumer extends MapItemConsumer {
   }
 }
 
+// Used for debugPrint only
+class DebugStringMapItemConsumer(baseOffset: Long) extends MapItemConsumer {
+  val lines = new collection.mutable.ArrayBuffer[String]
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    // TODO: emit actual bytes
+    val keyPrefix = if (keyBase == valueBase) f"+${keyOffset - baseOffset}%05d"
+                    else f"Predef: 0x${UnsafeUtils.getByte(valueBase, valueOffset - 1)}%02x"
+    lines += f"\tKey: $keyPrefix [${UTF8StringShort.toString(keyBase, keyOffset)}] " +
+             f"Value: +${valueOffset - baseOffset}%05d [${UTF8StringMedium.toString(valueBase, valueOffset)}]"
+  }
+}
+
 object RecordSchema {
   import Column.ColumnType._
 
@@ -373,22 +420,28 @@ object RecordSchema {
                                                        MapColumn -> 4,
                                                        HistogramColumn -> 4)
 
+  // Creates a Long from a byte array
+  private def eightBytesToLong(bytes: Array[Byte], index: Int, len: Int): Long = {
+    var num = 0L
+    for { i <- 0 until len optimized } {
+      num = (num << 8) ^ (bytes(index + i) & 0x00ff)
+    }
+    num
+  }
+
   /**
    * Creates a "unique" Long key for each incoming predefined key for quick lookup.  This will not be perfect
    * but probably good enough for the beginning.
-   * TODO: improve on this.  One reason for difficulty is that we need custom hashCode and equals functions and
-   * we don't want to box.
-   * In the output, the lower 32 bits is the hashcode of the bytes.
+   * If the key is 8 or less bytes, we just directly convert the bytes to a long for exact match.
+   * If the key is > 8 bytes, we use XXHash to compute a 64-bit hash.
    */
-  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long = {
-    val hash = BinaryRegion.hasher32.hash(strBytes, 0, strBytes.size, BinaryRegion.Seed)
-    (UnsafeUtils.getInt(strBytes, UnsafeUtils.arayOffset).toLong << 32) | hash
-  }
+  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte]): Long =
+    makeKeyKey(strBytes, 0, strBytes.size, 7)
 
   private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
-    val hash = if (keyHash != 7) { keyHash }
-               else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
-    (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
+    if (keyHash != 7) keyHash
+    else if (len <= 8) { eightBytesToLong(strBytes, index, len) }
+    else { BinaryRegion.hasher64.hash(strBytes, index, len, BinaryRegion.Seed) }
   }
 
   /**

@@ -8,7 +8,7 @@ import org.scalactic._
 
 import filodb.core._
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.ChunkDownsampler
+import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
 import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 
@@ -150,19 +150,22 @@ object Dataset {
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             keyColumns: Seq[String]): Dataset =
-    apply(name, partitionColumns, dataColumns, Nil, DatasetOptions.DefaultOptions)
+    apply(name, partitionColumns, dataColumns, Nil, None, DatasetOptions.DefaultOptions)
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
-            downsamplers: Seq[String], options: DatasetOptions): Dataset =
-    make(name, partitionColumns, dataColumns, downsamplers, options).badMap(BadSchemaError).toTry.get
+            downsamplers: Seq[String],
+            downsamplerPeriodMarker: Option[String],
+            options: DatasetOptions): Dataset =
+    make(name, partitionColumns, dataColumns, downsamplers, downsamplerPeriodMarker, options)
+      .badMap(BadSchemaError).toTry.get
 
   def apply(name: String,
             partitionColumns: Seq[String],
             dataColumns: Seq[String],
             options: DatasetOptions): Dataset =
-    apply(name, partitionColumns, dataColumns, Nil, options)
+    apply(name, partitionColumns, dataColumns, Nil, None, options)
 
   def apply(name: String,
             partitionColumns: Seq[String],
@@ -171,6 +174,7 @@ object Dataset {
 
   sealed trait BadSchema
   case class BadDownsampler(msg: String) extends BadSchema
+  case class BadDownsamplerPeriodMarker(msg: String) extends BadSchema
   case class BadColumnType(colType: String) extends BadSchema
   case class BadColumnName(colName: String, reason: String) extends BadSchema
   case class NotNameColonType(nameTypeString: String) extends BadSchema
@@ -233,6 +237,18 @@ object Dataset {
     }
   }
 
+  def validatedDownsamplerPeriodMarker(marker: Option[String]): DownsamplePeriodMarker Or BadSchema = {
+    try {
+      val v = marker.map(m => DownsamplePeriodMarker.downsamplePeriodMarker(m))
+            .getOrElse(DownsamplePeriodMarker.timeDownsamplePeriodMarker)
+      Good(v)
+    } catch {
+      case e: IllegalArgumentException =>
+        e.printStackTrace()
+        Bad(BadDownsamplerPeriodMarker(e.getMessage))
+    }
+  }
+
   // Partition columns have a column ID starting with this number.  This implies there cannot be
   // any more data columns than this number.
   val PartColStartIndex = 0x010000
@@ -254,13 +270,15 @@ object Dataset {
            partitionColNameTypes: Seq[String],
            dataColNameTypes: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
+           downsamplePeriodMarker: Option[String] = None,
            options: DatasetOptions = DatasetOptions.DefaultOptions,
            valueColumn: Option[String] = None,
            dsSchema: Option[String] = None): Dataset Or BadSchema = {
     // Default value column is the last data column name
     val valueCol = valueColumn.getOrElse(dataColNameTypes.last.split(":").head)
     for { partSchema <- PartitionSchema.make(partitionColNameTypes, options)
-          dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames, valueCol, dsSchema) }
+          dataSchema <- DataSchema.make(name, dataColNameTypes, downsamplerNames,
+                                        downsamplePeriodMarker, valueCol, dsSchema) }
     yield { Dataset(name, Schema(partSchema, dataSchema, None)) }
   }
 }
