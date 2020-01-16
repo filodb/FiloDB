@@ -11,6 +11,10 @@ import filodb.core.store._
 import filodb.query.Query.qLogger
 import filodb.query.QueryConfig
 
+final case class UnknownSchemaQueryErr(id: Int) extends
+  Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
+            "the partitionkeys tables were not truncated.")
+
 /**
   * ExecPlan to select raw data from partitions that the given filter resolves to,
   * in the given shard, for the given row key range.  Schema-agnostic - discovers the schema and
@@ -46,13 +50,13 @@ final case class MultiSchemaPartitionsExec(id: String,
     val schemas = source.schemas(dataset).get
 
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
-    // Also warn if unknown schema is found.  This is not supposed to happen since ingestion filters out unknown schemas
     schema.map { s => schemas.schemas(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
-          .filter { sch =>
-            if (sch == Schemas.UnknownSchema) qLogger.warn(s"Unknown schema ID ${lookupRes.firstSchemaId} skipped")
-            sch != Schemas.UnknownSchema
-          }.map { sch =>
+          .map { sch =>
+            // There should not be any unknown schemas at all, as they are filtered out during ingestion and
+            // in bootstrapPartKeys().  This might happen after schema changes if old partkeys are not truncated.
+            if (sch == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(lookupRes.firstSchemaId.getOrElse(-1))
+
             // Modify transformers as needed for histogram w/ max, downsample, other schemas
             val newxformers1 = newXFormersForDownsample(sch, rangeVectorTransformers)
             val newxformers = newXFormersForHistMax(sch, newxformers1)
