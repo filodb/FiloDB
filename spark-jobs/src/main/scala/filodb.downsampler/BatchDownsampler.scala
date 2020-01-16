@@ -20,6 +20,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
+import filodb.query.exec.UnknownSchemaQueryErr
 
 /**
   * This object maintains state during the processing of a batch of TSPartitions to downsample. Namely
@@ -118,7 +119,9 @@ object BatchDownsampler extends StrictLogging with Instance {
     try {
       rawPartsBatch.foreach { rawPart =>
         val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
-        val pkPairs = schemas(rawSchemaId).partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
+        val schema = schemas(rawSchemaId)
+        if (schema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
+        val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
         if (isEligibleForDownsample(pkPairs)) {
           try {
             downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
@@ -166,6 +169,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                              dsRecordBuilder: RecordBuilder) = {
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
+    if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
