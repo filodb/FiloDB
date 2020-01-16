@@ -265,6 +265,8 @@ class ParserSpec extends FunSpec with Matchers {
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(foo)),1524855988000,1000000,1524855988000),List(5.0),List(),List())",
       "stdvar(http_requests_total)" ->
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
+      "stddev(http_requests_total)" ->
+        "Aggregate(Stddev,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),List(),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Irate,List())",
       "idelta(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -319,8 +321,10 @@ class ParserSpec extends FunSpec with Matchers {
        "label_replace(http_requests_total,instance,new-label,instance,\"(.*)-(.*)\")" -> "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),LabelReplace,List(instance, new-label, instance, (.*)-(.*)))",
       "holt_winters(http_requests_total{job=\"api-server\"}[5m], 0.01, 0.1)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(ScalarFixedDoublePlan(0.01,RangeParams(1524855988,1000,1524855988)), ScalarFixedDoublePlan(0.1,RangeParams(1524855988,1000,1524855988))))",
+      "predict_linear(http_requests_total{job=\"api-server\"}[5m], 10)" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,PredictLinear,List(ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988))))",
 
-     // Binary Expressions should generate Logical Plan according to precedence
+      // Binary Expressions should generate Logical Plan according to precedence
      // Logical plan generated when expression does not have brackets according to precedence is same as logical plan for expression with brackets which are according to precedence
       "(10 % http_requests_total) + 5" ->
         "ScalarVectorBinaryOperation(ADD,ScalarFixedDoublePlan(5.0,RangeParams(1524855988,1000,1524855988)),ScalarVectorBinaryOperation(MOD,ScalarFixedDoublePlan(10.0,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000),true),false)",

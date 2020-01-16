@@ -425,12 +425,13 @@ object CustomMetricsData {
   val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
 
   //Partition Key with multiple string columns
-  val partitionColumns = Seq("metric:string", "app:string")
+  val partitionColumns = Seq("_metric_:string", "app:string")
   val metricdataset = Dataset.make("tsdbdata",
                         partitionColumns,
                         columns,
                         Seq.empty,
-                        DatasetOptions(Seq("metric", "_ns_", "_ws_"), "metric", true)).get
+                        None,
+                        DatasetOptions(Seq("_metric_", "_ns_", "_ws_"), "_metric_", true)).get
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey = partKeyBuilder.partKeyFromObjects(metricdataset.schema, "metric1", "app1")
 
@@ -440,6 +441,7 @@ object CustomMetricsData {
                         partitionColumns2,
                         columns,
                         Seq.empty,
+                        None,
                         DatasetOptions(Seq("__name__"), "__name__", true)).get
   val partKeyBuilder2 = new RecordBuilder(TestData.nativeMem, 2048)
   val defaultPartKey2 = partKeyBuilder2.partKeyFromObjects(metricdataset2.schema,
@@ -452,6 +454,7 @@ object MetricsTestData {
                                   Seq("tags:map"),
                                   Seq("timestamp:ts", "value:double:detectDrops=true"),
                                   Seq.empty,
+                                  None,
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
   val timeseriesSchemas = Schemas(timeseriesSchema)
@@ -489,8 +492,8 @@ object MetricsTestData {
     MachineMetricsData.linearHistSeries(startTs, numSeries, timeStep, numBuckets)
       .flatMap { record =>
         val timestamp = record(0)
-        val tags = record(4).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-        val metricName = tags("__name__".utf8).toString
+        val tags = record(5).asInstanceOf[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+        val metricName = record(4).toString
         val countRec = Seq(timestamp, record(1).asInstanceOf[Long].toDouble,
                            tags + ("__name__".utf8 -> (metricName + "_count").utf8))
         val sumRec = Seq(timestamp, record(2).asInstanceOf[Long].toDouble,

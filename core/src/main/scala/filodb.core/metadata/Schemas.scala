@@ -7,7 +7,7 @@ import org.scalactic._
 import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
-import filodb.core.downsample.ChunkDownsampler
+import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.BinaryRegion
@@ -28,7 +28,8 @@ final case class DataSchema private(name: String,
                                     downsamplers: Seq[ChunkDownsampler],
                                     hash: Int,
                                     valueColumn: ColumnId,
-                                    downsampleSchema: Option[String] = None) {
+                                    downsampleSchema: Option[String] = None,
+                                    downsamplePeriodMarker: DownsamplePeriodMarker) {
   val timestampColumn  = columns.head
 
   // Used to create a `VectorDataReader` of correct type for a given data column ID
@@ -78,15 +79,18 @@ object DataSchema {
   def make(name: String,
            dataColNameTypes: Seq[String],
            downsamplerNames: Seq[String] = Seq.empty,
+           dowsamplerPeriodMarker: Option[String] = None,
            valueColumn: String,
            downsampleSchema: Option[String] = None): DataSchema Or BadSchema = {
 
     for { dataColumns  <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
           downsamplers <- validateDownsamplers(downsamplerNames, downsampleSchema)
+          periodMarker <- validatedDownsamplerPeriodMarker(dowsamplerPeriodMarker)
           valueColID   <- validateValueColumn(dataColumns, valueColumn)
           _            <- validateTimeSeries(dataColumns, Seq(0)) }
     yield {
-      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns), valueColID, downsampleSchema)
+      DataSchema(name, dataColumns, downsamplers, Schemas.genHash(dataColumns),
+                 valueColID, downsampleSchema, periodMarker)
     }
   }
 
@@ -110,6 +114,7 @@ object DataSchema {
     make(schemaName,
          conf.as[Seq[String]]("columns"),
          conf.as[Seq[String]]("downsamplers"),
+         conf.as[Option[String]]("downsample-period-marker"),
          conf.getString("value-column"),
          conf.as[Option[String]]("downsample-schema"))
 }
@@ -153,8 +158,13 @@ object PartitionSchema {
 
 /**
  * A Schema combines a PartitionSchema with a DataSchema, forming all the columns of a single ingestion record.
+ *
+ * The downsample member is a var because setting it at construction time can potentially result be impossible
+ * when downsample schema is same as raw schema
+ *
+ * Important Note: Serialization will be tricky since there may be loops in object graph. Avoid if possible.
  */
-final case class Schema(partition: PartitionSchema, data: DataSchema, downsample: Option[Schema]) {
+final case class Schema(partition: PartitionSchema, data: DataSchema, var downsample: Option[Schema] = None) {
   val allColumns = data.columns ++ partition.columns
   val ingestionSchema = new RecordSchema(allColumns.map(c => ColumnInfo(c.name, c.columnType)),
                                          Some(data.columns.length),
@@ -234,6 +244,12 @@ final case class Schema(partition: PartitionSchema, data: DataSchema, downsample
   /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
   def infosFromIDs(ids: Seq[ColumnId]): Seq[ColumnInfo] =
     ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
+
+  override final def toString: String = {
+    s"Schema(partition=$partition, data=$data, downsample=${downsample.map(_.name)})"
+    // overriden since serializing downsample schema may result in infinite loop
+  }
+
 }
 
 final case class Schemas(part: PartitionSchema,
@@ -254,7 +270,7 @@ final case class Schemas(part: PartitionSchema,
    */
   final def schemaName(id: Int): String = {
     val sch = apply(id)
-    if (sch == Schemas.UnknownSchema) "<unknown>" else sch.name
+    if (sch == Schemas.UnknownSchema) s"schemaID:$id" else sch.name
   }
 }
 
@@ -312,11 +328,11 @@ object Schemas {
       if (uniqueHashes.size == schemas.length) Pass
       else Fail(Seq(("", HashConflict(s"${schemas.length - uniqueHashes.size + 1} schemas have the same hash"))))
     }.filter { schemas =>
-      // check that downsample-schemas point to valid schemas (and should not point at itself, no loops!)
+      // check that downsample-schemas point to valid schemas
       // TODO: also check that the downsample schema matches downsamplers
       val schemaMap = schemas.map { s => s.name -> s }.toMap
       val badDsSchemas = schemas.filterNot { s =>
-        s.downsampleSchema.map(ds => ds != s.name && schemaMap.contains(ds)).getOrElse(true)
+        s.downsampleSchema.forall(ds => schemaMap.contains(ds))
       }
       if (badDsSchemas.isEmpty) Pass
       else Fail(badDsSchemas.map { s =>
@@ -335,7 +351,7 @@ object Schemas {
     def addSchema(part: PartitionSchema, schemaName: String, datas: Seq[DataSchema]): Schema = {
       val data = datas.find(_.name == schemaName).get
       schemas.getOrElseUpdate(data.name, {
-        Schema(part, data, data.downsampleSchema.map(dsName => addSchema(part, dsName, datas)))
+        Schema(part, data, None)
       })
     }
 
@@ -345,6 +361,9 @@ object Schemas {
       dataSchemas <- validateDataSchemas(config.as[Map[String, Config]]("schemas"))
     } yield {
       dataSchemas.foreach { schema => addSchema(partSchema, schema.name, dataSchemas) }
+      schemas.values.foreach { s =>
+        s.downsample = s.data.downsampleSchema.map(dsName => schemas(dsName))
+      }
       Schemas(partSchema, schemas.toMap)
     }
   }
