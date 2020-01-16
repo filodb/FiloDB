@@ -206,7 +206,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
-    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): NonPeriodicSeriesPlan = {
+    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }

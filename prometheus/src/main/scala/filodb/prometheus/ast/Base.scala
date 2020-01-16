@@ -32,7 +32,7 @@ trait Base {
   }
 
   trait SimpleSeries extends Series {
-    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): NonPeriodicSeriesPlan
+    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan
   }
 
   trait Metadata extends Expression {

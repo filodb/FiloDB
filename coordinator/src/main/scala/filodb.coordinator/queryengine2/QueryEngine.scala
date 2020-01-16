@@ -364,7 +364,7 @@ class QueryEngine(dsRef: DatasetRef,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      spreadProvider: SpreadProvider): PlanResult = {
     val series = walkLogicalPlanTree(lp.series, queryId, submitTime, options, spreadProvider)
-    val rawSource = lp.series.isInstanceOf[RawSeriesPlan]
+    val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,

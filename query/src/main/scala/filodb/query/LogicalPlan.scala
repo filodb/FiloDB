@@ -10,13 +10,14 @@ sealed trait LogicalPlan {
   def isRoutable: Boolean = true
 }
 
-sealed trait NonPeriodicSeriesPlan extends LogicalPlan
-
 /**
-  * Super class for a query that results in range vectors with raw samples
+  * Super class for a query that results in range vectors with raw samples (chunks),
+  * or one simple transform from the raw data.  This data is likely non-periodic or at least
+  * not in the same time cadence as user query windowing.
   */
-sealed trait RawSeriesPlan extends NonPeriodicSeriesPlan {
+sealed trait RawSeriesLikePlan extends LogicalPlan {
   override def isRoutable: Boolean = false
+  def isRaw: Boolean = false
 }
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
@@ -52,7 +53,9 @@ case class IntervalSelector(from: Long, to: Long) extends RangeSelector
   */
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
-                     columns: Seq[String]) extends RawSeriesPlan
+                     columns: Seq[String]) extends RawSeriesLikePlan {
+  override def isRaw: Boolean = true
+}
 
 case class LabelValues(labelNames: Seq[String],
                        labelConstraints: Map[String, String],
@@ -83,7 +86,7 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   * This should be taken care outside this layer, or we need to have
   * proper validation.
   */
-case class PeriodicSeries(rawSeries: RawSeriesPlan,
+case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           start: Long,
                           step: Long,
                           end: Long,
@@ -98,7 +101,7 @@ case class PeriodicSeries(rawSeries: RawSeriesPlan,
   * Applies a range function on raw windowed data (perhaps with instant function applied) before
   * sampling data at regular intervals.
   */
-case class PeriodicSeriesWithWindowing(series: NonPeriodicSeriesPlan,
+case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        start: Long,
                                        step: Long,
                                        end: Long,
@@ -169,9 +172,9 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   * Apply Instant Vector Function to a collection of raw RangeVectors,
   * returning another set of non-periodic vectors
   */
-case class ApplyInstantFunctionRaw(vectors: RawSeriesPlan,
+case class ApplyInstantFunctionRaw(vectors: RawSeries,
                                    function: InstantFunctionId,
-                                   functionArgs: Seq[FunctionArgsPlan] = Nil) extends NonPeriodicSeriesPlan
+                                   functionArgs: Seq[FunctionArgsPlan] = Nil) extends RawSeriesLikePlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }

@@ -105,7 +105,7 @@ trait Functions extends Base with Operators with Vectors {
         ApplySortFunction(periodicSeriesPlan, sortFunctionId)
       } else if (absentFunctionIdOpt.isDefined) {
         val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
         ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
           timeParams.end))
       } else {

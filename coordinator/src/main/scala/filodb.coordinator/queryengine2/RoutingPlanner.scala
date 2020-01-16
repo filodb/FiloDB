@@ -213,11 +213,11 @@ object QueryRoutingPlanner extends RoutingPlanner {
   }
 
   /**
-    * Used to change rangeSelector of RawSeriesPlan
+    * Used to change rangeSelector of RawSeriesLikePlan
     */
-  def copyNonPeriodicWithUpdatedTimeRange(plan: NonPeriodicSeriesPlan,
+  def copyNonPeriodicWithUpdatedTimeRange(plan: RawSeriesLikePlan,
                                           timeRange: TimeRange,
-                                          lookBackTime: Long): NonPeriodicSeriesPlan = {
+                                          lookBackTime: Long): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
         case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,
