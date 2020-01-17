@@ -137,6 +137,29 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
+  it("should materialize ExecPlan correctly for _bucket_ histogram queries") {
+    val lp = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar",_bucket_="2.5"}[5m])""", TimeStepParams(20000, 100, 30000))
+
+    info(s"LogicalPlan is $lp")
+    lp match {
+      case p: PeriodicSeriesWithWindowing => p.series.isInstanceOf[ApplyInstantFunctionRaw] shouldEqual true
+      case _ => throw new IllegalArgumentException(s"Unexpected LP $lp")
+    }
+
+    val execPlan = engine.materialize(lp,
+      QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000), promQlQueryParams)
+
+    info(s"First child plan: ${execPlan.children.head.printTree()}")
+    execPlan.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.children.foreach { l1 =>
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      l1.rangeVectorTransformers.size shouldEqual 2
+      l1.rangeVectorTransformers(0).isInstanceOf[InstantVectorFunctionMapper] shouldEqual true
+      l1.rangeVectorTransformers(1).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
+      l1.rangeVectorTransformers(1).asInstanceOf[PeriodicSamplesMapper].rawSource shouldEqual false
+    }
+  }
+
   import com.softwaremill.quicklens._
 
   it("should rename Prom __name__ filters if dataset has different metric column") {

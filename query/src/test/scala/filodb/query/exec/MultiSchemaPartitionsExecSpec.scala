@@ -234,7 +234,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     dataRead.map(_._2) shouldEqual (86 to 166).by(20)
   }
 
-  it ("should read periodic Histogram samples from Memstore") {
+  it("should read periodic Histogram samples from Memstore") {
     import ZeroCopyUTF8String._
     val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
                       ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
@@ -255,6 +255,35 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
                        .grouped(2).map(_.head)   // Skip every other one, starting with second, since step=2x pace
                        .zip((start to end by step).toIterator).map { case (r, t) => (t, r(3)) }
     resultIt.zip(orig.toIterator).foreach { case (res, origData) => res shouldEqual origData }
+  }
+
+  it("should extract bucket from Histogram samples then calculate rate") {
+    import ZeroCopyUTF8String._
+    val filters = Seq(ColumnFilter("dc", Filter.Equals("0".utf8)),
+                      ColumnFilter("_metric_", Filter.Equals("request-latency".utf8)))
+    val execPlan = MultiSchemaPartitionsExec("id1", now, numRawSamples, dummyDispatcher, dsRef, 0,
+                                             filters, AllChunkScan)   // should default to h column
+
+    val start = 105000L
+    val step = 20000L
+    val end = 185000L
+    execPlan.addRangeVectorTransformer(new InstantVectorFunctionMapper(
+                                        InstantFunctionId.HistogramBucket,
+                                        Seq(StaticFuncArgs(16.0, RangeParams(0,0,0)))))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
+                                         Some(InternalRangeFunction.Rate), rawSource = false))
+
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val result = resp.asInstanceOf[QueryResult]
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
+    result.result.size shouldEqual 1
+    val resultIt = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1)))
+
+    val expected = (start to end by step).zip(Seq(Double.NaN, 0.049167, 0.078333, 0.115278, 0.145))
+    resultIt.zip(expected.toIterator).foreach { case (res, exp) =>
+      res._1 shouldEqual exp._1
+      if (!java.lang.Double.isNaN(exp._2)) res._2 shouldEqual exp._2 +- 0.00001
+    }
   }
 
   it("should return SchemaMismatch QueryError if multiple schemas found in query") {
