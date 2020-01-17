@@ -29,8 +29,7 @@ trait Expressions extends Aggregates with Functions {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
     // scalastyle:off method.length
-    override def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
-                                      function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
+    override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
       }

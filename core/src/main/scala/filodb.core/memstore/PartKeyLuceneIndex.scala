@@ -296,8 +296,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def partKeyString(partId: Int,
                             partKeyOnHeapBytes: Array[Byte],
                             partKeyBytesRefOffset: Int = 0): String = {
+    val partHash = schema.binSchema.partitionHash(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
     //scalastyle:off
-    s"shard=$shardNum partId=$partId [${
+    s"shard=$shardNum partId=$partId partHash=$partHash [${
       TimeSeriesPartition
         .partKeyString(schema, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
     }]"

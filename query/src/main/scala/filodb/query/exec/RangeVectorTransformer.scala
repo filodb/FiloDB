@@ -1,10 +1,12 @@
 package filodb.query.exec
 
 import monix.reactive.Observable
+import scala.collection.mutable.ListBuffer
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.RowReader
+import filodb.core.query.Filter.Equals
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
@@ -45,6 +47,7 @@ trait RangeVectorTransformer extends java.io.Serializable {
     * DO NOT change to a val. Increases heap usage.
     */
   protected[exec] def args: String
+  def canHandleEmptySchemas: Boolean = false
 }
 
 object RangeVectorTransformer {
@@ -332,10 +335,56 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
     source.map { rv =>
       new RangeVector {
         override def key: RangeVectorKey = rv.key
-
         override def rows: Iterator[RowReader] = rv.rows
       }
     }
   }
   override def funcParams: Seq[FuncArgs] = Nil
+}
+
+final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangeParams: RangeParams, metricColumn: String)
+  extends RangeVectorTransformer {
+
+  protected[exec] def args: String =
+    s"columnFilter=$columnFilter rangeParams=$rangeParams metricColumn=$metricColumn"
+
+  def keysFromFilter : RangeVectorKey = {
+    val labelsFromFilter = columnFilter.filter(_.filter.isInstanceOf[Equals]).
+      filterNot(_.column.equals(metricColumn)).map { c =>
+      ZeroCopyUTF8String(c.column) -> ZeroCopyUTF8String(c.filter.valuesStrings.head.asInstanceOf[String])
+    }.toMap
+    CustomRangeVectorKey(labelsFromFilter)
+  }
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+
+    def addNonNanTimestamps(res: List[Long], cur: RangeVector): List[Long]  = {
+      res ++ cur.rows.filter(!_.getDouble(1).isNaN).map(_.getLong(0)).toList
+    }
+    val nonNanTimestamps = source.foldLeftL(List[Long]())(addNonNanTimestamps)
+
+    val resultRv = nonNanTimestamps.map {
+      t =>
+        val rowList = new ListBuffer[TransientRow]()
+        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+          if (!t.contains(i * 1000))
+            rowList += new TransientRow(i * 1000, 1)
+        }
+        new RangeVector {
+          override def key: RangeVectorKey = if (rowList.isEmpty) CustomRangeVectorKey.empty else keysFromFilter
+          override def rows: Iterator[RowReader] = rowList.iterator
+          }
+        }
+
+    Observable.fromTask(resultRv)
+  }
+  override def funcParams: Seq[FuncArgs] = Nil
+  override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
+    ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+
+  override def canHandleEmptySchemas: Boolean = true
 }

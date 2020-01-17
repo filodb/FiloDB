@@ -314,14 +314,14 @@ class SchemasSpec extends FunSpec with Matchers {
     }
 
     val partSchemaStr2 = """{
-                        columns = ["metric:string", "tags:map"]
+                        columns = ["_metric_:string", "tags:map"]
                         predefined-keys = ["_ns", "app", "__name__", "instance", "dc"]
                         options {
                           copyTags = {}
                           ignoreShardKeyColumnSuffixes = {}
                           ignoreTagsOnPartitionKeyHash = ["le"]
-                          metricColumn = "metric"
-                          shardKeyColumns = ["metric", "_ns"]
+                          metricColumn = "_metric_"
+                          shardKeyColumns = ["_metric_", "_ns"]
                         }
                       }"""
 

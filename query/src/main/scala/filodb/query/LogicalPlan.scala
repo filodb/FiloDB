@@ -84,7 +84,7 @@ case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
                           end: Long,
-                          function: Option[RangeFunctionId] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -101,8 +101,8 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        end: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
-  with NonLeafLogicalPlan {
+                                       functionArgs: Seq[FunctionArgsPlan] = Nil,
+                                       offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -201,8 +201,19 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   override def isRoutable: Boolean = false
 }
 
+//scalastyle:off number.of.types
 final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
+}
+
+/**
+  * Apply Absent Function to a collection of RangeVectors
+  */
+case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
+                               columnFilters: Seq[ColumnFilter],
+                               rangeParams: RangeParams,
+                               functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
 object LogicalPlan {
@@ -217,3 +228,4 @@ object LogicalPlan {
    }
   }
 }
+//scalastyle:on number.of.types

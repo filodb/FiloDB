@@ -15,7 +15,8 @@ trait Functions extends Base with Operators with Vectors {
       FiloFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       MiscellaneousFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
       ScalarFunctionId.withNameInsensitiveOption(name.toLowerCase).isEmpty &&
-      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
+      SortFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty &&
+      AbsentFunctionId.withNameLowercaseOnlyOption(name.toLowerCase).isEmpty) {
 
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
@@ -28,8 +29,7 @@ trait Functions extends Base with Operators with Vectors {
       name.equalsIgnoreCase("scalar") ||
       name.equalsIgnoreCase("time")
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams,
-                             function: Option[RangeFunctionId] = None): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val vectorFn = VectorFunctionId.withNameInsensitiveOption(name)
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
       val filoFunctionIdOpt = FiloFunctionId.withNameInsensitiveOption(name)
@@ -86,10 +86,11 @@ trait Functions extends Base with Operators with Vectors {
       val miscellaneousFunctionIdOpt = MiscellaneousFunctionId.withNameInsensitiveOption(name)
       val scalarFunctionIdOpt = ScalarFunctionId.withNameInsensitiveOption(name)
       val sortFunctionIdOpt = SortFunctionId.withNameInsensitiveOption(name)
+      val absentFunctionIdOpt = AbsentFunctionId.withNameInsensitiveOption(name)
       // Get parameters other than  series like label names. Parameters can be quoted so remove special characters
-      val stringParam = allParams.filter(!_.equals(seriesParam)).
-                        filter(_.isInstanceOf[InstantExpression]).
-                        map(_.asInstanceOf[InstantExpression].realMetricName.replaceAll("^\"|\"$", ""))
+      val stringParam = allParams.filter(!_.equals(seriesParam)).collect {
+        case e: InstantExpression => e.realMetricName.replaceAll("^\"|\"$", "")
+      }
 
       if (miscellaneousFunctionIdOpt.isDefined) {
         val miscellaneousFunctionId = miscellaneousFunctionIdOpt.get
@@ -99,23 +100,33 @@ trait Functions extends Base with Operators with Vectors {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
         val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
         ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, params)
-      }
-      else if (sortFunctionIdOpt.isDefined) {
+      } else if (sortFunctionIdOpt.isDefined) {
         val sortFunctionId = sortFunctionIdOpt.get
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
         ApplySortFunction(periodicSeriesPlan, sortFunctionId)
+      } else if (absentFunctionIdOpt.isDefined) {
+        val columnFilter = seriesParam.asInstanceOf[InstantExpression].columnFilters
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
+        ApplyAbsentFunction(periodicSeriesPlan, columnFilter, RangeParams(timeParams.start, timeParams.step,
+          timeParams.end))
       } else {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
-
         if (rangeFunctionId == Timestamp) {
-          seriesParam.asInstanceOf[InstantExpression].toPeriodicSeriesPlan(timeParams, Some(rangeFunctionId))
+          val instantExpressiom = seriesParam.asInstanceOf[InstantExpression]
+          val offsetMillis: Long = instantExpressiom.offset.map(_.millis).getOrElse(0)
+
+          PeriodicSeriesWithWindowing(instantExpressiom.toRawSeriesPlan(timeParams),
+            timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis, 0,
+            rangeFunctionId, otherParams, instantExpressiom.offset.map(_.millis))
         } else {
           val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
+          val offsetMillis: Long = rangeExpression.offset.map(_.millis).getOrElse(0)
+
           PeriodicSeriesWithWindowing(
             rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
-            timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
+            timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
             rangeExpression.window.millis,
-            rangeFunctionId, otherParams)
+            rangeFunctionId, otherParams, rangeExpression.offset.map(_.millis))
         }
       }
     }
