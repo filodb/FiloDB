@@ -526,6 +526,32 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     answers.map(_._2) shouldEqual maxes
   }
 
+  it (" should work for countValues") {
+//    val s1 = Seq( (1541190600L, Double.NaN), (1541190660L, Double.NaN), (1541190720L, Double.NaN),
+//      (1541190780L, Double.NaN), (1541190840L, Double.NaN), (1541190900L, 1.0), (1541190960L, 1.0))
+    val s1 = Seq( (1541190600L, 1.0d), (1541190660L,1.0d))
+  //(1541190720L,2.0d),
+    //  (1541190780L,2.0d), (1541190840L,2.0d), (1541190900L,3.0d), (1541190960L,4.0d))
+
+//    val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
+//    val aggMR = AggregateMapReduce(AggregationOperator.CountValues, Seq("freq"), Nil, Nil)
+//    val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), queryConfig, 1000, tvSchema)
+
+    val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(Seq(toRv(s1))), noGrouping)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key)
+
+//    val resultObs= RangeVectorAggregator.mapReduce(agg, true, mapped1, rv=>rv.key)
+    val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000)
+    val result = resultObs2.toListL.runAsync.futureValue
+    println("result.size:" + result.size)
+  //  result4.size shouldEqual 1
+//    println("key")
+//    result4(0).key shouldEqual
+//    // prior to this fix, test was returning List(NaN, NaN, NaN, NaN, NaN, 1.0, 1.0)
+//    result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+  }
+
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{

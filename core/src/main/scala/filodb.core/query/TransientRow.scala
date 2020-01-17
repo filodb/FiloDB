@@ -2,6 +2,8 @@ package filodb.core.query
 
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String, vectors => bv}
 
+import scala.collection.mutable
+
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
   def setDouble(columnNo: Int, value: Double): Unit
@@ -251,35 +253,55 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
-//final class CountValuesTransientRow() extends MutableRowReader {
-//  var timestamp: Long = _
-//  val frequencyMap = mutable.Map[Double, Long]()
-//
-//  def setLong(columnNo: Int, valu: Long): Unit =
-//    if (columnNo == 0) timestamp = valu
-//    else throw new IllegalArgumentException()
-//
-//  def setDouble(columnNo: Int, valu: Double): Unit =
-//    values((columnNo-1)/2) = valu
-//
-//  def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit =
-//    partKeys((columnNo-1)/2) = valu
-//
-//  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
-//
-//  def notNull(columnNo: Int): Boolean = columnNo < 2*k + 1
-//  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
-//  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
-//  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
-//  def getDouble(columnNo: Int): Double = values((columnNo-1)/2)
-//  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
-//  def getString(columnNo: Int): String = partKeys((columnNo-1)/2).toString
-//  def getAny(columnNo: Int): Any = {
-//    if (columnNo == 0) timestamp
-//    else if (columnNo % 2 == 1) partKeys((columnNo-1)/2)
-//    else values((columnNo-1)/2)
-//  }
-//  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
-//  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
-//  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
-//}
+final class CountValuesTransientRow() extends MutableRowReader {
+  var timestamp: Long = _
+  var blobBase: Array[Byte] = _
+  var blobOffset: Int = _
+  var blobLength: Int = _
+  val frequencyMap = mutable.Map[Double, Int]()
+
+  def setLong(columnNo: Int, valu: Long): Unit =
+    if (columnNo == 0) timestamp = valu
+    else throw new IllegalArgumentException()
+
+  def setDouble(columnNo: Int, valu: Double): Unit = ???
+
+  def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit = ???
+
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = {
+    if (columnNo == 1) {
+      blobBase = base
+      blobOffset = offset
+      blobLength = length
+    }
+  }
+
+  def notNull(columnNo: Int): Boolean = throw new IllegalArgumentException()
+
+  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+
+  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
+
+  def getDouble(columnNo: Int): Double = throw new IllegalArgumentException()
+
+  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
+
+  def getString(columnNo: Int): String = throw new IllegalArgumentException()
+
+  def getAny(columnNo: Int): Any = {
+    if (columnNo == 0) timestamp
+    else throw new IllegalArgumentException()
+  }
+
+  def getBlobBase(columnNo: Int): Any = if (columnNo == 1) blobBase
+                                        else throw new IllegalArgumentException()
+
+  def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) blobOffset
+                                           else throw new IllegalArgumentException()
+
+  def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
+                                            else throw new IllegalArgumentException()
+
+}
