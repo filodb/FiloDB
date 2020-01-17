@@ -1,6 +1,7 @@
 package filodb.cli
 
 import java.io.OutputStream
+import java.math.BigInteger
 import java.sql.Timestamp
 
 import scala.concurrent.duration._
@@ -16,7 +17,10 @@ import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.coordinator.queryengine2.{PromQlQueryParams, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core._
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
+import filodb.core.store.ChunkSetInfoOnHeap
+import filodb.memory.MemFactory
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
@@ -39,6 +43,9 @@ class Arguments extends FieldArgs {
   var host: Option[String] = None
   var port: Int = 2552
   var promql: Option[String] = None
+  var schema: Option[String] = None
+  var hexPk: Option[String] = None
+  var hexChunkInfo: Option[String] = None
   var matcher: Option[String] = None
   var labelNames: Seq[String] = Seq.empty
   var labelFilter: Map[String, String] = Map.empty
@@ -80,6 +87,9 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command timeseriesMetadata --matcher <matcher-query> --dataset <dataset> --start <start> --end <end>")
     println("  --host <hostname/IP> [--port ...] --command labelValues --labelName <lable-names> --labelFilter <label-filter> --dataset <dataset>")
+    println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
+    println("""  --command partKeyBrAsString --hexPk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
+    println("""  --command decodeChunkInfo --hexChunkInfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -144,6 +154,18 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           dumpShardStatus(remote, ref)
 
         case Some("validateSchemas") => validateSchemas()
+
+        case Some("promFilterToPartKeyBR") =>
+          require(args.promql.nonEmpty && args.schema.nonEmpty, "--promql and --schema must be defined")
+          promFilterToPartKeyBr(args.promql.get, args.schema.get)
+
+        case Some("partKeyBrAsString") =>
+          require(args.hexPk.nonEmpty, "--hexPk must be defined")
+          partKeyBrAsString(args.hexPk.get)
+
+        case Some("decodeChunkInfo") =>
+          require(args.hexChunkInfo.nonEmpty, "--hexChunkInfo must be defined")
+          decodeChunkInfo(args.hexChunkInfo.get)
 
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
@@ -245,6 +267,38 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(query,timeParams.start, timeParams.step,
       timeParams.end))
+  }
+
+  def promFilterToPartKeyBr(query: String, schemaName: String): Unit = {
+
+    import filodb.memory.format.ZeroCopyUTF8String._
+
+    val schema = Schemas.fromConfig(config).get.schemas
+                        .getOrElse(schemaName, throw new IllegalArgumentException(s"Invalid schema $schemaName"))
+    val exp = Parser.parseFilter(query)
+    val rb = new RecordBuilder(MemFactory.onHeapFactory)
+    val metricName = exp.metricName.orElse(exp.labelSelection
+                                   .find(_.label == "__name__").map(_.value))
+                                   .getOrElse(throw new IllegalArgumentException("Metric name not provided"))
+    val tags = exp.labelSelection.filterNot(_.label == "__name__").map(lm => (lm.label.utf8, lm.value.utf8)).toMap
+    rb.partKeyFromObjects(schema, metricName.utf8, tags)
+    rb.currentContainer.get.foreach { case (b, o) =>
+      println(schema.partKeySchema.toHexString(b, o).toLowerCase)
+    }
+  }
+
+  def partKeyBrAsString(brHex: String): Unit = {
+    val brHex2 = if (brHex.startsWith("0x")) brHex.substring(2) else brHex
+    val array = new BigInteger(brHex2, 16).toByteArray
+    val schema = Schemas.fromConfig(config).get.schemas.head._2
+    println(schema.partKeySchema.stringify(array))
+  }
+
+  def decodeChunkInfo(hexChunkInfo: String): Unit = {
+    val brHex2 = if (hexChunkInfo.startsWith("0x")) hexChunkInfo.substring(2) else hexChunkInfo
+    val array = new BigInteger(brHex2, 16).toByteArray
+    val ci = ChunkSetInfoOnHeap(array, Array.empty)
+    println(s"ChunkSetInfo id=${ci.id} numRows=${ci.numRows} startTime=${ci.startTime} endTime=${ci.endTime}")
   }
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions, tsdbQueryParams:
