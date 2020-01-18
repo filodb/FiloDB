@@ -64,6 +64,23 @@ class RecordBuilder(memFactory: MemFactory,
     recHash = -1
   }
 
+  /**
+   * If somehow the state is inconsistent, and only a partial record is written,
+   * rewind the curRecordOffset back to the curRecEndOffset.  In other words, rewind the write pointer
+   * back to the end of previous record.  Partially written data is lost, but state is consistent again.
+   */
+  def rewind(): Unit = {
+    curRecEndOffset = curRecordOffset
+  }
+
+  // Check that we are at end of a record.  If a partial record is written, just rewind so state is not inconsistent.
+  private def checkPointers(): Unit = {
+    if (curRecEndOffset != curRecordOffset) {
+      logger.warn(s"Partial record was written, perhaps exception occurred.  Rewinding to end of previous record.")
+      rewind()
+    }
+  }
+
   // Only reset the container offsets, but not the fieldNo, mapOffset, recHash
   private def resetContainerPointers(): Unit = {
     curRecordOffset = containers.last.offset + ContainerHeaderLen
@@ -87,7 +104,7 @@ class RecordBuilder(memFactory: MemFactory,
    *        for partition keys.  However for ingestion records it would be the same.
    */
   private[core] final def startNewRecord(recSchema: RecordSchema, schemaID: Int): Unit = {
-    require(curRecEndOffset == curRecordOffset, s"Illegal state: $curRecEndOffset != $curRecordOffset")
+    checkPointers()
 
     // Set schema, hashoffset, and write schema ID if needed
     setSchema(recSchema)
