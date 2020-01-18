@@ -349,8 +349,8 @@ object Parser extends Expression {
     }
 
     expressionWithPrecedence match {
-      case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)
-      case r: SimpleSeries   => r.toRawSeriesPlan(timeParams, isRoot = true)
+      case p: PeriodicSeries => p.toSeriesPlan(timeParams)
+      case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
     }
   }

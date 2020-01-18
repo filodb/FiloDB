@@ -485,7 +485,7 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 
 * There is no need to append `_bucket` to the metric name.
 * To compute quantiles:  `histogram_quantile(0.7, sum(rate(http_req_latency{app="foo"}[5m])))`
-* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo"})`
+* To extract a bucket: `http_req_latency{app="foo",_bucket_="100.0"}`  (`_bucket_` is a special filter that translates to the `histogram_bucket` function for bucket extraction)
 * Sum over multiple Histogram time series:  `sum(rate(http_req_latency{app="foo"}[5m]))` - you could then compute quantile over the sum.
   - NOTE: Do NOT use `by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.

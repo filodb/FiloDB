@@ -65,7 +65,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
     aggregate.vectors.isInstanceOf[PeriodicSeriesWithWindowing] shouldEqual (true)
-    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].rawSeries.toString shouldEqual
+    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].series.toString shouldEqual
       (expectedRaw.toString)
 
   }
@@ -167,7 +167,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
     aggregate.vectors.isInstanceOf[PeriodicSeriesWithWindowing] shouldEqual (true)
-    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].rawSeries.toString shouldEqual
+    aggregate.asInstanceOf[Aggregate].vectors.asInstanceOf[PeriodicSeriesWithWindowing].series.toString shouldEqual
       (expectedRaw.toString)
 
   }

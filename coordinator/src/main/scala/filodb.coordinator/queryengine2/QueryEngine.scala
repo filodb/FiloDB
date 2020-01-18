@@ -239,6 +239,8 @@ class QueryEngine(dsRef: DatasetRef,
                                               spreadProvider)
       case lp: ApplyInstantFunction        => materializeApplyInstantFunction(queryId, submitTime, options, lp,
                                               spreadProvider)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(queryId, submitTime, options, lp,
+                                              spreadProvider)
       case lp: Aggregate                   => materializeAggregate(queryId, submitTime, options, lp, spreadProvider)
       case lp: BinaryJoin                  => materializeBinaryJoin(queryId, submitTime, options, lp, spreadProvider)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp,
@@ -345,17 +347,29 @@ class QueryEngine(dsRef: DatasetRef,
     vectors
   }
 
+  private def materializeApplyInstantFunctionRaw(queryId: String,
+                                                 submitTime: Long,
+                                                 options: QueryOptions,
+                                                 lp: ApplyInstantFunctionRaw,
+                                                 spreadProvider : SpreadProvider): PlanResult = {
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options, spreadProvider)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
+    vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
+    vectors
+  }
+
   private def materializePeriodicSeriesWithWindowing(queryId: String,
                                                      submitTime: Long,
                                                      options: QueryOptions,
                                                      lp: PeriodicSeriesWithWindowing,
                                                      spreadProvider: SpreadProvider): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options, spreadProvider)
+    val series = walkLogicalPlanTree(lp.series, queryId, submitTime, options, spreadProvider)
+    val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), paramsExec, lp.offset)))
-    rawSeries
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
+      lp.end, Some(lp.window), Some(execRangeFn), paramsExec, lp.offset, rawSource)))
+    series
   }
 
   private def materializePeriodicSeries(queryId: String,
