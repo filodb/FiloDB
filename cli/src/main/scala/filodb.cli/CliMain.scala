@@ -21,7 +21,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
-import filodb.memory.format.RowReader
+import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
 import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -45,7 +45,9 @@ class Arguments extends FieldArgs {
   var promql: Option[String] = None
   var schema: Option[String] = None
   var hexPk: Option[String] = None
+  var hexVector: Option[String] = None
   var hexChunkInfo: Option[String] = None
+  var vectorType: Option[String] = None
   var matcher: Option[String] = None
   var labelNames: Seq[String] = Seq.empty
   var labelFilter: Map[String, String] = Map.empty
@@ -90,6 +92,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     println("""  --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter""")
     println("""  --command partKeyBrAsString --hexPk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773""")
     println("""  --command decodeChunkInfo --hexChunkInfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000""")
+    println("""  --command decodeVector --hexVector 0x1b000000080800000300000000000000010000000700000006080400109836 --vectorType d""")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -166,6 +169,10 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         case Some("decodeChunkInfo") =>
           require(args.hexChunkInfo.nonEmpty, "--hexChunkInfo must be defined")
           decodeChunkInfo(args.hexChunkInfo.get)
+
+        case Some("decodeVector") =>
+          require(args.hexVector.nonEmpty && args.vectorType.nonEmpty, "--hexVector and --vectorType must be defined")
+          decodeVector(args.hexVector.get, args.vectorType.get)
 
         case Some("timeseriesMetadata") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
@@ -295,10 +302,30 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
   }
 
   def decodeChunkInfo(hexChunkInfo: String): Unit = {
-    val brHex2 = if (hexChunkInfo.startsWith("0x")) hexChunkInfo.substring(2) else hexChunkInfo
-    val array = new BigInteger(brHex2, 16).toByteArray
+    val ciHex = if (hexChunkInfo.startsWith("0x")) hexChunkInfo.substring(2) else hexChunkInfo
+    val array = new BigInteger(ciHex, 16).toByteArray
     val ci = ChunkSetInfoOnHeap(array, Array.empty)
     println(s"ChunkSetInfo id=${ci.id} numRows=${ci.numRows} startTime=${ci.startTime} endTime=${ci.endTime}")
+  }
+
+  def decodeVector(hexVector: String, vectorType: String): Unit = {
+    val vec = if (hexVector.startsWith("0x")) hexVector.substring(2) else hexVector
+    val array = new BigInteger(vec, 16).toByteArray
+    val memReader = MemoryReader.fromArray(array)
+
+    val clazz = vectorType match {
+      case "i" => Classes.Int
+      case "l" => Classes.Long
+      case "d" => Classes.Double
+      case "h" => Classes.Histogram
+      case "s" => Classes.UTF8
+      case _   => throw new IllegalArgumentException(s"--vectorType should be one of [i|l|d|h|s]")
+    }
+
+    val vecReader = BinaryVector.reader(clazz, memReader, 0)
+    val str = vecReader.toHumanReadable(memReader, 0)
+    println(vecReader.getClass.getSimpleName)
+    println(str)
   }
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions, tsdbQueryParams:

@@ -134,6 +134,12 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    */
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
 
+  def toHumanReadable(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String = {
+    val it = iterate(acc, vector)
+    val size = numBytes(acc, vector)
+    (0 to size).map(_ => it.next).mkString(sep)
+  }
+
   /**
    * Sums up the Double values in the vector from position start to position end.
    * @param vector the BinaryVectorPtr native address of the BinaryVector
