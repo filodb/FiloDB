@@ -48,10 +48,9 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
   lazy val readCql = session.prepare(s"SELECT * FROM $tableString " +
     s"WHERE shard = ? AND updateHour = ? AND split = ? ")
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
-    val fut: Future[Iterator[PartKeyRecord]] =
-      session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt)).toIterator.handleErrors
-             .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
-    Observable.fromFuture(fut).flatMap(it => Observable.fromIterator(it))
+    session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt))
+      .toObservable.handleObservableErrors
+      .map(PartitionKeysTable.rowToPartKeyRecord)
   }
 
 }

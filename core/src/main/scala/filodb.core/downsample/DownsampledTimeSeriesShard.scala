@@ -101,6 +101,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       // records with same part key
       indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef,
                                   fromHour, toHour)(lookupOrCreatePartId)
+        .map( _ => indexUpdatedHour.set(toHour))
         .onErrorHandle { e =>
           logger.error(s"Error occurred when refreshing downsample index " +
             s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)

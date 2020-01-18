@@ -50,7 +50,7 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     }
   }
 
-  lazy val scanCql = session.prepare(s"SELECT * FROM ${tableString} " +
+  lazy val scanCql = session.prepare(s"SELECT * FROM $tableString " +
                                       s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
     val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)

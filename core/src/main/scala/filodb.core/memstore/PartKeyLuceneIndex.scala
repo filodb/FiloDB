@@ -510,6 +510,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
     var chosenPartId: Option[Int] = None
     def handleMatch(partId: Int, candidate: BytesRef): Unit = {
+      // we need an equals check because there can potentially be another partKey with additional tags
       if (schema.binSchema.equals(partKeyBase, partKeyOffset,
         candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
         logger.debug(s"There is already a partId=$partId assigned for " +

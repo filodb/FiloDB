@@ -39,6 +39,8 @@ trait ChunkSink {
   /**
     * Used by downsample shard to do periodic pulls of new partition keys
     * into lucene index
+    *
+    * @param updateHour hour since epoch, essentially millis / 1000 / 60 / 60
     */
   def getPartKeysByUpdateHour(ref: DatasetRef,
                               shard: Int,
