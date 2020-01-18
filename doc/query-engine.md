@@ -209,20 +209,20 @@ FiloDB stores all histogram buckets together as a single time series, leading to
 
 Let's say one wanted to plot a single bucket which represents count of all latencies below 500ms:
 
-    rate(http_req_latency_buckets{app="foobar",le=".500"}[5m])
+    rate(http_req_latency_bucket{app="foobar",le=".5"}[5m])
 
 The above is how one would write the query in Prometheus itself.  In FiloDB, expressing the above is difficult as rate is a "range function" - it computes a periodic result from raw data.  However, what we need to do instead is to apply an instant function which extracts the bucket from the raw histogram, and then apply the rate to the result of the instant function.  We first need a transform to get the bucket data, then we apply the rate:
 
-    rate(histogram_bucket(0.500, http_req_latency{app="foobar"})[5m])
+    rate(histogram_bucket(0.5, http_req_latency{app="foobar"})[5m])
 
 The above has various problems.  The window specifier, `[5m]` is applied to the periodic "rate" range function, but in the above the range function rate is applied at the second level, so where does the `[5m]` go?  It doesn't apply to the `histogram_bucket` transformation.  So instead we allow users to use a magic label `_bucket_` to extract the bucket:
 
-    rate(http_req_latency{app="foobar",_bucket_=".500"}[5m])
+    rate(http_req_latency{app="foobar",_bucket_=".5"}[5m])
 
 Under the hood, however, we still produce a LogicalPlan like the following:
 
     * `PeriodicSeriesWithWindowing` with function=Rate and window=5*60
-      * InstantFunction with function=`histogram_bucket` and param1=0.500
+      * ApplyInstantFunctionRaw with function=`histogram_bucket` and param1=0.500
         * `RawSeries` with filter __name__==http_req_latency && app=foobar
 
 The logical plan above allows for Prometheus-style bucket extraction and queries, while retaining the advantages of an optimized histogram format.
