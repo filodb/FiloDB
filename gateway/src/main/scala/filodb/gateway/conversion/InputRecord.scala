@@ -106,20 +106,22 @@ object InputRecord {
       case (k, v) =>      (k.toDouble, v.toLong)
     }.sorted
 
-    // Built up custom histogram objects and scheme, then encode
-    val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
-    val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
+    if (sortedBuckets.nonEmpty) {
+      // Built up custom histogram objects and scheme, then encode
+      val buckets = CustomBuckets(sortedBuckets.map(_._1).toArray)
+      val hist = LongHistogram(buckets, sortedBuckets.map(_._2).toArray)
 
-    // Now, write out histogram
-    builder.startNewRecord(promHistogram)
-    builder.addLong(timestamp)
-    builder.addDouble(sum)
-    builder.addDouble(count)
-    builder.addBlob(hist.serialize())
+      // Now, write out histogram
+      builder.startNewRecord(promHistogram)
+      builder.addLong(timestamp)
+      builder.addDouble(sum)
+      builder.addDouble(count)
+      builder.addBlob(hist.serialize())
 
-    builder.addString(metric)
-    builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
-    builder.endRecord()
+      builder.addString(metric)
+      builder.addMap(tags.map { case (k, v) => (k.utf8, v.utf8) })
+      builder.endRecord()
+    }
   }
 }
 
