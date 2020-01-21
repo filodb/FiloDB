@@ -323,7 +323,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     }
 
     val vecReader = BinaryVector.reader(clazz, memReader, 0)
-    val str = vecReader.toHumanReadable(memReader, 0)
+    val str = vecReader.debugString(memReader, 0)
     println(vecReader.getClass.getSimpleName)
     println(str)
   }

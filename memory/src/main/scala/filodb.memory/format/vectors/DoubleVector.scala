@@ -134,9 +134,9 @@ trait DoubleVectorDataReader extends CounterVectorReader {
    */
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
 
-  def toHumanReadable(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String = {
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String = {
     val it = iterate(acc, vector)
-    val size = numBytes(acc, vector)
+    val size = length(acc, vector)
     (0 to size).map(_ => it.next).mkString(sep)
   }
 

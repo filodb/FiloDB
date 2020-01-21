@@ -141,7 +141,7 @@ trait VectorDataReader extends AvailableReader {
   def toHexString(acc: MemoryReader, vector: BinaryVectorPtr): String =
     s"0x${toBytes(acc, vector).map("%02X" format _).mkString}"
 
-  def toHumanReadable(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = ","): String
 
   def asIntReader: vectors.IntVectorDataReader = this.asInstanceOf[vectors.IntVectorDataReader]
   def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]

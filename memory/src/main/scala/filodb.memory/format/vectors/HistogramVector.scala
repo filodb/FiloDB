@@ -455,9 +455,9 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
     }
   }
 
-  def toHumanReadable(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = System.lineSeparator): String = {
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = System.lineSeparator): String = {
     val it = iterate(acc, vector)
-    val size = numBytes(acc, vector)
+    val size = length(acc, vector)
     (0 to size).map(_ => it.asHistIt).mkString(sep)
   }
 

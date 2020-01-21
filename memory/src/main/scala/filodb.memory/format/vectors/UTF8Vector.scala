@@ -116,9 +116,9 @@ trait UTF8VectorDataReader extends VectorDataReader {
    */
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
 
-  def toHumanReadable(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = "\n"): String = {
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = "\n"): String = {
     val it = iterate(acc, vector)
-    val size = numBytes(acc, vector)
+    val size = length(acc, vector)
     (0 to size).map(_ => it.next).mkString(sep)
   }
 
