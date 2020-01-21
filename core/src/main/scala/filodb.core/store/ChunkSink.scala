@@ -13,7 +13,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 
-case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
+case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int])
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
@@ -31,7 +31,20 @@ trait ChunkSink {
    */
   def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
+  /**
+    * Used to bootstrap lucene index with partition keys for a shard
+    */
   def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord]
+
+  /**
+    * Used by downsample shard to do periodic pulls of new partition keys
+    * into lucene index
+    *
+    * @param updateHour hour since epoch, essentially millis / 1000 / 60 / 60
+    */
+  def getPartKeysByUpdateHour(ref: DatasetRef,
+                              shard: Int,
+                              updateHour: Long): Observable[PartKeyRecord]
 
   def writePartKeys(ref: DatasetRef, shard: Int,
                     partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response]
@@ -146,4 +159,6 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
     partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
   }
 
+  override def getPartKeysByUpdateHour(ref: DatasetRef, shard: Int,
+                                       updateHour: Long): Observable[PartKeyRecord] = Observable.empty
 }

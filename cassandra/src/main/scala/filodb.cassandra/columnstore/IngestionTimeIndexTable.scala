@@ -103,7 +103,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
   def writeIndices(partition: Array[Byte],
                    infos: Seq[(Long, Long, Array[Byte])],
                    stats: ChunkSinkStats,
-                   diskTimeToLive: Int): Future[Response] = {
+                   diskTimeToLiveSeconds: Int): Future[Response] = {
     var infoBytes = 0
     val partitionBuf = toBuffer(partition)
     val statements = infos.map { case (ingestionTime, startTime, info) =>
@@ -112,7 +112,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
                          ingestionTime: java.lang.Long,
                          startTime: java.lang.Long,
                          ByteBuffer.wrap(info),
-                         diskTimeToLive: java.lang.Integer)
+                         diskTimeToLiveSeconds: java.lang.Integer)
     }
     stats.addIndexWriteStats(infoBytes)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))

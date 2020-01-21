@@ -347,6 +347,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     final def unlock(): Unit = chunkmapReleaseShared()
   }
 
+  def partKeyHash: Int = schema.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
+
   /**
     * startTime of earliest chunk in memory.
     * Long.MaxValue if no chunk is present

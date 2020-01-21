@@ -233,7 +233,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
       // Define a cancel task to run when ingestion is stopped.
       val onCancel = Task {
-        logger.info(s"Ingstion cancel task invoked for dataset=$ref shard=$shard")
+        logger.info(s"Ingestion cancel task invoked for dataset=$ref shard=$shard")
         val stopped = IngestionStopped(ref, shard)
         self ! stopped
         statusActor ! stopped
