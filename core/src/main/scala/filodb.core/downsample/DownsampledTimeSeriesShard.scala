@@ -88,28 +88,31 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // This is important because each partition's start/end time can be updated only once
     // in cassandra per flush interval. Less frequent update can result in multiple events
     // per partKey, and order (which we have  not persisted) would become important.
+    // Also, addition of keys to index can be parallelized using mapAsync below only if
+    // we are sure that in one raw dataset flush period, we wont get two updated part key
+    // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
     logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
       s"every ${storeConfig.flushInterval}")
     indexUpdateFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
                                                           storeConfig.flushInterval).mapAsync { i =>
-      val toHour = hour() - 1
+      // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
+      // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
+      // before refresh happens because we will not revist the hour again.
+      val toHour = hour() - 2
       val fromHour = indexUpdatedHour.get() + 1
       logger.info(s"Refreshing downsample index for dataset=$rawDatasetRef shard=$shardNum " +
         s"fromHour=$fromHour toHour=$toHour")
-      // Gotcha: Index loading is not single threaded. This is possible only
-      // because we are sure that in one raw dataset flush period, we wont get two updated part key
-      // records with same part key
-      indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef,
-                                  fromHour, toHour)(lookupOrCreatePartId)
-        .map( _ => indexUpdatedHour.set(toHour))
+      indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+        .map { count =>
+          indexUpdatedHour.set(toHour)
+          logger.info(s"Refreshed downsample index with $count new records for " +
+            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
+        }
         .onErrorHandle { e =>
-          logger.error(s"Error occurred when refreshing downsample index " +
-            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
-          0
+           logger.error(s"Error occurred when refreshing downsample index " +
+             s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
         }
     }.completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
-
-    // TODO cleanup / stop future when shard is down
   }
 
   def lookupOrCreatePartId(pk: PartKeyRecord): Int = {

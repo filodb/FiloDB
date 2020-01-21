@@ -20,7 +20,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
     * @param shardNum shard number
     * @param ref dataset ref
     * @param assignPartId the function to invoke to get the partitionId to be used to populate the index record
-    * @return
+    * @return number of updated records
     */
   def bootstrapIndex(index: PartKeyLuceneIndex,
                      shardNum: Int,
@@ -43,6 +43,14 @@ class IndexBootstrapper(colStore: ColumnStore) {
       }
   }
 
+  /**
+    * Refresh index
+    * @param fromHour
+    * @param toHour
+    * @param parallelism
+    * @param lookUpOrAssignPartId
+    * @return
+    */
   def refreshIndex(index: PartKeyLuceneIndex,
                    shardNum: Int,
                    ref: DatasetRef,
@@ -64,9 +72,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
      }
      .countL
      .map { count =>
-        index.refreshReadersBlocking()
-        tracer.finish()
-        count
+       index.refreshReadersBlocking()
+       tracer.finish()
+
+       count
      }
   }
 
