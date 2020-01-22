@@ -8,7 +8,7 @@ import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.StoreFactory
 import filodb.core.downsample.DownsampledTimeSeriesStore
 import filodb.core.memstore.TimeSeriesMemStore
-import filodb.core.store.{MetaStore, NullColumnStore}
+import filodb.core.store.{NullColumnStore, NullMetaStore}
 
 /**
  * A StoreFactory for a TimeSeriesMemStore backed by a Cassandra ChunkSink for on-demand recovery/persistence
@@ -26,7 +26,7 @@ class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFa
 class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
   val downsampleColStore = new CassandraColumnStore(config, ioPool, None, true)(ioPool)
   val rawColStore = new CassandraColumnStore(config, ioPool, None, false)(ioPool)
-  def metaStore: MetaStore = ??? // not used
+  val metaStore = NullMetaStore
   val memStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore, config)(ioPool)
 }
 

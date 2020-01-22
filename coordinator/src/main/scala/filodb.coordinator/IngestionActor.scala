@@ -167,10 +167,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         return
     }
 
-    logger.info(s"Initiating ingestion for dataset=$ref shard=${shard}")
-    logger.info(s"Metastore is ${memStore.metastore}")
     implicit val futureMapDispatcher = actorDispatcher
     val ingestion = if (memStore.isReadOnly) {
+      logger.info(s"Initiating shard startup on read-only memstore for dataset=$ref shard=${shard}")
       for {
         _ <- memStore.recoverIndex(ref, shard)
       } yield {
@@ -178,6 +177,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         streams(shard) = IngestionStream(Observable.never)
       }
     } else {
+      logger.info(s"Initiating ingestion for dataset=$ref shard=${shard}")
+      logger.info(s"Metastore is ${memStore.metastore}")
       for {
         _ <- memStore.recoverIndex(ref, shard)
         checkpoints <- memStore.metastore.readCheckpoints(ref, shard)
