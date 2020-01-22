@@ -367,8 +367,9 @@ class QueryEngine(dsRef: DatasetRef,
     val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options, spreadProvider)
+    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, Some(lp.window), Some(execRangeFn), paramsExec, lp.offset, rawSource)))
+      lp.end, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
     series
   }
 

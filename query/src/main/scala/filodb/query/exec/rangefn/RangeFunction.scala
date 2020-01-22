@@ -346,6 +346,7 @@ object RangeFunction {
       case Some(Changes)          => () => new ChangesChunkedFunctionD()
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionD(funcParams)
       case Some(HoltWinters)      => () => new HoltWintersChunkedFunctionD(funcParams)
+      case Some(Timestamp)        => () => new TimestampChunkedFunction()
       case Some(ZScore)           => () => new ZScoreChunkedFunctionD()
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionD(funcParams)
       case _                      => iteratingFunction(func, funcParams)
@@ -533,6 +534,26 @@ class LastSampleChunkedFunctionL extends LastSampleChunkedFuncDblVal() {
     val longReader = valReader.asLongReader
     timestamp = ts
     value = longReader(valAcc, valVector, endRowNum).toDouble
+  }
+}
+
+class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedRangeFunction[TransientRow] {
+  def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVectorPtr, tsReader: bv.LongVectorDataReader,
+                valueVectorAcc: MemoryReader, valueVector: BinaryVectorPtr, valueReader: VectorDataReader,
+                startTime: Long, endTime: Long, info: ChunkSetInfoReader, queryConfig: QueryConfig): Unit = {
+    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
+
+    if (endRowNum >= 0) {
+      val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
+      // Timestamp value should be in seconds
+      value = (ts.toDouble / 1000f)
+    }
+  }
+
+  override final def reset(): Unit = { value = Double.NaN }
+
+  final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
+    sampleToEmit.setValues(endTimestamp, value)
   }
 }
 

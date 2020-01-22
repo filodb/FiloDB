@@ -95,6 +95,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
 
   case object SumOverTime extends RangeFunctionId("sum_over_time")
+
+  case object Timestamp extends RangeFunctionId("timestamp")
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry
@@ -223,9 +225,6 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
   case object LabelReplace extends MiscellaneousFunctionId("label_replace")
 
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
-
-  case object Timestamp extends MiscellaneousFunctionId("timestamp")
-
 
 }
 

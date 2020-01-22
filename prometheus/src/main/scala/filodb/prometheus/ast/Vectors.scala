@@ -166,6 +166,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
 
     val staleDataLookbackSeconds = 5 * 60 // 5 minutes
+    val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
@@ -189,6 +190,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     def toMetadataPlan(timeParams: TimeRangeParams): SeriesKeysByFilters = {
       SeriesKeysByFilters(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+    }
+
+    def toRawSeriesPlan(timeParams: TimeRangeParams): RawSeries = {
+      RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000, offsetMillis),
+        columnFilters, column.toSeq)
     }
   }
 
