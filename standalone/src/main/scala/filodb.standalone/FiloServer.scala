@@ -44,6 +44,8 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
   lazy val config = cluster.settings.config
 
+  logger.info(s"Starting FiloDB with settings: ${cluster.settings.allConfig.root().render()}")
+
   var filoHttpServer: FiloHttpServer = _
 
   // Now, initialize any datasets using in memory MetaStore.
