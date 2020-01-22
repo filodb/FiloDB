@@ -1,6 +1,7 @@
 package filodb.cassandra.columnstore
 
 import java.net.InetSocketAddress
+import java.util.concurrent.TimeUnit
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -59,7 +60,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
-  private val pkByUTTtl = cassandraConfig.getDuration("pk-by-updated-time-table-num-ttl").toSeconds.toInt
+  private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-num-ttl",
+    TimeUnit.SECONDS).toInt
 
   val sinkStats = new ChunkSinkStats
 
@@ -284,7 +286,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
-        case resp if resp == Success => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtl)
+        case resp if resp == Success => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
         case resp                    => Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
