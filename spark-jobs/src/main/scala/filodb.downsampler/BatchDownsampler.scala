@@ -6,6 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import java.util
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import scalaxy.loops._
@@ -239,7 +240,10 @@ object BatchDownsampler extends StrictLogging with Instance {
           downsampleResToPart.foreach { case (resolution, part) =>
             val resMillis = resolution.toMillis
 
-            val downsamplePeriods = periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow)
+            val downsamplePeriods =
+              periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
+            util.Arrays.sort(downsamplePeriods)
+
             try {
               // for each downsample period
               var first = startRow

@@ -25,7 +25,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -525,12 +525,12 @@ class TimeSeriesShard(val ref: DatasetRef,
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
   def recoverIndex(): Future[Unit] = {
-    val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref, ingestSched)(bootstrapPartKey)
+    val indexBootstrapper = new IndexBootstrapper(colStore)
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, ref)(bootstrapPartKey)
                      .map { count =>
                         startFlushingIndex()
                        logger.info(s"Bootstrapped index for dataset=$ref shard=$shardNum with $count records")
-                     }
+                     }.runAsync(ingestSched)
   }
 
   /**
@@ -827,7 +827,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
       if (et == -1) System.currentTimeMillis() else et
     }
-    PartKeyRecord(p.partKeyBytes, startTime, endTime)
+    PartKeyRecord(p.partKeyBytes, startTime, endTime, Some(p.partKeyHash))
   }
 
   // scalastyle:off method.length
@@ -1066,35 +1066,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
 
     if (mightContain) {
-      val filters = schemas.part.binSchema.toStringPairs(partKeyBase, partKeyOffset)
-        .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
-      val matches = partKeyIndex.partIdsFromFilters(filters, 0, Long.MaxValue)
-      matches.length match {
-        case 0 =>           shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-                            CREATE_NEW_PARTID
-        case c if c >= 1 => // NOTE: if we hit one partition, we cannot directly call it out as the result without
-                            // verifying the partKey since the matching partition may have had an additional tag
-                            if (c > 1) shardStats.evictedPartIdLookupMultiMatch.increment()
-                            var i = 0
-                            var partId = -1
-                            do {
-                              // find the most specific match for the given ingestion record
-                              val nextPartId = matches(i)
-                              partKeyIndex.partKeyFromPartId(nextPartId).foreach { candidate =>
-                                if (schemas.part.binSchema.equals(partKeyBase, partKeyOffset,
-                                      candidate.bytes, PartKeyLuceneIndex.bytesRefToUnsafeOffset(candidate.offset))) {
-                                  partId = nextPartId
-                                  logger.debug(s"There is already a partId=$partId assigned for " +
-                                    s"${schemas.part.binSchema.stringify(partKeyBase, partKeyOffset)} in" +
-                                    s" dataset=$ref shard=$shardNum")
-                                }
-                              }
-                              i += 1
-                            } while (i < matches.length && partId != -1)
-                            if (partId == -1)
-                              shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
-                            partId // same as CREATE_NEW_PARTID if not present
-      }
+      partKeyIndex.partIdFromPartKeySlow(partKeyBase, partKeyOffset)
+        .getOrElse {
+          shardStats.evictedPartKeyBloomFilterFalsePositives.increment()
+          CREATE_NEW_PARTID
+        }
     } else CREATE_NEW_PARTID
   }
 

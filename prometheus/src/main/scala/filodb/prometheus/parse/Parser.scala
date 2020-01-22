@@ -326,6 +326,17 @@ object Parser extends Expression {
     }
   }
 
+  def parseFilter(query: String): InstantExpression = {
+    parseAll(expression, query) match {
+      case s: Success[_] => s.get match {
+        case ie: InstantExpression => ie
+        case _ => throw new IllegalArgumentException(s"Expression $query is not a simple filter")
+      }
+      case e: Error => handleError(e, query)
+      case f: Failure => handleFailure(f, query)
+    }
+  }
+
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
@@ -349,8 +360,8 @@ object Parser extends Expression {
     }
 
     expressionWithPrecedence match {
-      case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)
-      case r: SimpleSeries   => r.toRawSeriesPlan(timeParams, isRoot = true)
+      case p: PeriodicSeries => p.toSeriesPlan(timeParams)
+      case r: SimpleSeries   => r.toSeriesPlan(timeParams, isRoot = true)
       case _ => throw new UnsupportedOperationException()
     }
   }

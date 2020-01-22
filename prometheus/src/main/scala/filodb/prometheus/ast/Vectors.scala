@@ -1,12 +1,15 @@
 package filodb.prometheus.ast
 
+import scala.util.Try
+
 import filodb.core.query
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 
 object Vectors {
   val PromMetricLabel = "__name__"
   val TypeLabel       = "_type_"
+  val BucketFilterLabel = "_bucket_"
 }
 
 trait Vectors extends Scalars with TimeUnits with Base {
@@ -110,14 +113,24 @@ trait Vectors extends Scalars with TimeUnits with Base {
       } else (metricName, None)
     }
 
+    private def parseBucketValue(value: String): Option[Double] =
+      if (value == "+Inf") Some(Double.PositiveInfinity) else Try(value.toDouble).toOption
+
     /**
      * Converts LabelMatches to ColumnFilters.  Along the way:
      * - extracts ::col column name expressions in metric names to columns
      * - removes ::col in __name__ label matches as needed
+     * Also extracts special _bucket_ histogram bucket filter
      */
     protected def labelMatchesToFilters(labels: Seq[LabelMatch]) = {
       var column: Option[String] = None
-      val filters = labels.map { labelMatch =>
+      var bucketOpt: Option[Double] = None
+      val filters = labels.filter { labelMatch =>
+        if (labelMatch.label == BucketFilterLabel) {
+          bucketOpt = parseBucketValue(labelMatch.value)
+          false
+        } else true
+      }.map { labelMatch =>
         val labelVal = labelMatch.value.replace("\\\\", "\\")
                                          .replace("\\\"", "\"")
                                          .replace("\\n", "\n")
@@ -135,7 +148,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
           case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
         }
       }
-      (filters, column)
+      (filters, column, bucketOpt)
     }
   }
 
@@ -155,17 +168,24 @@ trait Vectors extends Scalars with TimeUnits with Base {
     val staleDataLookbackSeconds = 5 * 60 // 5 minutes
     val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
 
-    private[prometheus] val (columnFilters, column) = labelMatchesToFilters(mergeNameToLabels)
+    private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+    def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
+
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
-      PeriodicSeries(
+      val ps = PeriodicSeries(
         RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000, offsetMillis),
           columnFilters, column.toSeq),
         timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
         offset.map(_.millis)
       )
+      bucketOpt.map { bOpt =>
+        // It's a fixed value, the range params don't matter at all
+        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+        ApplyInstantFunction(ps, InstantFunctionId.HistogramBucket, Seq(param))
+      }.getOrElse(ps)
     }
 
     def toMetadataPlan(timeParams: TimeRangeParams): SeriesKeysByFilters = {
@@ -190,15 +210,20 @@ trait Vectors extends Scalars with TimeUnits with Base {
                              window: Duration,
                              offset: Option[Duration]) extends Vector with SimpleSeries {
 
-    private[prometheus] val (columnFilters, column) = labelMatchesToFilters(mergeNameToLabels)
+    private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
-    def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan = {
+    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan = {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
-      RawSeries(timeParamToSelector(timeParams, window.millis, offset.map(_.millis).getOrElse(0)), columnFilters,
-        column.toSeq)
+      val rs = RawSeries(timeParamToSelector(timeParams, window.millis, offset.map(_.millis).getOrElse(0)),
+                         columnFilters, column.toSeq)
+      bucketOpt.map { bOpt =>
+        // It's a fixed value, the range params don't matter at all
+        val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
+        ApplyInstantFunctionRaw(rs, InstantFunctionId.HistogramBucket, Seq(param))
+      }.getOrElse(rs)
     }
 
   }
