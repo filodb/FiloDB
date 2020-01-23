@@ -67,11 +67,12 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
   }
 }
 
-object ClusterSeedDiscovery {
+object ClusterSeedDiscovery extends StrictLogging {
   /** Seed node strategy. Some implementations discover, some simply read them. */
   def apply(cluster: Cluster, settings: AkkaBootstrapperSettings): ClusterSeedDiscovery = {
     import settings.{seedDiscoveryClass => fqcn}
 
+    logger.info(s"Using $fqcn strategy to discover cluster seeds")
     cluster.system.dynamicAccess.createInstanceFor[ClusterSeedDiscovery](
       fqcn, Seq((cluster.getClass, cluster), (settings.getClass, settings))) match {
         case Failure(e) =>
