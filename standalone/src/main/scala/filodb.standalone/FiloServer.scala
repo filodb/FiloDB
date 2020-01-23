@@ -44,7 +44,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
   lazy val config = cluster.settings.config
 
-  logger.info(s"Starting FiloDB with settings: ${cluster.settings.allConfig.root().render()}")
+  logger.info(s"Bootstrapping cluster with settings: ${cluster.system.settings.config.root().render()}")
 
   var filoHttpServer: FiloHttpServer = _
 
