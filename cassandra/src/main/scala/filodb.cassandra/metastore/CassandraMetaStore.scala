@@ -20,12 +20,13 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
   private val ingestionConsistencyLevel = ConsistencyLevel.valueOf(config.getString("ingestion-consistency-level"))
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val checkpointTable = new CheckpointTable(config, sessionProvider, ingestionConsistencyLevel)
+  private val createTablesEnabled = config.getBoolean("create-tables-enabled")
 
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
     checkpointTable.createKeyspace(checkpointTable.keyspace)
-    checkpointTable.initialize()
+    if (createTablesEnabled) checkpointTable.initialize() else Future.successful(Success)
   }
 
   def clearAllData(): Future[Response] = {
