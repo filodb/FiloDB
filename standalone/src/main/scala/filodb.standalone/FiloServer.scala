@@ -5,6 +5,7 @@ import scala.util.control.NonFatal
 
 import akka.actor.ActorRef
 import akka.cluster.Cluster
+import com.typesafe.scalalogging.StrictLogging
 
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
@@ -43,8 +44,6 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   override val role = ClusterRole.Server
 
   lazy val config = cluster.settings.config
-
-  logger.info(s"Bootstrapping cluster with settings: ${cluster.system.settings.config.root().render()}")
 
   var filoHttpServer: FiloHttpServer = _
 
@@ -88,7 +87,12 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   }
 }
 
-object FiloServer {
-  def main(args: Array[String]): Unit =
-    new FiloServer().start()
+object FiloServer extends StrictLogging {
+  def main(args: Array[String]): Unit = {
+    try {
+      new FiloServer().start()
+    } catch { case e: Exception =>
+      logger.error("Could not start FiloDB server", e)
+    }
+  }
 }

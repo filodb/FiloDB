@@ -60,26 +60,32 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
   private val pkByUTNumSplits = cassandraConfig.getInt("pk-by-updated-time-table-num-splits")
-  private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-num-ttl",
-    TimeUnit.SECONDS).toInt
+  private val pkByUTTtlSeconds = cassandraConfig.getDuration("pk-by-updated-time-table-ttl", TimeUnit.SECONDS).toInt
+  private val createTablesEnabled = cassandraConfig.getBoolean("create-tables-enabled")
 
   val sinkStats = new ChunkSinkStats
 
   def initialize(dataset: DatasetRef, numShards: Int): Future[Response] = {
-    val chunkTable = getOrCreateChunkTable(dataset)
-    val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
-    val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
-      getOrCreatePartitionKeysTable(dataset, s)
-    }.mapAsync(t => Task.fromFuture(t.initialize())).toListL
-    clusterConnector.createKeyspace(chunkTable.keyspace)
-    val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
-    // Important: make sure nodes are in agreement before any schema changes
-    clusterMeta.checkSchemaAgreement()
-    for { ctResp    <- chunkTable.initialize() if ctResp == Success
-          ixResp    <- indexTable.initialize() if ixResp == Success
-          pkutResp  <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
-          partKeyTablesResp <- partKeyTablesInit.runAsync if partKeyTablesResp.forall( _ == Success)
-        } yield Success
+      val chunkTable = getOrCreateChunkTable(dataset)
+      val partitionKeysByUpdateTimeTable = getOrCreatePartitionKeysByUpdateTimeTable(dataset)
+    if (createTablesEnabled) {
+      val partKeyTablesInit = Observable.fromIterable(0.until(numShards)).map { s =>
+        getOrCreatePartitionKeysTable(dataset, s)
+      }.mapAsync(t => Task.fromFuture(t.initialize())).toListL
+      clusterConnector.createKeyspace(chunkTable.keyspace)
+      val indexTable = getOrCreateIngestionTimeIndexTable(dataset)
+      // Important: make sure nodes are in agreement before any schema changes
+      clusterMeta.checkSchemaAgreement()
+      for {ctResp <- chunkTable.initialize() if ctResp == Success
+           ixResp <- indexTable.initialize() if ixResp == Success
+           pkutResp <- partitionKeysByUpdateTimeTable.initialize() if pkutResp == Success
+           partKeyTablesResp <- partKeyTablesInit.runAsync if partKeyTablesResp.forall(_ == Success)
+      } yield Success
+    } else {
+      // ensure the table handles are eagerly created
+      0.until(numShards).foreach(getOrCreatePartitionKeysTable(dataset, _))
+      Future.successful(Success)
+    }
   }
 
   def truncate(dataset: DatasetRef, numShards: Int): Future[Response] = {
