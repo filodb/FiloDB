@@ -7,11 +7,11 @@ import filodb.query._
 /**
   * Planner for routing based on failure ranges for a given LogicalPlan.
   */
-trait RoutingPlanner extends StrictLogging {
+trait FailureRoutingStrategy extends StrictLogging {
   def plan(failure: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route]
 }
 
-object QueryRoutingPlanner extends RoutingPlanner {
+object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
 
   /**
     * Remove smaller FailureTimeRange when more than one FailureTimeRanges have overlapping times

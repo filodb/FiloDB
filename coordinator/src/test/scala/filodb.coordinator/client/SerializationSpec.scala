@@ -6,7 +6,7 @@ import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
-import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core.{query, MachineMetricsData, SpreadChange}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.{Dataset, Schemas}

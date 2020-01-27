@@ -120,11 +120,11 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
-    return queryOptions.spreadProvider.getOrElse(functionalSpreadProvider)
+    return queryOptions.spreadOverride.getOrElse(functionalSpreadProvider)
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    // This is for CLI use only. Always prefer clients to materialize logical plan
+    // This is for CLI use only. Always prefer clients to materializeHaPlan logical plan
     lpRequests.increment
     try {
       val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions, q.tsdbQueryParams)

@@ -3,14 +3,15 @@ package filodb.coordinator
 import java.net.InetAddress
 
 import scala.concurrent.duration._
+
 import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
-import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
@@ -26,6 +27,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   with ScalaFutures with BeforeAndAfterEach {
 
   import akka.testkit._
+
   import client.DatasetCommands._
   import client.IngestionCommands._
   import client.QueryCommands._

@@ -17,12 +17,6 @@ import filodb.core.metadata.Schemas
 import filodb.query._
 import filodb.query.exec._
 
-
-trait TsdbQueryParams
-case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
-                             spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
-object UnavailablePromQlQueryParams extends TsdbQueryParams
-
 /**
   * FiloDB Query Engine is the facade for execution of FiloDB queries.
   * It is meant for use inside FiloDB nodes to execute materialized
@@ -31,14 +25,17 @@ object UnavailablePromQlQueryParams extends TsdbQueryParams
 class QueryEngine(dsRef: DatasetRef,
                   schemas: Schemas,
                   shardMapperFunc: => ShardMapper,
-                  downsampleMapperFunc: => ShardMapper,
+//                  downsampleMapperFunc: => ShardMapper,
                   failureProvider: FailureProvider,
                   spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                  queryEngineConfig: Config = ConfigFactory.empty())
-                   extends StrictLogging {
+                  queryEngineConfig: Config = ConfigFactory.empty()) extends StrictLogging {
 
-  val localPlanner = new SinglePodPlanner(dsRef, schemas, shardMapperFunc)
-  val multiPodPlanner = new MultiPodPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+  val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
+  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
+  val downsampleStitchPlanner = new DownsampleStitchPlanner(rawClusterPlanner, downsampleClusterPlanner)
+  val haMultiPodPlanner = new HaMultiPodPlanner(dsRef, rawClusterPlanner, failureProvider,
+                                                spreadProvider, queryEngineConfig)
+  //val multiPodPlanner = new MultiPodPlanner(podLocalityProvider, haMultiPodPlanner)
 
   /**
     * This is the facade to trigger orchestration of the ExecPlan.
@@ -60,8 +57,9 @@ class QueryEngine(dsRef: DatasetRef,
   def materialize(rootLogicalPlan: LogicalPlan,
                   options: QueryOptions,
                   tsdbQueryParams: TsdbQueryParams): ExecPlan = {
-
-    multiPodPlanner.materialize(rootLogicalPlan, options, tsdbQueryParams)
+    val queryId = UUID.randomUUID().toString
+    val submitTime = System.currentTimeMillis()
+    haMultiPodPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
   }
 
 
