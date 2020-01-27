@@ -152,7 +152,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       filters
     }
 
-
   /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
     *
@@ -162,7 +161,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                   queryId: String,
                                   submitTime: Long,
                                   options: QueryOptions): PlanResult = {
-
     logicalPlan match {
       case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp)
       case lp: RawChunkMeta                => materializeRawChunkMeta(queryId, submitTime, options, lp)

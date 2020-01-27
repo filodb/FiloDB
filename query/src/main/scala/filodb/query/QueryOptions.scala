@@ -8,13 +8,11 @@ case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
 object UnavailablePromQlQueryParams extends TsdbQueryParams
 
-
 /**
   * This class provides general query processing parameters
   */
 final case class QueryOptions(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
                               spreadOverride: Option[SpreadProvider] = None,
-                              parallelism: Int = 16,
                               queryTimeoutSecs: Int = 30,
                               sampleLimit: Int = 1000000,
                               shardOverrides: Option[Seq[Int]] = None)

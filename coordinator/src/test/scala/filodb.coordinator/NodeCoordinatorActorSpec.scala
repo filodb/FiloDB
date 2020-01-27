@@ -138,7 +138,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should return UnknownDataset if attempting to query before ingestion set up") {
       val ref = MachineMetricsData.dataset1.ref
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"),
-        Seq("min")), UnavailablePromQlQueryParams)
+        Seq("min")))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(UnknownDataset)
     }
@@ -152,7 +152,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // Query existing partition: Series 1
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"),
-        Seq("min")),UnavailablePromQlQueryParams, qOpt)
+        Seq("min")), qOpt)
 
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
@@ -164,7 +164,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // Query nonexisting partition
       val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "NotSeries"),
-        Seq("min")), UnavailablePromQlQueryParams, qOpt)
+        Seq("min")), qOpt)
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, Nil) =>
@@ -185,7 +185,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val from = to - 50
       val qParams = TimeStepParams(0, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, {__name__=\"Series 1\"})", qParams)
-      val q1 = LogicalPlan2Query(ref, logPlan, UnavailablePromQlQueryParams, qOpt)
+      val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
       probe.send(coordinatorActor, q1)
       probe.expectMsgClass(classOf[QueryError])
     }
@@ -200,7 +200,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
       val q2 = LogicalPlan2Query(ref, Aggregate(AggregationOperator.Avg, PeriodicSeries(RawSeries(AllChunksSelector,
-        multiFilter, Seq("min")), 120000L, 10000L, 130000L)), UnavailablePromQlQueryParams, qOpt)
+        multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
       memStore.refreshIndexForTesting(dataset1.ref)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
@@ -214,8 +214,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q3 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)),
-        UnavailablePromQlQueryParams, qOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("count")), 120000L, 10000L, 130000L)), qOpt)
       probe.send(coordinatorActor, q3)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -229,7 +228,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
                      RawSeries(AllChunksSelector, filters("series" -> "foobar"), Seq("min")), 120000L,
-                     10000L, 130000L)), UnavailablePromQlQueryParams,  qOpt)
+                     10000L, 130000L)),  qOpt)
       probe.send(coordinatorActor, q4)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -252,8 +251,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q2 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)),
-                UnavailablePromQlQueryParams, qOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 130000L)), qOpt)
       (0 until numQueries).foreach { i => probe.send(coordinatorActor, q2) }
 
       (0 until numQueries).foreach { _ =>
@@ -283,8 +281,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val q2 = LogicalPlan2Query(ref,
                  Aggregate(AggregationOperator.Avg,
                    PeriodicSeries(
-                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 140000L)),
-                  UnavailablePromQlQueryParams, queryOpt)
+                     RawSeries(AllChunksSelector, multiFilter, Seq("min")), 120000L, 10000L, 140000L)), queryOpt)
       probe.send(coordinatorActor, q2)
       probe.expectMsgPF() {
         case QueryResult(_, schema, vectors) =>
@@ -307,8 +304,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
-      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min")),
-        UnavailablePromQlQueryParams, queryOpt)
+      val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min")), queryOpt)
       probe.send(coordinatorActor, q2)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case QueryResult(_, schema, srvs) =>
@@ -380,7 +376,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
                  PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
-                   RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), UnavailablePromQlQueryParams , qOpt)
+                   RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
       case QueryResult(_, schema, vectors) =>

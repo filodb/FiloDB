@@ -77,7 +77,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(origQueryParams = promQlQueryParams))
 
     /*
     Following ExecPlan should be generated:
@@ -119,7 +119,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     // materialized exec plan
     val execPlan = engine.materialize(logicalPlan,
-      QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000), promQlQueryParams)
+      QueryOptions(promQlQueryParams, Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000))
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
 
     // Now there should be multiple levels of reduce because we have 16 shards
@@ -147,7 +147,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val execPlan = engine.materialize(lp,
-      QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000), promQlQueryParams)
+      QueryOptions(promQlQueryParams, Some(StaticSpreadProvider(SpreadChange(0, 4))), 1000000))
 
     info(s"First child plan: ${execPlan.children.head.printTree()}")
     execPlan.isInstanceOf[DistConcatExec] shouldEqual true
@@ -169,7 +169,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val engine2 = new QueryEngine(dataset2.ref, Schemas(dataset2.schema), mapperRef, EmptyFailureProvider)
 
     // materialized exec plan
-    val execPlan = engine2.materialize(raw2, QueryOptions(), promQlQueryParams)
+    val execPlan = engine2.materialize(raw2, QueryOptions(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual true
     execPlan.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
@@ -188,7 +188,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(FunctionalSpreadProvider(spreadFunc)), 1000000), promQlQueryParams)
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(promQlQueryParams, Some(FunctionalSpreadProvider(spreadFunc)), 1000000))
     execPlan.printTree()
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
@@ -204,8 +204,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2)) // spread change time is in ms
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
-      promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryOptions(promQlQueryParams, Some(FunctionalSpreadProvider(spread)), 1000000))
     execPlan.rangeVectorTransformers.head.isInstanceOf[StitchRvsMapper] shouldEqual true
   }
 
@@ -214,8 +213,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
-      promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryOptions(promQlQueryParams, Some(FunctionalSpreadProvider(spread)), 1000000))
     execPlan.rangeVectorTransformers.isEmpty shouldEqual true
   }
 
@@ -225,8 +223,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(25000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
-      promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryOptions(promQlQueryParams, Some(FunctionalSpreadProvider(spread)), 1000000))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.size shouldEqual 2
@@ -239,8 +236,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     def spread(filter: Seq[ColumnFilter]): Seq[SpreadChange] = {
       Seq(SpreadChange(0, 1), SpreadChange(35000000, 2))
     }
-    val execPlan = engine.materialize(lp, QueryOptions(Some(FunctionalSpreadProvider(spread)), 1000000),
-      promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryOptions(promQlQueryParams, Some(FunctionalSpreadProvider(spread)), 1000000))
     val binaryJoinNode = execPlan.children(0)
     binaryJoinNode.isInstanceOf[BinaryJoinExec] shouldEqual true
     binaryJoinNode.children.foreach(_.isInstanceOf[StitchRvsExec] should not equal true)
@@ -251,7 +247,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.LAND, Cardinality.ManyToMany, summed2)
 
     // materialized exec plan
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[SetOperatorExec] shouldEqual true
     execPlan.children.foreach { l1 =>
@@ -285,7 +281,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
 
@@ -320,7 +316,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
@@ -345,7 +341,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
@@ -392,7 +388,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
@@ -415,7 +411,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
@@ -438,7 +434,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
@@ -466,7 +462,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     //900K to 1020K and 1020+60 k to 2000K
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
@@ -518,7 +514,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
 
@@ -550,7 +546,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[ReduceAggregateExec] shouldEqual (true)
 
@@ -588,7 +584,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
 
     val engine = new QueryEngine(dsRef, schemas, mapperRef, failureProvider, StaticSpreadProvider(), queryEngineConfig)
-    val execPlan = engine.materialize(summed, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(summed, QueryOptions(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
 

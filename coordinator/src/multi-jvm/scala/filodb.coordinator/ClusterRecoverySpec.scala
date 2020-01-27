@@ -151,7 +151,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     val q2 = LogicalPlan2Query(dataset6.ref,
                PeriodicSeriesWithWindowing(
                  RawSeries(AllChunksSelector, Nil, Seq("AvgTone")),
-                 100L, 1000L, 100L, window = 1000L, function = RangeFunctionId.CountOverTime), UnavailablePromQlQueryParams, qOpt)
+                 100L, 1000L, 100L, window = 1000L, function = RangeFunctionId.CountOverTime), qOpt)
     coordinatorActor ! q2
     expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, schema, vectors) =>

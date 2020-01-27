@@ -33,9 +33,9 @@ class QueryEngine(dsRef: DatasetRef,
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
   val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
   val downsampleStitchPlanner = new DownsampleStitchPlanner(rawClusterPlanner, downsampleClusterPlanner)
-  val haMultiPodPlanner = new HaMultiPodPlanner(dsRef, rawClusterPlanner, failureProvider,
-                                                spreadProvider, queryEngineConfig)
-  //val multiPodPlanner = new MultiPodPlanner(podLocalityProvider, haMultiPodPlanner)
+  val haPlanner = new HighAvailabilityPlanner(dsRef, rawClusterPlanner, failureProvider,
+                                              spreadProvider, queryEngineConfig)
+  //val multiPodPlanner = new MultiPodPlanner(podLocalityProvider, haPlanner)
 
   /**
     * This is the facade to trigger orchestration of the ExecPlan.
@@ -50,17 +50,13 @@ class QueryEngine(dsRef: DatasetRef,
     }
   }
 
-
   /**
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions,
-                  tsdbQueryParams: TsdbQueryParams): ExecPlan = {
+                  options: QueryOptions): ExecPlan = {
     val queryId = UUID.randomUUID().toString
     val submitTime = System.currentTimeMillis()
-    haMultiPodPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
+    haPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
   }
-
-
 }

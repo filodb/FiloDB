@@ -8,22 +8,22 @@ import filodb.query.{LogicalPlan, PromQlInvocationParams, PromQlQueryParams, Que
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
 /**
-  * Query Planner responsible for using underlying local planner and FailureProvider
+  * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
   * to come up with a plan that orchestrates query execution between multiple
   * replica clusters. If there are failures in one cluster then query is routed
   * to other cluster.
   *
   * @param dsRef dataset
   * @param spreadProvider used to get spread
-  * @param localPodPlanner the planner to generate plans for local pod
+  * @param localPlanner the planner to generate plans for local pod
   * @param failureProvider the provider that helps route plan execution to HA cluster
   * @param queryEngineConfig config that determines query engine behavior
   */
-class HaMultiPodPlanner(dsRef: DatasetRef,
-                        localPodPlanner: QueryPlanner,
-                        failureProvider: FailureProvider,
-                        spreadProvider: SpreadProvider,
-                        queryEngineConfig: Config = ConfigFactory.empty()) extends StrictLogging {
+class HighAvailabilityPlanner(dsRef: DatasetRef,
+                              localPlanner: QueryPlanner,
+                              failureProvider: FailureProvider,
+                              spreadProvider: SpreadProvider,
+                              queryEngineConfig: Config = ConfigFactory.empty) extends QueryPlanner with StrictLogging {
 
   import QueryFailureRoutingStrategy._
 
@@ -37,9 +37,9 @@ class HaMultiPodPlanner(dsRef: DatasetRef,
     val execPlans: Seq[ExecPlan] = routes.map { route =>
       route match {
         case route: LocalRoute => if (route.timeRange.isEmpty)
-          localPodPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
+          localPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
         else
-          localPodPlanner.materialize( queryId, submitTime,
+          localPlanner.materialize( queryId, submitTime,
               copyWithUpdatedTimeRange(rootLogicalPlan, route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime),
               options)
         case route: RemoteRoute =>
@@ -82,11 +82,11 @@ class HaMultiPodPlanner(dsRef: DatasetRef,
           && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
         !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
         failures.isEmpty) { // no failures in query time range
-      localPodPlanner.materialize(queryId, submitTime, logicalPlan, options)
+      localPlanner.materialize(queryId, submitTime, logicalPlan, options)
     } else {
       val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
       val routes = if (promQlQueryParams.start == promQlQueryParams.end) { // Instant Query
-        if (failures.exists(_.isRemote)) {
+        if (failures.forall(!_.isRemote)) {
           Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startInMillis, periodicSeriesTime.endInMillis))))
         } else {
           Seq(LocalRoute(None))
@@ -98,5 +98,4 @@ class HaMultiPodPlanner(dsRef: DatasetRef,
       routeExecPlanMapper(routes, logicalPlan, queryId, submitTime, options, lookBackTime)
     }
   }
-
 }
