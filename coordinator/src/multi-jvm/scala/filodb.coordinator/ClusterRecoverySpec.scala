@@ -147,7 +147,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     // val query = LogicalPlanQuery(dataset6.ref,
     //               simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
-    val qOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
+    val qOpt = QueryContext(shardOverrides = Some(Seq(0, 1)))
     val q2 = LogicalPlan2Query(dataset6.ref,
                PeriodicSeriesWithWindowing(
                  RawSeries(AllChunksSelector, Nil, Seq("AvgTone")),

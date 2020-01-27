@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core.query.ColumnFilter
-import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand, QueryOptions}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand, QueryContext}
 
 object QueryCommands {
   import filodb.core._
@@ -60,17 +60,17 @@ object QueryCommands {
    * results.
    * @param dataset the dataset (and possibly database) to query
    * @param logicalPlan the LogicalPlan for the query to run
-   * @param queryOptions options to control routing of query
+   * @param qContext options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
   final case class LogicalPlan2Query(dataset: DatasetRef,
                                      logicalPlan: LogicalPlan2,
-                                     queryOptions: QueryOptions = QueryOptions(),
+                                     qContext: QueryContext = QueryContext(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   final case class ExplainPlan2Query(dataset: DatasetRef,
                                      logicalPlan: LogicalPlan2,
-                                     queryOptions: QueryOptions = QueryOptions(),
+                                     qContext: QueryContext = QueryContext(),
                                      submitTime: Long = System.currentTimeMillis()) extends QueryCommand
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse

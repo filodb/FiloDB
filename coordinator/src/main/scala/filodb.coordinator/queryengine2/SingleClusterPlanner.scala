@@ -66,14 +66,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     ActorPlanDispatcher(targetActor)
   }
 
-  def materialize(queryId: String,
-                  submitTime: Long,
-                  logicalPlan: LogicalPlan,
-                  options: QueryOptions): ExecPlan = {
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     // TODO downsampling planning goes here
 
-    val materialized = walkLogicalPlanTree(logicalPlan, queryId, System.currentTimeMillis(), options)
+    val materialized = walkLogicalPlanTree(logicalPlan, qContext)
     match {
       case PlanResult(Seq(justOne), stitch) =>
         if (stitch) justOne.addRangeVectorTransformer(StitchRvsMapper())
@@ -81,10 +78,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case PlanResult(many, stitch) =>
         val targetActor = pickDispatcher(many)
         many.head match {
-          case lve: LabelValuesExec => LabelValuesDistConcatExec(queryId, targetActor, many)
-          case ske: PartKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
+          case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext.queryId, targetActor, many)
+          case ske: PartKeysExec => PartKeysDistConcatExec(qContext.queryId, targetActor, many)
           case ep: ExecPlan =>
-            val topPlan = DistConcatExec(queryId, targetActor, many)
+            val topPlan = DistConcatExec(qContext.queryId, targetActor, many)
             if (stitch) topPlan.addRangeVectorTransformer(StitchRvsMapper())
             topPlan
         }
@@ -96,7 +93,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   }
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
-                                options: QueryOptions): Seq[Int] = {
+                                options: QueryContext): Seq[Int] = {
 
     val spreadProvToUse = options.spreadOverride.getOrElse(spreadProvider)
 
@@ -158,51 +155,45 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     * @return ExecPlans that answer the logical plan provided
     */
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
-                                  queryId: String,
-                                  submitTime: Long,
-                                  options: QueryOptions): PlanResult = {
+                                  options: QueryContext): PlanResult = {
     logicalPlan match {
-      case lp: RawSeries                   => materializeRawSeries(queryId, submitTime, options, lp)
-      case lp: RawChunkMeta                => materializeRawChunkMeta(queryId, submitTime, options, lp)
-      case lp: PeriodicSeries              => materializePeriodicSeries(queryId, submitTime, options, lp)
-      case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, submitTime, options, lp)
-      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(queryId, submitTime, options, lp)
-      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(queryId, submitTime, options, lp)
-      case lp: Aggregate                   => materializeAggregate(queryId, submitTime, options, lp)
-      case lp: BinaryJoin                  => materializeBinaryJoin(queryId, submitTime, options, lp)
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
-      case lp: LabelValues                 => materializeLabelValues(queryId, submitTime, options, lp)
-      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(queryId, submitTime, options, lp)
-      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(queryId, submitTime, options, lp)
-      case lp: ApplySortFunction           => materializeApplySortFunction(queryId, submitTime, options, lp)
-      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(queryId, submitTime, options, lp)
-      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(queryId, submitTime, options, lp)
-      case lp: VectorPlan                  => materializeVectorPlan(queryId, submitTime, options, lp)
-      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(queryId, submitTime, options, lp)
-      case lp: ApplyAbsentFunction         => materializeAbsentFunction(queryId, submitTime, options, lp)
+      case lp: RawSeries                   => materializeRawSeries(options, lp)
+      case lp: RawChunkMeta                => materializeRawChunkMeta(options, lp)
+      case lp: PeriodicSeries              => materializePeriodicSeries(options, lp)
+      case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(options, lp)
+      case lp: ApplyInstantFunction        => materializeApplyInstantFunction(options, lp)
+      case lp: ApplyInstantFunctionRaw     => materializeApplyInstantFunctionRaw(options, lp)
+      case lp: Aggregate                   => materializeAggregate(options, lp)
+      case lp: BinaryJoin                  => materializeBinaryJoin(options, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(options, lp)
+      case lp: LabelValues                 => materializeLabelValues(options, lp)
+      case lp: SeriesKeysByFilters         => materializeSeriesKeysByFilters(options, lp)
+      case lp: ApplyMiscellaneousFunction  => materializeApplyMiscellaneousFunction(options, lp)
+      case lp: ApplySortFunction           => materializeApplySortFunction(options, lp)
+      case lp: ScalarVaryingDoublePlan     => materializeScalarPlan(options, lp)
+      case lp: ScalarTimeBasedPlan         => materializeScalarTimeBased(options, lp)
+      case lp: VectorPlan                  => materializeVectorPlan(options, lp)
+      case lp: ScalarFixedDoublePlan       => materializeFixedScalar(options, lp)
+      case lp: ApplyAbsentFunction         => materializeAbsentFunction(options, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
 
-  private def materializeScalarVectorBinOp(queryId: String,
-                                           submitTime: Long,
-                                           options: QueryOptions,
+  private def materializeScalarVectorBinOp(options: QueryContext,
                                            lp: ScalarVectorBinaryOperation): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options)
-    val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vector, options)
+    val funcArg = materializeFunctionArgs(Seq(lp.scalarArg), options)
     vectors.plans.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalarIsLhs, funcArg)))
     vectors
   }
 
-  private def materializeBinaryJoin(queryId: String,
-                                    submitTime: Long,
-                                    options: QueryOptions,
+  private def materializeBinaryJoin(options: QueryContext,
                                     lp: BinaryJoin): PlanResult = {
-    val lhs = walkLogicalPlanTree(lp.lhs, queryId, submitTime, options)
-    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(lhs.plans), lhs.plans))
+    val lhs = walkLogicalPlanTree(lp.lhs, options)
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(options.queryId, pickDispatcher(lhs.plans), lhs.plans))
     else lhs.plans
-    val rhs = walkLogicalPlanTree(lp.rhs, queryId, submitTime, options)
-    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(queryId, pickDispatcher(rhs.plans), rhs.plans))
+    val rhs = walkLogicalPlanTree(lp.rhs, options)
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(options.queryId, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
@@ -212,19 +203,17 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
-      Seq(exec.SetOperatorExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator,
+      Seq(exec.SetOperatorExec(options.queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         lp.on, lp.ignoring, dsOptions.metricColumn))
     else
-      Seq(BinaryJoinExec(queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+      Seq(BinaryJoinExec(options.queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
         lp.on, lp.ignoring, lp.include, dsOptions.metricColumn))
     PlanResult(joined, false)
   }
 
-  private def materializeAggregate(queryId: String,
-                                   submitTime: Long,
-                                   options: QueryOptions,
+  private def materializeAggregate(options: QueryContext,
                                    lp: Aggregate): PlanResult = {
-    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    val toReduceLevel1 = walkLogicalPlanTree(lp.vectors, options)
     // Now we have one exec plan per shard
     /*
      * Note that in order for same overlapping RVs to not be double counted when spread is increased,
@@ -247,55 +236,47 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
         toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
           val reduceDispatcher = nodePlans.head.dispatcher
-          ReduceAggregateExec(queryId, reduceDispatcher, nodePlans, lp.operator, lp.params)
+          ReduceAggregateExec(options.queryId, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel1.plans
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
-    val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
+    val reducer = ReduceAggregateExec(options.queryId, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
     reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
 
-  private def materializeApplyInstantFunction(queryId: String,
-                                              submitTime: Long,
-                                              options: QueryOptions,
+  private def materializeApplyInstantFunction(options: QueryContext,
                                               lp: ApplyInstantFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
     vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
     vectors
   }
 
-  private def materializeApplyInstantFunctionRaw(queryId: String,
-                                                 submitTime: Long,
-                                                 options: QueryOptions,
+  private def materializeApplyInstantFunctionRaw(options: QueryContext,
                                                  lp: ApplyInstantFunctionRaw): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
-    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
     vectors.plans.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, paramsExec)))
     vectors
   }
 
-  private def materializePeriodicSeriesWithWindowing(queryId: String,
-                                                     submitTime: Long,
-                                                     options: QueryOptions,
+  private def materializePeriodicSeriesWithWindowing(options: QueryContext,
                                                      lp: PeriodicSeriesWithWindowing): PlanResult = {
-    val series = walkLogicalPlanTree(lp.series, queryId, submitTime, options)
+    val series = walkLogicalPlanTree(lp.series, options)
     val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
-    val paramsExec = materializeFunctionArgs(lp.functionArgs, queryId, submitTime, options)
+    val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
     series
   }
 
-  private def materializePeriodicSeries(queryId: String,
-                                        submitTime: Long,
-                                        options: QueryOptions,
+  private def materializePeriodicSeries(options: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil, lp.offset)))
     rawSeries
@@ -318,9 +299,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     (newFilters, schemaOpt)
   }
 
-  private def materializeRawSeries(queryId: String,
-                                   submitTime: Long,
-                                   options: QueryOptions,
+  private def materializeRawSeries(options: QueryContext,
                                    lp: RawSeries): PlanResult = {
 
     val spreadProvToUse = options.spreadOverride.getOrElse(spreadProvider)
@@ -334,15 +313,13 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      MultiSchemaPartitionsExec(queryId, submitTime, options.sampleLimit, dispatcher, dsRef, shard,
+      MultiSchemaPartitionsExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
         renamedFilters, toChunkScanMethod(lp.rangeSelector), schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
 
-  private def materializeLabelValues(queryId: String,
-                                     submitTime: Long,
-                                     options: QueryOptions,
+  private def materializeLabelValues(options: QueryContext,
                                      lp: LabelValues): PlanResult = {
     val filters = lp.labelConstraints.map { case (k, v) => ColumnFilter(k, Filter.Equals(v)) }.toSeq
     // If the label is PromMetricLabel and is different than dataset's metric name,
@@ -359,15 +336,13 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(queryId, submitTime, options.sampleLimit, dispatcher, dsRef, shard,
+      exec.LabelValuesExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
         filters, labelNames, lp.lookbackTimeInMillis)
     }
     PlanResult(metaExec, false)
   }
 
-  private def materializeSeriesKeysByFilters(queryId: String,
-                                             submitTime: Long,
-                                             options: QueryOptions,
+  private def materializeSeriesKeysByFilters(options: QueryContext,
                                              lp: SeriesKeysByFilters): PlanResult = {
     // NOTE: _type_ filter support currently isn't there in series keys queries
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
@@ -380,47 +355,41 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(queryId, submitTime, options.sampleLimit, dispatcher, dsRef, shard,
+      PartKeysExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
         schemas.part, renamedFilters, lp.start, lp.end)
     }
     PlanResult(metaExec, false)
   }
 
-  private def materializeRawChunkMeta(queryId: String,
-                                      submitTime: Long,
-                                      options: QueryOptions,
+  private def materializeRawChunkMeta(options: QueryContext,
                                       lp: RawChunkMeta): PlanResult = {
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) None else Some(lp.column)
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val metaExec = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectChunkInfosExec(queryId, submitTime, options.sampleLimit, dispatcher, dsRef, shard,
+      SelectChunkInfosExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
         renamedFilters, toChunkScanMethod(lp.rangeSelector), schemaOpt, colName)
     }
     PlanResult(metaExec, false)
   }
 
-  private def materializeApplyMiscellaneousFunction(queryId: String,
-                                                    submitTime: Long,
-                                                    options: QueryOptions,
+  private def materializeApplyMiscellaneousFunction(options: QueryContext,
                                                     lp: ApplyMiscellaneousFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
     vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
     vectors
   }
 
   private def materializeFunctionArgs(functionParams: Seq[FunctionArgsPlan],
-                                      queryId: String,
-                                      submitTime: Long,
-                                      options: QueryOptions): Seq[FuncArgs] = {
+                                      options: QueryContext): Seq[FuncArgs] = {
     if (functionParams.isEmpty){
       Nil
     } else {
       functionParams.map { param =>
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
-          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(queryId, submitTime, s, options),
+          case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, options),
                                                               s.timeStepParams)
           case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
           case _                          => throw new UnsupportedOperationException("Invalid logical plan")
@@ -429,13 +398,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def materializeScalarPlan(queryId: String, submitTime: Long,
-                                    options: QueryOptions,
+  private def materializeScalarPlan(options: QueryContext,
                                     lp: ScalarVaryingDoublePlan): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.timeStepParams))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -444,14 +412,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def materializeApplySortFunction(queryId: String,
-                                           submitTime: Long,
-                                           options: QueryOptions,
+  private def materializeApplySortFunction(options: QueryContext,
                                            lp: ApplySortFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
     if(vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -460,14 +426,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def materializeAbsentFunction(queryId: String,
-                                        submitTime: Long,
-                                        options: QueryOptions,
+  private def materializeAbsentFunction(options: QueryContext,
                                         lp: ApplyAbsentFunction): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, options)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
         PromMetricLabel))
       PlanResult(Seq(topPlan), vectors.needsStitch)
@@ -478,29 +442,23 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def materializeScalarTimeBased(queryId: String,
-                                         submitTime: Long,
-                                         options: QueryOptions,
+  private def materializeScalarTimeBased(options: QueryContext,
                                          lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(queryId, dsRef, lp.rangeParams, lp.function,
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(options.queryId, dsRef, lp.rangeParams, lp.function,
       options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
 
-  private def materializeVectorPlan(queryId: String,
-                                    submitTime: Long,
-                                    options: QueryOptions,
+  private def materializeVectorPlan(options: QueryContext,
                                     lp: VectorPlan): PlanResult = {
-    val vectors = walkLogicalPlanTree(lp.scalars, queryId, submitTime, options)
+    val vectors = walkLogicalPlanTree(lp.scalars, options)
     vectors.plans.foreach(_.addRangeVectorTransformer(VectorFunctionMapper()))
     vectors
   }
 
-  private def materializeFixedScalar(queryId: String,
-                                     submitTime: Long,
-                                     options: QueryOptions,
+  private def materializeFixedScalar(options: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
-    val scalarFixedDoubleExec = ScalarFixedDoubleExec(queryId, dsRef, lp.timeStepParams, lp.scalar,
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(options.queryId, dsRef, lp.timeStepParams, lp.scalar,
       options.sampleLimit)
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }

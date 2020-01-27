@@ -14,7 +14,7 @@ import org.openjdk.jmh.annotations._
 
 import filodb.coordinator.{FilodbCluster, IngestionStarted, ShardMapper}
 import filodb.coordinator.client.QueryCommands._
-import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
+import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
 import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
@@ -23,7 +23,7 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryOptions}
+import filodb.query.{QueryConfig, QueryContext}
 
 //scalastyle:off regex
 /**
@@ -88,15 +88,15 @@ class HistogramQueryBenchmark {
 
   // Single-threaded query test
   val numQueries = 500
-  val qOptions = QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
+  val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
     copy(shardOverrides = Some(Seq(0)))
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
-  val hExecPlan = hEngine.materialize(hLogicalPlan, qOptions, UnavailablePromQlQueryParams)
+  val hExecPlan = hEngine.materialize(hLogicalPlan, qContext)
   val querySched = Scheduler.singleThread(s"benchmark-query")
   val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val pLogicalPlan = Parser.queryToLogicalPlan(promQuery, startTime/1000)
-  val pExecPlan = pEngine.materialize(pLogicalPlan, qOptions, UnavailablePromQlQueryParams)
+  val pExecPlan = pEngine.materialize(pLogicalPlan, qContext)
 
   @TearDown
   def shutdownFiloActors(): Unit = {

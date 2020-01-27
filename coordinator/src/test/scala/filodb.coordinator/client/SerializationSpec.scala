@@ -196,7 +196,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 0))),
+    val execPlan = engine.materialize(logicalPlan, QueryContext(Some(StaticSpreadProvider(SpreadChange(0, 0))),
       100))
     roundTrip(execPlan) shouldEqual execPlan
   }
@@ -216,7 +216,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
       qParams)
-    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
       100))
     roundTrip(execPlan1) shouldEqual execPlan1
 
@@ -225,7 +225,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       s"""sum(rate(http_request_duration_microseconds_sum{job="prometheus",$shardKeyStr}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job="prometheus",$shardKeyStr}[5m])) by (handler)""",
       qParams)
     // scalastyle:on
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     roundTrip(execPlan2) shouldEqual execPlan2
 
   }
@@ -246,7 +246,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
       s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
       qParams)
-    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(Some(
       new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     val partKeysExec = execPlan1.asInstanceOf[PartKeysDistConcatExec]
     roundTrip(partKeysExec) shouldEqual partKeysExec
@@ -255,7 +255,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan2 = Parser.metadataQueryToLogicalPlan(
       "http_request_duration_seconds_bucket",
       qParams)
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(
       Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     val partKeysDistConcatExec = execPlan2.asInstanceOf[PartKeysDistConcatExec]
 

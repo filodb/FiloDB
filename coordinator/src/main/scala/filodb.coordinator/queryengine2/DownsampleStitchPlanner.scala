@@ -1,6 +1,6 @@
 package filodb.coordinator.queryengine2
 
-import filodb.query.{LogicalPlan, QueryOptions}
+import filodb.query.{LogicalPlan, QueryContext}
 import filodb.query.exec.ExecPlan
 
 /**
@@ -13,10 +13,7 @@ import filodb.query.exec.ExecPlan
 class DownsampleStitchPlanner(rawClusterPlanner: SingleClusterPlanner,
                               downsampleClusterPlanner: SingleClusterPlanner) extends QueryPlanner {
 
-  def materialize(queryId: String,
-                  submitTime: Long,
-                  logicalPlan: LogicalPlan,
-                  options: QueryOptions): ExecPlan = {
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     ???
   }
 

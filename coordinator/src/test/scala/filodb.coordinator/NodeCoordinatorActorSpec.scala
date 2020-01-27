@@ -122,7 +122,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
   val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("count", DoubleColumn)), 1)
   val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("value", DoubleColumn)), 1)
-  val qOpt = QueryOptions(shardOverrides = Some(Seq(0)))
+  val qOpt = QueryContext(shardOverrides = Some(Seq(0)))
 
   describe("QueryActor commands and responses") {
     import MachineMetricsData._
@@ -275,7 +275,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
-      val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
+      val queryOpt = QueryContext(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
       val q2 = LogicalPlan2Query(ref,
@@ -301,7 +301,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       memStore.refreshIndexForTesting(dataset1.ref)
 
-      val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
+      val queryOpt = QueryContext(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
       val q2 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, multiFilter, Seq("min")), queryOpt)

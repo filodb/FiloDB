@@ -1,7 +1,5 @@
 package filodb.coordinator.queryengine2
 
-import java.util.UUID
-
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
@@ -28,7 +26,7 @@ class QueryEngine(dsRef: DatasetRef,
 //                  downsampleMapperFunc: => ShardMapper,
                   failureProvider: FailureProvider,
                   spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                  queryEngineConfig: Config = ConfigFactory.empty()) extends StrictLogging {
+                  queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
 
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
   val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
@@ -54,9 +52,7 @@ class QueryEngine(dsRef: DatasetRef,
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions): ExecPlan = {
-    val queryId = UUID.randomUUID().toString
-    val submitTime = System.currentTimeMillis()
-    haPlanner.materialize(queryId, submitTime, rootLogicalPlan, options)
+                  options: QueryContext): ExecPlan = {
+    haPlanner.materialize(rootLogicalPlan, options)
   }
 }

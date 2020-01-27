@@ -15,7 +15,6 @@ import org.scalactic._
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.coordinator.queryengine2.{PromQlQueryParams, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
@@ -328,11 +327,11 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     println(str)
   }
 
-  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions, tsdbQueryParams:
-  TsdbQueryParams): Unit = {
+  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan,
+                    options: QOptions, tsdbQueryParams: TsdbQueryParams): Unit = {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
-    val qOpts = QueryOptions(spreadProvider, options.sampleLimit)
+    val qOpts = QueryContext(tsdbQueryParams, spreadProvider, options.sampleLimit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
@@ -340,7 +339,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     options.everyN match {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
-          client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
+          client.logicalPlan2Query(ref, plan, qOpts) match {
             case QueryResult(_, schema, result) => result.take(options.limit).foreach(rv => println(rv.prettyPrint()))
             case err: QueryError                => throw new ClientException(err)
           }
@@ -351,7 +350,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
         while (!fut.isCompleted) { Thread sleep 1000 }
       case None =>
         try {
-          client.logicalPlan2Query(ref, plan, tsdbQueryParams, qOpts) match {
+          client.logicalPlan2Query(ref, plan, qOpts) match {
             case QueryResult(_, schema, result) => println(s"Output schema: $schema")
                                                    println(s"Number of Range Vectors: ${result.size}")
                                                    result.take(options.limit).foreach(rv => println(rv.prettyPrint()))

@@ -74,7 +74,7 @@ final class QueryActor(memStore: MemStore,
   val spreadAssignment : List[SpreadAssignment]= config.as[List[SpreadAssignment]]("filodb.spread-assignment")
   spreadAssignment.foreach{ x => filodbSpreadMap.put(x.shardKeysMap, x.spread)}
 
-  val spreadFunc = QueryOptions.simpleMapSpreadFunc(applicationShardKeyNames, filodbSpreadMap, defaultSpread)
+  val spreadFunc = QueryContext.simpleMapSpreadFunc(applicationShardKeyNames, filodbSpreadMap, defaultSpread)
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
@@ -119,15 +119,11 @@ final class QueryActor(memStore: MemStore,
      }(queryScheduler)
   }
 
-  private def getSpreadProvider(queryOptions: QueryOptions): SpreadProvider = {
-    return queryOptions.spreadOverride.getOrElse(functionalSpreadProvider)
-  }
-
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
     // This is for CLI use only. Always prefer clients to materializeHaPlan logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.qContext)
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -139,7 +135,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan
     } catch {
       case NonFatal(ex) =>

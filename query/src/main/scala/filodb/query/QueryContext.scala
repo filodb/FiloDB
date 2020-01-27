@@ -1,5 +1,7 @@
 package filodb.query
 
+import java.util.UUID
+
 import filodb.core.{SpreadChange, SpreadProvider}
 import filodb.core.query.{ColumnFilter, Filter}
 
@@ -11,15 +13,17 @@ object UnavailablePromQlQueryParams extends TsdbQueryParams
 /**
   * This class provides general query processing parameters
   */
-final case class QueryOptions(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
+final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
                               spreadOverride: Option[SpreadProvider] = None,
                               queryTimeoutSecs: Int = 30,
                               sampleLimit: Int = 1000000,
-                              shardOverrides: Option[Seq[Int]] = None)
+                              shardOverrides: Option[Seq[Int]] = None,
+                              queryId: String = UUID.randomUUID().toString,
+                              submitTime: Long = System.currentTimeMillis())
 
-object QueryOptions {
-  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryOptions =
-    QueryOptions(spreadOverride = constSpread, sampleLimit = sampleLimit)
+object QueryContext {
+  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
+    QueryContext(spreadOverride = constSpread, sampleLimit = sampleLimit)
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
