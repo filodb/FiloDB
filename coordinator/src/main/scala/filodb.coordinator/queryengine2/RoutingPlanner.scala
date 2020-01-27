@@ -156,13 +156,13 @@ object QueryRoutingPlanner extends RoutingPlanner {
     * Check whether all child logical plans have same start and end time
     */
   def hasSingleTimeRange(logicalPlan: LogicalPlan): Boolean = {
-    if (logicalPlan.isInstanceOf[BinaryJoin]) {
-      val binaryJoin = logicalPlan.asInstanceOf[BinaryJoin]
-      val lhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.lhs)
-      val rhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.rhs)
-      ((lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis))
-    } else
-    true
+    logicalPlan match {
+      case binaryJoin: BinaryJoin =>
+        val lhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.lhs)
+        val rhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.rhs)
+        (lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis)
+      case _ => true
+    }
   }
 
   /**

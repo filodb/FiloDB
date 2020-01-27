@@ -31,8 +31,7 @@ case class TimeRange(startInMillis: Long, endInMillis: Long)
   * @param datasetRef  Dataset reference for database and dataset.
   * @param timeRange   time range.
   */
-case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange,
-                            isRemote: Boolean)
+case class FailureTimeRange(clusterName: String, datasetRef: DatasetRef, timeRange: TimeRange, isRemote: Boolean)
 
 /**
   * For rerouting queries for failure ranges, Route trait will offer more context in the form of corrective
