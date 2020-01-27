@@ -238,6 +238,7 @@ final case class InfluxHistogramRecord(bytes: Array[Byte],
     InfluxProtocolParser.parseKeyValues(bytes, fieldDelims, fieldEnd, visitor)
 
     // Only create histogram record if we are able to parse above and it contains +Inf bucket
+    // This also ensures that it's not a blank histogram, which cannot be ingested
     if (visitor.gotInf) {
       val buckets = CustomBuckets(visitor.bucketTops)
       val hist = LongHistogram(buckets, visitor.bucketVals)
