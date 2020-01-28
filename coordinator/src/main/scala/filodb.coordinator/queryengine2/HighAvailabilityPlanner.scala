@@ -28,7 +28,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import QueryFailureRoutingStrategy._
 
   /**
-    * Converts Routes to ExecPlan
+    * Converts Route objects returned by FailureProvider to ExecPlan
     */
   private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan,
                                   options: QueryContext, lookBackTime: Long): ExecPlan = {
@@ -66,9 +66,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
     // lazy because we want to fetch failures only if needed
     lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-    lazy val lookBackTime = getRawSeriesStartTime(logicalPlan)
-                               .map(periodicSeriesTime.startInMillis - _).get
-
+    lazy val lookBackTime = getRawSeriesStartTime(logicalPlan).map(periodicSeriesTime.startInMillis - _).get
     lazy val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
     lazy val failures = failureProvider.getFailures(dsRef, routingTime).sortBy(_.timeRange.startInMillis)
 

@@ -10,8 +10,7 @@ import filodb.query.exec.ExecPlan
   */
 class MultiPodPlanner extends QueryPlanner {
 
-  def materialize(logicalPlan: LogicalPlan,
-                  qContext: QueryContext): ExecPlan = {
+  def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     ???
   }
 

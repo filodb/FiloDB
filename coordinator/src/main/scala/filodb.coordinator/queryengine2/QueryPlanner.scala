@@ -11,9 +11,9 @@ trait QueryPlanner {
   /**
     * Converts a logical plan to execution plan.
     *
-    * @param logicalPlan
-    * @param qContext
-    * @return materialized Execution Plan
+    * @param logicalPlan Logical plan after converting PromQL -> AST -> LogicalPlan
+    * @param qContext holder for additional query parameters
+    * @return materialized Execution Plan which can be dispatched
     */
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
 }

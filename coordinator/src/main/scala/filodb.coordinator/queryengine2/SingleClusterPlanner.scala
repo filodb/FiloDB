@@ -92,6 +92,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   }
 
+
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 options: QueryContext): Seq[Int] = {
 
@@ -131,7 +132,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case EncodedChunksSelector      => ???
       case WriteBufferSelector        => WriteBufferChunkScan
       case InMemoryChunksSelector     => InMemoryChunkScan
-      case _ => ???
+      case _                          => ???
     }
   }
 

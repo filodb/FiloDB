@@ -5,7 +5,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.query._
 
 /**
-  * Planner for routing based on failure ranges for a given LogicalPlan.
+  * HA Strategy for routing queries between replica clusters based on failure time ranges.
   */
 trait FailureRoutingStrategy extends StrictLogging {
   def plan(failure: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route]
