@@ -74,7 +74,7 @@ object PrometheusModel {
 
   def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
     SuccessResponse(Data(toPromResultType(qr.resultType),
-      qr.result.map(toPromResult(_, verbose)).filter(_.values.nonEmpty)))
+      qr.result.map(toPromResult(_, verbose, qr.resultType)).filter(_.values.nonEmpty)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -92,7 +92,7 @@ object PrometheusModel {
   /**
     * Used to send out HTTP response for double-based data
     */
-  def toPromResult(srv: RangeVector, verbose: Boolean): Result = {
+  def toPromResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
                                   "_partIds_" -> srv.key.partIds.mkString(","))
@@ -101,15 +101,19 @@ object PrometheusModel {
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
     }.toSeq
 
-    val res = if (samples.isEmpty) None else Some(samples)
-
-    Result(tags,
-      // remove NaN in HTTP results
-      // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
-      // in HTTP raw query results.
-      res,
-      None
-    )
+    typ match {
+      case QueryResultType.RangeVectors =>
+        Result(tags,
+          // remove NaN in HTTP results
+          // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
+          // in HTTP raw query results.
+          if (samples.isEmpty) None else Some(samples),
+          None
+        )
+      case QueryResultType.InstantVector =>
+        Result(tags, None, samples.headOption)
+      case QueryResultType.Scalar => ???
+    }
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
