@@ -423,54 +423,50 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
     if (valueColumnType(sourceSchema) != ColumnType.HistogramColumn) return source
 
     source.flatMap { rv =>
-      // Data structures to hold bucket values for each possible bucket.
-      val timestamps = debox.Buffer.empty[Long]
-      val buckets    = debox.Map.empty[Double, debox.Buffer[Double]]
-      var curScheme: HistogramBuckets = HistogramBuckets.emptyBuckets
-      var emptyBuckets = debox.Set.empty[Double]
-
-      rv.rows.foreach { row =>
-        timestamps += row.getLong(0)
-        val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
-
-        if (hist.buckets != curScheme) {
-          addNewBuckets(hist.buckets, buckets)  // add new buckets, backfilling timestamps with NaN
-          curScheme = hist.buckets
-          emptyBuckets = buckets.keysSet -- curScheme.bucketSet   // All the buckets that need NaN filled going forward
-        }
-
-        for { b <- 0 until hist.numBuckets optimized } {
-          buckets(hist.bucketTop(b)) += hist.bucketValue(b)
-        }
-        emptyBuckets.foreach { b => buckets(b) += Double.NaN }
-      }
-
-      // Now create new RangeVectors for each bucket
-      val bucketRVs = buckets.mapToArray { case (le, bucketValues) =>
-        promBucketRV(rv.key, le, timestamps, bucketValues)
-      }
-      Observable.fromIterable(bucketRVs.toSeq)
+      Observable.fromIterable(expandVector(rv))
     }
+  }
+
+  def expandVector(rv: RangeVector): Seq[RangeVector] = {
+    // Data structures to hold bucket values for each possible bucket.
+    val timestamps = debox.Buffer.empty[Long]
+    val buckets    = debox.Map.empty[Double, debox.Buffer[Double]]
+    var curScheme: HistogramBuckets = HistogramBuckets.emptyBuckets
+    var emptyBuckets = debox.Set.empty[Double]
+
+    rv.rows.foreach { row =>
+      val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+
+      if (hist.buckets != curScheme) {
+        addNewBuckets(hist.buckets, buckets, timestamps.length)  // add new buckets, backfilling timestamps with NaN
+        curScheme = hist.buckets
+        emptyBuckets = buckets.keysSet -- curScheme.bucketSet   // All the buckets that need NaN filled going forward
+      }
+
+      timestamps += row.getLong(0)
+      for { b <- 0 until hist.numBuckets optimized } {
+        buckets(hist.bucketTop(b)) += hist.bucketValue(b)
+      }
+      emptyBuckets.foreach { b => buckets(b) += Double.NaN }
+    }
+
+    // Now create new RangeVectors for each bucket
+    // NOTE: debox.Map methods sometimes has issues giving consistent results instead of duplicates.
+    buckets.mapToArray { case (le, bucketValues) =>
+      promBucketRV(rv.key, le, timestamps, bucketValues)
+    }.toSeq
   }
 
   override def schema(source: ResultSchema): ResultSchema =
     if (valueColumnType(source) != ColumnType.HistogramColumn) source else
     ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
-  private def addNewBuckets(newScheme: HistogramBuckets, buckets: debox.Map[Double, debox.Buffer[Double]]): Unit = {
+  private def addNewBuckets(newScheme: HistogramBuckets,
+                            buckets: debox.Map[Double, debox.Buffer[Double]],
+                            elemsToPad: Int): Unit = {
     val bucketsToAdd = newScheme.bucketSet -- buckets.keysSet
-
-    // Case 1: buckets is empty, no backfilling to do
-    if (buckets.isEmpty) {
-      bucketsToAdd.foreach { buc =>
-        buckets(buc) = debox.Buffer.empty[Double]
-      }
-    } else {
-    // Case 2: buckets is nonempty.  Need to pad new buckets with NaNs to match length of existing buckets
-      val elemsToPad = buckets(buckets.keys.head).length
-      bucketsToAdd.foreach { buc =>
-        buckets(buc) = debox.Buffer.fill(elemsToPad)(Double.NaN)
-      }
+    bucketsToAdd.foreach { buc =>
+      buckets(buc) = debox.Buffer.fill(elemsToPad)(Double.NaN)
     }
   }
 

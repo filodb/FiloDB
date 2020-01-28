@@ -2,12 +2,24 @@ package filodb.prometheus.query
 
 import remote.RemoteStorage._
 
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, Filter, RangeVector}
 import filodb.query.{Data, ErrorResponse, ExplainPlanResponse, IntervalSelector, LogicalPlan, QueryResultType,
   RawSeries, Result, Sampl, SuccessResponse}
-import filodb.query.exec.ExecPlan
+import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
+  /**
+   * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
+   */
+  def convertHistToPromResult(qr: filodb.query.QueryResult, sch: PartitionSchema): filodb.query.QueryResult = {
+    if (!qr.resultSchema.isEmpty && qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn) {
+      val mapper = HistToPromSeriesMapper(sch)
+      val promVectors = qr.result.flatMap(mapper.expandVector)
+      qr.copy(result = promVectors)
+    } else qr
+  }
 
   /**
     * Converts a prometheus read request to a Seq[LogicalPlan]
@@ -36,6 +48,7 @@ object PrometheusModel {
     b.build().toByteArray()
   }
 
+  // Creates Prometheus protobuf QueryResult output
   def toPromQueryResult(qr: filodb.query.QueryResult): QueryResult = {
     val b = QueryResult.newBuilder()
     qr.result.foreach{ srv =>
@@ -45,7 +58,7 @@ object PrometheusModel {
   }
 
   /**
-    * Used to send out raw data
+    * Used to send out raw data as Prometheus TimeSeries protobuf
     */
   def toPromTimeSeries(srv: RangeVector): TimeSeries = {
     val b = TimeSeries.newBuilder()
@@ -77,7 +90,7 @@ object PrometheusModel {
   }
 
   /**
-    * Used to send out HTTP response
+    * Used to send out HTTP response for double-based data
     */
   def toPromResult(srv: RangeVector, verbose: Boolean): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++

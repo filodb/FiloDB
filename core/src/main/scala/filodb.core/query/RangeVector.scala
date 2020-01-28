@@ -358,7 +358,7 @@ final case class IteratorBackedRangeVector(key: RangeVectorKey,
 final case class BufferRangeVector(key: RangeVectorKey,
                                    timestamps: Buffer[Long],
                                    values: Buffer[Double]) extends RangeVector {
-  require(timestamps.length == values.length)
+  require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
 
   def rows: Iterator[RowReader] = new Iterator[RowReader] {
     val row = new TransientRow()

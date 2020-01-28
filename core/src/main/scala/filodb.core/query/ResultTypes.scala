@@ -44,6 +44,7 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   import Column.ColumnType._
 
   def length: Int = columns.length
+  def isEmpty: Boolean = columns.isEmpty
   def isTimeSeries: Boolean = columns.length >= 1 && numRowKeyColumns == 1 &&
                               (columns.head.colType == LongColumn || columns.head.colType == TimestampColumn)
   // True if main col is Histogram and extra column is a Double

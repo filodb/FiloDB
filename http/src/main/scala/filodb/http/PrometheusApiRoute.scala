@@ -32,6 +32,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
 
+  val schemas = settings.filoSettings.schemas
+
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
     // Used to issue a promQL query for a time range with a `start` and `end` timestamp and at regular `step` intervals.
@@ -93,7 +95,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
               case Some(UnknownDataset) => complete(Codes.NotFound ->
                                            ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
               case Some(a: Any)      => throw new IllegalStateException(s"Got $a as query response")
-              case None              => val rrBytes = toPromReadResponse(qr.asInstanceOf[Seq[filodb.query.QueryResult]])
+              case None              => val promQrs = qr.asInstanceOf[Seq[filodb.query.QueryResult]].map { r =>
+                                          convertHistToPromResult(r, schemas.part)
+                                        }
+                                        val rrBytes = toPromReadResponse(promQrs)
                                         // Would have ideally liked to have the encoding driven by akka directives,
                                         // but Akka doesnt support snappy out of the box.
                                         // Elegant solution is a TODO for later.
@@ -117,7 +122,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, tsdbQueryParams, QueryOptions(spreadProvider))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
-      case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
+      case qr: QueryResult => val translated = convertHistToPromResult(qr, schemas.part)
+                              complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
