@@ -1,11 +1,9 @@
 package filodb.downsampler.index
 
 import com.typesafe.scalalogging.StrictLogging
-import monix.reactive.Observable
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-import filodb.core.store.PartKeyRecord
 import filodb.downsampler.BatchDownsampler._
 
 object DSIndexJobMain extends App {
@@ -31,24 +29,17 @@ class IndexJobDriver extends StrictLogging {
 
     val datasetRef = downsampleRefsByRes(5 minutes)
     val rdd = spark.sparkContext
-      .range(0, numShards)
+      .makeRDD(0 until numShards)
       .mapPartitions { shardIter =>
         import DSIndexJob._
         shardIter.map(shard => {
           updateDSPartKeyIndex(shard)
         })
       }
-    rdd.collect()
+    rdd.foreach(_ => {}) //run job and ignore output
     spark.sparkContext.stop()
 
     logger.info(s"IndexUpdater Driver completed successfully")
-  }
-
-  def getPartKeys(shard: Long): Observable[PartKeyRecord] = {
-    import DSIndexJob._
-    val rawDataSource = rawCassandraColStore
-    rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-      shard = shard.toInt, updateHour = hour())
   }
 
   def shutdown(): Unit = {
@@ -57,5 +48,4 @@ class IndexJobDriver extends StrictLogging {
     downsampleCassandraColStore.shutdown()
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 }

@@ -1,11 +1,11 @@
 package filodb.downsampler.index
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.util.Failure
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.Scheduler
+import monix.execution.{Scheduler, UncaughtExceptionReporter}
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -44,6 +44,11 @@ object DSIndexJob extends StrictLogging {
   private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
+  implicit lazy val globalImplicitScheduler = Scheduler.computation(
+    parallelism = 15,
+    name = "global-implicit",
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalScheduler", _)))
+
   def updateDSPartKeyIndex(shard: Long): Unit = {
     val rawDataSource = rawCassandraColStore
     val dsDtasource = downsampleCassandraColStore
@@ -51,10 +56,15 @@ object DSIndexJob extends StrictLogging {
     val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
       shard = shard.toInt, updateHour = hour())
     val partKeyIter = partKeys.map(toPartkeyRecordWithHash)
-    Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+    dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = partKeyIter,
       diskTTLSeconds = dsJobsettings.ttlByResolution(rawDatasetIngestionConfig.downsampleConfig.resolutions.last),
-      writeToPkUTTable = false), 1 minute)
+      writeToPkUTTable = false).onComplete((response) => {
+        response match {
+          case Failure(e) => logger.error("exception while updating partkey index", e)
+          case _ =>
+        }
+      })
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
