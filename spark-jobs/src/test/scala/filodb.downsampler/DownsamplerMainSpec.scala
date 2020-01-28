@@ -21,6 +21,7 @@ import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, RawDataRangeVector
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.BatchDownsampler.shardStats
+import filodb.downsampler.index.IndexJobDriver
 import filodb.memory.format.PrimitiveVectorReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, MutableHistogram}
@@ -63,6 +64,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   val lastSampleTime = 1574273042000L
   val downsampler = new Downsampler
+
+  val indexUpdater = new IndexJobDriver
 
   override def beforeAll(): Unit = {
     BatchDownsampler.downsampleRefsByRes.values.foreach { ds =>
@@ -263,17 +266,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
     downsampler.run(sparkConf)
   }
+
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
-    // TODO add spark job in future PR
-    // For now write part keys manually
-    val dsDataset5Min = BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min"))
-    val pks = Seq( PartKeyRecord(histPartKeyBytes, 1574272801000L, 1574273042000L, Some(199)),
-                   PartKeyRecord(counterPartKeyBytes, 1574272801000L, 1574273042000L, Some(1)),
-                   PartKeyRecord(gaugePartKeyBytes, 1574272801000L, 1574273042000L, Some(150)),
-                   PartKeyRecord(gaugeLowFreqPartKeyBytes, 1574272801000L, 1574273042000L, Some(345)))
-
-    downsampleColStore.writePartKeys(dsDataset5Min, 0, Observable.fromIterable(pks), 259200).futureValue
-
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    indexUpdater.run(sparkConf)
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {

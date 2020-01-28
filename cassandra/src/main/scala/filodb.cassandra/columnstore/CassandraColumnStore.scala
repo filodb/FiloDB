@@ -283,7 +283,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int): Future[Response] = {
+                    diskTTLSeconds: Int,
+                    writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val updateHour = hour()
@@ -292,8 +293,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
-        case resp if resp == Success => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
-        case resp                    => Future.successful(resp)
+        case resp if resp == Success
+          && writeToPkUTTable => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
+
+        case resp             => Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
         sinkStats.partKeysWrite(1)
