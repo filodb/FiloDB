@@ -92,15 +92,14 @@ object BatchDownsampler extends StrictLogging with Instance {
 
   private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
+  import java.time.Instant._
+
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-
-    import java.time.Instant._
-
     logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
@@ -120,24 +119,24 @@ object BatchDownsampler extends StrictLogging with Instance {
       rawPartsBatch.foreach { rawPart =>
         val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
         val schema = schemas(rawSchemaId)
-        if (schema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
-        val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
-        if (isEligibleForDownsample(pkPairs)) {
-          try {
-            downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
-              downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
-          } catch { case e: Exception =>
-              logger.error(s"Error occurred when downsampling partition $pkPairs", e)
-              // TODO there certain exceptions caused by data that should not abort the job
-              // Rerun of such batches will not help unless data is fixed.
-              throw e
+        if (schema != Schemas.UnknownSchema) {
+          val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
+          if (isEligibleForDownsample(pkPairs)) {
+            try {
+              downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
+                downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+            } catch { case e: Exception =>
+                logger.error(s"Error occurred when downsampling partition $pkPairs", e)
+                // TODO there certain exceptions caused by data that should not abort the job
+                // Rerun of such batches will not help unless data is fixed.
+                throw e
+            }
           }
-        }
+        } else logger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
-      // free off-heap memory
-      offHeapMem.free()
+      offHeapMem.free()   // free offheap mem
       pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
     }
