@@ -55,9 +55,7 @@ case class PromQlExec(id: String,
   }
 
   def toQueryResponse(data: Data, id: String): QueryResponse = {
-
     val rangeVectors = data.result.map { r =>
-
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
@@ -66,7 +64,7 @@ case class PromQlExec(id: String,
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
         override def rows: Iterator[RowReader] = {
-          samples.iterator.map { v =>
+          samples.iterator.collect { case v: Sampl =>
             row.setLong(0, v.timestamp * 1000)
             row.setDouble(1, v.value)
             row

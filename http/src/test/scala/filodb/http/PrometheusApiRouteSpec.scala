@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 import filodb.coordinator._
 import filodb.core.{AsyncTest, DatasetRef, TestData}
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.query.{ExplainPlanResponse, SuccessResponse}
+import filodb.query.{ExplainPlanResponse, HistSampl, SuccessResponse}
 
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
@@ -137,19 +137,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     }
   }
 
-  // NOTE: custom decoder needed since Sampl does not automatically decode from Prom [ts, "value"] syntax
-  import io.circe.{ Decoder, HCursor }
-  import cats.syntax.either._
-  import filodb.query.Sampl
-  implicit val decodeFoo: Decoder[Sampl] = new Decoder[Sampl] {
-    final def apply(c: HCursor): Decoder.Result[Sampl] =
-      for {
-        ts    <- c.downArray.as[Long]
-        value <- c.downArray.right.as[String]
-      } yield {
-        new Sampl(ts, value.toDouble)
-      }
-  }
+  import filodb.query.PromCirceSupport._
 
   it("should auto convert Histogram data to Prom bucket vectors") {
     val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
@@ -170,6 +158,30 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
         res.values.get.length should be > (1)
         res.metric.contains("le") shouldEqual true
         res.metric("_metric_").endsWith("_bucket") shouldEqual true
+      }
+    }
+  }
+
+  it("should output native Histogram maps if histogramMap=true") {
+    val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
+
+    val start = 1555427432
+    val end   = 1555447432
+    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+      s"start=$start&end=$end&step=15&histogramMap=true") ~> prometheusAPIRoute ~> check {
+
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[SuccessResponse]
+      resp.status shouldEqual "success"
+      resp.data.result should have length (10)    // 10 series, one histogram each, each with 8 buckets
+      resp.data.result.foreach { res =>
+        res.value shouldEqual None
+        res.values.get.length should be > (1)
+        res.values.get.foreach(_.asInstanceOf[HistSampl].buckets.size shouldEqual 8)
+        res.metric.contains("le") shouldEqual false
+        res.metric("_metric_").endsWith("_bucket") shouldEqual false
       }
     }
   }

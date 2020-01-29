@@ -4,20 +4,22 @@ import remote.RemoteStorage._
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{ColumnFilter, Filter, RangeVector}
-import filodb.query.{Data, ErrorResponse, ExplainPlanResponse, IntervalSelector, LogicalPlan, QueryResultType,
-  RawSeries, Result, Sampl, SuccessResponse}
+import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector}
+import filodb.query.{QueryResult => FQR, _}
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
+  import com.softwaremill.quicklens._
+
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
    */
-  def convertHistToPromResult(qr: filodb.query.QueryResult, sch: PartitionSchema): filodb.query.QueryResult = {
+  def convertHistToPromResult(qr: FQR, sch: PartitionSchema): FQR = {
     if (!qr.resultSchema.isEmpty && qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn) {
       val mapper = HistToPromSeriesMapper(sch)
       val promVectors = qr.result.flatMap(mapper.expandVector)
       qr.copy(result = promVectors)
+        .modify(_.resultSchema.columns).using(_.updated(1, ColumnInfo("value", ColumnType.DoubleColumn)))
     } else qr
   }
 
@@ -42,14 +44,14 @@ object PrometheusModel {
     }
   }
 
-  def toPromReadResponse(qrs: Seq[filodb.query.QueryResult]): Array[Byte] = {
+  def toPromReadResponse(qrs: Seq[FQR]): Array[Byte] = {
     val b = ReadResponse.newBuilder()
     qrs.foreach(r => b.addResults(toPromQueryResult(r)))
     b.build().toByteArray()
   }
 
   // Creates Prometheus protobuf QueryResult output
-  def toPromQueryResult(qr: filodb.query.QueryResult): QueryResult = {
+  def toPromQueryResult(qr: FQR): QueryResult = {
     val b = QueryResult.newBuilder()
     qr.result.foreach{ srv =>
       b.addTimeseries(toPromTimeSeries(srv))
@@ -72,9 +74,12 @@ object PrometheusModel {
     b.build()
   }
 
-  def toPromSuccessResponse(qr: filodb.query.QueryResult, verbose: Boolean): SuccessResponse = {
-    SuccessResponse(Data(toPromResultType(qr.resultType),
-      qr.result.map(toPromResult(_, verbose, qr.resultType)).filter(_.values.nonEmpty)))
+  def toPromSuccessResponse(qr: FQR, verbose: Boolean): SuccessResponse = {
+    val results = if (qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
+                    qr.result.map(toHistResult(_, verbose, qr.resultType))
+                  else
+                    qr.result.map(toPromResult(_, verbose, qr.resultType))
+    SuccessResponse(Data(toPromResultType(qr.resultType), results.filter(_.values.nonEmpty)))
   }
 
   def toPromExplainPlanResponse(ex: ExecPlan): ExplainPlanResponse = {
@@ -110,6 +115,29 @@ object PrometheusModel {
           if (samples.isEmpty) None else Some(samples),
           None
         )
+      case QueryResultType.InstantVector =>
+        Result(tags, None, samples.headOption)
+      case QueryResultType.Scalar => ???
+    }
+  }
+
+  def toHistResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
+    val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
+                (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
+                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                else Map.empty)
+    val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
+      case (t, h) if h.numBuckets > 0 =>
+        val buckets = (0 until h.numBuckets).map { b =>
+          val le = h.bucketTop(b)
+          (if (le == Double.PositiveInfinity) "+Inf" else le.toString) -> h.bucketValue(b)
+        }
+        HistSampl(t / 1000, buckets.toMap)
+    }.toSeq
+
+    typ match {
+      case QueryResultType.RangeVectors =>
+        Result(tags, if (samples.isEmpty) None else Some(samples), None)
       case QueryResultType.InstantVector =>
         Result(tags, None, samples.headOption)
       case QueryResultType.Scalar => ???
