@@ -1,6 +1,12 @@
 package filodb.coordinator.queryengine2
 
-import filodb.query.{LogicalPlan, QueryContext}
+import scala.concurrent.duration.FiniteDuration
+
+import kamon.Kamon
+import monix.eval.Task
+import monix.execution.Scheduler
+
+import filodb.query.{LogicalPlan, QueryContext, QueryResponse}
 import filodb.query.exec.ExecPlan
 
 /**
@@ -16,4 +22,14 @@ trait QueryPlanner {
     * @return materialized Execution Plan which can be dispatched
     */
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan
+
+  /**
+    * Trigger orchestration of the ExecPlan. It sends the ExecPlan to the destination where it will be executed.
+    */
+  def dispatchExecPlan(execPlan: ExecPlan)(implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+    val currentSpan = Kamon.currentSpan()
+    Kamon.withSpan(currentSpan) {
+      execPlan.dispatcher.dispatch(execPlan)
+    }
+  }
 }

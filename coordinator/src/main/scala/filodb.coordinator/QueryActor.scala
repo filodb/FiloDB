@@ -120,7 +120,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    // This is for CLI use only. Always prefer clients to materializeHaPlan logical plan
+    // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
       val execPlan = queryEngine2.materialize(q.logicalPlan, q.qContext)

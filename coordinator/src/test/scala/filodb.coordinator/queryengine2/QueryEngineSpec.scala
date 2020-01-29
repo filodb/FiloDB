@@ -137,7 +137,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
-  it("should materializeHaPlan ExecPlan correctly for _bucket_ histogram queries") {
+  it("should materialize ExecPlan correctly for _bucket_ histogram queries") {
     val lp = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar",_bucket_="2.5"}[5m])""", TimeStepParams(20000, 100, 30000))
 
     info(s"LogicalPlan is $lp")

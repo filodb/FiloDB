@@ -26,6 +26,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                               queryEngineConfig: Config = ConfigFactory.empty) extends QueryPlanner with StrictLogging {
 
   import QueryFailureRoutingStrategy._
+  import LogicalPlanUtils._
 
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
@@ -45,6 +46,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val timeRange = route.timeRange.get
           val queryParams = options.origQueryParams.asInstanceOf[PromQlQueryParams]
           val routingConfig = queryEngineConfig.getConfig("routing")
+          // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
             timeRange.startInMillis / 1000, queryParams.step, timeRange.endInMillis / 1000,
             queryParams.spread, processFailure = false)
