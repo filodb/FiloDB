@@ -15,10 +15,10 @@ import monix.execution.Scheduler
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef}
+import filodb.core.SpreadProvider
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.SpreadProvider
 import filodb.core.store._
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.query.{exec, _}
