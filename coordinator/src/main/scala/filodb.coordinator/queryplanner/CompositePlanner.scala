@@ -24,12 +24,11 @@ class CompositePlanner(dsRef: DatasetRef,
                        queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
 
   // Note the composition of query planners below using decorator pattern
-  val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
-  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)
+  val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc, spreadProvider)
+  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc, spreadProvider)
   val downsampleStitchPlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner)
   // TODO haPlanner should later use downsampleStitchPlanner
-  val haPlanner = new HighAvailabilityPlanner(dsRef, rawClusterPlanner, failureProvider,
-                                              spreadProvider, queryEngineConfig)
+  val haPlanner = new HighAvailabilityPlanner(dsRef, rawClusterPlanner, failureProvider, queryEngineConfig)
   //val multiPodPlanner = new MultiClusterPlanner(podLocalityProvider, haPlanner)
 
   def materialize(rootLogicalPlan: LogicalPlan, options: QueryContext): ExecPlan = {

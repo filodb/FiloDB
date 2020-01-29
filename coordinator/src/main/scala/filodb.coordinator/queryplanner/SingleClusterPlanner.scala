@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
+import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
@@ -30,8 +31,9 @@ object SingleClusterPlanner {
   */
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
-                           spreadProvider: SpreadProvider,
-                           shardMapperFunc: => ShardMapper) extends QueryPlanner with StrictLogging {
+                           shardMapperFunc: => ShardMapper,
+                           spreadProvider: SpreadProvider = StaticSpreadProvider())
+                                extends QueryPlanner with StrictLogging {
 
   private val dsOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted

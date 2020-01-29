@@ -38,7 +38,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new CompositePlanner(dsRef, schemas, mapperRef, EmptyFailureProvider)
+  val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef)
 
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"

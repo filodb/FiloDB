@@ -3,7 +3,7 @@ package filodb.coordinator.queryplanner
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.core.{DatasetRef, SpreadProvider}
+import filodb.core.DatasetRef
 import filodb.query.{LogicalPlan, PromQlInvocationParams, PromQlQueryParams, QueryContext}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
@@ -14,7 +14,6 @@ import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchR
   * to other cluster.
   *
   * @param dsRef dataset
-  * @param spreadProvider used to get spread
   * @param localPlanner the planner to generate plans for local pod
   * @param failureProvider the provider that helps route plan execution to HA cluster
   * @param queryEngineConfig config that determines query engine behavior
@@ -22,11 +21,10 @@ import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchR
 class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
-                              spreadProvider: SpreadProvider,
                               queryEngineConfig: Config = ConfigFactory.empty) extends QueryPlanner with StrictLogging {
 
-  import QueryFailureRoutingStrategy._
   import LogicalPlanUtils._
+  import QueryFailureRoutingStrategy._
 
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan

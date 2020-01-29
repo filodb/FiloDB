@@ -200,7 +200,7 @@ E~BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatche
   they are attached to the ExecPlan that are at the next depth (and not higher depth)
 * ExecPlan and RangeVectorTransformers immediately above them are designated to run on a node represented by the ActorPlanDispatcher
 
-See [CompositePlannerSpec](../coordinator/src/test/scala/filodb.coordinator/queryplanner/CompositePlannerSpec.scala) for
+See [SingleClusterPlannerSpec](../coordinator/src/test/scala/filodb.coordinator/queryplanner/SingleClusterPlannerSpec.scala) for
 test code on this example. 
 
 ## Special Case: Extracting Buckets Out of Histograms
