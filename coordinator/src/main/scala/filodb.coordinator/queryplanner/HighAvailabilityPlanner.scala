@@ -1,4 +1,4 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -32,31 +32,31 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     * Converts Route objects returned by FailureProvider to ExecPlan
     */
   private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan,
-                                  options: QueryContext, lookBackTime: Long): ExecPlan = {
+                                  qContext: QueryContext, lookBackTime: Long): ExecPlan = {
 
     val execPlans: Seq[ExecPlan] = routes.map { route =>
       route match {
         case route: LocalRoute => if (route.timeRange.isEmpty)
-          localPlanner.materialize(rootLogicalPlan, options)
+          localPlanner.materialize(rootLogicalPlan, qContext)
         else
           localPlanner.materialize(
             copyWithUpdatedTimeRange(rootLogicalPlan, route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime),
-            options)
+            qContext)
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
-          val queryParams = options.origQueryParams.asInstanceOf[PromQlQueryParams]
+          val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           val routingConfig = queryEngineConfig.getConfig("routing")
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
             timeRange.startInMillis / 1000, queryParams.step, timeRange.endInMillis / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
-          PromQlExec(options.queryId, InProcessPlanDispatcher(), dsRef, promQlInvocationParams, options.submitTime)
+          PromQlExec(qContext.queryId, InProcessPlanDispatcher(), dsRef, promQlInvocationParams, qContext.submitTime)
       }
     }
 
     if (execPlans.size == 1) execPlans.head
-    else StitchRvsExec(options.queryId,
+    else StitchRvsExec(qContext.queryId,
                        InProcessPlanDispatcher(),
                        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher

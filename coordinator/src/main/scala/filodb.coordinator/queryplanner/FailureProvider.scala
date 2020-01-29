@@ -1,4 +1,4 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import filodb.core.DatasetRef
 

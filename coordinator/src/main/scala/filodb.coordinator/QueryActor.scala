@@ -2,6 +2,8 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.util.control.NonFatal
+
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
@@ -9,9 +11,8 @@ import kamon.Kamon
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
-import scala.util.control.NonFatal
 
-import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine}
+import filodb.coordinator.queryplanner.{CompositePlanner, EmptyFailureProvider}
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
@@ -78,7 +79,7 @@ final class QueryActor(memStore: MemStore,
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
-  val queryEngine2 = new QueryEngine(dsRef, schemas, shardMapFunc,
+  val queryEngine2 = new CompositePlanner(dsRef, schemas, shardMapFunc,
     EmptyFailureProvider, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)

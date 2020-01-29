@@ -1,4 +1,4 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
@@ -15,13 +15,13 @@ import filodb.query.exec._
   * It is meant for use inside FiloDB nodes to execute materialized
   * ExecPlans as well as from the client to execute LogicalPlans.
   */
-class QueryEngine(dsRef: DatasetRef,
-                  schemas: Schemas,
-                  shardMapperFunc: => ShardMapper,
-//                  downsampleMapperFunc: => ShardMapper,
-                  failureProvider: FailureProvider,
-                  spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                  queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
+class CompositePlanner(dsRef: DatasetRef,
+                       schemas: Schemas,
+                       shardMapperFunc: => ShardMapper,
+                       //                  downsampleMapperFunc: => ShardMapper,
+                       failureProvider: FailureProvider,
+                       spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                       queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
 
   // Note the composition of query planners below using decorator pattern
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, spreadProvider, shardMapperFunc)

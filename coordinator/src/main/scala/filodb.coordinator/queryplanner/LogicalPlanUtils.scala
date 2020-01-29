@@ -1,11 +1,11 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import filodb.query._
 
 object LogicalPlanUtils {
 
   /**
-    * Check whether logical plan has a PeriodicSeriesPlan
+    * Check whether logical plan is a PeriodicSeriesPlan
     */
   def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
     if (!logicalPlan.isRoutable) {
@@ -61,22 +61,32 @@ object LogicalPlanUtils {
     * Used to change start and end time(TimeRange) of LogicalPlan
     * NOTE: Plan should be PeriodicSeriesPlan
     */
-  def copyWithUpdatedTimeRange(logicalPlan: LogicalPlan, timeRange: TimeRange,
+  def copyWithUpdatedTimeRange(logicalPlan: LogicalPlan,
+                               timeRange: TimeRange,
                                lookBackTime: Long): PeriodicSeriesPlan = {
     logicalPlan match {
-      case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis, end = timeRange.endInMillis,
-        rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange, lookBackTime).asInstanceOf[RawSeries])
-      case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis, end =
-        timeRange.endInMillis, series = copyNonPeriodicWithUpdatedTimeRange(lp.series, timeRange, lookBackTime))
+      case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis,
+                                         end = timeRange.endInMillis,
+                                         rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange,
+                                                                         lookBackTime).asInstanceOf[RawSeries])
+      case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis,
+                                                      end = timeRange.endInMillis,
+                                                      series = copyNonPeriodicWithUpdatedTimeRange(lp.series, timeRange,
+                                                                                                   lookBackTime))
       case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
-      case lp: Aggregate => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
-      case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange, lookBackTime), rhs =
-        copyWithUpdatedTimeRange(lp.rhs, timeRange, lookBackTime))
-      case lp: ScalarVectorBinaryOperation => lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange,
-        lookBackTime))
-      case lp: ApplyMiscellaneousFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange,
-        lookBackTime))
+
+      case lp: Aggregate  => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+
+      case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange, lookBackTime),
+                                     rhs = copyWithUpdatedTimeRange(lp.rhs, timeRange, lookBackTime))
+      case lp: ScalarVectorBinaryOperation =>
+                      lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange, lookBackTime))
+
+      case lp: ApplyMiscellaneousFunction =>
+                      lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+
       case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+
       case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
     }
   }
@@ -84,9 +94,9 @@ object LogicalPlanUtils {
   /**
     * Used to change rangeSelector of RawSeriesLikePlan
     */
-  def copyNonPeriodicWithUpdatedTimeRange(plan: RawSeriesLikePlan,
-                                          timeRange: TimeRange,
-                                          lookBackTime: Long): RawSeriesLikePlan = {
+  private def copyNonPeriodicWithUpdatedTimeRange(plan: RawSeriesLikePlan,
+                                                  timeRange: TimeRange,
+                                                  lookBackTime: Long): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
         case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,

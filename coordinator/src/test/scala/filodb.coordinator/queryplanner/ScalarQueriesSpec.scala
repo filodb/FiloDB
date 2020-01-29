@@ -1,4 +1,4 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -38,7 +38,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dsRef, schemas, mapperRef, EmptyFailureProvider)
+  val engine = new CompositePlanner(dsRef, schemas, mapperRef, EmptyFailureProvider)
 
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
