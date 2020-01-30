@@ -13,7 +13,8 @@ object HistogramTest {
   )
   val rawLongBuckets = rawHistBuckets.map(_.map(_.toLong))
   val mutableHistograms = rawHistBuckets.map { buckets =>
-    MutableHistogram(bucketScheme, buckets)
+    // Create a new copy here, so that mutations don't affect original array
+    MutableHistogram(bucketScheme, buckets.toList.toArray)
   }
 
   val incrHistBuckets = rawHistBuckets.scanLeft(Array.fill(8)(0.0)) { case (acc, h) =>
@@ -127,7 +128,7 @@ class HistogramTest extends NativeVectorTest {
 
     it("should copy and not be affected by mutation to original") {
       val addedBuckets = rawHistBuckets(0).zip(rawHistBuckets(1)).map { case(a,b) => a + b }.toArray
-      val hist = mutableHistograms(0)
+      val hist = mutableHistograms(0).copy
       val hist2 = hist.copy
       hist shouldEqual hist2
       hist.add(mutableHistograms(1))

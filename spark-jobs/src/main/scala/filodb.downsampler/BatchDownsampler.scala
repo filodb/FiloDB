@@ -21,6 +21,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
+import filodb.query.exec.UnknownSchemaQueryErr
 
 /**
   * This object maintains state during the processing of a batch of TSPartitions to downsample. Namely
@@ -92,15 +93,14 @@ object BatchDownsampler extends StrictLogging with Instance {
 
   private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
+  import java.time.Instant._
+
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-
-    import java.time.Instant._
-
     logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
@@ -119,23 +119,25 @@ object BatchDownsampler extends StrictLogging with Instance {
     try {
       rawPartsBatch.foreach { rawPart =>
         val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
-        val pkPairs = schemas(rawSchemaId).partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
-        if (isEligibleForDownsample(pkPairs)) {
-          try {
-            downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
-              downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
-          } catch { case e: Exception =>
-              logger.error(s"Error occurred when downsampling partition $pkPairs", e)
-              // TODO there certain exceptions caused by data that should not abort the job
-              // Rerun of such batches will not help unless data is fixed.
-              throw e
+        val schema = schemas(rawSchemaId)
+        if (schema != Schemas.UnknownSchema) {
+          val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
+          if (isEligibleForDownsample(pkPairs)) {
+            try {
+              downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
+                downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+            } catch { case e: Exception =>
+                logger.error(s"Error occurred when downsampling partition $pkPairs", e)
+                // TODO there certain exceptions caused by data that should not abort the job
+                // Rerun of such batches will not help unless data is fixed.
+                throw e
+            }
           }
-        }
+        } else logger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
     } finally {
-      // free off-heap memory
-      offHeapMem.free()
+      offHeapMem.free()   // free offheap mem
       pagedPartsToFree.clear()
       downsampledPartsToFree.clear()
     }
@@ -167,6 +169,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                              dsRecordBuilder: RecordBuilder) = {
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
+    if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
