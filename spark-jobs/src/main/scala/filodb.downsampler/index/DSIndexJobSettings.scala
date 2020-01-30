@@ -31,7 +31,9 @@ object DSIndexJobSettings extends StrictLogging {
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
   val numShards = filodbSettings.streamConfigs
-    .filter(_.getString("dataset") == DownsamplerSettings.rawDatasetName)(0).getInt("num-shards")
+    .find(_.getString("dataset") == DownsamplerSettings.rawDatasetName)
+    .headOption.getOrElse(ConfigFactory.empty())
+    .as[Option[Int]]("num-shards").getOrElse(0)
 
 }
 
