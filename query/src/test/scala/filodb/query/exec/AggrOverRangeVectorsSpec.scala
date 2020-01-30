@@ -2,12 +2,10 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 import scala.util.Random
-
 import com.tdunning.math.stats.TDigest
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -527,31 +525,28 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it (" should work for countValues") {
-//    val s1 = Seq( (1541190600L, Double.NaN), (1541190660L, Double.NaN), (1541190720L, Double.NaN),
-//      (1541190780L, Double.NaN), (1541190840L, Double.NaN), (1541190900L, 1.0), (1541190960L, 1.0))
-    val s1 = Seq( (1541190600L, 1.0d), (1541190660L,1.0d))
-  //(1541190720L,2.0d),
-    //  (1541190780L,2.0d), (1541190840L,2.0d), (1541190900L,3.0d), (1541190960L,4.0d))
-
-//    val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
-//    val aggMR = AggregateMapReduce(AggregationOperator.CountValues, Seq("freq"), Nil, Nil)
-//    val mapped1 = aggMR(Observable.fromIterable(Seq(toRv(s1))), queryConfig, 1000, tvSchema)
+    val expectedLabels = List(Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("4.4")),
+      Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("2.0")),
+      Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.6")), Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.1")))
+    val expectedRows = List((2,1.0), (1,1.0), (2,2.0), (1,1.0))
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L,5.1), (2L, 5.6d))),
+      toRv(Seq((1L, 2), (2L, 4.4d))),
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d)))
+    )
 
     val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
-    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(Seq(toRv(s1))), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
     val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key)
-
-//    val resultObs= RangeVectorAggregator.mapReduce(agg, true, mapped1, rv=>rv.key)
+    //
     val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000)
     val result = resultObs2.toListL.runAsync.futureValue
-    println("result.size:" + result.size)
-  //  result4.size shouldEqual 1
-//    println("key")
-//    result4(0).key shouldEqual
-//    // prior to this fix, test was returning List(NaN, NaN, NaN, NaN, NaN, 1.0, 1.0)
-//    result4(0).rows.map(_.getDouble(1)).toList shouldEqual Seq(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
-  }
+    result.size.shouldEqual(4)
+    result.map(_.key.labelValues).sameElements(expectedLabels) shouldEqual true
+    result.flatMap(_.rows.map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
 
+  }
+  
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{

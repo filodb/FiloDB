@@ -1,8 +1,6 @@
 package filodb.core.query
 
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String, vectors => bv}
-
-import scala.collection.mutable
+import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -258,7 +256,6 @@ final class CountValuesTransientRow() extends MutableRowReader {
   var blobBase: Array[Byte] = _
   var blobOffset: Int = _
   var blobLength: Int = _
-  val frequencyMap = mutable.Map[Double, Int]()
 
   def setLong(columnNo: Int, valu: Long): Unit =
     if (columnNo == 0) timestamp = valu
@@ -268,13 +265,13 @@ final class CountValuesTransientRow() extends MutableRowReader {
 
   def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit = ???
 
-  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = {
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit =
     if (columnNo == 1) {
       blobBase = base
       blobOffset = offset
       blobLength = length
     }
-  }
+    else throw new IllegalArgumentException()
 
   def notNull(columnNo: Int): Boolean = throw new IllegalArgumentException()
 
@@ -292,6 +289,7 @@ final class CountValuesTransientRow() extends MutableRowReader {
 
   def getAny(columnNo: Int): Any = {
     if (columnNo == 0) timestamp
+    else if (columnNo == 1) blobBase
     else throw new IllegalArgumentException()
   }
 
@@ -303,5 +301,14 @@ final class CountValuesTransientRow() extends MutableRowReader {
 
   def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
                                             else throw new IllegalArgumentException()
+
+  override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
+    // Needed since blobs are serialized as strings (for now) underneath the covers.
+    if (columnNo == 1) {
+      val zs = new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
+      zs
+    }
+    else throw new IllegalArgumentException()
+  }
 
 }

@@ -172,7 +172,6 @@ object RangeVectorAggregator extends StrictLogging {
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
           itsAndKeys.foreach { case (rowIter, rvk) =>
-            println("skipMapPhase:" + skipMapPhase)
             val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
             acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
           }
@@ -356,7 +355,7 @@ object RowAggregator {
       case Quantile => new QuantileRowAggregator(params(0).asInstanceOf[Double])
       case Stdvar   => StdvarRowAggregator
       case Stddev   => StddevRowAggregator
-      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String])
+      case CountValues => new CountValuesRowAggregator(params(0).asInstanceOf[String].replaceAll("^\"|\"$", ""))
       case _     => ???
     }
   }
@@ -935,68 +934,72 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
   }
 }
 
-class CountValuesRowAggregator(label: String) extends RowAggregator {
+class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggregator {
 
-  //case class ValueFrequency(value: Double, count: Long)
+  var arr = new Array[Byte](500)
   class CountValuesHolder(var timestamp: Long = 0L) extends AggregateHolder {
-    val frequencyMap = mutable.Map[Double, Int]()
+    val frequencyMap = debox.Map[Double, Int]()
     val row =  new CountValuesTransientRow
     def toRowReader: MutableRowReader = {
-      val serializedMap = serialize(frequencyMap)
-      row.setBlob(1, serializedMap,0, serializedMap.length)
+      val size = frequencyMap.size * 12
+      if (arr.length < size) arr = new Array[Byte](size)
+      val buf = serialize(frequencyMap)
+      row.setLong(0, timestamp)
+      row.setBlob(1, arr, UnsafeUtils.arayOffset, size)
       row
     }
-    def resetToZero(): Unit = frequencyMap.size
+    def resetToZero(): Unit = {
+      frequencyMap.clear()
+    }
   }
 
   type AggHolderType = CountValuesHolder
   def zero: CountValuesHolder = new CountValuesHolder()
+
   def newRowToMapInto: MutableRowReader = new CountValuesTransientRow
 
-  def serialize(map: mutable.Map[Double, Int]) : Array[Byte] = {
-    val bytes = new Array[Byte](map.size * (8 + 4))
-    val buf = ByteBuffer.wrap(bytes)
-    for (l <- map) {
-      buf.putDouble(l._1)
-      buf.putInt(l._2)
+  def serialize(map: debox.Map[Double, Int]): Array[Byte] = {
+    var index = 0
+    map.foreach {(k, v) =>
+      UnsafeUtils.setDouble(arr, UnsafeUtils.arayOffset + index, k)
+      UnsafeUtils.setInt(arr,  UnsafeUtils.arayOffset + index + 8, v)
+      index += 12
     }
-    buf.array()
+    arr
   }
 
-  def deserialize(arr: Array[Byte]): mutable.Map[Double, Int] = {
-    val frequencyMap = mutable.Map[Double, Int]()
-    val buf = ByteBuffer.wrap(arr)
-    for (i <-0 to arr.length/12 - 1) {
-      val index = i*(8+4)
-      //println("i:" + i + "index:" + index)
-      val key = buf.getDouble(index)
-      val value = buf.getInt(index+8)
-      frequencyMap.put(key,value)
+  def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
+    val frequencyMap = debox.Map[Double, Int]()
+    for (i <-0 until  size/12 ) {
+      val index = i * (8+4)
+      val key = UnsafeUtils.getDouble(buf, offset + index)
+      val value = UnsafeUtils.getInt(buf, offset + index + 8)
+      frequencyMap(key) = value
     }
     frequencyMap
   }
-  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
 
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0,item.getLong(0))
-    val map = mutable.Map[Double, Int]()
-    map.put(item.getDouble(1), 1)
-    println("in map map:" + map)
-    val serializedMap = serialize(map)
-    mapInto.setBlob(1, serializedMap, 0, serializedMap.length)
+    val map = debox.Map[Double, Int]()
+    map(item.getDouble(1)) = 1
+    val arr = serialize(map)
+    mapInto.setBlob(1, arr, UnsafeUtils.arayOffset, map.size * 12)
     mapInto
   }
 
   def reduceAggregate(acc: CountValuesHolder, aggRes: RowReader): CountValuesHolder = {
-    val arr = aggRes.getBlobBase(1)
-    val aggMap = deserialize(arr.asInstanceOf[Array[Byte]])
-    println("aggMap in reduce:" + aggMap)
-    println("acc map in reduce:" + acc.frequencyMap)
-    aggMap.keys.filter(!_.isNaN).foreach { x =>
-      val aggCount = aggMap.get(x).get
-      println("x:" + x + "aggCount:" + aggCount)
-      if (acc.frequencyMap.contains(x)) acc.frequencyMap.put(x, acc.frequencyMap.get(x).get + aggCount)
-      else acc.frequencyMap.put(x, aggCount)
-      println("acc map in reduce2:" + acc.frequencyMap)
+    acc.timestamp = aggRes.getLong(0)
+    val aggMap = deserialize(aggRes.getBlobBase(1), aggRes.getBlobNumBytes(1),
+      aggRes.getBlobOffset(1))
+    aggMap.keysSet.foreach { x =>
+      if (!x.isNaN ) {
+        val aggCount = aggMap.get(x).get
+        if (acc.frequencyMap.contains(x)) acc.frequencyMap(x) = acc.frequencyMap.get(x).get + aggCount
+        else acc.frequencyMap(x) = aggCount
+        if (acc.frequencyMap.size > limit)
+          throw new UnsupportedOperationException("No of unique values greater than 1000")
+      }
     }
     acc
   }
@@ -1009,18 +1012,16 @@ class CountValuesRowAggregator(label: String) extends RowAggregator {
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
-      //ChunkMap.validateNoSharedLocks(s"TopkQuery-$k-$bottomK")
-      // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
-          val arr = row.getBlobBase(1)
-          val rowMap = deserialize(arr.asInstanceOf[Array[Byte]])
-          rowMap.foreach { x =>
-            //TODO check whether double to string conversion is happening
-            val rvk = CustomRangeVectorKey(Map(ZeroCopyUTF8String(label) -> ZeroCopyUTF8String(x._1.toString)))
+          val rowMap = deserialize(row.getBlobBase(1), row.getBlobNumBytes(1),
+            row.getBlobOffset(1))
+          rowMap.foreach { (k, v) =>
+            val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
+              (ZeroCopyUTF8String(label) -> ZeroCopyUTF8String(k.toString)))
             val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
             builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))
-            builder.addDouble(x._2)
+            builder.addDouble(v)
             builder.endRecord()
         }
       }
@@ -1037,7 +1038,6 @@ class CountValuesRowAggregator(label: String) extends RowAggregator {
   def reductionSchema(source: ResultSchema): ResultSchema = {
     val cols = new Array[ColumnInfo](2)
     cols(0) = source.columns(0)
-    // TODO need a first class blob column
     cols(1) = ColumnInfo("map", ColumnType.StringColumn)
     ResultSchema(cols, 1)
   }
