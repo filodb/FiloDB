@@ -1,18 +1,16 @@
 import sbt._
 import Keys._
+import sbt.librarymanagement.ScalaModuleInfo
 
 import com.typesafe.sbt.SbtMultiJvm
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
-import org.scalastyle.sbt.ScalastylePlugin
+import sbt.Tests.Output._
+import org.scalastyle.sbt.ScalastylePlugin.autoImport._
 import pl.project13.scala.sbt.JmhPlugin
 import sbtassembly.AssemblyPlugin.autoImport._
 
 /* Settings */
-object FiloSettings extends Build {
-  import ScalastylePlugin._
-
-  val buildSettings = Seq(
-    scalaVersion := "2.11.12")
+object FiloSettings {
 
   /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
      so we disable for console */
@@ -60,11 +58,11 @@ object FiloSettings extends Build {
 
   lazy val styleSettings = Seq(
     scalastyleFailOnError := true,
-    testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
+    testScalastyle := scalastyle.in(Test).toTask("").value,
     // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
     // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
     // (test in Test) <<= (test in Test) dependsOn testScalastyle,
-    compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
+    compileScalastyle := scalastyle.in(Compile).toTask("").value,
     // Is running this on compile too much?
     (compile in Test) := ((compile in Test) dependsOn compileScalastyle).value)
 
@@ -147,12 +145,16 @@ object FiloSettings extends Build {
     executeTests in Test := {
       val testResults = (executeTests in Test).value
       val multiNodeResults = (executeTests in MultiJvm).value
+      // passed, failed, error
+      // 0, 1, 2
       val overall =
-        if (testResults.overall.id < multiNodeResults.overall.id)
-          multiNodeResults.overall
-        else
-          testResults.overall
-      Tests.Output(overall,
+      // passed,
+      (testResults.overall, multiNodeResults.overall) match {
+        case (TestResult.Passed, TestResult.Failed | TestResult.Error) => multiNodeResults
+        case (TestResult.Failed, TestResult.Error) => multiNodeResults
+        case _ => testResults
+      }
+      Tests.Output(overall.overall,
         testResults.events ++ multiNodeResults.events,
         testResults.summaries ++ multiNodeResults.summaries)
     }
@@ -169,7 +171,7 @@ object FiloSettings extends Build {
         Tests.Group(
           name = test.name,
           tests = Seq(test),
-          runPolicy = Tests.SubProcess(ForkOptions(runJVMOptions = Seq.empty[String])))
+          runPolicy = Tests.SubProcess(ForkOptions()))
       }
 
     Seq(testGrouping in Test := ((definedTests in Test) map jvmPerTest).value)
@@ -263,32 +265,20 @@ object FiloSettings extends Build {
     assemblyJarName in assembly := s"gateway-${version.value}"
   )
 
-  lazy val publishSettings = Seq(
-    organizationName := "FiloDB",
-    publishMavenStyle := true,
-    publishArtifact in Test := false,
-    publishArtifact in IntegrationTest := false,
-    licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/")),
-    pomIncludeRepository := { x => false }
-  )
 
   lazy val moduleSettings = Seq(
     resolvers ++= Seq(
-      "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
-      "spray repo" at "http://repo.spray.io"
+      "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
     ),
     resolvers += Resolver.bintrayRepo("tanukkii007", "maven"),
 
     cancelable in Global := true,
 
-    incOptions := incOptions.value.withNameHashing(true),
-
-    ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) })
+    scalaModuleInfo := scalaModuleInfo.value map {_.withOverrideScalaVersion(true)}
+  )
 
   lazy val commonSettings =
-    buildSettings ++
       disciplineSettings ++
       moduleSettings ++
-      testSettings ++
-      publishSettings
+      testSettings
 }

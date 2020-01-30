@@ -27,17 +27,20 @@ final case class PeriodicSamplesMapper(start: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
                                        funcParams: Seq[FuncArgs] = Nil,
-                                       offset: Option[Long] = None) extends RangeVectorTransformer {
+                                       offset: Option[Long] = None,
+                                       rawSource: Boolean = true) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
 
-  val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax)
+  val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax) ||
+    functionId == Some(InternalRangeFunction.Timestamp)
+
   if (!isLastFn) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
-    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId"
+    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, rawSource=$rawSource"
 
  //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
@@ -52,7 +55,8 @@ final case class PeriodicSamplesMapper(start: Long,
     // If a max column is present, the ExecPlan's job is to put it into column 2
     val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
                       sourceSchema.columns(2).name == "max"
-    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig, funcParams)
+    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig,
+                                                  funcParams, rawSource)
 
     // Generate one range function to check if it is chunked
     val sampleRangeFunc = rangeFuncGen()

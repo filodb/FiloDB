@@ -1,15 +1,14 @@
 package filodb.core.memstore
 
-import scala.concurrent.Future
-
 import kamon.Kamon
-import monix.execution.Scheduler
-import monix.reactive.{Observable, OverflowStrategy}
+import monix.eval.Task
+import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.store.{ColumnStore, PartKeyRecord}
 
-trait IndexBootstrapper {
+class IndexBootstrapper(colStore: ColumnStore) {
+
   /**
     * Bootstrap the lucene index for the shard
     * using PartKeyRecord objects read from some persistent source.
@@ -20,50 +19,65 @@ trait IndexBootstrapper {
     * @param index the lucene index to populate
     * @param shardNum shard number
     * @param ref dataset ref
-    * @param ingestSched the thread on which to get the partitionId to be used to populate the index record
-    * @param addPartKey the function to invoke to get the partitionId to be used to populate the index record
-    * @return
+    * @param assignPartId the function to invoke to get the partitionId to be used to populate the index record
+    * @return number of updated records
     */
   def bootstrapIndex(index: PartKeyLuceneIndex,
                      shardNum: Int,
-                     ref: DatasetRef,
-                     ingestSched: Scheduler)
-                     (addPartKey: PartKeyRecord => Int): Future[Long] = {
+                     ref: DatasetRef)
+                     (assignPartId: PartKeyRecord => Int): Task[Long] = {
     val tracer = Kamon.buildSpan("memstore-recover-index-latency")
       .withTag("dataset", ref.dataset)
       .withTag("shard", shardNum).start()
 
-    fetchPartKeyRecords(ref, shardNum)
-      .asyncBoundary(OverflowStrategy.Default)
-      .executeOn(ingestSched)
+    colStore.scanPartKeys(ref, shardNum)
       .map { pk =>
-        val partId = addPartKey(pk)
+        val partId = assignPartId(pk)
         index.addPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
       }
-      .countL.runAsync(ingestSched)
+      .countL
       .map { count =>
         index.refreshReadersBlocking()
         tracer.finish()
         count
-      }(ingestSched)
+      }
   }
 
   /**
-    * Implementations of this method can customize the fetch of the persisted
-    * PartKeyRecords
+    * Refresh index
+    * @param fromHour
+    * @param toHour
+    * @param parallelism
+    * @param lookUpOrAssignPartId
+    * @return
     */
-  def fetchPartKeyRecords(ref: DatasetRef, shardNum: Int): Observable[PartKeyRecord]
+  def refreshIndex(index: PartKeyLuceneIndex,
+                   shardNum: Int,
+                   ref: DatasetRef,
+                   fromHour: Long,
+                   toHour: Long,
+                   parallelism: Int = Runtime.getRuntime.availableProcessors())
+                  (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
+    val tracer = Kamon.buildSpan("downsample-store-refresh-index-latency")
+      .withTag("dataset", ref.dataset)
+      .withTag("shard", shardNum).start()
 
-}
+    Observable.fromIterable(fromHour to toHour).flatMap { hour =>
+      colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
+    }.mapAsync(parallelism) { pk =>
+      Task {
+        val partId = lookUpOrAssignPartId(pk)
+        index.upsertPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+      }
+     }
+     .countL
+     .map { count =>
+       index.refreshReadersBlocking()
+       tracer.finish()
 
-/**
-  * Index Bootstrapper that fetches PartKeyRecords from a ColStore.
-  */
-class ColStoreIndexBootstrapper(colStore: ColumnStore) extends IndexBootstrapper {
-  override def fetchPartKeyRecords(ref: DatasetRef,
-                                   shardNum: Int): Observable[PartKeyRecord] = {
-    colStore.scanPartKeys(ref, shardNum)
+       count
+     }
   }
-}
 
+}
 

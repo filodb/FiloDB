@@ -2,10 +2,10 @@ package filodb.cassandra.columnstore
 
 import java.lang.{Integer => JInt, Long => JLong}
 
-import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.ConsistencyLevel
+import com.datastax.driver.core.{ConsistencyLevel, Row}
+import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -40,27 +40,36 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  def writePartKey(pk: PartKeyRecord, diskTimeToLive: Int): Future[Response] = {
-    if (diskTimeToLive <= 0) {
+  def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Int): Future[Response] = {
+    if (diskTimeToLiveSeconds <= 0) {
       connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
         toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong))
     } else {
       connector.execStmtWithRetries(writePartitionCql.bind(
-        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLive: JInt))
+        toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, diskTimeToLiveSeconds: JInt))
     }
   }
 
+  lazy val scanCql = session.prepare(s"SELECT * FROM $tableString " +
+                                      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
-    def cql(start: String, end: String): String =
-      s"SELECT * FROM ${tableString} " +
-        s"WHERE TOKEN(partKey) >= $start AND TOKEN(partKey) < $end "
-    val it = tokens.iterator.flatMap { case (start, end) =>
-      session.execute(cql(start, end)).iterator.asScala
-        .map { row => PartKeyRecord(row.getBytes("partKey").array(),
-          row.getLong("startTime"), row.getLong("endTime")) }
-    }
-    Observable.fromIterator(it).handleObservableErrors
+    val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
+      .mapAsync { range =>
+        val fut = session.executeAsync(scanCql.bind(range._1.toLong: JLong, range._2.toLong: JLong))
+                         .toIterator.handleErrors
+                         .map { rowIt => rowIt.map(PartitionKeysTable.rowToPartKeyRecord) }
+        Task.fromFuture(fut)
+      }
+    for {
+      pkRecs <- res
+      pk <- Observable.fromIterator(pkRecs)
+    } yield pk
   }
-
 }
 
+object PartitionKeysTable {
+  private[columnstore] def rowToPartKeyRecord(row: Row) = {
+    PartKeyRecord(row.getBytes("partKey").array(),
+      row.getLong("startTime"), row.getLong("endTime"), None)
+  }
+}

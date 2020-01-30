@@ -18,7 +18,7 @@ import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesStore(val store: ColumnStore,
-                                 val metastore: MetaStore,
+                                 rawColStore: ColumnStore,
                                  val filodbConfig: Config)
                                 (implicit val ioPool: ExecutionContext)
 extends MemStore with StrictLogging {
@@ -30,6 +30,8 @@ extends MemStore with StrictLogging {
 
   override def isReadOnly: Boolean = true
 
+  override def metastore: MetaStore = ??? // Not needed
+
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(ref: DatasetRef, schemas: Schemas, shard: Int, storeConf: StoreConfig,
             downsample: DownsampleConfig = DownsampleConfig.disabled): Unit = synchronized {
@@ -37,7 +39,8 @@ extends MemStore with StrictLogging {
     if (shards.containsKey(shard)) {
       throw ShardAlreadySetup(ref, shard)
     } else {
-      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store, shard, filodbConfig, downsample)
+      val tsdb = new DownsampledTimeSeriesShard(ref, storeConf, schemas, store,
+                                                rawColStore, shard, filodbConfig, downsample)
       shards.put(shard, tsdb)
     }
   }
@@ -104,9 +107,6 @@ extends MemStore with StrictLogging {
     shard.scanPartitions(lookupRes)
 
   }
-
-  def shardMetrics(dataset: DatasetRef, shard: Int): TimeSeriesShardStats =
-    getShard(dataset, shard).get.shardStats
 
   def activeShards(dataset: DatasetRef): Seq[Int] =
     datasets.get(dataset).map(_.keySet.asScala.map(_.toInt).toSeq).getOrElse(Nil)

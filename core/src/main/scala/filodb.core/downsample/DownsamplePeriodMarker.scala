@@ -1,8 +1,6 @@
 package filodb.core.downsample
 
-import debox.Buffer
 import enumeratum.{Enum, EnumEntry}
-import java.util
 import scalaxy.loops._
 
 import filodb.core.metadata.DataSchema
@@ -46,7 +44,7 @@ trait DownsamplePeriodMarker {
               chunkset: ChunkSetInfoReader,
               resMillis: Long,
               startRow: Int,
-              endRow: Int): Buffer[Int]
+              endRow: Int): debox.Set[Int]
 }
 
 /**
@@ -59,7 +57,7 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        chunkset: ChunkSetInfoReader,
                        resMillis: Long,
                        startRow: Int,
-                       endRow: Int): Buffer[Int] = {
+                       endRow: Int): debox.Set[Int] = {
     require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
       s"chunkset: ${chunkset.debugString(part.schema)}")
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
@@ -69,7 +67,8 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
     val startTime = tsReader.apply(tsAcc, tsPtr, startRow)
     val endTime = tsReader.apply(tsAcc, tsPtr, endRow)
 
-    val result = debox.Buffer.empty[Int]
+    // set to remove duplicates - it is possible for dupes in case there are no samples in the period
+    val result = debox.Set.empty[Int]
     // A sample exactly for 5pm downsampled 5-minutely should fall in the period 4:55:00:001pm to 5:00:00:000pm.
     // Hence subtract - 1 below from chunk startTime to find the first downsample period.
     // + 1 is needed since the startTime is inclusive. We don't want pStart to be 4:55:00:000;
@@ -104,14 +103,15 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        chunkset: ChunkSetInfoReader,
                        resMillis: Long,
                        startRow: Int,
-                       endRow: Int): Buffer[Int] = {
+                       endRow: Int): debox.Set[Int] = {
     require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
       s"chunkset: ${chunkset.debugString(part.schema)}")
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
     if (startRow < endRow) { // there is more than 1 row
-      result ++= DownsamplePeriodMarker.timeDownsamplePeriodMarker
-        .periods(part, chunkset, resMillis, startRow + 1, endRow)
+      DownsamplePeriodMarker.timeDownsamplePeriodMarker.periods(part, chunkset, resMillis, startRow + 1, endRow)
+                            .foreach(result += _)
+
       val ctrVecAcc = chunkset.vectorAccessor(inputColId)
       val ctrVecPtr = chunkset.vectorAddress(inputColId)
       val ctrReader = part.chunkReader(inputColId, ctrVecAcc, ctrVecPtr)
@@ -130,14 +130,7 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
           throw new IllegalStateException("Did not get a double column - cannot apply counter period marking strategy")
       }
     }
-
-    // Note: following alternative avoids copies, but results in spire library version conflicts with Spark. :(
-//    import spire.std.int._
-//    result.toSortedBuffer
-
-    val res = result.toArray()
-    util.Arrays.sort(res)
-    debox.Buffer.fromArray(res)
+    result
   }
 }
 

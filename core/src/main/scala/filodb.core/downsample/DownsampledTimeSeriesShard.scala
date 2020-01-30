@@ -1,10 +1,13 @@
 package filodb.core.downsample
 
+import java.util.Arrays
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import java.util.Arrays
+import monix.execution.CancelableFuture
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, GlobalScheduler}
@@ -15,20 +18,19 @@ import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
-class DownsampledTimeSeriesShard(ref: DatasetRef,
+class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                  val storeConfig: StoreConfig,
                                  val schemas: Schemas,
-                                 colStore: ColumnStore,
+                                 store: ColumnStore, // downsample colStore
+                                 rawColStore: ColumnStore,
                                  shardNum: Int,
                                  filodbConfig: Config,
                                  downsampleConfig: DownsampleConfig)
                                 (implicit val ioPool: ExecutionContext) extends StrictLogging {
 
-  val shardStats = new TimeSeriesShardStats(ref, shardNum)
-
   val downsampleResolutions = downsampleConfig.resolutions
   val downsampleTtls = downsampleConfig.ttls
-  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(ref.dataset)
+  val downsampledDatasetRefs = downsampleConfig.downsampleDatasetRefs(rawDatasetRef.dataset)
 
   val indexResolution = downsampleResolutions.last
   val indexDataset = downsampledDatasetRefs.last
@@ -37,9 +39,16 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
   val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
 
-  private var nextPartitionID = 0
+  private val nextPartitionID = new AtomicInteger(0)
 
   private final val partKeyIndex = new PartKeyLuceneIndex(indexDataset, schemas.part, shardNum, indexTtl)
+
+  private val indexUpdatedHour = new AtomicLong(0)
+
+  val indexBootstrapper = new IndexBootstrapper(store) // used for initial index loading
+  val indexRefresher = new IndexBootstrapper(rawColStore) // used for periodic refresh of index, happens from raw tables
+
+  var indexUpdateFuture: CancelableFuture[Unit] = _
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -62,13 +71,53 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     }
   }
 
+  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
+
   def recoverIndex(): Future[Unit] = {
-    val indexBootstrapper = new ColStoreIndexBootstrapper(colStore)
-    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset,
-                                     GlobalScheduler.globalImplicitScheduler){ _ => createPartitionID() }
+    indexUpdatedHour.set(hour() - 1)
+    indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
-      }
+      }.map { _ =>
+        startIndexRefreshTask()
+      }.runAsync(GlobalScheduler.globalImplicitScheduler)
+  }
+
+  def startIndexRefreshTask(): Unit = {
+    // Run index refresh at same frequency of raw dataset's flush interval.
+    // This is important because each partition's start/end time can be updated only once
+    // in cassandra per flush interval. Less frequent update can result in multiple events
+    // per partKey, and order (which we have  not persisted) would become important.
+    // Also, addition of keys to index can be parallelized using mapAsync below only if
+    // we are sure that in one raw dataset flush period, we wont get two updated part key
+    // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
+    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
+      s"every ${storeConfig.flushInterval}")
+    indexUpdateFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
+                                                          storeConfig.flushInterval).mapAsync { i =>
+      // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
+      // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
+      // before refresh happens because we will not revist the hour again.
+      val toHour = hour() - 2
+      val fromHour = indexUpdatedHour.get() + 1
+      logger.info(s"Refreshing downsample index for dataset=$rawDatasetRef shard=$shardNum " +
+        s"fromHour=$fromHour toHour=$toHour")
+      indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+        .map { count =>
+          indexUpdatedHour.set(toHour)
+          logger.info(s"Refreshed downsample index with $count new records for " +
+            s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
+        }
+        .onErrorHandle { e =>
+           logger.error(s"Error occurred when refreshing downsample index " +
+             s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+        }
+    }.completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
+  }
+
+  def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
+    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset)
+      .getOrElse(createPartitionID())
   }
 
   /**
@@ -76,14 +125,11 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     * partition ID wouldn't work with bitmaps.
     */
   private def createPartitionID(): Int = {
-    this.synchronized {
-      val id = nextPartitionID
-      nextPartitionID += 1
-      if (nextPartitionID < 0) {
-        throw new IllegalStateException("Too many partitions. Reached int capacity")
-      }
-      id
+    val next = nextPartitionID.incrementAndGet()
+    if (next == 0) {
+      throw new IllegalStateException("Too many partitions. Reached int capacity")
     }
+    next
   }
 
   def refreshPartKeyIndexBlocking(): Unit = {}
@@ -116,7 +162,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     // Step 1: Choose the downsample level depending on the range requested
     val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
-    // Step 2: Query Cassandra table for that downsample level using colStore
+    // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
@@ -129,7 +175,7 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
     val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       .mapAsync(10) { case partBytes =>
-        colStore.readRawPartitions(downsampledDataset,
+        store.readRawPartitions(downsampledDataset,
                                    storeConfig.maxChunkTime.toMillis,
                                    SinglePartitionScan(partBytes, shardNum),
                                    lookup.chunkMethod)
@@ -214,6 +260,14 @@ class DownsampledTimeSeriesShard(ref: DatasetRef,
         partKeyBytes.get.offset + partKeyBytes.get.length)
     else throw new IllegalStateException("This is not an expected behavior." +
       " PartId should always have a corresponding PartKey!")
+  }
+
+  def cleanup(): Unit = {
+    Option(indexUpdateFuture).foreach(_.cancel())
+  }
+
+  override protected def finalize(): Unit = {
+    cleanup()
   }
 
 }

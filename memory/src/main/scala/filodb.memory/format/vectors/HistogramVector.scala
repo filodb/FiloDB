@@ -139,13 +139,16 @@ object BinaryHistogram extends StrictLogging {
     val formatCode = buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
+      case c: CustomBuckets if c.numBuckets == 0 => HistFormat_Null
       case c: CustomBuckets                  => HistFormat_Custom_Delta
     }
 
     buf.putByte(2, formatCode)
-    val valuesIndex = buckets.serialize(buf, 3)
-    val finalPos = NibblePack.packDelta(values, buf, valuesIndex)
-
+    val finalPos = if (formatCode == HistFormat_Null) { 3 }
+                   else {
+                     val valuesIndex = buckets.serialize(buf, 3)
+                     NibblePack.packDelta(values, buf, valuesIndex)
+                   }
     require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
     buf.putShort(0, (finalPos - 2).toShort)
     finalPos
@@ -450,6 +453,12 @@ class RowHistogramReader(val acc: MemoryReader, histVect: Ptr.U8) extends Histog
       elem += 1
       h
     }
+  }
+
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = System.lineSeparator): String = {
+    val it = iterate(acc, vector)
+    val size = length(acc, vector)
+    (0 to size).map(_ => it.asHistIt).mkString(sep)
   }
 
   def length(accNotUsed: MemoryReader, vectorNotUsed: BinaryVectorPtr): Int = length
