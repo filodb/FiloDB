@@ -10,6 +10,7 @@ object Dependencies {
   // The default minlog only logs to STDOUT.  We want to log to SLF4J.
   val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = "minlog")
   val excludeOldLz4 = ExclusionRule(organization = "net.jpountz.lz4", name = "lz4")
+  val excludeNetty  = ExclusionRule(organization = "io.netty", name = "netty-handler")
 
 
   /* Versions in various modules versus one area of build */
@@ -78,8 +79,8 @@ object Dependencies {
   lazy val sparkJobsDeps = commonDeps ++ Seq(
     "org.apache.spark"       %%      "spark-core" % sparkVersion % Provided,
     "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Provided,
-    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test,
-    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test,
+    "org.apache.spark"       %%      "spark-core" % sparkVersion % Test excludeAll(excludeNetty),
+    "org.apache.spark"       %%      "spark-sql"  % sparkVersion % Test excludeAll(excludeNetty),
     scalaxyDep
   )
 
