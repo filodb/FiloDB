@@ -524,7 +524,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     answers.map(_._2) shouldEqual maxes
   }
 
-  it (" should work for countValues") {
+  it ("should work for countValues") {
     val expectedLabels = List(Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("4.4")),
       Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("2.0")),
       Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.6")), Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.1")))
@@ -538,7 +538,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
     val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
     val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key)
-    //
+
     val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000)
     val result = resultObs2.toListL.runAsync.futureValue
     result.size.shouldEqual(4)
