@@ -942,8 +942,8 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val row =  new CountValuesTransientRow
     def toRowReader: MutableRowReader = {
       val size = frequencyMap.size * 12
-      if (arr.length < size) arr = new Array[Byte](size)
-      val buf = serialize(frequencyMap)
+      if (arr.length < size) arr = new Array[Byte](size) // Create bigger array
+      serialize(frequencyMap)
       row.setLong(0, timestamp)
       row.setBlob(1, arr, UnsafeUtils.arayOffset, size)
       row
@@ -970,8 +970,8 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
 
   def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
     val frequencyMap = debox.Map[Double, Int]()
-    for (i <-0 until  size/12 ) {
-      val index = i * (8+4)
+    for (i <-0 until size/12) {
+      val index = i * 12 // 8 bytes for double and 4 for Int
       val key = UnsafeUtils.getDouble(buf, offset + index)
       val value = UnsafeUtils.getInt(buf, offset + index + 8)
       frequencyMap(key) = value
@@ -983,7 +983,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     mapInto.setLong(0,item.getLong(0))
     val map = debox.Map[Double, Int]()
     map(item.getDouble(1)) = 1
-    val arr = serialize(map)
+    serialize(map)
     mapInto.setBlob(1, arr, UnsafeUtils.arayOffset, map.size * 12)
     mapInto
   }
@@ -993,7 +993,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val aggMap = deserialize(aggRes.getBlobBase(1), aggRes.getBlobNumBytes(1),
       aggRes.getBlobOffset(1))
     aggMap.keysSet.foreach { x =>
-      if (!x.isNaN ) {
+      if (!x.isNaN) {
         val aggCount = aggMap.get(x).get
         if (acc.frequencyMap.contains(x)) acc.frequencyMap(x) = acc.frequencyMap.get(x).get + aggCount
         else acc.frequencyMap(x) = aggCount

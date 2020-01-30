@@ -304,11 +304,7 @@ final class CountValuesTransientRow() extends MutableRowReader {
 
   override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
     // Needed since blobs are serialized as strings (for now) underneath the covers.
-    if (columnNo == 1) {
-      val zs = new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
-      zs
-    }
+    if (columnNo == 1) new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
     else throw new IllegalArgumentException()
   }
-
 }
