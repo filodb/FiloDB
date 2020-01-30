@@ -11,9 +11,8 @@ import filodb.query._
 import filodb.query.exec._
 
 /**
-  * FiloDB Query Engine is the facade for execution of FiloDB queries.
-  * It is meant for use inside FiloDB nodes to execute materialized
-  * ExecPlans as well as from the client to execute LogicalPlans.
+  * Query Planner implementation that composes other planners to provide overall capability
+  * of high availability, downsampling and (later) multi-cluster partitioning.
   */
 class CompositePlanner(dsRef: DatasetRef,
                        schemas: Schemas,
