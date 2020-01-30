@@ -17,7 +17,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
 
   import filodb.cassandra.Util._
 
-  val suffix = s"partitionkeys_by_update_time"
+  val suffix = s"pks_by_update_time"
 
   val createCql =
     s"""
