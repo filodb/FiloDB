@@ -91,7 +91,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
@@ -119,7 +119,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 

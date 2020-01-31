@@ -66,7 +66,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate Scalar exec plan") {
     val lp = Parser.queryToLogicalPlan("scalar(test{job = \"app\"})", 1000)
-    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
+    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"))
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -99,7 +99,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarOperationMapper exec plan for query http_requests_total + time()") {
     val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + time()", 1000)
-    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
+    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"))
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))

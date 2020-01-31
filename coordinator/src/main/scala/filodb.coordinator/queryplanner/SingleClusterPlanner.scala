@@ -11,7 +11,7 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.query._
@@ -391,7 +391,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
           case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, options),
-                                                              s.timeStepParams)
+                                                              RangeParams(s.start, s.step, s.end))
           case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
           case _                          => throw new UnsupportedOperationException("Invalid logical plan")
         }
@@ -405,10 +405,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
-      topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.timeStepParams))
+      topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, RangeParams(lp.start, lp.step, lp.end)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
-      vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, lp.timeStepParams)))
+      vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function,
+                                                               RangeParams(lp.start, lp.step, lp.end))))
       vectors
     }
   }

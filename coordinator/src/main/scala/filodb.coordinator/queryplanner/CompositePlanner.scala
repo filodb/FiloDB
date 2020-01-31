@@ -17,17 +17,19 @@ import filodb.query.exec._
 class CompositePlanner(dsRef: DatasetRef,
                        schemas: Schemas,
                        shardMapperFunc: => ShardMapper,
-                       //                  downsampleMapperFunc: => ShardMapper,
+                       downsampleMapperFunc: => ShardMapper,
                        failureProvider: FailureProvider,
+                       rawDataRetentionMillis: Long,
                        spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                       stitchDispatcher: => PlanDispatcher = { InProcessPlanDispatcher },
                        queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
 
   // Note the composition of query planners below using decorator pattern
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc, spreadProvider)
-  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc, spreadProvider)
-  val downsampleStitchPlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner)
-  // TODO haPlanner should later use downsampleStitchPlanner
-  val haPlanner = new HighAvailabilityPlanner(dsRef, rawClusterPlanner, failureProvider, queryEngineConfig)
+  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc, spreadProvider)
+  val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
+                                                         rawDataRetentionMillis, stitchDispatcher)
+  val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryEngineConfig)
   //val multiPodPlanner = new MultiClusterPlanner(podLocalityProvider, haPlanner)
 
   def materialize(rootLogicalPlan: LogicalPlan, options: QueryContext): ExecPlan = {

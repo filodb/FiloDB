@@ -17,7 +17,7 @@ import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
   * Goal is that Non-Leaf plans can be executed locally in JVM and make network
   * calls only for children.
   */
-case class InProcessPlanDispatcher() extends PlanDispatcher {
+case object InProcessPlanDispatcher extends PlanDispatcher {
 
   // Empty query config, since its does not apply in case of non-leaf plans
   val queryConfig: QueryConfig = EmptyQueryConfig

@@ -76,5 +76,5 @@ case class TimeScalarGeneratorExec(id: String,
     * to the node where it will be executed. The Query Engine
     * will supply this parameter
     */
-  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher
 }
