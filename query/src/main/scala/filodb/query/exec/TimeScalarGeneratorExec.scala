@@ -48,7 +48,6 @@ case class TimeScalarGeneratorExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val recSchema = SerializedRangeVector.toSchema(columns)
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = function match {
       case Time        => Seq(TimeScalar(params))

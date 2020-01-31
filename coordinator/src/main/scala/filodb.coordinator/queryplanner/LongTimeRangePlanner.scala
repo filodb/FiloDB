@@ -13,16 +13,19 @@ import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
   * @param rawClusterPlanner this planner (typically a SingleClusterPlanner) abstracts planning for raw cluster data
   * @param downsampleClusterPlanner this planner (typically a SingleClusterPlanner)
   *                                 abstracts planning for downsample cluster data
+  * @param lastRawTimestamp the function that will provide millis timestamp of last sample that
+  *                         would be available in the raw cluster
+  * @param stitchDispatcher function to get the dispatcher for the stitch exec plan node
   */
 class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            downsampleClusterPlanner: QueryPlanner,
-                           rawDataRetentionMillis: Long,
+                           lastRawTimestamp: => Long,
                            stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
-        val lastRawTime = System.currentTimeMillis() - rawDataRetentionMillis
+        val lastRawTime = lastRawTimestamp
         if (p.end < lastRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
         else if (p.start >= lastRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
         else {

@@ -39,9 +39,11 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   }
 
   val rawRetention = 10.minutes
+  val now = System.currentTimeMillis() / 1000 * 1000
+  val lastRawTime = now - rawRetention.toMillis
 
   private def disp = InProcessPlanDispatcher
-  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, rawRetention.toMillis, disp)
+  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, lastRawTime, disp)
 
   it("should direct raw-cluster-only queries to raw planner") {
     val now = System.currentTimeMillis()

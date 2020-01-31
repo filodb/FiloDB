@@ -50,7 +50,6 @@ case class ScalarFixedDoubleExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val recSchema = SerializedRangeVector.toSchema(columns)
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
 

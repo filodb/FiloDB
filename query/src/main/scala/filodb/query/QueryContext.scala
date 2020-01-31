@@ -8,7 +8,7 @@ import filodb.core.query.{ColumnFilter, Filter}
 trait TsdbQueryParams
 case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
-object UnavailablePromQlQueryParams extends TsdbQueryParams
+case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 /**
   * This class provides general query processing parameters
