@@ -43,8 +43,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
   it("should check for PeriodicSeries plan") {
-    isPeriodicSeriesPlan(summed1) shouldEqual (true)
-    isPeriodicSeriesPlan(raw2) shouldEqual (false)
+    summed1.isRoutable shouldEqual (true)
+    raw2.isRoutable shouldEqual (false)
   }
 
   it("should extract time from logical plan") {
