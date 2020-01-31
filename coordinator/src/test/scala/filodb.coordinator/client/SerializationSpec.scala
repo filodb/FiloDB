@@ -6,7 +6,7 @@ import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
-import filodb.coordinator.queryengine2.{EmptyFailureProvider, QueryEngine, UnavailablePromQlQueryParams}
+import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core.{query, MachineMetricsData, SpreadChange}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.{Dataset, Schemas}
@@ -16,7 +16,7 @@ import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, 
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
-import filodb.query.exec.{PartKeysDistConcatExec}
+import filodb.query.exec.PartKeysDistConcatExec
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -172,7 +172,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val mapper = new ShardMapper(1)
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
-    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")),
@@ -196,8 +196,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(Some(StaticSpreadProvider(SpreadChange(0, 0))),
-      100), UnavailablePromQlQueryParams)
+    val execPlan = engine.materialize(logicalPlan, QueryContext(Some(StaticSpreadProvider(SpreadChange(0, 0))),
+      100))
     roundTrip(execPlan) shouldEqual execPlan
   }
 
@@ -211,13 +211,13 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
       qParams)
-    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
-      100), UnavailablePromQlQueryParams)
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))),
+      100))
     roundTrip(execPlan1) shouldEqual execPlan1
 
     // scalastyle:off
@@ -225,8 +225,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       s"""sum(rate(http_request_duration_microseconds_sum{job="prometheus",$shardKeyStr}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job="prometheus",$shardKeyStr}[5m])) by (handler)""",
       qParams)
     // scalastyle:on
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100),
-      UnavailablePromQlQueryParams)
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     roundTrip(execPlan2) shouldEqual execPlan2
 
   }
@@ -241,14 +240,14 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new QueryEngine(dataset.ref, Schemas.global, mapperRef, EmptyFailureProvider)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
       s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
       qParams)
-    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(Some(
-      new StaticSpreadProvider(SpreadChange(0, 0))), 100), UnavailablePromQlQueryParams)
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(Some(
+      new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     val partKeysExec = execPlan1.asInstanceOf[PartKeysDistConcatExec]
     roundTrip(partKeysExec) shouldEqual partKeysExec
 
@@ -256,8 +255,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan2 = Parser.metadataQueryToLogicalPlan(
       "http_request_duration_seconds_bucket",
       qParams)
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(
-      Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100), UnavailablePromQlQueryParams)
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(
+      Some(new StaticSpreadProvider(SpreadChange(0, 0))), 100))
     val partKeysDistConcatExec = execPlan2.asInstanceOf[PartKeysDistConcatExec]
 
     // will be dispatched to all active shards since no shard column filters in the query

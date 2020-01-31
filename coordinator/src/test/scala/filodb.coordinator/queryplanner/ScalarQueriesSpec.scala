@@ -1,21 +1,22 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
+
+import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 
-import scala.concurrent.duration.FiniteDuration
-import com.typesafe.config.ConfigFactory
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query
-import filodb.query.ScalarFunctionId.Time
 import filodb.query._
+import filodb.query.ScalarFunctionId.Time
 import filodb.query.exec._
 
 class ScalarQueriesSpec extends FunSpec with Matchers {
@@ -37,7 +38,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 
-  val engine = new QueryEngine(dsRef, schemas, mapperRef, EmptyFailureProvider)
+  val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef)
 
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
@@ -68,7 +69,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.isInstanceOf[DistConcatExec] shouldEqual (true)
     execPlan.rangeVectorTransformers.size shouldEqual (1)
     execPlan.rangeVectorTransformers.head.isInstanceOf[ScalarFunctionMapper] shouldEqual (true)
@@ -86,8 +87,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate scalar time based plan") {
     val logicalPlan = ScalarTimeBasedPlan(Time, RangeParams(1524855988, 1000, 1524858988))
-    val execPlan = engine.materialize(logicalPlan,
-      QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
     val expected = "E~TimeScalarGeneratorExec(params=RangeParams(1524855988,1000,1524858988), function=Time) on InProcessPlanDispatcher()"
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual (true)
     val scalarTimeBasedExec = execPlan.asInstanceOf[TimeScalarGeneratorExec]
@@ -102,7 +102,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
       """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1510751596])
@@ -121,7 +121,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + node_info{job = \"app\"}", 1000)
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.children.head.rangeVectorTransformers(1).isInstanceOf[ScalarOperationMapper] shouldEqual true
     val scalarOperationMapper = execPlan.children.head.rangeVectorTransformers(1).asInstanceOf[ScalarOperationMapper]
     scalarOperationMapper.funcParams.head.isInstanceOf[ExecPlanFuncArgs] shouldEqual true
@@ -157,7 +157,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("10 + http_requests_total{job = \"app\"}", 1000)
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
       """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
@@ -177,7 +177,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("time() + 10", 1000)
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
@@ -190,7 +190,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + 10", 1000)
 
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
       """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1245070935])
@@ -209,7 +209,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) + time()") {
     val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + time()", 1000)
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
         |-FA1~
@@ -226,7 +226,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) - scalar(node_info)") {
     val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) - scalar(node_info{job = \"app\"})", 1000)
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=SUB, scalarOnLhs=true)
         |-FA1~
@@ -248,7 +248,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate ScalarOperationMapper exec plan for query scalar(http_requests_total) + 3") {
     val lp = Parser.queryToLogicalPlan("scalar(http_requests_total{job = \"app\"}) + 3", 1000)
     // materialized exec plan
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
         |-FA1~StaticFuncArgs(3.0,RangeParams(1000,1000,1000))
@@ -264,7 +264,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate vector plan for vector(2000)") {
     val lp = Parser.queryToLogicalPlan("vector(2000)", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
         |-E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=2000.0) on InProcessPlanDispatcher()""".stripMargin
@@ -273,7 +273,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate vector plan for vector(time())") {
     val lp = Parser.queryToLogicalPlan("vector(time())", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
         |-E~TimeScalarGeneratorExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher()""".stripMargin
@@ -282,7 +282,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate InstantVectorFunctionMapper and VectorFunctionMapper for minute(vector(1136239445))") {
     val lp = Parser.queryToLogicalPlan("minute(vector(1136239445))", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~InstantVectorFunctionMapper(function=Minute)
         |-T~VectorFunctionMapper(funcParams=List())
@@ -293,7 +293,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate vector plan for days_in_month(vector(1454284800))") {
     val lp = Parser.queryToLogicalPlan("days_in_month(vector(1454284800))", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~InstantVectorFunctionMapper(function=DaysInMonth)
         |-T~VectorFunctionMapper(funcParams=List())
@@ -303,7 +303,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate binary join for month(vector(1456790399)) + day_of_month(vector(1456790399))") {
     val lp = Parser.queryToLogicalPlan("month(vector(1456790399)) + day_of_month(vector(1456790399))", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher()
         |-T~InstantVectorFunctionMapper(function=Month)
@@ -317,7 +317,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate InstantFunctionMapper when parameter is scalar function") {
     val lp = Parser.queryToLogicalPlan("clamp_max(node_info{job = \"app\"},scalar(http_requests_total{job = \"app\"}))", 1000)
-    val execPlan = engine.materialize(lp, QueryOptions(), promQlQueryParams)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])
         |-T~InstantVectorFunctionMapper(function=ClampMax)

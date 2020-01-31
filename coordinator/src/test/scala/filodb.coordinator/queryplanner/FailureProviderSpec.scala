@@ -1,4 +1,4 @@
-package filodb.coordinator.queryengine2
+package filodb.coordinator.queryplanner
 
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -11,6 +11,9 @@ import filodb.query._
 import filodb.query.exec.{ExecPlan, PlanDispatcher}
 
 class FailureProviderSpec extends FunSpec with Matchers {
+
+  import LogicalPlanUtils._
+
   val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request")),
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
@@ -40,15 +43,15 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val datasetRef = DatasetRef("dataset", Some("cassandra"))
 
   it("should check for PeriodicSeries plan") {
-    QueryRoutingPlanner.isPeriodicSeriesPlan(summed1) shouldEqual (true)
-    QueryRoutingPlanner.isPeriodicSeriesPlan(raw2) shouldEqual (false)
+    isPeriodicSeriesPlan(summed1) shouldEqual (true)
+    isPeriodicSeriesPlan(raw2) shouldEqual (false)
   }
 
   it("should extract time from logical plan") {
-    QueryRoutingPlanner.hasSingleTimeRange(summed1) shouldEqual (true)
-    QueryRoutingPlanner.hasSingleTimeRange(binaryJoinLogicalPlan) shouldEqual (false)
+    hasSingleTimeRange(summed1) shouldEqual (true)
+    hasSingleTimeRange(binaryJoinLogicalPlan) shouldEqual (false)
 
-    val timeRange = QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(summed1)
+    val timeRange = getPeriodicSeriesTimeFromLogicalPlan(summed1)
 
     timeRange.startInMillis shouldEqual (100000)
     timeRange.endInMillis shouldEqual (150000)
@@ -57,10 +60,10 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should update time in logical plan") {
 
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"))
-    val updatedTimeLogicalPlan = QueryRoutingPlanner.copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 0)
+    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 0)
 
-    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
-    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
+    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
+    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
 
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
@@ -79,7 +82,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
     val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 1499))),
       RemoteRoute(Some(TimeRange(1500, 3000))))
-    val routes = QueryRoutingPlanner.plan(failureTimeRanges, TimeRange(50, 3000), 0 , 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRanges, TimeRange(50, 3000), 0 , 1)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
@@ -93,7 +96,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
     val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999))),
       LocalRoute(Some(TimeRange(1000, 5000))))
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
@@ -105,7 +108,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
       TimeRange(100, 200), false))
 
     val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 5000))))
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0, 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0, 1)
 
     routes.sameElements(expectedResult) shouldEqual (true)
   }
@@ -118,7 +121,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
     val expectedResult = Seq(RemoteRoute(Some(TimeRange(50, 999))),
       LocalRoute(Some(TimeRange(1000, 3999))), RemoteRoute(Some(TimeRange(4000, 5000))))
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
 
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
@@ -135,7 +138,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
       RemoteRoute(Some(TimeRange(1000, 3999))), LocalRoute(Some(TimeRange(4000, 5000))))
 
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
     routes.sameElements(expectedResult) shouldEqual (true)
@@ -150,7 +153,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
       RemoteRoute(Some(TimeRange(1000, 5000))))
 
     //Query time is 100 to 5000
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(100, 5000), 50 , 20)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(100, 5000), 50 , 20)
     println("routes:" + routes)
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
@@ -159,10 +162,10 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
   it("should update time in logical plan when lookBack is present") {
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(19900, 30000), filters = f1, columns = Seq("value"))
-    val updatedTimeLogicalPlan = QueryRoutingPlanner.copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 100)
+    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 100)
 
-    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
-    QueryRoutingPlanner.getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
+    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startInMillis shouldEqual (20000)
+    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endInMillis shouldEqual (30000)
 
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
@@ -181,7 +184,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
       LocalRoute(Some(TimeRange(1000, 5000))))
 
     //Query time is 100 to 5000
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(100, 5000), 50 , 20)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(100, 5000), 50 , 20)
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
     routes.sameElements(expectedResult) shouldEqual (true)
@@ -196,7 +199,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val expectedResult = Seq(LocalRoute(Some(TimeRange(50, 999))),
       RemoteRoute(Some(TimeRange(1000, 3999))), LocalRoute(Some(TimeRange(4000, 5000))))
 
-    val routes = QueryRoutingPlanner.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
+    val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(50, 5000), 0 , 1)
     routes.sameElements(expectedResult) shouldEqual (true)
   }
 
