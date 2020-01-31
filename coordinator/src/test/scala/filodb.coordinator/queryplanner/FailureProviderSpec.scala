@@ -33,7 +33,6 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from + 1000, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
 
-  val binaryJoinLogicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler,
@@ -47,9 +46,14 @@ class FailureProviderSpec extends FunSpec with Matchers {
     isPeriodicSeriesPlan(raw2) shouldEqual (false)
   }
 
+  it("should not allow Binary Joins with different time ranges in lhs/rhs") {
+    intercept[IllegalArgumentException] {
+      BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
+    }
+  }
+
   it("should extract time from logical plan") {
     hasSingleTimeRange(summed1) shouldEqual (true)
-    hasSingleTimeRange(binaryJoinLogicalPlan) shouldEqual (false)
 
     val timeRange = getPeriodicSeriesTimeFromLogicalPlan(summed1)
 
