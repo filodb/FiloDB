@@ -1,7 +1,6 @@
 package filodb.downsampler.index
 
 import scala.concurrent.Await
-import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -49,16 +48,19 @@ object DSIndexJob extends StrictLogging {
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalScheduler", _)))
 
   def updateDSPartKeyIndex(shard: Int): Unit = {
+    import DSIndexJobSettings._
+
     val rawDataSource = rawCassandraColStore
     val dsDtasource = downsampleCassandraColStore
-    val dsDatasetRef = downsampleRefsByRes(5 minutes)
+    val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
+    val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
     val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
       shard = shard.toInt, updateHour = hour())
     val partKeyIter = partKeys.map(toPartkeyRecordWithHash)
     Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = partKeyIter,
-      diskTTLSeconds = dsJobsettings.ttlByResolution(rawDatasetIngestionConfig.downsampleConfig.resolutions.last),
-      writeToPkUTTable = false), 1 minute)
+      diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
+      writeToPkUTTable = false), batchTime)
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
