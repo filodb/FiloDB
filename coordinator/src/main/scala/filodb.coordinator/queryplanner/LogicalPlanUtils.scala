@@ -3,7 +3,7 @@ package filodb.coordinator.queryplanner
 import filodb.query._
 
 object LogicalPlanUtils {
-  
+
   /**
     * Check whether all child logical plans have same start and end time
     */
