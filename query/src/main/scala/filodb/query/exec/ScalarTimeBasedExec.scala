@@ -15,7 +15,8 @@ import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
-  * Exec Plans for time functions which can execute locally without being dispatched
+  * Exec Plans for time functions which can execute locally without being dispatched as they don't have any input
+  * Query example: time(), hour()
   */
 case class TimeScalarGeneratorExec(id: String,
                                    dataset: DatasetRef, params: RangeParams,
