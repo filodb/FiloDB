@@ -40,13 +40,12 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
   val rawRetention = 10.minutes
   val now = System.currentTimeMillis() / 1000 * 1000
-  val lastRawTime = now - rawRetention.toMillis
+  val earliestRawTime = now - rawRetention.toMillis
 
   private def disp = InProcessPlanDispatcher
-  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, lastRawTime, disp)
+  val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, earliestRawTime, disp)
 
   it("should direct raw-cluster-only queries to raw planner") {
-    val now = System.currentTimeMillis()
     val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
       TimeStepParams(now/1000 - 7.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds))
 
@@ -56,7 +55,6 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   }
 
   it("should direct downsample-only queries to downsample planner") {
-    val now = System.currentTimeMillis()
     val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
 
@@ -67,7 +65,6 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
   it("should direct overlapping queries to both raw & downsample planner and stitch") {
 
-    val now = System.currentTimeMillis() / 1000 * 1000
     val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
       TimeStepParams(now/1000 - 30.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 5.minutes.toSeconds))
       .asInstanceOf[PeriodicSeriesPlan]
@@ -94,7 +91,6 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
   it("should direct raw-data queries to both raw planner only irrespective of time length") {
 
-    val now = System.currentTimeMillis() / 1000 * 1000
     Seq(5, 10, 20).foreach { t =>
       val logicalPlan = Parser.queryToLogicalPlan(s"foo[${t}m]", now)
       val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
