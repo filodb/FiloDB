@@ -46,7 +46,7 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
   }
 
   lazy val readCql = session.prepare(s"SELECT * FROM $tableString " +
-    s"WHERE shard = ? AND updateHour = ? AND split = ? ")
+    s"WHERE shard = ? AND epochHour = ? AND split = ? ")
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
     session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt))
       .toObservable.handleObservableErrors

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_$SHARD (
 EOF
 done
 
+if [[ "${KEYSP}" != "${FILO_DOWNSAMPLE_KEYSPACE}" ]]; then
 cat << EOF
 
 CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_by_update_time (
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_by_update_time (
     PRIMARY KEY ((shard, epochHour, split), partKey))
 ) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 EOF
+fi
 
 }
 
@@ -117,4 +119,3 @@ do
 done
 
 create_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[-1]}"
-

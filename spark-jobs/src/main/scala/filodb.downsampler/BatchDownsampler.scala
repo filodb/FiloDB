@@ -58,7 +58,7 @@ object BatchDownsampler extends StrictLogging with Instance {
   private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
 
-  private val schemas = Schemas.fromConfig(settings.filodbConfig).get
+  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
   private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
 
