@@ -76,5 +76,5 @@ object DSIndexJob extends StrictLogging with Instance {
     PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60 - 1
+  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 }
