@@ -146,7 +146,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
 
-  override def isRoutable: Boolean = lhs.isRoutable
+  override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
 }
 
 /**
