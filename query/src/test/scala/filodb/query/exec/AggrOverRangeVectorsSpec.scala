@@ -12,6 +12,7 @@ import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
+import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
 
 class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {

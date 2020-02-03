@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String, vectors => bv}
+import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -314,7 +314,7 @@ object CountValuesTransientRow {
     var index = 0
     map.foreach {(k, v) =>
       UnsafeUtils.setDouble(serializedMap, UnsafeUtils.arayOffset + index, k)
-      UnsafeUtils.setInt(serializedMap,  UnsafeUtils.arayOffset + index + 8, v)
+      UnsafeUtils.setInt(serializedMap, UnsafeUtils.arayOffset + index + 8, v)
       index += 12
     }
     serializedMap
