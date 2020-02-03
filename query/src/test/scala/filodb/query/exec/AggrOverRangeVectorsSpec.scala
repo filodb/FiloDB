@@ -9,7 +9,8 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
 
@@ -24,7 +25,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
-      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+      Map(("ignore").utf8 -> ("ignore").utf8))
 
     val noKey = CustomRangeVectorKey(Map.empty)
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
@@ -160,7 +161,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   val ignoreKey = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+    Map("ignore".utf8 -> "ignore".utf8))
 
   val noKey = CustomRangeVectorKey(Map.empty)
   def noGrouping(rv: RangeVector): RangeVectorKey = noKey
@@ -525,9 +526,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it ("should work for countValues") {
-    val expectedLabels = List(Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("4.4")),
-      Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("2.0")),
-      Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.6")), Map(ZeroCopyUTF8String("freq") -> ZeroCopyUTF8String("5.1")))
+    val expectedLabels = List(Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8),
+      Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8))
     val expectedRows = List((2,1.0), (1,1.0), (2,2.0), (1,1.0))
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L,5.1), (2L, 5.6d))),

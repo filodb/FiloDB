@@ -17,6 +17,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.data.ChunkMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.AggregationOperator._
 
@@ -934,22 +935,43 @@ class QuantileRowAggregator(q: Double) extends RowAggregator {
   }
 }
 
+/**
+  * Map: Every sample is mapped to map with value as key and 1 as value
+  * ReduceMappedRow: Same as ReduceAggregate
+  * ReduceAggregate: Accumulator maintains a map for values and their frequencies. Reduction happens
+  *                  by deserializing items blob into map and aggregating with frequencies of map of accumulator
+  * Present: Each key from map is placed into distinct RangeVectors. RangeVectorKey is formed by appending the key/value
+  *          to existing labelValues.
+  *
+  */
 class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggregator {
 
-  var arr = new Array[Byte](500)
+  var serializedMap = new Array[Byte](500)
+  val rowMap = debox.Map[Double, Int]()
   class CountValuesHolder(var timestamp: Long = 0L) extends AggregateHolder {
     val frequencyMap = debox.Map[Double, Int]()
     val row =  new CountValuesTransientRow
     def toRowReader: MutableRowReader = {
       val size = frequencyMap.size * 12
-      if (arr.length < size) arr = new Array[Byte](size) // Create bigger array
-      serialize(frequencyMap)
+      if (serializedMap.length < size) serializedMap = new Array[Byte](size) // Create bigger array
+      CountValuesTransientRow.serialize(frequencyMap, serializedMap)
       row.setLong(0, timestamp)
-      row.setBlob(1, arr, UnsafeUtils.arayOffset, size)
+      row.setBlob(1, serializedMap, UnsafeUtils.arayOffset, size)
       row
     }
+
     def resetToZero(): Unit = {
       frequencyMap.clear()
+    }
+
+    def addValue(value: Double, count: Int) = {
+      if (!value.isNaN) {
+        if (frequencyMap.contains(value)) frequencyMap(value) = frequencyMap.get(value).get + count
+        else frequencyMap(value) = count
+        if (frequencyMap.size > limit)
+          throw new UnsupportedOperationException("CountValues has no of unique values greater than 1000." +
+            "Reduce number of unique values by using topk, comparison operator etc")
+      }
     }
   }
 
@@ -958,48 +980,27 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
 
   def newRowToMapInto: MutableRowReader = new CountValuesTransientRow
 
-  def serialize(map: debox.Map[Double, Int]): Array[Byte] = {
-    var index = 0
-    map.foreach {(k, v) =>
-      UnsafeUtils.setDouble(arr, UnsafeUtils.arayOffset + index, k)
-      UnsafeUtils.setInt(arr,  UnsafeUtils.arayOffset + index + 8, v)
-      index += 12
-    }
-    arr
-  }
-
-  def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
-    val frequencyMap = debox.Map[Double, Int]()
-    for (i <-0 until size/12) {
-      val index = i * 12 // 8 bytes for double and 4 for Int
-      val key = UnsafeUtils.getDouble(buf, offset + index)
-      val value = UnsafeUtils.getInt(buf, offset + index + 8)
-      frequencyMap(key) = value
-    }
-    frequencyMap
-  }
-
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0,item.getLong(0))
-    val map = debox.Map[Double, Int]()
-    map(item.getDouble(1)) = 1
-    serialize(map)
-    mapInto.setBlob(1, arr, UnsafeUtils.arayOffset, map.size * 12)
+    rowMap.clear()
+    rowMap(item.getDouble(1)) = 1
+    CountValuesTransientRow.serialize(rowMap, serializedMap)
+    mapInto.setBlob(1, serializedMap, UnsafeUtils.arayOffset, rowMap.size * 12)
     mapInto
   }
 
   def reduceAggregate(acc: CountValuesHolder, aggRes: RowReader): CountValuesHolder = {
     acc.timestamp = aggRes.getLong(0)
-    val aggMap = deserialize(aggRes.getBlobBase(1), aggRes.getBlobNumBytes(1),
-      aggRes.getBlobOffset(1))
-    aggMap.keysSet.foreach { x =>
-      if (!x.isNaN) {
-        val aggCount = aggMap.get(x).get
-        if (acc.frequencyMap.contains(x)) acc.frequencyMap(x) = acc.frequencyMap.get(x).get + aggCount
-        else acc.frequencyMap(x) = aggCount
-        if (acc.frequencyMap.size > limit)
-          throw new UnsupportedOperationException("No of unique values greater than 1000")
-      }
+
+    // No need to create map when there is only one value
+    if (CountValuesTransientRow.hasOneSample(aggRes.getBlobNumBytes(1))) {
+      acc.addValue(CountValuesTransientRow.getValueForOneSample(aggRes.getBlobBase(1),
+        aggRes.getBlobOffset(1)), CountValuesTransientRow.getCountForOneSample(
+        aggRes.getBlobBase(1), aggRes.getBlobOffset(1)) )
+    } else {
+      val aggMap = CountValuesTransientRow.deserialize(aggRes.getBlobBase(1),
+        aggRes.getBlobNumBytes(1), aggRes.getBlobOffset(1))
+      aggMap.keysSet.foreach(x => acc.addValue(x, aggMap.get(x).get))
     }
     acc
   }
@@ -1012,12 +1013,14 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
       FiloSchedulers.assertThreadName(QuerySchedName)
+      // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
+      ChunkMap.validateNoSharedLocks(s"CountValues-$label")
       aggRangeVector.rows.take(limit).foreach { row =>
-          val rowMap = deserialize(row.getBlobBase(1), row.getBlobNumBytes(1),
-            row.getBlobOffset(1))
+          val rowMap = CountValuesTransientRow.deserialize(row.getBlobBase(1),
+            row.getBlobNumBytes(1), row.getBlobOffset(1))
           rowMap.foreach { (k, v) =>
             val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +
-              (ZeroCopyUTF8String(label) -> ZeroCopyUTF8String(k.toString)))
+              (label.utf8 -> k.toString.utf8))
             val builder = resRvs.getOrElseUpdate(rvk, SerializedRangeVector.newBuilder())
             builder.startNewRecord(recSchema)
             builder.addLong(row.getLong(0))

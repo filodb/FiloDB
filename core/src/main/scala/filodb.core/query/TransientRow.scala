@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String, vectors => bv}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -254,7 +254,6 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
 final class CountValuesTransientRow() extends MutableRowReader {
   var timestamp: Long = _
   var blobBase: Array[Byte] = _
-  var blobOffset: Int = _
   var blobLength: Int = _
 
   def setLong(columnNo: Int, valu: Long): Unit =
@@ -268,7 +267,6 @@ final class CountValuesTransientRow() extends MutableRowReader {
   def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit =
     if (columnNo == 1) {
       blobBase = base
-      blobOffset = offset
       blobLength = length
     }
     else throw new IllegalArgumentException()
@@ -296,7 +294,7 @@ final class CountValuesTransientRow() extends MutableRowReader {
   def getBlobBase(columnNo: Int): Any = if (columnNo == 1) blobBase
                                         else throw new IllegalArgumentException()
 
-  def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) blobOffset
+  def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) UnsafeUtils.arayOffset
                                            else throw new IllegalArgumentException()
 
   def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
@@ -304,7 +302,40 @@ final class CountValuesTransientRow() extends MutableRowReader {
 
   override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
     // Needed since blobs are serialized as strings (for now) underneath the covers.
-    if (columnNo == 1) new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
+    if (columnNo == 1) new ZeroCopyUTF8String(blobBase, UnsafeUtils.arayOffset, blobLength)
     else throw new IllegalArgumentException()
   }
+}
+
+object CountValuesTransientRow {
+
+  // TODO can be serialized and compressed more efficiently by using histogram like type
+  def serialize(map: debox.Map[Double, Int], serializedMap: Array[Byte]): Array[Byte] = {
+    var index = 0
+    map.foreach {(k, v) =>
+      UnsafeUtils.setDouble(serializedMap, UnsafeUtils.arayOffset + index, k)
+      UnsafeUtils.setInt(serializedMap,  UnsafeUtils.arayOffset + index + 8, v)
+      index += 12
+    }
+    serializedMap
+  }
+
+  def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
+    val frequencyMap = debox.Map[Double, Int]()
+    for (i <-0 until size/12) {
+      val index = i * 12 // 8 bytes for double and 4 for Int
+      val key = UnsafeUtils.getDouble(buf, offset + index)
+      val value = UnsafeUtils.getInt(buf, offset + index + 8)
+      frequencyMap(key) = value
+    }
+    frequencyMap
+  }
+
+ def hasOneSample(size: Int) : Boolean = (size == 12) // 8 for Double and 4 for Int
+
+ // Return just value when only one sample is present
+  def getValueForOneSample(buf: Any, offset: Long): Double = UnsafeUtils.getDouble(buf, offset)
+
+  // Return just count when only one sample is present
+  def getCountForOneSample(buf: Any, offset: Long): Int = UnsafeUtils.getInt(buf, offset + 8)
 }

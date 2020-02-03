@@ -197,7 +197,16 @@ case class ApplySortFunction(vectors: PeriodicSeriesPlan,
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
 
+/**
+  * Nested logical plan for argument of function
+  * Example: clamp_max(node_info{job = "app"},scalar(http_requests_total{job = "app"}))
+  */
 trait FunctionArgsPlan extends LogicalPlan
+
+/**
+  * Generate scalar
+  * Example: scalar(http_requests_total), time(), hour()
+  */
 trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
 
 /**
@@ -221,7 +230,7 @@ final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: Ra
 }
 
 /**
-  * Logical plan for numeric values
+  * Logical plan for numeric values. Used in queries like foo + 5
   * Example: 3, 4.2
   */
 final case class ScalarFixedDoublePlan(scalar: Double,
