@@ -4,18 +4,20 @@ import scala.concurrent.Await
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.{Scheduler, UncaughtExceptionReporter}
+import monix.execution.Scheduler
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core.{DatasetRef, Instance}
+import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.BatchDownsampler._
 import filodb.downsampler.DownsamplerSettings
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
 import filodb.memory.format.UnsafeUtils
 
-object DSIndexJob extends StrictLogging {
+object DSIndexJob extends StrictLogging with Instance {
 
+  val settings = DownsamplerSettings
   val dsJobsettings = DownsamplerSettings
 
   private val kamonTags = Map( "rawDataset" -> dsJobsettings.rawDatasetName,
@@ -30,6 +32,14 @@ object DSIndexJob extends StrictLogging {
   private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
     .zip(settings.downsampledDatasetRefs).toMap
 
+
+  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+
+  /**
+    * Raw dataset from which we downsample data
+    */
+  private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
+
   private val sessionProvider = dsJobsettings.sessionProvider.map { p =>
     val clazz = createClass(p).get
     val args = Seq(classOf[Config] -> dsJobsettings.cassandraConfig)
@@ -42,12 +52,7 @@ object DSIndexJob extends StrictLogging {
   private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
-  implicit lazy val globalImplicitScheduler = Scheduler.computation(
-    parallelism = 15,
-    name = "global-implicit",
-    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalScheduler", _)))
-
-  def updateDSPartKeyIndex(shard: Int): Unit = {
+  def updateDSPartKeyIndex(shard: Int, epochHour: Long): Unit = {
     import DSIndexJobSettings._
 
     val rawDataSource = rawCassandraColStore
@@ -55,12 +60,14 @@ object DSIndexJob extends StrictLogging {
     val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
     val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
     val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-      shard = shard.toInt, updateHour = hour())
-    val partKeyIter = partKeys.map(toPartkeyRecordWithHash)
+      shard = shard.toInt, updateHour = epochHour)
+    var count = 0
+    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
     Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
-      partKeys = partKeyIter,
+      partKeys = pkRecords,
       diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
       writeToPkUTTable = false), batchTime)
+    logger.info(s"Number of partitionKey written numPkeysWritten=${count} shard=${shard} hour=${epochHour}")
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
@@ -68,5 +75,4 @@ object DSIndexJob extends StrictLogging {
     PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 }

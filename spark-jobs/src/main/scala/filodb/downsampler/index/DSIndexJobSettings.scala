@@ -35,5 +35,6 @@ object DSIndexJobSettings extends StrictLogging {
     .headOption.getOrElse(ConfigFactory.empty())
     .as[Option[Int]]("num-shards").getOrElse(0)
 
+  def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 }
 
