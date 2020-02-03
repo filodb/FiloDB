@@ -59,7 +59,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
-    val aggregator = exec.aggregator.RowAggregator(aggrOp, aggrParams, sourceSchema)
+    val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
 
     def grouping(rv: RangeVector): RangeVectorKey = {
       val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
@@ -82,7 +82,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
-    val aggregator = exec.aggregator.RowAggregator(aggrOp, aggrParams, source)
+    val aggregator = RowAggregator.RowAggregator(aggrOp, aggrParams, source)
     // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
     aggregator.reductionSchema(source)
   }
@@ -99,12 +99,12 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
-    val aggregator = exec.aggregator.RowAggregator(aggrOp, aggrParams, sourceSchema)
+    val aggregator = RowAggregator(aggrOp, aggrParams, sourceSchema)
     RangeVectorAggregator.present(aggregator, source, limit)
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
-    val aggregator = exec.aggregator.RowAggregator(aggrOp, aggrParams, source)
+    val aggregator = RowAggregator(aggrOp, aggrParams, source)
     aggregator.presentationSchema(source)
   }
 }
