@@ -52,23 +52,22 @@ object DSIndexJob extends StrictLogging with Instance {
   private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
-  def updateDSPartKeyIndex(shard: Int): Unit = {
+  def updateDSPartKeyIndex(shard: Int, epochHour: Long): Unit = {
     import DSIndexJobSettings._
 
     val rawDataSource = rawCassandraColStore
     val dsDtasource = downsampleCassandraColStore
     val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
     val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
-    val prevHour = hour() - 1
     val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-      shard = shard.toInt, updateHour = prevHour)
+      shard = shard.toInt, updateHour = epochHour)
     var count = 0
     val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
     Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
       diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
       writeToPkUTTable = false), batchTime)
-    logger.info(s"Number of partitionKey written numPkeysWritten=${count} shard=${shard} hour=${prevHour}")
+    logger.info(s"Number of partitionKey written numPkeysWritten=${count} shard=${shard} hour=${epochHour}")
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
@@ -76,5 +75,4 @@ object DSIndexJob extends StrictLogging with Instance {
     PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 }

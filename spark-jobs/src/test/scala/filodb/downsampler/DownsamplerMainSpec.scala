@@ -1,7 +1,7 @@
 package filodb.downsampler
 
-import scala.concurrent.duration._
 import scala.concurrent.Await
+import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
@@ -22,6 +22,7 @@ import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, RawDataRangeVector
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.BatchDownsampler.{schemas, shardStats}
+import filodb.downsampler.index.DSIndexJobSettings._
 import filodb.downsampler.index.IndexJobDriver
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -66,7 +67,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val lastSampleTime = 1574273042000L
   val downsampler = new Downsampler
 
-  val indexUpdater = new IndexJobDriver
+  //Run for current hour for testing, actual job migrates previous hour's index updates
+  val indexUpdater = new IndexJobDriver(hour())
 
   def partKeyReader(pkr: PartKeyRecord): Seq[(String, String)] = {
     schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
