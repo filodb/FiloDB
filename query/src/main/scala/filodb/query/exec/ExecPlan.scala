@@ -152,7 +152,7 @@ trait ExecPlan extends QueryCommand {
           .toListL
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
-            SerializedRangeVector.queryResultBytes.record(numBytes)
+            SerializedRangeVector.queryResultBytes.withoutTags().record(numBytes)
             if (numBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
@@ -336,7 +336,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler, timeout: FiniteDuration) =
-    Kamon.withSpan(span) {
+    Kamon.runWithSpan(span) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)

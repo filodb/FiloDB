@@ -280,9 +280,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
                          checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
-      val recoveryTrace = Kamon.buildSpan("ingestion-recovery-trace")
-                               .withTag("shard", shard.toString)
-                               .withTag("dataset", ref.toString).start()
+      val recoveryTrace = Kamon.spanBuilder("ingestion-recovery-trace")
+                               .tag("shard", shard.toString)
+                               .tag("dataset", ref.toString).start()
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
 
@@ -305,7 +305,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
-          recoveryTrace.addError(s"Recovery failed for dataset=$ref shard=$shard", ex)
+          recoveryTrace.fail(s"Recovery failed for dataset=$ref shard=$shard", ex)
           logger.error(s"Recovery failed for dataset=$ref shard=$shard", ex)
           handleError(ref, shard, ex)
           recoveryTrace.finish()

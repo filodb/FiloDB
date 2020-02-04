@@ -63,7 +63,7 @@ trait FiloCassandraConnector extends StrictLogging {
                  _: ConnectionException ) =>
         logger.warn(s"CQL execution of $statement resulted in error. Will retry $retryAttemptsLeft times", e)
         if (retryAttemptsLeft > 0) {
-          FiloCassandraConnector.cassRetriesScheduledCount.increment()
+          FiloCassandraConnector.cassRetriesScheduledCount.withoutTags().increment()
           scheduleRetry(baseRetryInterval + ThreadLocalRandom.current().nextInt(retryIntervalMaxJitter).millis) {
             attemptExecute(statement, retryAttemptsLeft - 1)
           }.runAsync.flatMap(r=>r)

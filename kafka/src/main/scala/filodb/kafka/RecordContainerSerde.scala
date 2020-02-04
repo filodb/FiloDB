@@ -19,8 +19,8 @@ final class RecordContainerDeserializer extends Deserializer[RecordContainer] wi
   import RecordContainerSerdeStats._
 
   override def deserialize(topic: String, data: Array[Byte]): RecordContainer = {
-    tsBatchSize.record(data.size)
-    tsCount.increment
+    tsBatchSize.withoutTags.record(data.size)
+    tsCount.withoutTags.increment
     RecordContainer(data)
   }
 }

@@ -364,7 +364,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case PublishSnapshot          => datasets.keys.foreach(shardManager.publishSnapshot)
                                      //This counter gets published from ShardManager,
                                      // > 0 means this node is shardmanager
-                                     iamShardManager.increment()
+                                     iamShardManager.withoutTags.increment
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
     case Terminated(subscriber)   => context unwatch subscriber

@@ -358,9 +358,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     * Called when a document is updated with new endTime
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
-    val span = Kamon.buildSpan("index-startTimes-for-odp-lookup-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val span = Kamon.spanBuilder("index-startTimes-for-odp-lookup-latency")
+      .tag("dataset", ref.dataset)
+      .tag("shard", shardNum)
       .start()
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
@@ -472,9 +472,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): debox.Buffer[Int] = {
-    val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val partKeySpan = Kamon.spanBuilder("index-partition-lookup-latency")
+      .tag("dataset", ref.dataset)
+      .tag("shard", shardNum)
       .start()
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
@@ -497,9 +497,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val columnFilters = schema.binSchema.toStringPairs(partKeyBase, partKeyOffset)
       .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
 
-    val partKeySpan = Kamon.buildSpan("index-partition-lookup-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum)
+    val partKeySpan = Kamon.spanBuilder("index-partition-lookup-latency")
+      .tag("dataset", ref.dataset)
+      .tag("shard", shardNum)
       .start()
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>

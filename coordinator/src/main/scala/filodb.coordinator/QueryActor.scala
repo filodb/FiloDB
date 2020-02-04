@@ -8,6 +8,7 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
@@ -85,16 +86,16 @@ final class QueryActor(memStore: MemStore,
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
 
   private val tags = Map("dataset" -> dsRef.toString)
-  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
-  private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
-  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
-  private val queryErrors = Kamon.counter("queryactor-query-errors").refine(tags)
+  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
+  private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
+  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
+  private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
-      .withTag("query-id", q.id)
+    val span = Kamon.spanBuilder(s"execplan2-${q.getClass.getSimpleName}")
+      .tag("query-id", q.id)
       .start()
     q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
      .foreach { res =>

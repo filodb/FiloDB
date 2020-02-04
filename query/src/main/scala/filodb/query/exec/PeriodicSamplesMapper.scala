@@ -437,7 +437,7 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
         nextVal.setValues(t, v)
         hasNextVal = true
       } else {
-        Query.droppedSamples.increment()
+        Query.droppedSamples.withoutTags().increment()
       }
     }
   }

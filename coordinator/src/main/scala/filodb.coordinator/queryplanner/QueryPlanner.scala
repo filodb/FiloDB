@@ -28,7 +28,7 @@ trait QueryPlanner {
     */
   def dispatchExecPlan(execPlan: ExecPlan)(implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     val currentSpan = Kamon.currentSpan()
-    Kamon.withSpan(currentSpan) {
+    Kamon.runWithSpan(currentSpan) {
       execPlan.dispatcher.dispatch(execPlan)
     }
   }

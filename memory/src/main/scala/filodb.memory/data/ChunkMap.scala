@@ -100,7 +100,7 @@ object ChunkMap extends StrictLogging {
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
           total += amt
-          sharedLockLingering.increment(amt)
+          sharedLockLingering.withoutTags().increment(amt)
           _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
           var lockState = 0
           do {
@@ -275,7 +275,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
           // this is a bug which needs to be fixed.
           throw new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
         }
-        exclusiveLockWait.increment()
+        exclusiveLockWait.withoutTags().increment()
         _logger.warn(s"Waiting for exclusive lock: $this")
         locks1 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         warned = true
@@ -467,7 +467,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
           if (evictKey == Long.MinValue || chunkmapKeyRetrieve(arrayGet(first)) > evictKey) {
             throw e
           }
-          chunkEvictions.increment()
+          chunkEvictions.withoutTags().increment()
           first += 1
           if (first >= capacity) {
             // Wraparound.

@@ -81,9 +81,9 @@ class ShardDownsampler(datasetName: String,
                                 chunksets: ChunkInfoIterator,
                                 records: Seq[DownsampleRecords]): Unit = {
     if (enabled) {
-      val downsampleTrace = Kamon.buildSpan("memstore-downsample-records-trace")
-        .withTag("dataset", datasetName)
-        .withTag("shard", shardNum).start()
+      val downsampleTrace = Kamon.spanBuilder("memstore-downsample-records-trace")
+        .tag("dataset", datasetName)
+        .tag("shard", shardNum).start()
       while (chunksets.hasNext) {
         val chunkset = chunksets.nextInfoReader
         val startTime = chunkset.startTime

@@ -263,7 +263,7 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
     ActorSystem(role.systemName, allConfig)
   }
 
-  Kamon.loadReportersFromConfig()
+  Kamon.init()
 
   lazy val cluster = FilodbCluster(system)
 

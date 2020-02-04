@@ -332,7 +332,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
       shardsFromFilters(filters, options)
     } else {
-      mdNoShardKeyFilterRequests.increment()
+      mdNoShardKeyFilterRequests.withoutTags().increment()
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
@@ -351,7 +351,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
       shardsFromFilters(lp.filters, options)
     } else {
-      mdNoShardKeyFilterRequests.increment()
+      mdNoShardKeyFilterRequests.withoutTags().increment()
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>

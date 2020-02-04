@@ -88,23 +88,23 @@ class ChunkSinkStats {
   val partKeysWritten = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
-    chunksPerCallHist.record(numChunks)
-    chunkBytesHist.record(totalChunkBytes)
-    chunkLenHist.record(chunkLen)
+    chunksPerCallHist.withoutTags().record(numChunks)
+    chunkBytesHist.withoutTags().record(totalChunkBytes)
+    chunkLenHist.withoutTags().record(chunkLen)
   }
 
   def addIndexWriteStats(indexBytes: Long): Unit = {
-    numIndexWriteCalls.increment
-    indexBytesHist.record(indexBytes)
+    numIndexWriteCalls.withoutTags().increment
+    indexBytesHist.withoutTags().record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {
-    chunksetWrites.increment
+    chunksetWrites.withoutTags().increment
     chunksetsWritten.incrementAndGet()
   }
 
   def partKeysWrite(numKeys: Int): Unit = {
-    partKeysWrites.increment(numKeys)
+    partKeysWrites.withoutTags().increment(numKeys)
     partKeysWritten.addAndGet(numKeys)
   }
 }

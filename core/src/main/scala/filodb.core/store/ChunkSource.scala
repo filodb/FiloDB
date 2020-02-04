@@ -175,16 +175,16 @@ class ChunkSourceStats {
   var readPartitions: Int = 0
 
   def incrReadPartitions(numPartitions: Int): Unit = {
-    readPartitionsCtr.increment(numPartitions)
+    readPartitionsCtr.withoutTags().increment(numPartitions)
     readPartitions += numPartitions
   }
 
   def incrReadChunksets(): Unit = {
-    readChunksetsCtr.increment
+    readChunksetsCtr.withoutTags().increment
     readChunkSets += 1
   }
 
-  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment }
+  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.withoutTags().increment }
 }
 
 final case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer)
