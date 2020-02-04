@@ -59,15 +59,22 @@ object DSIndexJob extends StrictLogging with Instance {
     val dsDtasource = downsampleCassandraColStore
     val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
     val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
-    val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-      shard = shard.toInt, updateHour = epochHour)
-    var count = 0
-    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
-    Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
-      partKeys = pkRecords,
-      diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
-      writeToPkUTTable = false), batchTime)
-    logger.info(s"Number of partitionKey written numPkeysWritten=${count} shard=${shard} hour=${epochHour}")
+    @volatile var count = 0
+    try {
+      val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
+        shard = shard.toInt, updateHour = epochHour)
+      val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
+      Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+        partKeys = pkRecords,
+        diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
+        writeToPkUTTable = false), cassWriteTimeout)
+      logger.info(s"Number of partitionKey written numPkeysWritten=$count shard=$shard hour=$epochHour")
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in task count=$count " +
+          s"shard=$shard hour=$epochHour", e)
+        throw e
+    }
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
