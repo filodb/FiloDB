@@ -81,11 +81,11 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
     val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
 
-    downsampleLp.start shouldEqual logicalPlan.start
-    downsampleLp.end shouldEqual logicalPlan.start + 20.minutes.toMillis
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual logicalPlan.startMs + 20.minutes.toMillis
 
-    rawLp.start shouldEqual logicalPlan.start + 21.minutes.toMillis
-    rawLp.end shouldEqual logicalPlan.end
+    rawLp.startMs shouldEqual logicalPlan.startMs + 21.minutes.toMillis
+    rawLp.endMs shouldEqual logicalPlan.endMs
 
   }
 

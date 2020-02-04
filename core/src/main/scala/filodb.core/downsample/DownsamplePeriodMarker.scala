@@ -39,6 +39,12 @@ trait DownsamplePeriodMarker {
   /**
     * Returns sorted collection of row numbers for the given chunkset that mark the
     * periods to downsample. startRow and endRow are inclusive
+    *
+    * @param part Partition with downsampled data
+    * @param chunkset reader to read chunks from partition
+    * @param resMillis downsample resolution in millis
+    * @param startRow start row number (inclusive)
+    * @param endRow end row number (inclusive)
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,

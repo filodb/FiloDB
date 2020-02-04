@@ -26,21 +26,22 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestamp
-        if (p.end < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
-        else if (p.start >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
+        if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
+        else if (p.startMs >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
         else {
 
-          val numStepsDownsample = (earliestRawTime - p.start) / p.step
-          val lastInstantInDownsample = p.start + numStepsDownsample * p.step
-          val firstInstantInRaw = lastInstantInDownsample + p.step
+          // Split the query between raw and downsample planners
+          val numStepsDownsample = (earliestRawTime - p.startMs) / p.stepMs
+          val lastInstantInDownsample = p.startMs + numStepsDownsample * p.stepMs
+          val firstInstantInRaw = lastInstantInDownsample + p.stepMs
 
-          val lookBackTime = getRawSeriesStartTime(logicalPlan).map(p.start - _).get
+          val lookBackTime = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
-                                           TimeRange(p.start, lastInstantInDownsample), lookBackTime)
+                                           TimeRange(p.startMs, lastInstantInDownsample), lookBackTime)
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
 
           val rawLp = copyWithUpdatedTimeRange(logicalPlan,
-                                                      TimeRange(firstInstantInRaw, p.end),
+                                                      TimeRange(firstInstantInRaw, p.endMs),
                                                       lookBackTime)
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext.queryId, stitchDispatcher, Seq(rawEp, downsampleEp))

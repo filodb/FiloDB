@@ -104,8 +104,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
+    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
@@ -154,8 +154,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    child2.params.start shouldEqual from/1000
-    child2.params.end shouldEqual (1060000-1)/1000
+    child2.params.startSecs shouldEqual from/1000
+    child2.params.endSecs shouldEqual (1060000-1)/1000
     child2.params.processFailure shouldEqual(false)
   }
 
@@ -179,8 +179,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
+    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure timerange coincide with query time range") {
@@ -203,8 +203,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
+    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure starts before query end time and ends after query end time") {
@@ -227,8 +227,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
     execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.start shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.end shouldEqual(to/1000)
+    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate PromQlExecPlan and LocalPlan with RawSeries time according to lookBack and step") {
@@ -258,14 +258,14 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     execPlan.isInstanceOf[StitchRvsExec] shouldEqual (true)
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
-    stitchRvsExec.children.size shouldEqual (2)
+    stitchRvsExec.children.size shouldEqual 2
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
     stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
     val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
 
-    child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
+    child1.children.length shouldEqual 2 //default spread is 1 so 2 shards
 
     child1.children.foreach { l1 =>
       l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
@@ -275,14 +275,14 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
         2000000
       l1.rangeVectorTransformers.size shouldEqual 2
       l1.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual (1080000)
-      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual (2000000)
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].start shouldEqual 1080000
+      l1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper].end shouldEqual 2000000
       l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
     }
 
-    child2.params.start shouldEqual 900
-    child2.params.end shouldEqual 1020
-    child2.params.step shouldEqual 60
+    child2.params.startSecs shouldEqual 900
+    child2.params.endSecs shouldEqual 1020
+    child2.params.stepSecs shouldEqual 60
     child2.params.processFailure shouldEqual(false)
   }
 
@@ -309,14 +309,14 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan.isInstanceOf[PromQlExec] shouldEqual true
 
     val child = execPlan.asInstanceOf[PromQlExec]
 
-    child.params.start shouldEqual 900
-    child.params.end shouldEqual 1980
-    child.params.step shouldEqual 60
-    child.params.processFailure shouldEqual(false)
+    child.params.startSecs shouldEqual 900
+    child.params.endSecs shouldEqual 1980
+    child.params.stepSecs shouldEqual 60
+    child.params.processFailure shouldEqual false
   }
 
   it("should not do routing for InstantQueries when there are local and remote failures") {
@@ -381,12 +381,12 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan.isInstanceOf[PromQlExec] shouldEqual true
 
     val child = execPlan.asInstanceOf[PromQlExec]
-    child.params.start shouldEqual from
-    child.params.end shouldEqual to
-    child.params.step shouldEqual step
-    child.params.processFailure shouldEqual(false)
+    child.params.startSecs shouldEqual from
+    child.params.endSecs shouldEqual to
+    child.params.stepSecs shouldEqual step
+    child.params.processFailure shouldEqual false
   }
 }

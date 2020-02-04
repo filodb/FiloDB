@@ -270,15 +270,15 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
-      lp.end, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
+      lp.endMs, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
     series
   }
 
   private def materializePeriodicSeries(options: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
       None, None, Nil, lp.offset)))
     rawSeries
   }
@@ -338,7 +338,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        filters, labelNames, lp.lookbackTimeInMillis)
+        filters, labelNames, lp.lookbackTimeMs)
     }
     PlanResult(metaExec, false)
   }
@@ -357,7 +357,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
       PartKeysExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        schemas.part, renamedFilters, lp.start, lp.end)
+        schemas.part, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
@@ -391,7 +391,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         param match {
           case num: ScalarFixedDoublePlan => StaticFuncArgs(num.scalar, num.timeStepParams)
           case s: ScalarVaryingDoublePlan => ExecPlanFuncArgs(materialize(s, options),
-                                                              RangeParams(s.start, s.step, s.end))
+                                                              RangeParams(s.startMs, s.stepMs, s.endMs))
           case  t: ScalarTimeBasedPlan    => TimeFuncArgs(t.rangeParams)
           case _                          => throw new UnsupportedOperationException("Invalid logical plan")
         }
@@ -405,11 +405,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
       val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
-      topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, RangeParams(lp.start, lp.step, lp.end)))
+      topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, RangeParams(lp.startMs, lp.stepMs, lp.endMs)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
       vectors.plans.foreach(_.addRangeVectorTransformer(ScalarFunctionMapper(lp.function,
-                                                               RangeParams(lp.start, lp.step, lp.end))))
+                                                               RangeParams(lp.startMs, lp.stepMs, lp.endMs))))
       vectors
     }
   }

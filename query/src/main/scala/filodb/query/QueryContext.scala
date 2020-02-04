@@ -6,7 +6,7 @@ import filodb.core.{SpreadChange, SpreadProvider}
 import filodb.core.query.{ColumnFilter, Filter}
 
 trait TsdbQueryParams
-case class PromQlQueryParams(promQl: String, start: Long, step: Long, end: Long,
+case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
