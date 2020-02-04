@@ -16,6 +16,7 @@ import filodb.query.Query.qLogger
 
 /**
   * Exec Plans for fixed scalars which can execute locally without being dispatched
+  * Query example: 3, 4.2
   */
 case class ScalarFixedDoubleExec(id: String,
                                  dataset: DatasetRef,

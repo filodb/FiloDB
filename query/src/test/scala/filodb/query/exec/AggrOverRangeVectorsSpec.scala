@@ -2,17 +2,17 @@ package filodb.query.exec
 
 import scala.annotation.tailrec
 import scala.util.Random
-
 import com.tdunning.math.stats.TDigest
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core.{MachineMetricsData => MMD}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query.AggregationOperator
+import filodb.query.exec.aggregator.RowAggregator
 import filodb.query.exec.rangefn.RawDataWindowingSpec
 
 class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
@@ -26,7 +26,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
-      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+      Map(("ignore").utf8 -> ("ignore").utf8))
 
     val noKey = CustomRangeVectorKey(Map.empty)
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
@@ -162,7 +162,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   val ignoreKey = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+    Map("ignore".utf8 -> "ignore".utf8))
 
   val noKey = CustomRangeVectorKey(Map.empty)
   def noGrouping(rv: RangeVector): RangeVectorKey = noKey
@@ -526,6 +526,28 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     answers.map(_._2) shouldEqual maxes
   }
 
+  it ("should work for countValues") {
+    val expectedLabels = List(Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8),
+      Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8))
+    val expectedRows = List((2,1.0), (1,1.0), (2,2.0), (1,1.0))
+    val samples: Array[RangeVector] = Array(
+      toRv(Seq((1L,5.1), (2L, 5.6d))),
+      toRv(Seq((1L, 2), (2L, 4.4d))),
+      toRv(Seq((1L, Double.NaN), (2L, 5.6d)))
+    )
+
+    val agg = RowAggregator(AggregationOperator.CountValues, Seq("freq"), tvSchema)
+    val resultObs = RangeVectorAggregator.mapReduce(agg, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg, true, resultObs,  rv=>rv.key)
+
+    val resultObs2 = RangeVectorAggregator.present(agg, resultObs1, 1000)
+    val result = resultObs2.toListL.runAsync.futureValue
+    result.size.shouldEqual(4)
+    result.map(_.key.labelValues).sameElements(expectedLabels) shouldEqual true
+    result.flatMap(_.rows.map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
+
+  }
+  
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{

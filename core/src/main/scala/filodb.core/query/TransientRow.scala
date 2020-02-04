@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import filodb.memory.format.{vectors => bv, RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv, RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
@@ -249,4 +249,95 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+}
+
+final class CountValuesTransientRow() extends MutableRowReader {
+  var timestamp: Long = _
+  var blobBase: Array[Byte] = _
+  var blobLength: Int = _
+
+  def setLong(columnNo: Int, valu: Long): Unit =
+    if (columnNo == 0) timestamp = valu
+    else throw new IllegalArgumentException()
+
+  def setDouble(columnNo: Int, valu: Double): Unit = ???
+
+  def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit = ???
+
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit =
+    if (columnNo == 1) {
+      blobBase = base
+      blobLength = length
+    }
+    else throw new IllegalArgumentException()
+
+  def notNull(columnNo: Int): Boolean = throw new IllegalArgumentException()
+
+  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
+
+  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
+
+  def getDouble(columnNo: Int): Double = throw new IllegalArgumentException()
+
+  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
+
+  def getString(columnNo: Int): String = throw new IllegalArgumentException()
+
+  def getAny(columnNo: Int): Any = {
+    if (columnNo == 0) timestamp
+    else if (columnNo == 1) blobBase
+    else throw new IllegalArgumentException()
+  }
+
+  def getBlobBase(columnNo: Int): Any = if (columnNo == 1) blobBase
+                                        else throw new IllegalArgumentException()
+
+  def getBlobOffset(columnNo: Int): Long = if (columnNo == 1) UnsafeUtils.arayOffset
+                                           else throw new IllegalArgumentException()
+
+  def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
+                                            else throw new IllegalArgumentException()
+
+  override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
+    // Needed since blobs are serialized as strings (for now) underneath the covers.
+    if (columnNo == 1) new ZeroCopyUTF8String(blobBase, UnsafeUtils.arayOffset, blobLength)
+    else throw new IllegalArgumentException()
+  }
+}
+
+object CountValuesSerDeser {
+
+  val sampleSize = 12 // 8 for Double and 4 for Int
+
+  // TODO can be serialized and compressed more efficiently by using histogram like type
+  def serialize(map: debox.Map[Double, Int], serializedMap: Array[Byte]): Array[Byte] = {
+    var index = 0
+    map.foreach {(k, v) =>
+      UnsafeUtils.setDouble(serializedMap, UnsafeUtils.arayOffset + index, k)
+      UnsafeUtils.setInt(serializedMap, UnsafeUtils.arayOffset + index + 8, v)
+      index += sampleSize
+    }
+    serializedMap
+  }
+
+  def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
+    val frequencyMap = debox.Map[Double, Int]()
+    for (i <-0 until size/sampleSize) {
+      val index = i * sampleSize
+      val key = UnsafeUtils.getDouble(buf, offset + index)
+      val value = UnsafeUtils.getInt(buf, offset + index + 8)
+      frequencyMap(key) = value
+    }
+    frequencyMap
+  }
+
+ def hasOneSample(size: Int): Boolean = (size == sampleSize)
+
+ // Return just value when only one sample is present
+ def getValueForOneSample(buf: Any, offset: Long): Double = UnsafeUtils.getDouble(buf, offset)
+
+ // Return just count when only one sample is present
+ def getCountForOneSample(buf: Any, offset: Long): Int = UnsafeUtils.getInt(buf, offset + 8)
 }
