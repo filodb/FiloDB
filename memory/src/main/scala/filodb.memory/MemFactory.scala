@@ -4,12 +4,14 @@ import java.nio.ByteBuffer
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
+
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
+
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
-import kamon.tag.TagSet
 
 final case class OutOfOffheapMemoryException(needed: Long, have: Long) extends
   Exception(s"Out of offheap memory: Need $needed but only have $have bytes")

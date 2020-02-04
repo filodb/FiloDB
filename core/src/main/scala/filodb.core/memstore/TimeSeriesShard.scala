@@ -46,15 +46,18 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").withTags(TagSet.from(tags))
   val rowsPerContainer = Kamon.histogram("num-samples-per-container").withoutTags()
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").withTags(TagSet.from(tags))
-  val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes).withTags(TagSet.from(tags))
-  val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes).withTags(TagSet.from(tags))
+  val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes)
+    .withTags(TagSet.from(tags))
+  val encodedHistBytes = Kamon.counter("memstore-hist-encoded-bytes", MeasurementUnit.information.bytes)
+    .withTags(TagSet.from(tags))
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").withTags(TagSet.from(tags))
   val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").withTags(TagSet.from(tags))
   val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").withTags(TagSet.from(tags))
   val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").withTags(TagSet.from(tags))
 
   val numDirtyPartKeysFlushed = Kamon.counter("memstore-index-num-dirty-keys-flushed").withTags(TagSet.from(tags))
-  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").withTags(TagSet.from(tags))
+  val indexRecoveryNumRecordsProcessed = Kamon.counter("memstore-index-recovery-partkeys-processed").
+    withTags(TagSet.from(tags))
   val downsampleRecordsCreated = Kamon.counter("memstore-downsample-records-created").withTags(TagSet.from(tags))
 
   /**
