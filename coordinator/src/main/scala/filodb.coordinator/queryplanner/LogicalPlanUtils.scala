@@ -5,23 +5,6 @@ import filodb.query._
 object LogicalPlanUtils {
 
   /**
-    * Check whether logical plan is a PeriodicSeriesPlan
-    */
-  def isPeriodicSeriesPlan(logicalPlan: LogicalPlan): Boolean = {
-    if (!logicalPlan.isRoutable) {
-      false
-    } else {
-      logicalPlan match {
-        case s: ScalarVectorBinaryOperation => isPeriodicSeriesPlan(s.vector)
-        case v: VectorPlan                  => isPeriodicSeriesPlan(v.scalars)
-        case i: ApplyInstantFunction        => isPeriodicSeriesPlan(i.vectors)
-        case b: BinaryJoin                  => isPeriodicSeriesPlan(b.lhs)
-        case _                              => true
-      }
-    }
-  }
-
-  /**
     * Check whether all child logical plans have same start and end time
     */
   def hasSingleTimeRange(logicalPlan: LogicalPlan): Boolean = {

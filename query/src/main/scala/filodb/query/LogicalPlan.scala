@@ -173,6 +173,7 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
   override def startMs: Long = lhs.startMs
   override def stepMs: Long = lhs.stepMs
   override def endMs: Long = lhs.endMs
+  override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
 }
 
 /**
@@ -186,6 +187,7 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
   override def startMs: Long = vector.startMs
   override def stepMs: Long = vector.stepMs
   override def endMs: Long = vector.endMs
+  override def isRoutable: Boolean = vector.isRoutable
 }
 
 /**
@@ -200,6 +202,7 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
+  override def isRoutable: Boolean = vectors.isRoutable
 }
 
 /**
@@ -297,6 +300,7 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def startMs: Long = scalars.startMs
   override def stepMs: Long = scalars.stepMs
   override def endMs: Long = scalars.endMs
+  override def isRoutable: Boolean = scalars.isRoutable
 }
 
 /**

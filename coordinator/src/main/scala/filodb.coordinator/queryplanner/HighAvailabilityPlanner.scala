@@ -71,8 +71,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     lazy val failures = failureProvider.getFailures(dsRef, routingTime).sortBy(_.timeRange.startMs)
 
     val tsdbQueryParams = qContext.origQueryParams
-    if (!isPeriodicSeriesPlan(logicalPlan) || // It is a raw data query
-        !logicalPlan.isRoutable ||
+    if (!logicalPlan.isRoutable ||
         !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
         (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
           && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
