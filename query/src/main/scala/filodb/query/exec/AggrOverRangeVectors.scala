@@ -7,7 +7,7 @@ import scalaxy.loops._
 
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query.{exec, _}
+import filodb.query. _
 import filodb.query.exec.aggregator.RowAggregator
 
 /**
@@ -82,7 +82,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
-    val aggregator = RowAggregator.RowAggregator(aggrOp, aggrParams, source)
+    val aggregator = RowAggregator(aggrOp, aggrParams, source)
     // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
     aggregator.reductionSchema(source)
   }

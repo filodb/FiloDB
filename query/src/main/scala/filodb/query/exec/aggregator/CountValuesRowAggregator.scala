@@ -12,7 +12,7 @@ import filodb.memory.format.{RowReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 
 /**
-  * Map: Every sample is mapped to map with value as key and 1 as value
+  * Map: Every sample is mapped to frequency map with value as key and 1 as initial frequency
   * ReduceMappedRow: Same as ReduceAggregate
   * ReduceAggregate: Accumulator maintains a map for values and their frequencies. Reduction happens
   *                  by deserializing items blob into map and aggregating with frequencies of map of accumulator
@@ -28,9 +28,9 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     val frequencyMap = debox.Map[Double, Int]()
     val row = new CountValuesTransientRow
     def toRowReader: MutableRowReader = {
-      val size = frequencyMap.size * 12
+      val size = frequencyMap.size * CountValuesSerDeser.sampleSize
       if (serializedMap.length < size) serializedMap = new Array[Byte](size) // Create bigger array
-      CountValuesTransientRow.serialize(frequencyMap, serializedMap)
+      CountValuesSerDeser.serialize(frequencyMap, serializedMap)
       row.setLong(0, timestamp)
       row.setBlob(1, serializedMap, UnsafeUtils.arayOffset, size)
       row
@@ -60,8 +60,8 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     mapInto.setLong(0, item.getLong(0))
     rowMap.clear()
     rowMap(item.getDouble(1)) = 1
-    CountValuesTransientRow.serialize(rowMap, serializedMap)
-    mapInto.setBlob(1, serializedMap, UnsafeUtils.arayOffset, rowMap.size * 12)
+    CountValuesSerDeser.serialize(rowMap, serializedMap)
+    mapInto.setBlob(1, serializedMap, UnsafeUtils.arayOffset, rowMap.size * CountValuesSerDeser.sampleSize)
     mapInto
   }
 
@@ -69,12 +69,12 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
     acc.timestamp = aggRes.getLong(0)
 
     // No need to create map when there is only one value
-    if (CountValuesTransientRow.hasOneSample(aggRes.getBlobNumBytes(1))) {
-      acc.addValue(CountValuesTransientRow.getValueForOneSample(aggRes.getBlobBase(1),
-        aggRes.getBlobOffset(1)), CountValuesTransientRow.getCountForOneSample(
+    if (CountValuesSerDeser.hasOneSample(aggRes.getBlobNumBytes(1))) {
+      acc.addValue(CountValuesSerDeser.getValueForOneSample(aggRes.getBlobBase(1),
+        aggRes.getBlobOffset(1)), CountValuesSerDeser.getCountForOneSample(
         aggRes.getBlobBase(1), aggRes.getBlobOffset(1)) )
     } else {
-      val aggMap = CountValuesTransientRow.deserialize(aggRes.getBlobBase(1),
+      val aggMap = CountValuesSerDeser.deserialize(aggRes.getBlobBase(1),
         aggRes.getBlobNumBytes(1), aggRes.getBlobOffset(1))
       aggMap.keysSet.foreach(x => acc.addValue(x, aggMap.get(x).get))
     }
@@ -92,7 +92,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       // aggRangeVector.rows.take below triggers the ChunkInfoIterator which requires lock/release
       ChunkMap.validateNoSharedLocks(s"CountValues-$label")
       aggRangeVector.rows.take(limit).foreach { row =>
-        val rowMap = CountValuesTransientRow.deserialize(row.getBlobBase(1),
+        val rowMap = CountValuesSerDeser.deserialize(row.getBlobBase(1),
           row.getBlobNumBytes(1), row.getBlobOffset(1))
         rowMap.foreach { (k, v) =>
           val rvk = CustomRangeVectorKey(aggRangeVector.key.labelValues +

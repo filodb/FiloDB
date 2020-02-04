@@ -307,7 +307,9 @@ final class CountValuesTransientRow() extends MutableRowReader {
   }
 }
 
-object CountValuesTransientRow {
+object CountValuesSerDeser {
+
+  val sampleSize = 12 // 8 for Double and 4 for Int
 
   // TODO can be serialized and compressed more efficiently by using histogram like type
   def serialize(map: debox.Map[Double, Int], serializedMap: Array[Byte]): Array[Byte] = {
@@ -315,15 +317,15 @@ object CountValuesTransientRow {
     map.foreach {(k, v) =>
       UnsafeUtils.setDouble(serializedMap, UnsafeUtils.arayOffset + index, k)
       UnsafeUtils.setInt(serializedMap, UnsafeUtils.arayOffset + index + 8, v)
-      index += 12
+      index += sampleSize
     }
     serializedMap
   }
 
   def deserialize(buf: Any, size: Int, offset: Long): debox.Map[Double, Int] = {
     val frequencyMap = debox.Map[Double, Int]()
-    for (i <-0 until size/12) {
-      val index = i * 12 // 8 bytes for double and 4 for Int
+    for (i <-0 until size/sampleSize) {
+      val index = i * sampleSize
       val key = UnsafeUtils.getDouble(buf, offset + index)
       val value = UnsafeUtils.getInt(buf, offset + index + 8)
       frequencyMap(key) = value
@@ -331,11 +333,11 @@ object CountValuesTransientRow {
     frequencyMap
   }
 
- def hasOneSample(size: Int) : Boolean = (size == 12) // 8 for Double and 4 for Int
+ def hasOneSample(size: Int): Boolean = (size == sampleSize)
 
  // Return just value when only one sample is present
-  def getValueForOneSample(buf: Any, offset: Long): Double = UnsafeUtils.getDouble(buf, offset)
+ def getValueForOneSample(buf: Any, offset: Long): Double = UnsafeUtils.getDouble(buf, offset)
 
-  // Return just count when only one sample is present
-  def getCountForOneSample(buf: Any, offset: Long): Int = UnsafeUtils.getInt(buf, offset + 8)
+ // Return just count when only one sample is present
+ def getCountForOneSample(buf: Any, offset: Long): Int = UnsafeUtils.getInt(buf, offset + 8)
 }
