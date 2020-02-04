@@ -24,8 +24,6 @@ object DSIndexJobSettings extends StrictLogging {
 
   val batchSize = dsIndexJobConfig.getInt("cass-write-batch-size")
 
-  val batchTime = dsIndexJobConfig.as[FiniteDuration]("cass-write-batch-time")
-
   val splitsPerNode = dsIndexJobConfig.getInt("splits-per-node")
 
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
