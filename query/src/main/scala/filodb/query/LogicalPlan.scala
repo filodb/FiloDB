@@ -145,6 +145,8 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       ignoring: Seq[String] = Nil,
                       include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
+
+  override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
 }
 
 /**
@@ -155,6 +157,8 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vector)
+
+  override def isRoutable: Boolean = vector.isRoutable
 }
 
 /**
@@ -166,6 +170,8 @@ case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+
+  override def isRoutable: Boolean = vectors.isRoutable
 }
 
 /**
@@ -246,6 +252,8 @@ final case class ScalarFixedDoublePlan(scalar: Double,
   */
 final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
+
+  override def isRoutable: Boolean = scalars.isRoutable
 }
 
 /**
