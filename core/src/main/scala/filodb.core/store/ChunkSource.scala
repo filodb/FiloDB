@@ -168,23 +168,23 @@ trait RawToPartitionMaker {
  * Statistics for a ChunkSource.  Some of this is used by unit tests.
  */
 class ChunkSourceStats {
-  private val readPartitionsCtr  = Kamon.counter("read-partitions")
-  private val readChunksetsCtr   = Kamon.counter("read-chunksets")
-  private val chunkNoInfoCtr     = Kamon.counter("read-chunks-with-no-info")
+  private val readPartitionsCtr  = Kamon.counter("read-partitions").withoutTags
+  private val readChunksetsCtr   = Kamon.counter("read-chunksets").withoutTags
+  private val chunkNoInfoCtr     = Kamon.counter("read-chunks-with-no-info").withoutTags
   var readChunkSets: Int = 0
   var readPartitions: Int = 0
 
   def incrReadPartitions(numPartitions: Int): Unit = {
-    readPartitionsCtr.withoutTags().increment(numPartitions)
+    readPartitionsCtr.increment(numPartitions)
     readPartitions += numPartitions
   }
 
   def incrReadChunksets(): Unit = {
-    readChunksetsCtr.withoutTags().increment
+    readChunksetsCtr.increment
     readChunkSets += 1
   }
 
-  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.withoutTags().increment }
+  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment }
 }
 
 final case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer)

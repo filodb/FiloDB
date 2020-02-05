@@ -52,9 +52,9 @@ object ChunkMap extends StrictLogging {
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
   private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
 
-  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
-  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
-  private val chunkEvictions = Kamon.counter("memory-chunk-evictions")
+  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").withoutTags
+  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering").withoutTags
+  private val chunkEvictions = Kamon.counter("memory-chunk-evictions").withoutTags
 
   // Tracks all the shared locks held, by each thread.
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {
@@ -100,7 +100,7 @@ object ChunkMap extends StrictLogging {
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
           total += amt
-          sharedLockLingering.withoutTags().increment(amt)
+          sharedLockLingering.increment(amt)
           _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
           var lockState = 0
           do {
@@ -275,7 +275,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
           // this is a bug which needs to be fixed.
           throw new IllegalStateException("Cannot acquire exclusive lock because thread already owns a shared lock")
         }
-        exclusiveLockWait.withoutTags().increment()
+        exclusiveLockWait.increment
         _logger.warn(s"Waiting for exclusive lock: $this")
         locks1 = new ConcurrentHashMap[Thread, String](execPlanTracker)
         warned = true
@@ -467,7 +467,7 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
           if (evictKey == Long.MinValue || chunkmapKeyRetrieve(arrayGet(first)) > evictKey) {
             throw e
           }
-          chunkEvictions.withoutTags().increment()
+          chunkEvictions.increment
           first += 1
           if (first >= capacity) {
             // Wraparound.

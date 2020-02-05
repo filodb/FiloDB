@@ -16,7 +16,7 @@ import monix.eval.Task
 import filodb.core._
 
 object FiloCassandraConnector {
-  val cassRetriesScheduledCount = Kamon.counter("cassandra-retries-scheduled")
+  val cassRetriesScheduledCount = Kamon.counter("cassandra-retries-scheduled").withoutTags
 }
 
 trait FiloCassandraConnector extends StrictLogging {
@@ -63,7 +63,7 @@ trait FiloCassandraConnector extends StrictLogging {
                  _: ConnectionException ) =>
         logger.warn(s"CQL execution of $statement resulted in error. Will retry $retryAttemptsLeft times", e)
         if (retryAttemptsLeft > 0) {
-          FiloCassandraConnector.cassRetriesScheduledCount.withoutTags().increment()
+          FiloCassandraConnector.cassRetriesScheduledCount.increment
           scheduleRetry(baseRetryInterval + ThreadLocalRandom.current().nextInt(retryIntervalMaxJitter).millis) {
             attemptExecute(statement, retryAttemptsLeft - 1)
           }.runAsync.flatMap(r=>r)

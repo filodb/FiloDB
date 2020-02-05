@@ -18,7 +18,7 @@ import filodb.query._
 import filodb.query.exec._
 
 object SingleClusterPlanner {
-  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
 }
 
 /**
@@ -332,7 +332,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val shardsToHit = if (shardColumns.toSet.subsetOf(lp.labelConstraints.keySet)) {
       shardsFromFilters(filters, options)
     } else {
-      mdNoShardKeyFilterRequests.withoutTags().increment()
+      mdNoShardKeyFilterRequests.increment
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>
@@ -351,7 +351,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val shardsToHit = if (shardColumns.toSet.subsetOf(filterCols)) {
       shardsFromFilters(lp.filters, options)
     } else {
-      mdNoShardKeyFilterRequests.withoutTags().increment()
+      mdNoShardKeyFilterRequests.increment
       shardMapperFunc.assignedShards
     }
     val metaExec = shardsToHit.map { shard =>

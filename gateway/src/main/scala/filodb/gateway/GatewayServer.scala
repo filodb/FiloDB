@@ -56,17 +56,19 @@ import filodb.timeseries.TestTimeseriesProducer
  * Oh, and you have to observe on shards 1 and 3.
  */
 object GatewayServer extends StrictLogging {
+  Kamon.init
+
   // Get global configuration using universal FiloDB/Akka-based config
   val settings = new FilodbSettings()
   val config = settings.allConfig
   val storeFactory = StoreFactory(settings, Scheduler.io())
 
   // ==== Metrics ====
-  val numInfluxMessages = Kamon.counter("num-influx-messages")
-  val numInfluxParseErrors = Kamon.counter("num-influx-parse-errors")
-  val numDroppedMessages = Kamon.counter("num-dropped-messages")
-  val numContainersSent = Kamon.counter("num-containers-sent")
-  val containersSize = Kamon.histogram("containers-size-bytes")
+  val numInfluxMessages = Kamon.counter("num-influx-messages").withoutTags
+  val numInfluxParseErrors = Kamon.counter("num-influx-parse-errors").withoutTags
+  val numDroppedMessages = Kamon.counter("num-dropped-messages").withoutTags
+  val numContainersSent = Kamon.counter("num-containers-sent").withoutTags
+  val containersSize = Kamon.histogram("containers-size-bytes").withoutTags
 
   // Most options are for generating test data
   class GatewayOptions(args: Seq[String]) extends ScallopConf(args) {
@@ -81,7 +83,6 @@ object GatewayServer extends StrictLogging {
 
   //scalastyle:off method.length
   def main(args: Array[String]): Unit = {
-    Kamon.init
     val userOpts = new GatewayOptions(args)
     val numSamples = userOpts.samplesPerSeries() * userOpts.numSeries()
     val numSeries = userOpts.numSeries()
@@ -102,18 +103,18 @@ object GatewayServer extends StrictLogging {
     def calcShardAndQueueHandler(buf: ChannelBuffer): Unit = {
       val initIndex = buf.readerIndex
       val len = buf.readableBytes
-      numInfluxMessages.withoutTags.increment
+      numInfluxMessages.increment
       InfluxProtocolParser.parse(buf) map { record =>
         logger.trace(s"Enqueuing: $record")
         val shard = shardMapper.ingestionShard(record.shardKeyHash, record.partitionKeyHash, spread)
         if (!shardQueues(shard).offer(record)) {
           // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
           logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
-          numDroppedMessages.withoutTags.increment
+          numDroppedMessages.increment
           // Thread sleep queueFullWait
         }
       } getOrElse {
-        numInfluxParseErrors.withoutTags.increment
+        numInfluxParseErrors.increment
         logger.warn(s"Could not parse:\n${buf.toString(initIndex, len, Charset.defaultCharset)}")
       }
     }
@@ -135,7 +136,7 @@ object GatewayServer extends StrictLogging {
         if (!shardQueues(shard).offer(rec)) {
           // Prioritize recent data.  This means dropping messages when full, so new data may have a chance.
           logger.warn(s"Queue for shard=$shard is full.  Dropping data.")
-          numDroppedMessages.withoutTags.increment
+          numDroppedMessages.increment
         }
       }
       Thread sleep 10000
@@ -250,10 +251,10 @@ object GatewayServer extends StrictLogging {
          (System.currentTimeMillis - sendTime(shard)) > 1000)) {
       sendTime(shard) = System.currentTimeMillis
       val out = if (numContainers > 1) {   // First container probably full.  Send only the first container
-        numContainersSent.withoutTags.increment(numContainers - 1)
+        numContainersSent.increment(numContainers - 1)
         (shard, builder.nonCurrentContainerBytes(reset = true))
       } else {    // only one container.  Get the smallest bytes possible as its probably not full
-        numContainersSent.withoutTags.increment
+        numContainersSent.increment
         (shard, builder.optimalContainerBytes(reset = true))
       }
       logger.debug(s"Sending ${out._2.length} containers, ${out._2.map(_.size).sum} bytes from shard=$shard")

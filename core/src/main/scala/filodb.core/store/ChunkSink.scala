@@ -74,37 +74,37 @@ trait ChunkSink {
  * Stats for a ChunkSink
  */
 class ChunkSinkStats {
-  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call")
-  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call")
-  private val chunkLenHist       = Kamon.histogram("chunk-length")
+  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call").withoutTags
+  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call").withoutTags
+  private val chunkLenHist       = Kamon.histogram("chunk-length").withoutTags
 
-  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num")
-  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
+  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num").withoutTags
+  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call").withoutTags
 
-  private val chunksetWrites     = Kamon.counter("chunkset-writes")
-  private val partKeysWrites     = Kamon.counter("partKey-writes")
+  private val chunksetWrites     = Kamon.counter("chunkset-writes").withoutTags
+  private val partKeysWrites     = Kamon.counter("partKey-writes").withoutTags
 
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
-    chunksPerCallHist.withoutTags().record(numChunks)
-    chunkBytesHist.withoutTags().record(totalChunkBytes)
-    chunkLenHist.withoutTags().record(chunkLen)
+    chunksPerCallHist.record(numChunks)
+    chunkBytesHist.record(totalChunkBytes)
+    chunkLenHist.record(chunkLen)
   }
 
   def addIndexWriteStats(indexBytes: Long): Unit = {
-    numIndexWriteCalls.withoutTags().increment
-    indexBytesHist.withoutTags().record(indexBytes)
+    numIndexWriteCalls.increment
+    indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {
-    chunksetWrites.withoutTags().increment
+    chunksetWrites.increment
     chunksetsWritten.incrementAndGet()
   }
 
   def partKeysWrite(numKeys: Int): Unit = {
-    partKeysWrites.withoutTags().increment(numKeys)
+    partKeysWrites.increment(numKeys)
     partKeysWritten.addAndGet(numKeys)
   }
 }

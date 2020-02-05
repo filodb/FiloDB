@@ -152,7 +152,7 @@ trait ExecPlan extends QueryCommand {
           .toListL
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
-            SerializedRangeVector.queryResultBytes.withoutTags().record(numBytes)
+            SerializedRangeVector.queryResultBytes.record(numBytes)
             if (numBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
