@@ -19,7 +19,8 @@ import filodb.query._
 
 case class PromQlExec(id: String,
                       dispatcher: PlanDispatcher,
-                      dataset: DatasetRef, params: PromQlInvocationParams,
+                      dataset: DatasetRef,
+                      params: PromQlInvocationParams,
                       submitTime: Long = System.currentTimeMillis())
                       extends LeafExecPlan {
 
@@ -105,8 +106,11 @@ object PromQlExec extends  StrictLogging{
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").get
     val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
-    var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
-      "processFailure" -> params.processFailure)
+    var urlParams = Map("query" -> params.promQl,
+                        "start" -> params.startSecs,
+                        "end" -> params.endSecs,
+                        "step" -> params.stepSecs,
+                        "processFailure" -> params.processFailure)
     if (params.spread.isDefined)
       urlParams = urlParams + ("spread" -> params.spread.get)
 

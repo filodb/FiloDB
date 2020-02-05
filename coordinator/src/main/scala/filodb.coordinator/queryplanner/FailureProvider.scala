@@ -19,10 +19,10 @@ object EmptyFailureProvider extends FailureProvider {
 /**
   * Time range.
   *
-  * @param startInMillis epoch time in millis.
-  * @param endInMillis   epoch time in millis.
+  * @param startMs epoch time in millis.
+  * @param endMs   epoch time in millis.
   */
-case class TimeRange(startInMillis: Long, endInMillis: Long)
+case class TimeRange(startMs: Long, endMs: Long)
 
 /**
   * Failure details.

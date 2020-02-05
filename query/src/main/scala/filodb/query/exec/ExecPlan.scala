@@ -285,7 +285,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
       qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
       QueryError(execPlan.id, ex)
     }.map {
-      case (QueryResult(_, _, result))  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
+      case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
                                             if (result.isEmpty) {
                                               ScalarFixedDouble(timeStepParams, Double.NaN)
                                             } else {
@@ -294,7 +294,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                                                 case s: ScalarVaryingDouble => s
                                               }
                                             }
-      case (QueryError(_, ex))          =>  throw ex
+      case QueryError(_, ex)          =>  throw ex
     })
   }
 

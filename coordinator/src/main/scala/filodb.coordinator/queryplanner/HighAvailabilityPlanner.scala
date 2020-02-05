@@ -46,16 +46,16 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val routingConfig = queryEngineConfig.getConfig("routing")
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
-            timeRange.startInMillis / 1000, queryParams.step, timeRange.endInMillis / 1000,
+            timeRange.startMs / 1000, queryParams.stepSecs, timeRange.endMs / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
-          PromQlExec(qContext.queryId, InProcessPlanDispatcher(), dsRef, promQlInvocationParams, qContext.submitTime)
+          PromQlExec(qContext.queryId, InProcessPlanDispatcher, dsRef, promQlInvocationParams, qContext.submitTime)
       }
     }
 
     if (execPlans.size == 1) execPlans.head
     else StitchRvsExec(qContext.queryId,
-                       InProcessPlanDispatcher(),
+                       InProcessPlanDispatcher,
                        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
     // Sort to move RemoteExec in end as it does not have schema
@@ -66,9 +66,9 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
     // lazy because we want to fetch failures only if needed
     lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-    lazy val lookBackTime = getRawSeriesStartTime(logicalPlan).map(periodicSeriesTime.startInMillis - _).get
-    lazy val routingTime = TimeRange(periodicSeriesTime.startInMillis - lookBackTime, periodicSeriesTime.endInMillis)
-    lazy val failures = failureProvider.getFailures(dsRef, routingTime).sortBy(_.timeRange.startInMillis)
+    lazy val lookBackTime = getRawSeriesStartTime(logicalPlan).map(periodicSeriesTime.startMs - _).get
+    lazy val routingTime = TimeRange(periodicSeriesTime.startMs - lookBackTime, periodicSeriesTime.endMs)
+    lazy val failures = failureProvider.getFailures(dsRef, routingTime).sortBy(_.timeRange.startMs)
 
     val tsdbQueryParams = qContext.origQueryParams
     if (!logicalPlan.isRoutable ||
@@ -80,14 +80,14 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
       localPlanner.materialize(logicalPlan, qContext)
     } else {
       val promQlQueryParams = tsdbQueryParams.asInstanceOf[PromQlQueryParams]
-      val routes = if (promQlQueryParams.start == promQlQueryParams.end) { // Instant Query
+      val routes = if (promQlQueryParams.startSecs == promQlQueryParams.endSecs) { // Instant Query
         if (failures.forall(!_.isRemote)) {
-          Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startInMillis, periodicSeriesTime.endInMillis))))
+          Seq(RemoteRoute(Some(TimeRange(periodicSeriesTime.startMs, periodicSeriesTime.endMs))))
         } else {
           Seq(LocalRoute(None))
         }
       } else {
-        plan(failures, periodicSeriesTime, lookBackTime, promQlQueryParams.step * 1000)
+        plan(failures, periodicSeriesTime, lookBackTime, promQlQueryParams.stepSecs * 1000)
       }
       logger.debug("Routes: " + routes)
       routeExecPlanMapper(routes, logicalPlan, qContext, lookBackTime)

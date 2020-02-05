@@ -98,8 +98,7 @@ trait Functions extends Base with Operators with Vectors {
         ApplyMiscellaneousFunction(periodicSeriesPlan, miscellaneousFunctionId, stringParam)
       } else if (scalarFunctionIdOpt.isDefined) {
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)
-        val params = RangeParams(timeParams.start, timeParams.step, timeParams.end)
-        ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get, params)
+        ScalarVaryingDoublePlan(periodicSeriesPlan, scalarFunctionIdOpt.get)
       } else if (sortFunctionIdOpt.isDefined) {
         val sortFunctionId = sortFunctionIdOpt.get
         val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toSeriesPlan(timeParams)

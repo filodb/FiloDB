@@ -66,7 +66,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate Scalar exec plan") {
     val lp = Parser.queryToLogicalPlan("scalar(test{job = \"app\"})", 1000)
-    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -88,7 +87,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate scalar time based plan") {
     val logicalPlan = ScalarTimeBasedPlan(Time, RangeParams(1524855988, 1000, 1524858988))
     val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = promQlQueryParams))
-    val expected = "E~TimeScalarGeneratorExec(params=RangeParams(1524855988,1000,1524858988), function=Time) on InProcessPlanDispatcher()"
+    val expected = "E~TimeScalarGeneratorExec(params=RangeParams(1524855988,1000,1524858988), function=Time) on InProcessPlanDispatcher"
     execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual (true)
     val scalarTimeBasedExec = execPlan.asInstanceOf[TimeScalarGeneratorExec]
     scalarTimeBasedExec.function.shouldEqual(ScalarFunctionId.Time)
@@ -99,7 +98,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarOperationMapper exec plan for query http_requests_total + time()") {
     val lp = Parser.queryToLogicalPlan("http_requests_total{job = \"app\"} + time()", 1000)
-    val logicalPlan = ScalarVaryingDoublePlan(summed1, ScalarFunctionId.withName("scalar"), RangeParams(100, 2, 300))
 
     // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
@@ -182,7 +180,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val expected =
       """T~ScalarOperationMapper(operator=ADD, scalarOnLhs=false)
         |-FA1~StaticFuncArgs(10.0,RangeParams(1000,1000,1000))
-        |-E~TimeScalarGeneratorExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher()""".stripMargin
+        |-E~TimeScalarGeneratorExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 
@@ -219,7 +217,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
         |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true)
         |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-2114470773])
-        |-E~TimeScalarGeneratorExec(params = RangeParams(1000,1000,1000), function = Time) on InProcessPlanDispatcher()""".stripMargin
+        |-E~TimeScalarGeneratorExec(params = RangeParams(1000,1000,1000), function = Time) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 
@@ -267,7 +265,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
-        |-E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=2000.0) on InProcessPlanDispatcher()""".stripMargin
+        |-E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=2000.0) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 
@@ -276,7 +274,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
       """T~VectorFunctionMapper(funcParams=List())
-        |-E~TimeScalarGeneratorExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher()""".stripMargin
+        |-E~TimeScalarGeneratorExec(params=RangeParams(1000,1000,1000), function=Time) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 
@@ -286,7 +284,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val expected =
       """T~InstantVectorFunctionMapper(function=Minute)
         |-T~VectorFunctionMapper(funcParams=List())
-        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.136239445E9) on InProcessPlanDispatcher()
+        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.136239445E9) on InProcessPlanDispatcher
         |""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
@@ -297,7 +295,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val expected =
       """T~InstantVectorFunctionMapper(function=DaysInMonth)
         |-T~VectorFunctionMapper(funcParams=List())
-        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.4542848E9) on InProcessPlanDispatcher()""".stripMargin
+        |--E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.4542848E9) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 
@@ -305,13 +303,13 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("month(vector(1456790399)) + day_of_month(vector(1456790399))", 1000)
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     val expected =
-      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher()
+      """E~BinaryJoinExec(binaryOp=ADD, on=List(), ignoring=List()) on InProcessPlanDispatcher
         |-T~InstantVectorFunctionMapper(function=Month)
         |--T~VectorFunctionMapper(funcParams=List())
-        |---E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.456790399E9) on InProcessPlanDispatcher()
+        |---E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.456790399E9) on InProcessPlanDispatcher
         |-T~InstantVectorFunctionMapper(function=DayOfMonth)
         |--T~VectorFunctionMapper(funcParams=List())
-        |---E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.456790399E9) on InProcessPlanDispatcher()""".stripMargin
+        |---E~ScalarFixedDoubleExec(params=RangeParams(1000,1000,1000), value=1.456790399E9) on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 

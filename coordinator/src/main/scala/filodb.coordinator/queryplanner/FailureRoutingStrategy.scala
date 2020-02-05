@@ -16,15 +16,15 @@ object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
     */
   private def removeSmallerOverlappingFailures(failures: Seq[FailureTimeRange]): Seq[FailureTimeRange] = {
 
-    failures.sortWith(_.timeRange.startInMillis < _.timeRange.startInMillis).
+    failures.sortWith(_.timeRange.startMs < _.timeRange.startMs).
       foldLeft(Seq[FailureTimeRange]()) { (buildList, tail) =>
         buildList match {
           case Nil => Seq(tail)
           case head :+ value =>
-            if (value.timeRange.endInMillis >= tail.timeRange.startInMillis) {
+            if (value.timeRange.endMs >= tail.timeRange.startMs) {
               // Remove larger overlapping interval
-              if ((value.timeRange.endInMillis - value.timeRange.startInMillis) <
-                (tail.timeRange.endInMillis - tail.timeRange.startInMillis)) {
+              if ((value.timeRange.endMs - value.timeRange.startMs) <
+                (tail.timeRange.endMs - tail.timeRange.startMs)) {
                 buildList.dropRight(1) :+ tail
               }
               else {
@@ -49,14 +49,14 @@ object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
   def plan(failures: Seq[FailureTimeRange], time: TimeRange, lookbackTime: Long, step: Long): Seq[Route] = {
 
     val nonOverlappingFailures = removeSmallerOverlappingFailures(failures)
-    if ((nonOverlappingFailures.last.timeRange.endInMillis < time.startInMillis) ||
-      (nonOverlappingFailures.head.timeRange.startInMillis > time.endInMillis)) {
+    if ((nonOverlappingFailures.last.timeRange.endMs < time.startMs) ||
+      (nonOverlappingFailures.head.timeRange.startMs > time.endMs)) {
        Seq(LocalRoute(None)) // No failure in this time range
     }
     logger.info("Logical plan time:" + time)
 
     // Recursively split query into local and remote routes starting from first FailureTimeRange
-    splitQueryTime(nonOverlappingFailures, 0, time.startInMillis - lookbackTime, time.endInMillis, lookbackTime,
+    splitQueryTime(nonOverlappingFailures, 0, time.startMs - lookbackTime, time.endMs, lookbackTime,
      step)
   }
 
@@ -93,7 +93,7 @@ object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
       // need further splitting
       if (i < failure.length) {
         val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack,
-          failure(i).timeRange.startInMillis, step)
+          failure(i).timeRange.startMs, step)
         // Query from current start time till next remote failure starts should be executed remotely
         // Routes should have Periodic series time so add lookbackTime
         RemoteRoute(Some(TimeRange(startWithLookBack, lastSampleTime))) +:
@@ -106,11 +106,11 @@ object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
 
     } else {
       // Iterate till we get a local failure
-      while ((i < failure.length) && (failure(i).isRemote))
+      while ((i < failure.length) && failure(i).isRemote)
         i = i + 1
       if (i < failure.length) {
         val lastSampleTime = getLastSampleTimeWithStep(startWithLookBack,
-          failure(i).timeRange.startInMillis, step )
+          failure(i).timeRange.startMs, step )
         // Query from current start time till next local failure starts should be executed locally
         LocalRoute(Some(TimeRange(startWithLookBack, lastSampleTime))) +:
           splitQueryTime(failure, i, lastSampleTime + step, end, lookbackTime, step)

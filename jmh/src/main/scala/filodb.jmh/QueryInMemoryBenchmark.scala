@@ -14,7 +14,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.queryplanner.{EmptyFailureProvider}
+import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
@@ -103,9 +103,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves
-  import filodb.coordinator.queryplanner.CompositePlanner
-
-  val engine = new CompositePlanner(dataset.ref, Schemas(dataset.schema), shardMapper, EmptyFailureProvider)
+  val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper)
 
   /**
    * ## ========  Queries ===========

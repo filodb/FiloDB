@@ -539,7 +539,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
       val exec = MultiSchemaPartitionsExec("someId", System.currentTimeMillis(),
-        1000, InProcessPlanDispatcher(), BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+        1000, InProcessPlanDispatcher, BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
       val queryConfig = new QueryConfig(DownsamplerSettings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)

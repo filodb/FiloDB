@@ -12,7 +12,7 @@ object LogicalPlanUtils {
       case binaryJoin: BinaryJoin =>
         val lhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.lhs)
         val rhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.rhs)
-        (lhsTime.startInMillis == rhsTime.startInMillis) && (lhsTime.endInMillis == rhsTime.endInMillis)
+        (lhsTime.startMs == rhsTime.startMs) && (lhsTime.endMs == rhsTime.endMs)
       case _ => true
     }
   }
@@ -23,8 +23,8 @@ object LogicalPlanUtils {
     */
   def getPeriodicSeriesTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
-      case lp: PeriodicSeries              => TimeRange(lp.start, lp.end)
-      case lp: PeriodicSeriesWithWindowing => TimeRange(lp.start, lp.end)
+      case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
+      case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
       case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: BinaryJoin                  => // can assume lhs & rhs have same time
@@ -48,12 +48,12 @@ object LogicalPlanUtils {
                                timeRange: TimeRange,
                                lookBackTime: Long): PeriodicSeriesPlan = {
     logicalPlan match {
-      case lp: PeriodicSeries => lp.copy(start = timeRange.startInMillis,
-                                         end = timeRange.endInMillis,
+      case lp: PeriodicSeries => lp.copy(startMs = timeRange.startMs,
+                                         endMs = timeRange.endMs,
                                          rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange,
                                                                          lookBackTime).asInstanceOf[RawSeries])
-      case lp: PeriodicSeriesWithWindowing => lp.copy(start = timeRange.startInMillis,
-                                                      end = timeRange.endInMillis,
+      case lp: PeriodicSeriesWithWindowing => lp.copy(startMs = timeRange.startMs,
+                                                      endMs = timeRange.endMs,
                                                       series = copyNonPeriodicWithUpdatedTimeRange(lp.series, timeRange,
                                                                                                    lookBackTime))
       case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
@@ -82,8 +82,8 @@ object LogicalPlanUtils {
                                                   lookBackTime: Long): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
-        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startInMillis - lookBackTime,
-          timeRange.endInMillis))
+        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs - lookBackTime,
+          timeRange.endMs))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
       case p: ApplyInstantFunctionRaw =>
