@@ -65,7 +65,7 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
   }
 
   private def formatTags(tags: TagSet) = tags.iterator(tagPair => tagPair.toString)
-    .map{case (t) => s"${t.key}=${t.value}"}.mkString(" ")
+    .map{case t => s"${t.key}=${t.value}"}.mkString(" ")
 
   private def normalizeLabelName(label: String): String =
     label.map(charOrUnderscore)
@@ -80,14 +80,6 @@ class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
       case Information  => normalizedMetricName + "_bytes"
       case _            => normalizedMetricName
     }
-  }
-
-  private def scale(value: Long, unit: MeasurementUnit): Double = unit.dimension match {
-    case Time if unit.magnitude != time.seconds.magnitude =>
-      MeasurementUnit.convert(value, unit, time.seconds)
-    case Information  if unit.magnitude != information.bytes.magnitude  =>
-      MeasurementUnit.convert(value, unit, information.bytes)
-    case _ => value
   }
 
   private def scale(value: Double, unit: MeasurementUnit): Double = unit.dimension match {

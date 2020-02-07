@@ -92,7 +92,7 @@ final class QueryActor(memStore: MemStore,
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    epRequests.increment
+    epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     val span = Kamon.spanBuilder(s"execplan2-${q.getClass.getSimpleName}")
       .tag("query-id", q.id)
@@ -104,7 +104,7 @@ final class QueryActor(memStore: MemStore,
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
-           queryErrors.increment
+           queryErrors.increment()
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
            e.t match {
              case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
@@ -122,7 +122,7 @@ final class QueryActor(memStore: MemStore,
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
     // This is for CLI use only. Always prefer clients to materialize logical plan
-    lpRequests.increment
+    lpRequests.increment()
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       self forward execPlan

@@ -145,7 +145,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
-      shardStats.partitionsRestored.increment
+      shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
     // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
     // as opposed to ingestSched

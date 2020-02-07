@@ -180,11 +180,11 @@ class ChunkSourceStats {
   }
 
   def incrReadChunksets(): Unit = {
-    readChunksetsCtr.increment
+    readChunksetsCtr.increment()
     readChunkSets += 1
   }
 
-  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment }
+  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment() }
 }
 
 final case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer)

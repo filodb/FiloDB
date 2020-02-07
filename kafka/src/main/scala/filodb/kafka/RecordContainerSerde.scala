@@ -20,7 +20,7 @@ final class RecordContainerDeserializer extends Deserializer[RecordContainer] wi
 
   override def deserialize(topic: String, data: Array[Byte]): RecordContainer = {
     tsBatchSize.record(data.size)
-    tsCount.increment
+    tsCount.increment()
     RecordContainer(data)
   }
 }

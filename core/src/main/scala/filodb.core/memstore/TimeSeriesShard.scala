@@ -471,7 +471,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       if (schema != Schemas.UnknownSchema) {
         val group = partKeyGroup(schema.ingestionSchema, recBase, recOffset, numGroups)
         if (ingestOffset < groupWatermark(group)) {
-          shardStats.rowsSkipped.increment
+          shardStats.rowsSkipped.increment()
           try {
             // Needed to update index with new partitions added during recovery with correct startTime.
             // This is important to do since the group designated for dirty part key persistence can
@@ -492,7 +492,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       } else {
         logger.debug(s"Unknown schema ID $schemaId will be ignored during ingestion")
-        shardStats.unknownSchemaDropped.increment
+        shardStats.unknownSchemaDropped.increment()
       }
     }
   }
@@ -519,7 +519,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         _offset = offset
       }
     } else {
-      shardStats.oldContainers.increment
+      shardStats.oldContainers.increment()
     }
     _offset
   }
@@ -573,7 +573,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         }
       } else {
         logger.info(s"Ignoring part key with unknown schema ID $schemaId")
-        shardStats.unknownSchemaDropped.increment
+        shardStats.unknownSchemaDropped.increment()
         -1
       }
     } else {
@@ -978,7 +978,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     colStore.write(ref, chunkSetStream, storeConfig.diskTTLSeconds).recover { case e =>
       logger.error(s"Critical! Chunk persistence failed after retries and skipped in dataset=$ref " +
         s"shard=$shardNum", e)
-      shardStats.flushesFailedChunkWrite.increment
+      shardStats.flushesFailedChunkWrite.increment()
 
       // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
       // never be freed.
@@ -1019,11 +1019,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     // negative checkpoints are refused by Kafka, and also offsets should be positive
     if (flushGroup.flushWatermark > 0) {
       val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
-        shardStats.flushesSuccessful.increment
+        shardStats.flushesSuccessful.increment()
         r
       }.recover { case e =>
         logger.error(s"Critical! Checkpoint persistence skipped in dataset=$ref shard=$shardNum", e)
-        shardStats.flushesFailedOther.increment
+        shardStats.flushesFailedOther.increment()
         // skip the checkpoint write
         // Sorry - need to skip to keep the ingestion moving
         DataDropped
@@ -1204,7 +1204,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           partId, schema, partKeyAddr, shardNum, pool, shardStats, bufferMemoryManager, initMapSize)
       }
       partitions.put(partId, newPart)
-      shardStats.partitionsCreated.increment
+      shardStats.partitionsCreated.increment()
       partitionGroups(group).set(partId)
       newPart
     }
@@ -1215,7 +1215,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (addPartitionsDisabled.compareAndSet(false, true))
       logger.warn(s"dataset=$ref shard=$shardNum: Out of buffer memory and not able to evict enough; " +
         s"adding partitions disabled")
-    shardStats.dataDropped.increment
+    shardStats.dataDropped.increment()
   }
 
   private def checkEnableAddPartitions(): Unit = {
