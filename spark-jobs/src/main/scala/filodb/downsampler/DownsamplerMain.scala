@@ -99,7 +99,6 @@ class Downsampler extends StrictLogging {
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
-    spark.sparkContext.stop()
 
     logger.info(s"Downsampling Driver completed successfully")
   }
