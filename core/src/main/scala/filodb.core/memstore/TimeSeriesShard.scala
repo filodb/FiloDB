@@ -80,6 +80,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").refine(tags)
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
+  val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
@@ -1403,6 +1404,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       // No matter if there are filters or not, need to run things through Lucene so we can discover potential
       // TSPartitions to read back from disk
       val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+      shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
 
       if (matches.length > storeConfig.maxQueryMatches)
         throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
