@@ -307,7 +307,7 @@ class AppendableHistogramVector(factory: MemFactory,
     val hReader = reader.asInstanceOf[RowHistogramReader]
     s"AppendableHistogramVector(vectPtr=$vectPtr maxBytes=$maxBytes) " +
     s"numItems=${hReader.length} curSection=$curSection " +
-    { if (hReader.length > 0) s"bucketScheme: ${hReader.buckets} numBuckets=${hReader.numBuckets}" else "" }
+    { if (hReader.length > 0) s"bucketScheme: ${hReader.buckets} numBuckets=${hReader.numBuckets}" else "<noSchema>" }
   }
 
   // Inner method to add the histogram to this vector
