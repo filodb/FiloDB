@@ -45,6 +45,8 @@ trait ReadablePartition extends FiloPartition {
   // Returns binary partition key as a new, copied byte array
   def partKeyBytes: Array[Byte] = schema.partKeySchema.asByteArray(partKeyBase, partKeyOffset)
 
+  def hexPartKey: String = schema.partKeySchema.toHexString(partKeyBase, partKeyOffset)
+
   def numChunks: Int
 
   /**
