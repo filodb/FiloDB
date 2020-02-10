@@ -155,7 +155,7 @@ object BinaryHistogram extends StrictLogging {
   }
 }
 
-object HistogramVector {
+object HistogramVector extends StrictLogging {
   type HistIterator = Iterator[Histogram] with TypedIterator
 
   val OffsetNumHistograms = 6
@@ -164,6 +164,8 @@ object HistogramVector {
   val OffsetBucketDef  = 11    // Start of bucket definition
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
+
+  val _log = logger
 
   final def getNumBuckets(acc: MemoryReader, addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16(acc)
 
@@ -386,8 +388,7 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
  */
 class AppendableSectDeltaHistVector(factory: MemFactory,
                                     vectPtr: Ptr.U8,
-                                    maxBytes: Int)
-extends AppendableHistogramVector(factory, vectPtr, maxBytes) with StrictLogging {
+                                    maxBytes: Int) extends AppendableHistogramVector(factory, vectPtr, maxBytes) {
   import BinaryHistogram._
   import HistogramVector._
 
@@ -408,8 +409,8 @@ extends AppendableHistogramVector(factory, vectPtr, maxBytes) with StrictLogging
       NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
     } catch {
       case e: Exception =>
-        logger.error(s"RepackError: $debugString\nh.numBuckets=${h.numBuckets}\nSink state: ${repackSink.debugString}",
-                     e)
+        _log.error(s"RepackError: $debugString\nh.numBuckets=${h.numBuckets}\nSink state: ${repackSink.debugString}",
+                   e)
         throw e
     }
 
