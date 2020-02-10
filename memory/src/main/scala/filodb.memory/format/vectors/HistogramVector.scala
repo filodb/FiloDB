@@ -155,7 +155,7 @@ object BinaryHistogram extends StrictLogging {
   }
 }
 
-object HistogramVector {
+object HistogramVector extends StrictLogging {
   type HistIterator = Iterator[Histogram] with TypedIterator
 
   val OffsetNumHistograms = 6
@@ -164,6 +164,8 @@ object HistogramVector {
   val OffsetBucketDef  = 11    // Start of bucket definition
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
+
+  val _log = logger
 
   final def getNumBuckets(acc: MemoryReader, addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16(acc)
 
@@ -303,6 +305,13 @@ class AppendableHistogramVector(factory: MemFactory,
     res
   }
 
+  def debugString: String = {
+    val hReader = reader.asInstanceOf[RowHistogramReader]
+    s"AppendableHistogramVector(vectPtr=$vectPtr maxBytes=$maxBytes) " +
+    s"numItems=${hReader.length} curSection=$curSection " +
+    { if (hReader.length > 0) s"bucketScheme: ${hReader.buckets} numBuckets=${hReader.numBuckets}" else "<noSchema>" }
+  }
+
   // Inner method to add the histogram to this vector
   protected def appendHist(buf: DirectBuffer, h: BinHistogram, numItems: Int): AddResponse = {
     appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
@@ -396,7 +405,14 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
 
     // Recompress hist based on original delta.  Do this for ALL histograms so drop detection works correctly
     repackSink.writePos = 0
-    NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
+    try {
+      NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
+    } catch {
+      case e: Exception =>
+        _log.error(s"RepackError: $debugString\nh.numBuckets=${h.numBuckets}\nSink state: ${repackSink.debugString}",
+                   e)
+        throw e
+    }
 
     // If need new section, append blob.  Reset state for originalDeltas as needed.
     if (repackSink.valueDropped) {
