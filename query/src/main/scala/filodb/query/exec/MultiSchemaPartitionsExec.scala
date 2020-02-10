@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
@@ -42,13 +43,15 @@ final case class MultiSchemaPartitionsExec(id: String,
 
   var finalPlan: ExecPlan = _
 
-  private def finalizePlan(source: ChunkSource): ExecPlan = {
+  private def finalizePlan(source: ChunkSource, span: kamon.trace.Span): ExecPlan = {
+    span.mark("filtered-partition-scan")
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    span.mark("lookup-partitions")
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
-
+    span.mark("finalize-plan")
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
     schema.map { s => schemas.schemas(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
@@ -81,11 +84,18 @@ final case class MultiSchemaPartitionsExec(id: String,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-     finalPlan = finalizePlan(source)
-     finalPlan.doExecute(source, queryConfig)(sched, timeout)
+    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", id)
+      .start()
+    finalPlan = finalizePlan(source, span)
+    Kamon.runWithSpan(span, true) {
+      finalPlan.doExecute(source, queryConfig, span)(sched, timeout)
+    }
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -45,9 +46,14 @@ final case class SelectChunkInfosExec(id: String,
   import SelectChunkInfosExec._
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
+    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", id)
+      .start()
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
 
@@ -58,6 +64,7 @@ final case class SelectChunkInfosExec(id: String,
     val dataColumn = dataSchema.data.columns(colID)
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
+    span.mark("starting-scanpartitions")
     val rvs = source.scanPartitions(dataset, lookupRes)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
@@ -68,6 +75,7 @@ final case class SelectChunkInfosExec(id: String,
                                                   dataSchema.partKeySchema, partCols, shard, subgroup, partition.partID)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
           }
+    span.finish()
     ExecResult(rvs, Task.eval(ChunkInfosSchema))
   }
 

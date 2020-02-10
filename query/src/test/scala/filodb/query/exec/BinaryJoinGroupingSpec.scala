@@ -32,7 +32,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
   val rand = new Random()
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, span: kamon.trace.Span)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }

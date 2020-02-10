@@ -94,11 +94,9 @@ final class QueryActor(memStore: MemStore,
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    val span = Kamon.spanBuilder(s"execplan2-${q.getClass.getSimpleName}")
-      .tag("query-id", q.id)
-      .start()
-    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
-     .foreach { res =>
+    Kamon.currentSpan().tag("query-id", q.id)
+    q.execute(memStore, queryConfig, Kamon.currentSpan())(queryScheduler, queryConfig.askTimeout)
+      .foreach   { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
@@ -111,12 +109,10 @@ final class QueryActor(memStore: MemStore,
              case t: Throwable =>
            }
        }
-       span.finish()
      }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
        logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
        replyTo ! QueryError(q.id, ex)
-       span.finish()
      }(queryScheduler)
   }
 

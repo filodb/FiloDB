@@ -34,7 +34,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   val schemas = Schemas(dataset.schema)
 
   val emptyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
+    override def dispatch(plan: ExecPlan, span: kamon.trace.Span)(implicit sched: Scheduler,
                                           timeout: FiniteDuration): Task[query.QueryResponse] = ???
   }
 

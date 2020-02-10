@@ -5,14 +5,12 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
@@ -23,6 +21,7 @@ import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
+import kamon.Kamon
 
 // So, this is effectively a test for NonLeafExecPlan
 class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
@@ -101,7 +100,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
       timeseriesDataset.ref, 0, filters, AllChunkScan)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runAsync.futureValue
+    val result = dispatcher.dispatch(sep, Kamon.currentSpan()).runAsync.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -129,7 +128,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
       timeseriesDataset.ref, 0, emptyFilters, AllChunkScan)
 
     val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
-    val result = dispatcher.dispatch(sep).runAsync.futureValue
+    val result = dispatcher.dispatch(sep, Kamon.currentSpan()).runAsync.futureValue
 
     result match {
       case e: QueryError => throw e.t
@@ -141,7 +140,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
     val sep2 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan1))
-    val result2 = dispatcher.dispatch(sep2).runAsync.futureValue
+    val result2 = dispatcher.dispatch(sep2, Kamon.currentSpan()).runAsync.futureValue
 
     result2 match {
       case e: QueryError => throw e.t
@@ -153,7 +152,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     // Two children none of which returns data
     val sep3 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan2))
-    val result3 = dispatcher.dispatch(sep3).runAsync.futureValue
+    val result3 = dispatcher.dispatch(sep3, Kamon.currentSpan()).runAsync.futureValue
 
     result3 match {
       case e: QueryError => throw e.t
@@ -166,9 +165,9 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
 case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfig) extends PlanDispatcher {
   // run locally withing any check.
-  override def dispatch(plan: ExecPlan)
+  override def dispatch(plan: ExecPlan, span: kamon.trace.Span)
                        (implicit sched: Scheduler,
                         timeout: FiniteDuration): Task[QueryResponse] = {
-    plan.execute(memStore, queryConfig)
+    plan.execute(memStore, queryConfig, span)
   }
 }

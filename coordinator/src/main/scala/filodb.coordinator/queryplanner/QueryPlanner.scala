@@ -26,10 +26,11 @@ trait QueryPlanner {
   /**
     * Trigger orchestration of the ExecPlan. It sends the ExecPlan to the destination where it will be executed.
     */
-  def dispatchExecPlan(execPlan: ExecPlan)(implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
-    val currentSpan = Kamon.currentSpan()
-    Kamon.runWithSpan(currentSpan) {
-      execPlan.dispatcher.dispatch(execPlan)
+  def dispatchExecPlan(execPlan: ExecPlan,
+                       parentSpan: kamon.trace.Span)
+                      (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+    Kamon.runWithSpan(parentSpan) {
+      execPlan.dispatcher.dispatch(execPlan, parentSpan)
     }
   }
 }

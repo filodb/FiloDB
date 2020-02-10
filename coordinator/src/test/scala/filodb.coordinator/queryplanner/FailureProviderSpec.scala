@@ -34,7 +34,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: ExecPlan, span: kamon.trace.Span)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }

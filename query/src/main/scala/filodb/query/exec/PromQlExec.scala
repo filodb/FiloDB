@@ -3,6 +3,7 @@ package filodb.query.exec
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import scala.concurrent.Future
@@ -36,27 +37,38 @@ case class PromQlExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+  def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+                span: kamon.trace.Span)
                (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig)
+                       queryConfig: QueryConfig,
+                       parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
+    val execPlan2Span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", id)
+      .start()
 
     val queryResponse = PromQlExec.httpGet(params).map { response =>
 
       response.unsafeBody match {
         case Left(error) => QueryError(id, error.error)
-        case Right(successResponse) => toQueryResponse(successResponse.data, id)
+        case Right(successResponse) => toQueryResponse(successResponse.data, id, execPlan2Span)
       }
 
     }
-    Task.fromFuture(queryResponse)
+    Kamon.runWithSpan(execPlan2Span, true) {
+      Task.fromFuture(queryResponse)
+    }
   }
 
-  def toQueryResponse(data: Data, id: String): QueryResponse = {
-
+  def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
+    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", id)
+      .start()
     val rangeVectors = data.result.map { r =>
 
       val samples = r.values.getOrElse(Seq(r.value.get))
@@ -79,6 +91,7 @@ case class PromQlExec(id: String,
       }
       SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
     }
+    span.finish()
     QueryResult(id, resultSchema, rangeVectors)
   }
 
