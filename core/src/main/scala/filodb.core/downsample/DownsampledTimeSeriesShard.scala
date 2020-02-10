@@ -56,7 +56,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val indexUpdatedHour = new AtomicLong(0)
 
   private val indexBootstrapper = new IndexBootstrapper(store) // used for initial index loading
-  
+
   // used for periodic refresh of index, happens from raw tables
   private val indexRefresher = new IndexBootstrapper(rawColStore)
 
