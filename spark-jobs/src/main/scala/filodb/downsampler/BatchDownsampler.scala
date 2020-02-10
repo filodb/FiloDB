@@ -277,23 +277,25 @@ object BatchDownsampler extends StrictLogging with Instance {
               }
             } catch {
               case e: Exception =>
-                logger.error(s"Error downsampling partition ${rawPartToDownsample.stringPartition} " +
+                logger.error(s"Error downsampling partition " +
+                  s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
+                  s"schema=${rawPartToDownsample.schema.name} " +
                   s"resolution=$resolution " +
                   s"startRow=$startRow " +
                   s"endRow=$endRow " +
-                  s"downsamplePeriods=$downsamplePeriods " +
-                  s"chunkset: ${chunkset.debugString(rawPartToDownsample.schema)}", e)
+                  s"downsamplePeriods=${downsamplePeriods.mkString("/")} " +
+                  s"chunkset: ${chunkset.debugString}", e)
                 // log debugging information and re-throw
                 throw e
             }
             dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
           }
         } else {
-          logger.warn(s"Skipping since startRow lessThan endRow when downsampling " +
-            s"partition ${rawPartToDownsample.stringPartition} " +
+          logger.warn(s"Not downsampling partition since startRow lessThan endRow " +
+            s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
             s"startRow=$startRow " +
             s"endRow=$endRow " +
-            s"chunkset: ${chunkset.debugString(rawPartToDownsample.schema)}")
+            s"chunkset: ${chunkset.debugString}")
         }
       }
     }
