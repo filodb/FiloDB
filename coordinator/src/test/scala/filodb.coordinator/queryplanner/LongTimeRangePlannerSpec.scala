@@ -21,7 +21,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     override def limit: Int = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
-    override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+    override def doExecute(source: ChunkSource, queryConfig: QueryConfig, parentSpan: kamon.trace.Span)
                           (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
     override protected def args: String = ???
   }
