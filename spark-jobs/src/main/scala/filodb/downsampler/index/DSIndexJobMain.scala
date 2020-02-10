@@ -1,6 +1,7 @@
 package filodb.downsampler.index
 
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
@@ -29,7 +30,7 @@ class IndexJobDriver(epochHour: Long) extends StrictLogging {
       .makeRDD(0 until numShards)
       .foreach(updateDSPartKeyIndex(_, hour))
 
-    spark.sparkContext.stop()
+    Kamon.counter("index-migration-completed").increment
 
     logger.info(s"IndexUpdater Driver completed successfully")
   }

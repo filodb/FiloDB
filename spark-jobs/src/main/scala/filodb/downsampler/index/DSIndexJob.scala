@@ -4,6 +4,7 @@ import scala.concurrent.Await
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.cassandra.FiloSessionProvider
@@ -20,11 +21,13 @@ object DSIndexJob extends StrictLogging with Instance {
   val settings = DownsamplerSettings
   val dsJobsettings = DownsamplerSettings
 
-  private val kamonTags = Map( "rawDataset" -> dsJobsettings.rawDatasetName,
-    "owner" -> "BatchIndexUpdater")
-
   private val readSched = Scheduler.io("cass-index-read-sched")
   private val writeSched = Scheduler.io("cass-index-write-sched")
+
+  val sparkTasksStarted = Kamon.counter("spark-tasks-started")
+  val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
+  val sparkTasksFailed = Kamon.counter("spark-tasks-failed")
+  val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated")
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
@@ -55,8 +58,13 @@ object DSIndexJob extends StrictLogging with Instance {
   def updateDSPartKeyIndex(shard: Int, epochHour: Long): Unit = {
     import DSIndexJobSettings._
 
+    sparkTasksStarted.increment
+
+    val span = Kamon.buildSpan("timetaken-index-migration")
+      .withTag("shard", shard)
+      .start
     val rawDataSource = rawCassandraColStore
-    val dsDtasource = downsampleCassandraColStore
+    val dsDatasource = downsampleCassandraColStore
     val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
     val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
     @volatile var count = 0
@@ -64,16 +72,21 @@ object DSIndexJob extends StrictLogging with Instance {
       val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
         shard = shard.toInt, updateHour = epochHour)
       val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
-      Await.result(dsDtasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+      Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
         partKeys = pkRecords,
         diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
         writeToPkUTTable = false), cassWriteTimeout)
-      logger.info(s"Number of partitionKey written numPkeysWritten=$count shard=$shard hour=$epochHour")
+      sparkForeachTasksCompleted.increment()
+      totalPartkeysUpdated.increment(count)
+      logger.info(s"Number of partitionKeys written numPkeysWritten=$count shard=$shard hour=$epochHour")
     } catch {
       case e: Exception =>
         logger.error(s"Exception in task count=$count " +
           s"shard=$shard hour=$epochHour", e)
+        sparkTasksFailed.increment
         throw e
+    } finally {
+      span.finish()
     }
   }
 
