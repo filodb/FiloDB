@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
@@ -110,7 +111,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def histSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      hExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
+      hExecPlan.execute(memStore, queryConfig, Kamon.currentSpan())(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -122,7 +123,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def promSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      pExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
+      pExecPlan.execute(memStore, queryConfig, Kamon.currentSpan())(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

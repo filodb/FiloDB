@@ -9,6 +9,7 @@ import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
@@ -131,7 +132,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumOfRate.execute(store, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumOfRate.execute(store, queryConfig, Kamon.currentSpan()).runAsync, 60.seconds)
     }
   }
 
@@ -142,7 +143,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumSumOverTime.execute(store, queryConfig).runAsync, 60.seconds)
+      Await.result(scanSumSumOverTime.execute(store, queryConfig, Kamon.currentSpan()).runAsync, 60.seconds)
     }
   }
 

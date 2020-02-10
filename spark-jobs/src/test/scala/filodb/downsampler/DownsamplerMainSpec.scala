@@ -4,6 +4,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -543,7 +544,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
       val queryConfig = new QueryConfig(DownsamplerSettings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler, 1 minute)
+      val res = exec.execute(downsampleTSStore, queryConfig, Kamon.currentSpan())(queryScheduler, 1 minute)
                     .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
