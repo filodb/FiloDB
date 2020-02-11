@@ -355,7 +355,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler, timeout: FiniteDuration) = {
-    Kamon.runWithSpan(span) {
+    Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan, span).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)

@@ -28,7 +28,7 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
 
-    Kamon.runWithSpan(parentSpan) {
+    Kamon.runWithSpan(parentSpan, false) {
       // translate implicit ExecutionContext to monix.Scheduler
       plan.execute(source, queryConfig, parentSpan)
     }

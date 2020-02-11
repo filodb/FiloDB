@@ -30,7 +30,7 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
   def dispatch(plan: ExecPlan, parentSpan: kamon.trace.Span)
               (implicit sched: Scheduler,
                timeout: FiniteDuration): Task[QueryResponse] = {
-    Kamon.runWithSpan(parentSpan) {
+    Kamon.runWithSpan(parentSpan, false) {
       implicit val _ = Timeout(timeout)
       val fut = (target ? plan).map {
         case resp: QueryResponse => resp
