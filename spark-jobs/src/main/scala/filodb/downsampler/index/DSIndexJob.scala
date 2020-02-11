@@ -55,7 +55,7 @@ object DSIndexJob extends StrictLogging with Instance {
   private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
-  def updateDSPartKeyIndex(shard: Int, epochHour: Long): Unit = {
+  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
     import DSIndexJobSettings._
 
     sparkTasksStarted.increment
@@ -70,13 +70,16 @@ object DSIndexJob extends StrictLogging with Instance {
     val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
     @volatile var count = 0
     try {
-      val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-        shard = shard.toInt, updateHour = epochHour)
-      val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{ pkey => count += 1; pkey}
-      Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
-        partKeys = pkRecords,
-        diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
-        writeToPkUTTable = false), cassWriteTimeout)
+      for (epochHour <- fromHour to toHour) {
+        val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
+          shard = shard.toInt, updateHour = epochHour)
+        val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
+        Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+          partKeys = pkRecords,
+          diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
+          writeToPkUTTable = false), cassWriteTimeout)
+        logger.info(s"Number of partitionKeys written numPkeysWritten=$count shard=$shard hour=$epochHour")
+      }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
       logger.info(s"Part key migration successful for shard=$shard numPartKeysWritten=$count hour=$epochHour")

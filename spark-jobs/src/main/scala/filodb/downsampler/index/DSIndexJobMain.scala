@@ -7,13 +7,14 @@ import org.apache.spark.sql.SparkSession
 
 object DSIndexJobMain extends App {
   import DSIndexJobSettings._
-  val iu = new IndexJobDriver(hour() - 1) // Run for the previous hour
+  val migrateUpto = hour() - 1
+  val iu = new IndexJobDriver(migrateUpto - batchLookbackInHours, migrateUpto) //migrate partkeys between these hours
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
   iu.shutdown()
 }
 
-class IndexJobDriver(epochHour: Long) extends StrictLogging {
+class IndexJobDriver(from: Long, to: Long) extends StrictLogging {
   import DSIndexJobSettings._
 
   def run(conf: SparkConf): Unit = {
@@ -24,11 +25,11 @@ class IndexJobDriver(epochHour: Long) extends StrictLogging {
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
-
-    val hour = epochHour
+    val fromHour = from
+    val toHour = to
     val rdd = spark.sparkContext
       .makeRDD(0 until numShards)
-      .foreach(updateDSPartKeyIndex(_, hour))
+      .foreach(updateDSPartKeyIndex(_, fromHour, toHour))
 
     Kamon.counter("index-migration-completed").withoutTags().increment
 

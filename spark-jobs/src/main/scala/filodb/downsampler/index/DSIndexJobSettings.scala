@@ -28,6 +28,9 @@ object DSIndexJobSettings extends StrictLogging {
 
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
+  //default 6hours
+  val batchLookbackInHours = dsIndexJobConfig.as[Option[Int]]("batch-lookback-in-hours").getOrElse(6)
+
   val numShards = filodbSettings.streamConfigs
     .find(_.getString("dataset") == DownsamplerSettings.rawDatasetName)
     .headOption.getOrElse(ConfigFactory.empty())
