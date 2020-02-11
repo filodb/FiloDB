@@ -14,6 +14,13 @@ object DSIndexJobMain extends App {
   iu.shutdown()
 }
 
+/**
+  * Migrate index updates from Raw dataset to Downsampled dataset.
+  * Updates get applied only to the dataset with highest ttl. Updates are applied sequentially between
+  * the provided hours inclusive.
+  * @param from from epoch hour - inclusive
+  * @param to to epoch hour - inclusive
+  */
 class IndexJobDriver(from: Long, to: Long) extends StrictLogging {
   import DSIndexJobSettings._
 
