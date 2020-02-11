@@ -18,10 +18,10 @@ object DSIndexJobMain extends App {
   * Migrate index updates from Raw dataset to Downsampled dataset.
   * Updates get applied only to the dataset with highest ttl. Updates are applied sequentially between
   * the provided hours inclusive.
-  * @param from from epoch hour - inclusive
-  * @param to to epoch hour - inclusive
+  * @param fromHour from epoch hour - inclusive
+  * @param toHour to epoch hour - inclusive
   */
-class IndexJobDriver(from: Long, to: Long) extends StrictLogging {
+class IndexJobDriver(fromHour: Long, toHour: Long) extends StrictLogging {
   import DSIndexJobSettings._
 
   def run(conf: SparkConf): Unit = {
@@ -32,8 +32,8 @@ class IndexJobDriver(from: Long, to: Long) extends StrictLogging {
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
-    val fromHour = from
-    val toHour = to
+    val fromHour = fromHour
+    val toHour = toHour
     val rdd = spark.sparkContext
       .makeRDD(0 until numShards)
       .foreach(updateDSPartKeyIndex(_, fromHour, toHour))
