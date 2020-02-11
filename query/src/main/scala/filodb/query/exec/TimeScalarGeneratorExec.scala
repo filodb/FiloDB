@@ -47,12 +47,11 @@ case class TimeScalarGeneratorExec(id: String,
   override protected def args: String = s"params = $params, function = $function"
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig,
-                       parentSpan: kamon.trace.Span)
+                       queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
+      .asChildOf(Kamon.currentSpan())
       .tag("query-id", id)
       .start()
     val resultSchema = ResultSchema(columns, 1)

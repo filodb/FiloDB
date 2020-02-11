@@ -9,7 +9,6 @@ import akka.actor.ActorSystem
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -185,7 +184,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedRawQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      execPlan.execute(cluster.memStore, queryConfig, Kamon.currentSpan())(querySched, 60.seconds)
+      execPlan.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -201,7 +200,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      minEP.execute(cluster.memStore, queryConfig, Kamon.currentSpan())(querySched, 60.seconds)
+      minEP.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -217,7 +216,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      sumRateEP.execute(cluster.memStore, queryConfig, Kamon.currentSpan())(querySched, 60.seconds)
+      sumRateEP.execute(cluster.memStore, queryConfig)(querySched, 60.seconds)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

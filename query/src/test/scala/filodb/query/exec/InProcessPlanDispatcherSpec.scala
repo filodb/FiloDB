@@ -168,6 +168,6 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfi
   override def dispatch(plan: ExecPlan, span: kamon.trace.Span)
                        (implicit sched: Scheduler,
                         timeout: FiniteDuration): Task[QueryResponse] = {
-    plan.execute(memStore, queryConfig, span)
+    plan.execute(memStore, queryConfig)
   }
 }

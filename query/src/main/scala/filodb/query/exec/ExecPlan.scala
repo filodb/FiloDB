@@ -100,9 +100,10 @@ trait ExecPlan extends QueryCommand {
     *
     */
   // scalastyle:off method.length
-  def execute(source: ChunkSource, queryConfig: QueryConfig, parentSpan: kamon.trace.Span)
+  def execute(source: ChunkSource, queryConfig: QueryConfig)
              (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
 
+    val parentSpan = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.

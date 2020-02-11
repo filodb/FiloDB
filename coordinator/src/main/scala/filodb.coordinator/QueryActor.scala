@@ -95,7 +95,7 @@ final class QueryActor(memStore: MemStore,
     epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     Kamon.currentSpan().tag("query-id", q.id)
-    q.execute(memStore, queryConfig, Kamon.currentSpan())(queryScheduler, queryConfig.askTimeout)
+    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
       .foreach   { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res

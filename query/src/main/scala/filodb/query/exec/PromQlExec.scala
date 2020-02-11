@@ -42,12 +42,11 @@ case class PromQlExec(id: String,
                (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig,
-                       parentSpan: kamon.trace.Span)
+                       queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
+      .asChildOf(Kamon.currentSpan())
       .tag("query-id", id)
       .start()
 

@@ -11,7 +11,6 @@ import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.exec.{ExecPlan, PlanDispatcher, TimeScalarGeneratorExec}
 import filodb.query.{QueryConfig, QueryResponse, QueryResult, ScalarFunctionId, exec}
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
@@ -129,7 +128,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec("test", timeseriesDataset.ref, RangeParams(10, 10, 100), ScalarFunctionId.Time, 0)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -144,7 +143,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec("test", timeseriesDataset.ref, RangeParams(1565627710, 10, 1565627790), ScalarFunctionId.Hour, 0)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)

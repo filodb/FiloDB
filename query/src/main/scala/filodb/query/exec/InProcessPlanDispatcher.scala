@@ -30,7 +30,7 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
 
     Kamon.runWithSpan(parentSpan, false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      plan.execute(source, queryConfig, parentSpan)
+      plan.execute(source, queryConfig)
     }
   }
 

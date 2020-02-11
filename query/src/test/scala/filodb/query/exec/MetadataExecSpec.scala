@@ -4,7 +4,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
@@ -88,7 +87,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -109,7 +108,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     resp match {
       case QueryResult(_, _, results) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
@@ -123,7 +122,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
@@ -143,7 +142,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec("someQueryId", now, limit - 1, dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig, Kamon.currentSpan()).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
