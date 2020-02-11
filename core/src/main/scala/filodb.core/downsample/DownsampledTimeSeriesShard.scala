@@ -4,10 +4,12 @@ import java.util
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import monix.eval.Task
 import monix.execution.CancelableFuture
 import monix.reactive.Observable
 
@@ -21,11 +23,16 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
+
   val partitionsQueried = Kamon.counter("downsample-partitions-queried").refine(tags)
   val chunksQueried = Kamon.counter("downsample-chunks-queried").refine(tags)
   val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").refine(tags)
   val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").refine(tags)
+  val indexEntriesPurged = Kamon.counter("index-entries-purged").refine(tags)
   val indexRefreshFailed = Kamon.counter("index-refresh-failed").refine(tags)
+  val indexPurgeFailed = Kamon.counter("index-purge-failed").refine(tags)
+  val indexEntries = Kamon.gauge("downsample-store-index-entries").refine(tags)
+  val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").refine(tags)
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -60,7 +67,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   // used for periodic refresh of index, happens from raw tables
   private val indexRefresher = new IndexBootstrapper(rawColStore)
 
-  private var indexUpdateFuture: CancelableFuture[Unit] = _
+  private var houseKeepingFuture: CancelableFuture[Unit] = _
+  private var gaugeUpdateFuture: CancelableFuture[Unit] = _
 
   def indexNames(limit: Int): Seq[String] = Seq.empty
 
@@ -91,11 +99,12 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
-        startIndexRefreshTask()
+        startHousekeepingTask()
+        startStatsUpdateTask()
       }.runAsync(GlobalScheduler.globalImplicitScheduler)
   }
 
-  def startIndexRefreshTask(): Unit = {
+  private def startHousekeepingTask(): Unit = {
     // Run index refresh at same frequency of raw dataset's flush interval.
     // This is important because each partition's start/end time can be updated only once
     // in cassandra per flush interval. Less frequent update can result in multiple events
@@ -103,33 +112,69 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // Also, addition of keys to index can be parallelized using mapAsync below only if
     // we are sure that in one raw dataset flush period, we wont get two updated part key
     // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
-    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
+    logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
                 s"every ${storeConfig.flushInterval}")
-    indexUpdateFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
+    houseKeepingFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
                                                           storeConfig.flushInterval).mapAsync { _ =>
-      // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
-      // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
-      // before refresh happens because we will not revist the hour again.
-      val toHour = hour() - 2
-      val fromHour = indexUpdatedHour.get() + 1
-      indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
-        .map { count =>
-          indexUpdatedHour.set(toHour)
-          stats.indexEntriesRefreshed.increment(count)
-          logger.info(s"Refreshed downsample index with new records numRecords=$count " +
-                      s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
-        }
-        .onErrorHandle { e =>
-          stats.indexRefreshFailed.increment()
-           logger.error(s"Error occurred when refreshing downsample index " +
-                        s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
-        }
+      purgeExpiredIndexEntries()
+      indexRefresh()
     }.completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
   }
 
-  def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
-    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset)
-      .getOrElse(createPartitionID())
+  private def purgeExpiredIndexEntries(): Unit = {
+    val tracer = Kamon.buildSpan("downsample-store-purge-index-entries-latency")
+      .withTag("dataset", rawDatasetRef.toString)
+      .withTag("shard", shardNum).start()
+    try {
+      val partsToPurge = partKeyIndex.partIdsEndedBefore(System.currentTimeMillis() - downsampleTtls.last.toMillis)
+      partKeyIndex.removePartKeys(partsToPurge)
+      logger.info(s"Purged ${partsToPurge.length} entries from downsample " +
+        s"index of dataset=$rawDatasetRef shard=$shardNum")
+      stats.indexEntriesPurged.increment(partsToPurge.length)
+    } catch { case e: Exception =>
+      logger.error(s"Error occurred when purging index entries dataset=$rawDatasetRef shard=$shardNum", e)
+      stats.indexPurgeFailed.increment()
+    } finally {
+      tracer.finish()
+    }
+  }
+
+  private def indexRefresh(): Task[Unit] = {
+    // Update keys until hour()-2 hours ago. hour()-1 hours ago can cause missed records if
+    // refresh was triggered exactly at end of the hour. All partKeys for the hour would need to be flushed
+    // before refresh happens because we will not revist the hour again.
+    val toHour = hour() - 2
+    val fromHour = indexUpdatedHour.get() + 1
+    indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+      .map { count =>
+        indexUpdatedHour.set(toHour)
+        stats.indexEntriesRefreshed.increment(count)
+        logger.info(s"Refreshed downsample index with new records numRecords=$count " +
+          s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour")
+      }
+      .onErrorHandle { e =>
+        stats.indexRefreshFailed.increment()
+        logger.error(s"Error occurred when refreshing downsample index " +
+          s"dataset=$rawDatasetRef shard=$shardNum fromHour=$fromHour toHour=$toHour", e)
+      }
+  }
+
+  private def startStatsUpdateTask(): Unit = {
+    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
+      s"every ${storeConfig.flushInterval}")
+    gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
+      updateGauges()
+    }.onErrorRestartUnlimited
+      .completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
+  }
+
+  private def updateGauges(): Unit = {
+    stats.indexEntries.set(partKeyIndex.indexNumEntries)
+    stats.indexRamBytes.set(partKeyIndex.indexRamBytes)
+  }
+
+  private def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
+    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset).getOrElse(createPartitionID())
   }
 
   /**
@@ -289,7 +334,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   def cleanup(): Unit = {
-    Option(indexUpdateFuture).foreach(_.cancel())
+    Option(houseKeepingFuture).foreach(_.cancel())
+    Option(gaugeUpdateFuture).foreach(_.cancel())
   }
 
   override protected def finalize(): Unit = {
