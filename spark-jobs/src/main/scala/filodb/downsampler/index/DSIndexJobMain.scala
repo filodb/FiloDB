@@ -30,7 +30,7 @@ class IndexJobDriver(epochHour: Long) extends StrictLogging {
       .makeRDD(0 until numShards)
       .foreach(updateDSPartKeyIndex(_, hour))
 
-    Kamon.counter("index-migration-completed").increment
+    Kamon.counter("index-migration-completed").withoutTags().increment
 
     logger.info(s"IndexUpdater Driver completed successfully")
   }

@@ -24,10 +24,10 @@ object DSIndexJob extends StrictLogging with Instance {
   private val readSched = Scheduler.io("cass-index-read-sched")
   private val writeSched = Scheduler.io("cass-index-write-sched")
 
-  val sparkTasksStarted = Kamon.counter("spark-tasks-started")
-  val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
-  val sparkTasksFailed = Kamon.counter("spark-tasks-failed")
-  val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated")
+  val sparkTasksStarted = Kamon.counter("spark-tasks-started").withoutTags()
+  val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed").withoutTags()
+  val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
+  val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
@@ -60,8 +60,8 @@ object DSIndexJob extends StrictLogging with Instance {
 
     sparkTasksStarted.increment
 
-    val span = Kamon.buildSpan("timetaken-index-migration")
-      .withTag("shard", shard)
+    val span = Kamon.spanBuilder("timetaken-index-migration")
+      .tag("shard", shard)
       .start
     val rawDataSource = rawCassandraColStore
     val dsDatasource = downsampleCassandraColStore
