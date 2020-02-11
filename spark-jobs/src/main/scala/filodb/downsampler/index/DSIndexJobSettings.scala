@@ -33,7 +33,7 @@ object DSIndexJobSettings extends StrictLogging {
   // As the updates need to be applied incrementally, migration needs to happen from the failed batch until the
   // latest hour. This is to ensure that subsequent mutations were not overwritten.
   val batchLookbackInHours = dsIndexJobConfig.as[Option[Long]]("batch-lookback-in-hours")
-                                .getOrElse(downsampleStoreConfig.flushInterval.toHours)
+    .getOrElse(downsampleStoreConfig.flushInterval.toHours)
 
   val numShards = filodbSettings.streamConfigs
     .find(_.getString("dataset") == DownsamplerSettings.rawDatasetName)
@@ -42,4 +42,3 @@ object DSIndexJobSettings extends StrictLogging {
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 }
-

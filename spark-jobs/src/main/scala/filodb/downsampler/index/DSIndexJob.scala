@@ -74,13 +74,12 @@ object DSIndexJob extends StrictLogging with Instance {
         val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
           shard = shard.toInt, updateHour = epochHour)
         val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => {
-            count += 1
-            logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
-              s" start=${pkey.startTime} end=${pkey.endTime}")
-            pkey
-          }
+          count += 1
+          logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
+            s" start=${pkey.startTime} end=${pkey.endTime}")
+          pkey
         }
-
+        }
         Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
           partKeys = pkRecords,
           diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
