@@ -46,7 +46,7 @@ case class PromQlExec(id: String,
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
+    val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()
@@ -65,7 +65,7 @@ case class PromQlExec(id: String,
   }
 
   def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+    val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()

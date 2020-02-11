@@ -103,25 +103,26 @@ trait ExecPlan extends QueryCommand {
   def execute(source: ChunkSource, queryConfig: QueryConfig, parentSpan: kamon.trace.Span)
              (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
 
-    val execPlan2Span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
-
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
     // Step 1: initiate doExecute, get schema
     lazy val step1 = Task {
+      val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+        .asChildOf(parentSpan)
+        .tag("query-id", id)
+        .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      doExecute(source, queryConfig, execPlan2Span)
+      val task = doExecute(source, queryConfig, span)
+      span.finish()
+      task
     }
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
       val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
-        .asChildOf(execPlan2Span)
+        .asChildOf(parentSpan)
         .tag("query-id", id)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
@@ -194,11 +195,9 @@ trait ExecPlan extends QueryCommand {
       QueryError(id, ex)
     }
 
-    Kamon.runWithSpan(execPlan2Span, true) {
-      for { res <- step1
-            qResult <- step2(res) }
-      yield { qResult }
-    }
+    for { res <- step1
+          qResult <- step2(res) }
+    yield { qResult }
   }
 
 
@@ -376,16 +375,12 @@ abstract class NonLeafExecPlan extends ExecPlan {
                       parentSpan: kamon.trace.Span)
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
-    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
-    span.mark("createcchildtasks")
+    parentSpan.mark("createcchildtasks")
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
-                                 dispatchRemotePlan(plan, span).map((_, i))
+                                 dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
@@ -403,10 +398,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-    span.mark("outputcompose")
+    parentSpan.mark("outputcompose")
     val outputRvs = compose(processedTasks, outputSchema, queryConfig)
-    span.mark("returnresults")
-    span.finish()
+    parentSpan.mark("returnresults")
     ExecResult(outputRvs, outputSchema)
   }
 

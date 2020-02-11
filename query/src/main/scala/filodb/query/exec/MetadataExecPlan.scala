@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -116,10 +115,6 @@ final case class PartKeysExec(id: String,
                 parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
     val rvs = source match {
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
@@ -127,10 +122,9 @@ final case class PartKeysExec(id: String,
       case other =>
         Observable.empty
     }
-    span.mark("creating-resultschema")
+    parentSpan.mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
                                Map(0 -> partSchema.binSchema))
-    span.finish()
     ExecResult(rvs, Task.eval(sch))
   }
 
@@ -154,10 +148,6 @@ final case class  LabelValuesExec(id: String,
                 parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val curr = System.currentTimeMillis()
@@ -177,9 +167,8 @@ final case class  LabelValuesExec(id: String,
     } else {
       Observable.empty
     }
-    span.mark("creating-resultschema")
+    parentSpan.mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
-    span.finish()
     ExecResult(rvs, Task.eval(sch))
   }
 

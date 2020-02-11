@@ -53,7 +53,7 @@ case class ScalarFixedDoubleExec(id: String,
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()

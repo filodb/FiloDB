@@ -128,7 +128,7 @@ final case class SelectRawPartitionsExec(id: String,
                 parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    val span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
+    val span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .start()
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")} " +

@@ -2,7 +2,6 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
-import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
@@ -88,14 +87,8 @@ final case class MultiSchemaPartitionsExec(id: String,
                 parentSpan: kamon.trace.Span)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-    val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
-      .tag("query-id", id)
-      .start()
-    finalPlan = finalizePlan(source, span)
-    Kamon.runWithSpan(span, true) {
-      finalPlan.doExecute(source, queryConfig, span)(sched, timeout)
-    }
+    finalPlan = finalizePlan(source, parentSpan)
+    finalPlan.doExecute(source, queryConfig, parentSpan)(sched, timeout)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

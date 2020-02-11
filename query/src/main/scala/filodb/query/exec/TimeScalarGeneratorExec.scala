@@ -51,7 +51,7 @@ case class TimeScalarGeneratorExec(id: String,
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execplan2-${getClass.getSimpleName}")
+    val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()
@@ -69,7 +69,7 @@ case class TimeScalarGeneratorExec(id: String,
     }
     Kamon.runWithSpan(execPlan2Span, true) {
       Task {
-        val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+        val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
           .asChildOf(execPlan2Span)
           .tag("query-id", id)
           .start()
