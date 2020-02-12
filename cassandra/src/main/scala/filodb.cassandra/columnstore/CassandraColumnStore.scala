@@ -235,7 +235,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
 
     val targetIndexTable = target.getOrCreateIngestionTimeIndexTable(targetDatasetRef)
-    val targetChunksTable = target.getOrCreateChunkTable(datasetRef)
+    val targetChunksTable = target.getOrCreateChunkTable(targetDatasetRef)
 
     val chunkInfos = new ArrayBuffer[ByteBuffer]()
     val futures = new ArrayBuffer[Future[Response]]()
