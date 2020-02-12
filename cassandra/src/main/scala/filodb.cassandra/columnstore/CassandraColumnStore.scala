@@ -1,9 +1,11 @@
 package filodb.cassandra.columnstore
 
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
@@ -214,6 +216,79 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
       chunksTable.readRawPartitionRangeBB(parts, userTimeStart - maxChunkTime, endTimeExclusive).toIterator().toSeq
     }
   }
+
+  /**
+    * Copy a range of chunks to a target ColumnStore, for performing disaster recovery or
+    * backfills.
+    */
+  // scalastyle:off null method.length
+  def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                     splits: Iterator[ScanSplit],
+                                     ingestionTimeStart: Long,
+                                     ingestionTimeEnd: Long,
+                                     batchSize: Int,
+                                     target: CassandraColumnStore,
+                                     targetDatasetRef: DatasetRef,
+                                     diskTimeToLiveSeconds: Int): Unit =
+  {
+    val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
+    val sourceChunksTable = getOrCreateChunkTable(datasetRef)
+
+    val targetIndexTable = target.getOrCreateIngestionTimeIndexTable(targetDatasetRef)
+    val targetChunksTable = target.getOrCreateChunkTable(datasetRef)
+
+    val chunkInfos = new ArrayBuffer[ByteBuffer]()
+    val futures = new ArrayBuffer[Future[Response]]()
+
+    def finishBatch(partition: ByteBuffer): Unit = {
+      for (row <- sourceChunksTable.readChunks(partition, chunkInfos).iterator.asScala) {
+        futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+      }
+
+      chunkInfos.clear()
+
+      for (f <- futures) {
+        try {
+          Await.result(f, Duration(10, SECONDS))
+        } catch {
+          case e: Exception => {
+            logger.error(s"Async cassandra chunk copy failed", e)
+          }
+        }
+      }
+
+      futures.clear()
+    }
+
+    var lastPartition: ByteBuffer = null
+
+    for (split <- splits) {
+      val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+      val rows = sourceIndexTable.scanRowsByIngestionTime(tokens, ingestionTimeStart, ingestionTimeEnd)
+      for (row <- rows) {
+        val partition = row.getBytes(0) // partition
+
+        if (!partition.equals(lastPartition)) {
+          if (lastPartition != null) {
+            finishBatch(lastPartition);
+          }
+          lastPartition = partition;
+        }
+
+        chunkInfos += row.getBytes(3) // info
+        futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+
+        if (chunkInfos.size >= batchSize) {
+          finishBatch(partition)
+        }
+      }
+    }
+
+    if (lastPartition != null) {
+      finishBatch(lastPartition);
+    }
+  }
+  // scalastyle:on
 
   def shutdown(): Unit = {
     clusterConnector.shutdown()
