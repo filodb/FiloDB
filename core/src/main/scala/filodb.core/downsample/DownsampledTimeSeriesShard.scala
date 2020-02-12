@@ -10,10 +10,10 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
-import monix.execution.CancelableFuture
+import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 
-import filodb.core.{DatasetRef, GlobalScheduler}
+import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
@@ -64,6 +64,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private val indexBootstrapper = new IndexBootstrapper(store) // used for initial index loading
 
+  private val housekeepingSched = Scheduler.computation(
+    name = "housekeeping",
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Housekeeping Scheduler", _)))
+
   // used for periodic refresh of index, happens from raw tables
   private val indexRefresher = new IndexBootstrapper(rawColStore)
 
@@ -101,7 +105,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       }.map { _ =>
         startHousekeepingTask()
         startStatsUpdateTask()
-      }.runAsync(GlobalScheduler.globalImplicitScheduler)
+      }.runAsync(housekeepingSched)
   }
 
   private def startHousekeepingTask(): Unit = {
@@ -118,7 +122,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                                           storeConfig.flushInterval).mapAsync { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
-    }.completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
+    }.map { _ =>
+      partKeyIndex.refreshReadersBlocking()
+    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
@@ -164,8 +170,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       s"every ${storeConfig.flushInterval}")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
-    }.onErrorRestartUnlimited
-      .completedL.runAsync(GlobalScheduler.globalImplicitScheduler)
+    }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
   }
 
   private def updateGauges(): Unit = {
