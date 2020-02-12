@@ -10,11 +10,6 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store.ChunkSinkStats
-import filodb.memory.format.UnsafeUtils
-
-case class InfoRecord(binPartition: ByteBuffer, data: ByteBuffer) {
-  def partBaseOffset: (Any, Long, Int) = UnsafeUtils.BOLfromBuffer(binPartition)
-}
 
 /**
  * Mapping to chunk set info records using a full ingestion time, positioned in the cluster key
@@ -41,37 +36,32 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
                      |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  def fromRow(row: Row): InfoRecord =
-    InfoRecord(row.getBytes("partition"), row.getBytes("info"))
-
   val selectCql = s"SELECT partition, info FROM $tableString WHERE "
   lazy val allPartReadCql = session.prepare(selectCql + "partition = ?")
   lazy val inPartReadCql = session.prepare(selectCql + "partition IN ?")
 
   /**
-   * Retrieves all infos from a single partition.
-   */
-  def getInfos(binPartition: Array[Byte]): Observable[InfoRecord] = {
-    val it = session.execute(allPartReadCql.bind(toBuffer(binPartition)))
-                    .asScala.toIterator.map(fromRow)
-    Observable.fromIterator(it).handleObservableErrors
-  }
-
-  def getMultiInfos(partitions: Seq[Array[Byte]]): Observable[InfoRecord] = {
-    val query = inPartReadCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
-    val it = session.execute(query).asScala.toIterator.map(fromRow)
-    Observable.fromIterator(it).handleObservableErrors
-  }
-
-  def scanInfos(tokens: Seq[(String, String)]): Observable[InfoRecord] = {
+    * Returns Rows consisting of:
+    *
+    * partition:      ByteBuffer
+    * ingestion_time: long
+    * start_time:     long
+    * info:           ByteBuffer
+    *
+    * The ChunkSetInfo object contains methods for extracting fields from the info column.
+    */
+  def scanRowsByIngestionTime(tokens: Seq[(String, String)],
+                              ingestionTimeStart: Long,
+                              ingestionTimeEnd: Long): Iterator[Row] = {
     def cql(start: String, end: String): String =
-      s"SELECT * FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
+      s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
+      s"WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
+      s"AND ingestion_time >= $ingestionTimeStart AND ingestion_time <= $ingestionTimeEnd " +
       s"ALLOW FILTERING"
-    val it = tokens.iterator.flatMap { case (start, end) =>
-        session.execute(cql(start, end)).iterator.asScala
-               .map { row => fromRow(row) }
-      }
-    Observable.fromIterator(it).handleObservableErrors
+
+    tokens.iterator.flatMap { case (start, end) =>
+      session.execute(cql(start, end)).iterator.asScala
+    }
   }
 
   def scanPartKeysByIngestionTime(tokens: Seq[(String, String)],
@@ -116,5 +106,19 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
     }
     stats.addIndexWriteStats(infoBytes)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))
+  }
+
+  /**
+    * Writes a single record, exactly as-is from the scanInfosByIngestionTime method. Is
+    * used to copy records from one column store to another.
+    */
+  def writeIndex(row: Row, diskTimeToLiveSeconds: Int): Future[Response] = {
+    connector.execStmtWithRetries(writeIndexCql.bind(
+      row.getBytes(0),                // partition
+      row.getLong(1): java.lang.Long, // ingestion_time
+      row.getLong(2): java.lang.Long, // start_time
+      row.getBytes(3),                // info
+      diskTimeToLiveSeconds: java.lang.Integer)
+    )
   }
 }
