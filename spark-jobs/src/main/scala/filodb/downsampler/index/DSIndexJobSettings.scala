@@ -32,7 +32,7 @@ object DSIndexJobSettings extends StrictLogging {
   // Longer lookback-time is needed to account for failures in the job runs.
   // As the updates need to be applied incrementally, this batching gives us the buffer
   // required to fix previous run failures.
-  val batchLookbackInHours = dsIndexJobConfig.as[Option[Int]]("batch-lookback-in-hours")
+  val batchLookbackInHours = dsIndexJobConfig.as[Option[Long]]("batch-lookback-in-hours")
                                 .getOrElse(downsampleStoreConfig.flushInterval.toHours)
 
   val numShards = filodbSettings.streamConfigs
