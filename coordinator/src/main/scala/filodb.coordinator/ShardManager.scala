@@ -539,6 +539,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       }
     }
     updateShardMetrics()
+    logAllMappers(s"After Update from event $event")
   }
 
   private def doAssignShards(dataset: DatasetRef,
