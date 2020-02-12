@@ -427,7 +427,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def refreshReadersBlocking(): Unit = {
     searcherManager.maybeRefreshBlocking()
-    logger.info("Refreshed index searchers to make reads consistent")
+    logger.info(s"Refreshed index searchers to make reads consistent for dataset=$ref shard=$shardNum")
   }
 
   private def leafFilter(column: String, filter: Filter): Query = {
