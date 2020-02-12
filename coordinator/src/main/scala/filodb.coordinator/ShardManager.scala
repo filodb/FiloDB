@@ -479,6 +479,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
         // Above condition ensures that we respond to shard events only from the node shard is currently assigned to.
         // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
         updateFromShardEvent(event)
+        logAllMappers(s"After Update from event $event")
         // reassign shard if IngestionError. Exclude previous node since it had error shards.
         event match {
           case _: IngestionError =>
@@ -488,7 +489,7 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
             val info = _datasetInfo(event.ref)
             if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
               logger.warn(s"Attempting to reassign shard=${event.shard} from dataset=${event.ref}. " +
-                s"It was last reassigned at ${lastReassignment}")
+                s"It was last reassigned at $lastReassignment")
               val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
               if (assignments.valuesIterator.flatten.contains(event.shard)) {
                 setShardReassignmentTime(event.ref, event.shard, now)
@@ -539,7 +540,6 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
       }
     }
     updateShardMetrics()
-    logAllMappers(s"After Update from event $event")
   }
 
   private def doAssignShards(dataset: DatasetRef,
