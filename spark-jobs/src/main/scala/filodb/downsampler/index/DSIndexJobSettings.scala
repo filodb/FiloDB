@@ -30,8 +30,8 @@ object DSIndexJobSettings extends StrictLogging {
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
   // Longer lookback-time is needed to account for failures in the job runs.
-  // As the updates need to be applied incrementally, this batching gives us the buffer
-  // required to fix previous run failures.
+  // As the updates need to be applied incrementally, migration needs to happen from the failed batch until the
+  // latest hour. This is to ensure that subsequent mutations were not overwritten.
   val batchLookbackInHours = dsIndexJobConfig.as[Option[Long]]("batch-lookback-in-hours")
                                 .getOrElse(downsampleStoreConfig.flushInterval.toHours)
 

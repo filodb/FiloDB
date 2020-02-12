@@ -20,7 +20,9 @@ object DSIndexJobMain extends App {
   *
   * Updates are applied sequentially between the provided hours inclusive. As the updates are incremental, if a job run
   * fails and successive runs complete successfully, migration still needs to happen from the failed batch upto the
-  * latest hour. This is to avoid any unwanted overwrites. Hence job will be submitted once to fix the failed cases.
+  * latest hour. This is to ensure that subsequent mutations were not overwritten. Hence job will be submitted once to
+  * fix the failed cases.
+  *
   * For e.g if there was a failure 12 hours ago. Job will be submitted to run once with 12 hours as lookback time to
   * fix the indexes before resuming the regular schedule.
   *
