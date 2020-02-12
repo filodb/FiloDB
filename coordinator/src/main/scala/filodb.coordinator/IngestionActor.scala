@@ -4,7 +4,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
@@ -167,12 +167,13 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
         return
     }
 
-    implicit val futureMapDispatcher: ExecutionContextExecutor = actorDispatcher
+    implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
     val ingestion = if (memStore.isReadOnly) {
       logger.info(s"Initiating shard startup on read-only memstore for dataset=$ref shard=$shard")
       for {
         _ <- memStore.recoverIndex(ref, shard)
       } yield {
+        // bring shard to active state by sending this message - this code path wont invoke normalIngestion
         statusActor ! IngestionStarted(ref, shard, nodeCoord)
         streamSubscriptions(shard) = CancelableFuture.never // simulate ingestion happens continuously
         streams(shard) = IngestionStream(Observable.never)
