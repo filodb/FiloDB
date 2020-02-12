@@ -78,14 +78,14 @@ object DSIndexJob extends StrictLogging with Instance {
           partKeys = pkRecords,
           diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
           writeToPkUTTable = false), cassWriteTimeout)
-        logger.info(s"Number of partitionKeys written numPkeysWritten=$count shard=$shard hour=$epochHour")
       }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
-      logger.info(s"Part key migration successful for shard=$shard numPartKeysWritten=$count hour=$epochHour")
+      logger.info(s"Part key migration successful for shard=$shard count=$count from=$fromHour to=$toHour")
     } catch {
       case e: Exception =>
-        logger.error(s"Exception in task count=$count shard=$shard hour=$epochHour", e)
+        logger.error(s"Exception in task count=$count " +
+          s"shard=$shard from=$fromHour to=$toHour", e)
         sparkTasksFailed.increment
         throw e
     } finally {
