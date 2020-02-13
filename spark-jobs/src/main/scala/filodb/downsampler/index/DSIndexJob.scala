@@ -60,7 +60,7 @@ object DSIndexJob extends StrictLogging with Instance {
 
     sparkTasksStarted.increment
 
-    val span = Kamon.spanBuilder("timetaken-index-migration")
+    val span = Kamon.spanBuilder("per-shard-index-migration-latency")
       .asChildOf(Kamon.currentSpan())
       .tag("shard", shard)
       .start
@@ -72,18 +72,17 @@ object DSIndexJob extends StrictLogging with Instance {
     try {
       val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
         shard = shard.toInt, updateHour = epochHour)
-      val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => count += 1; pkey}
+      val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{ pkey => count += 1; pkey}
       Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
         partKeys = pkRecords,
         diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
         writeToPkUTTable = false), cassWriteTimeout)
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
-      logger.info(s"Number of partitionKeys written numPkeysWritten=$count shard=$shard hour=$epochHour")
+      logger.info(s"Part key migration successful for shard=$shard numPartKeysWritten=$count hour=$epochHour")
     } catch {
       case e: Exception =>
-        logger.error(s"Exception in task count=$count " +
-          s"shard=$shard hour=$epochHour", e)
+        logger.error(s"Exception in task count=$count shard=$shard hour=$epochHour", e)
         sparkTasksFailed.increment
         throw e
     } finally {
