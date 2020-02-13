@@ -23,12 +23,12 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
   // Empty query config, since its does not apply in case of non-leaf plans
   val queryConfig: QueryConfig = EmptyQueryConfig
 
-  override def dispatch(plan: ExecPlan, parentSpan: kamon.trace.Span)(implicit sched: Scheduler,
+  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
                                         timeout: FiniteDuration): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
 
-    Kamon.runWithSpan(parentSpan, false) {
+    Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
       plan.execute(source, queryConfig)
     }

@@ -30,7 +30,7 @@ trait QueryPlanner {
                        parentSpan: kamon.trace.Span)
                       (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
     Kamon.runWithSpan(parentSpan, false) {
-      execPlan.dispatcher.dispatch(execPlan, parentSpan)
+      execPlan.dispatcher.dispatch(execPlan)
     }
   }
 }

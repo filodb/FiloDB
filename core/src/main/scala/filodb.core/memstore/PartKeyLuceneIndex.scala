@@ -475,6 +475,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     val partKeySpan = Kamon.spanBuilder("index-partition-lookup-latency")
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum)
+      .asChildOf(Kamon.currentSpan())
       .start()
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>

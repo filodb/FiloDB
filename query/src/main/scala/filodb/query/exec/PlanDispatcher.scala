@@ -5,7 +5,6 @@ import scala.concurrent.duration.FiniteDuration
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
-import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -16,7 +15,7 @@ import filodb.query.QueryResponse
   * from the ExecPlan.
   */
 trait PlanDispatcher extends java.io.Serializable {
-  def dispatch(plan: ExecPlan, parentSpan: kamon.trace.Span)
+  def dispatch(plan: ExecPlan)
               (implicit sched: Scheduler,
                timeout: FiniteDuration): Task[QueryResponse]
 }
@@ -27,16 +26,14 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
-  def dispatch(plan: ExecPlan, parentSpan: kamon.trace.Span)
+  def dispatch(plan: ExecPlan)
               (implicit sched: Scheduler,
                timeout: FiniteDuration): Task[QueryResponse] = {
-    Kamon.runWithSpan(parentSpan, false) {
-      implicit val _ = Timeout(timeout)
-      val fut = (target ? plan).map {
-        case resp: QueryResponse => resp
-        case e =>  throw new IllegalStateException(s"Received bad response $e")
-      }
-      Task.fromFuture(fut)
+    implicit val _ = Timeout(timeout)
+    val fut = (target ? plan).map {
+      case resp: QueryResponse => resp
+      case e =>  throw new IllegalStateException(s"Received bad response $e")
     }
+    Task.fromFuture(fut)
   }
 }

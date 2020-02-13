@@ -124,12 +124,11 @@ final case class SelectRawPartitionsExec(id: String,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
-                parentSpan: kamon.trace.Span)
+                queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
     val span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
-      .asChildOf(parentSpan)
+      .asChildOf(Kamon.currentSpan())
       .start()
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")} " +
       s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")

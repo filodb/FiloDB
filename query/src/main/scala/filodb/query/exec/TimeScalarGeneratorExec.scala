@@ -33,8 +33,7 @@ case class TimeScalarGeneratorExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
-                         span: kamon.trace.Span)
+  override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
                                   (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
       "a readily available static value")
@@ -50,7 +49,7 @@ case class TimeScalarGeneratorExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
       .tag("query-id", id)
       .start()
@@ -68,12 +67,13 @@ case class TimeScalarGeneratorExec(id: String,
     }
     Kamon.runWithSpan(execPlan2Span, true) {
       Task {
-        val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
+        val span = Kamon.spanBuilder(s"transform-${getClass.getSimpleName}")
           .asChildOf(execPlan2Span)
           .tag("query-id", id)
           .start()
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({

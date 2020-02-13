@@ -37,15 +37,14 @@ case class PromQlExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  def doExecute(source: ChunkSource, queryConfig: QueryConfig,
-                span: kamon.trace.Span)
+  def doExecute(source: ChunkSource, queryConfig: QueryConfig)
                (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val execPlan2Span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
       .tag("query-id", id)
       .start()
@@ -64,7 +63,7 @@ case class PromQlExec(id: String,
   }
 
   def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
-    val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
+    val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()

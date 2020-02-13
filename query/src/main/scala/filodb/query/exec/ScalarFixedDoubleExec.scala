@@ -34,8 +34,7 @@ case class ScalarFixedDoubleExec(id: String,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
-                         parentSpan: kamon.trace.Span)
+  override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
                         (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
       "readily available static value")

@@ -21,7 +21,7 @@ import monix.execution.Scheduler
 
 object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan, span: kamon.trace.Span)
+    override def dispatch(plan: ExecPlan)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }

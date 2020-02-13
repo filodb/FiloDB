@@ -115,9 +115,9 @@ trait ExecPlan extends QueryCommand {
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      val task = doExecute(source, queryConfig, span)
-      span.finish()
-      task
+      Kamon.runWithSpan(span, true) {
+        doExecute(source, queryConfig)
+      }
     }
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
@@ -210,8 +210,7 @@ trait ExecPlan extends QueryCommand {
     * Note that this should not include any operations done in the transformers.
     */
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
-                span: kamon.trace.Span)
+                queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult
 
@@ -301,7 +300,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
 
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
     Observable.fromTask(
-      execPlan.dispatcher.dispatch(execPlan, Kamon.currentSpan()).onErrorHandle { case ex: Throwable =>
+      execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
       qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
       QueryError(execPlan.id, ex)
     }.map {
@@ -357,7 +356,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler, timeout: FiniteDuration) = {
     Kamon.runWithSpan(span, false) {
-      plan.dispatcher.dispatch(plan, span).onErrorHandle { case ex: Throwable =>
+      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)
       }
@@ -372,10 +371,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * from the non-empty results.
     */
   final def doExecute(source: ChunkSource,
-                      queryConfig: QueryConfig,
-                      parentSpan: kamon.trace.Span)
+                      queryConfig: QueryConfig)
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
+    val parentSpan = Kamon.currentSpan()
     parentSpan.mark("createcchildtasks")
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
