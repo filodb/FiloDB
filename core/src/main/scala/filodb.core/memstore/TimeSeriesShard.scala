@@ -1410,7 +1410,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
       shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
 
-      Kamon.currentSpan().tag("num-partitions-from-index", matches.length)
+      Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
       if (matches.length > storeConfig.maxQueryMatches)
         throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
           s"to narrow your query by adding more filters so there is less than ${storeConfig.maxQueryMatches} matches " +
@@ -1422,8 +1422,9 @@ class TimeSeriesShard(val ref: DatasetRef,
       val it1 = InMemPartitionIterator2(matches)
       val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
       val partIdsNotInMem = it1.skippedPartIDs
-      Kamon.currentSpan().tag("num-partitions-not-in-memory", partIdsNotInMem.length)
+      Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
       val startTimes = if (partIdsToPage.nonEmpty) {
+        Kamon.currentSpan().tag(s"num-partitions-to-page-$shardNum", partIdsToPage.length)
         val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
         logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
           s"startTime lookup for query in dataset=$ref shard=$shardNum " +

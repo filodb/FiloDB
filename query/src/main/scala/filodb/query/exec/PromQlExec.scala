@@ -57,6 +57,9 @@ case class PromQlExec(id: String,
       }
 
     }
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
     Kamon.runWithSpan(execPlan2Span, true) {
       Task.fromFuture(queryResponse)
     }

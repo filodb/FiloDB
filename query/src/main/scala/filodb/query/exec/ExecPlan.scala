@@ -115,6 +115,9 @@ trait ExecPlan extends QueryCommand {
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
+      // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+      // across threads. Note that task/observable will not run on the thread where span is present since
+      // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
         doExecute(source, queryConfig)
       }
@@ -143,7 +146,7 @@ trait ExecPlan extends QueryCommand {
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
         val builder = SerializedRangeVector.newBuilder()
-        var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
           .map {
             case srv: SerializableRangeVector =>
@@ -168,7 +171,7 @@ trait ExecPlan extends QueryCommand {
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
             SerializedRangeVector.queryResultBytes.record(numBytes)
-            span.mark(s"numbytes: $numBytes")
+            span.mark(s"num-bytes: $numBytes")
             if (numBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
@@ -179,6 +182,8 @@ trait ExecPlan extends QueryCommand {
                 s"Limit was: ${limit}")
             }
             qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
+            span.mark(s"num-result-samples: $numResultSamples")
+            span.mark(s"num-range-vectors: ${r.size}")
             span.finish()
             QueryResult(id, finalRes._2, r)
           }
@@ -355,6 +360,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler, timeout: FiniteDuration) = {
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
