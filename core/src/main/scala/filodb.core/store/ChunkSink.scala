@@ -74,15 +74,15 @@ trait ChunkSink {
  * Stats for a ChunkSink
  */
 class ChunkSinkStats {
-  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call")
-  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call")
-  private val chunkLenHist       = Kamon.histogram("chunk-length")
+  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call").withoutTags
+  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call").withoutTags
+  private val chunkLenHist       = Kamon.histogram("chunk-length").withoutTags
 
-  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num")
-  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
+  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num").withoutTags
+  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call").withoutTags
 
-  private val chunksetWrites     = Kamon.counter("chunkset-writes")
-  private val partKeysWrites     = Kamon.counter("partKey-writes")
+  private val chunksetWrites     = Kamon.counter("chunkset-writes").withoutTags
+  private val partKeysWrites     = Kamon.counter("partKey-writes").withoutTags
 
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
@@ -94,12 +94,12 @@ class ChunkSinkStats {
   }
 
   def addIndexWriteStats(indexBytes: Long): Unit = {
-    numIndexWriteCalls.increment
+    numIndexWriteCalls.increment()
     indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {
-    chunksetWrites.increment
+    chunksetWrites.increment()
     chunksetsWritten.incrementAndGet()
   }
 

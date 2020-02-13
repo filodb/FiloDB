@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
@@ -24,15 +25,15 @@ import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val partitionsQueried = Kamon.counter("downsample-partitions-queried").refine(tags)
-  val chunksQueried = Kamon.counter("downsample-chunks-queried").refine(tags)
-  val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").refine(tags)
-  val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").refine(tags)
-  val indexEntriesPurged = Kamon.counter("index-entries-purged").refine(tags)
-  val indexRefreshFailed = Kamon.counter("index-refresh-failed").refine(tags)
-  val indexPurgeFailed = Kamon.counter("index-purge-failed").refine(tags)
-  val indexEntries = Kamon.gauge("downsample-store-index-entries").refine(tags)
-  val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").refine(tags)
+  val partitionsQueried = Kamon.counter("downsample-partitions-queried").withTags(TagSet.from(tags))
+  val chunksQueried = Kamon.counter("downsample-chunks-queried").withTags(TagSet.from(tags))
+  val queryTimeRangeMins = Kamon.histogram("query-time-range-minutes").withTags(TagSet.from(tags))
+  val indexEntriesRefreshed = Kamon.counter("index-entries-refreshed").withTags(TagSet.from(tags))
+  val indexEntriesPurged = Kamon.counter("index-entries-purged").withTags(TagSet.from(tags))
+  val indexRefreshFailed = Kamon.counter("index-refresh-failed").withTags(TagSet.from(tags))
+  val indexPurgeFailed = Kamon.counter("index-purge-failed").withTags(TagSet.from(tags))
+  val indexEntries = Kamon.gauge("downsample-store-index-entries").withTags(TagSet.from(tags))
+  val indexRamBytes = Kamon.gauge("downsample-store-index-ram-bytes").withTags(TagSet.from(tags))
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
@@ -128,9 +129,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def purgeExpiredIndexEntries(): Unit = {
-    val tracer = Kamon.buildSpan("downsample-store-purge-index-entries-latency")
-      .withTag("dataset", rawDatasetRef.toString)
-      .withTag("shard", shardNum).start()
+    val tracer = Kamon.spanBuilder("downsample-store-purge-index-entries-latency")
+      .asChildOf(Kamon.currentSpan())
+      .tag("dataset", rawDatasetRef.toString)
+      .tag("shard", shardNum).start()
     try {
       val partsToPurge = partKeyIndex.partIdsEndedBefore(System.currentTimeMillis() - downsampleTtls.last.toMillis)
       partKeyIndex.removePartKeys(partsToPurge)
@@ -174,8 +176,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def updateGauges(): Unit = {
-    stats.indexEntries.set(partKeyIndex.indexNumEntries)
-    stats.indexRamBytes.set(partKeyIndex.indexRamBytes)
+    stats.indexEntries.update(partKeyIndex.indexNumEntries)
+    stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
   }
 
   private def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
@@ -240,9 +242,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     Observable.fromIterator(partKeys)
       // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
       .mapAsync(storeConfig.demandPagingParallelism * 3) { partBytes =>
-        val partLoadSpan = Kamon.buildSpan(s"single-partition-cassandra-latency")
-          .withTag("dataset", rawDatasetRef.toString)
-          .withTag("shard", shardNum)
+        val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
+          .asChildOf(Kamon.currentSpan())
+          .tag("dataset", rawDatasetRef.toString)
+          .tag("shard", shardNum)
           .start()
         // TODO test multi-partition scan if latencies are high
         store.readRawPartitions(downsampledDataset,

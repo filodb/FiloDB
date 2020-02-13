@@ -26,9 +26,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      shardNum: Int,
                      ref: DatasetRef)
                      (assignPartId: PartKeyRecord => Int): Task[Long] = {
-    val tracer = Kamon.buildSpan("memstore-recover-index-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum).start()
+    val tracer = Kamon.spanBuilder("memstore-recover-index-latency")
+      .asChildOf(Kamon.currentSpan())
+      .tag("dataset", ref.dataset)
+      .tag("shard", shardNum).start()
 
     colStore.scanPartKeys(ref, shardNum)
       .map { pk =>
@@ -58,9 +59,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    toHour: Long,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                   (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
-    val tracer = Kamon.buildSpan("downsample-store-refresh-index-latency")
-      .withTag("dataset", ref.dataset)
-      .withTag("shard", shardNum).start()
+    val tracer = Kamon.spanBuilder("downsample-store-refresh-index-latency")
+      .asChildOf(Kamon.currentSpan())
+      .tag("dataset", ref.dataset)
+      .tag("shard", shardNum).start()
 
     Observable.fromIterable(fromHour to toHour).flatMap { hour =>
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)

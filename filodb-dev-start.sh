@@ -23,7 +23,7 @@ while getopts "hc:l:p" opt; do
         ;;
     l)  LOG_SUFFIX=$OPTARG
         ;;
-    p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0"
+    p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dkamon.prometheus.embedded-server.port=9096"
         ;;
     esac
 done
