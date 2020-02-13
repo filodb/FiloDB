@@ -1,18 +1,16 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, RangeParams}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query
 import filodb.query._

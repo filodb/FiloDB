@@ -3,12 +3,11 @@ package filodb.coordinator.queryplanner
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
 import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._

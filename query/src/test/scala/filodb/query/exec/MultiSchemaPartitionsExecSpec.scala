@@ -7,7 +7,7 @@ import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import filodb.core.{DatasetRef, TestData, Types}
+import filodb.core.{DatasetRef, QueryTimeoutException, TestData, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SchemaMismatch, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
@@ -18,6 +18,7 @@ import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 import monix.execution.Scheduler
+import org.scalatest.exceptions.TestFailedException
 
 object MultiSchemaPartitionsExecSpec {
   val dummyDispatcher = new PlanDispatcher {
@@ -187,7 +188,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -223,7 +224,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -244,7 +245,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -317,7 +318,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val step = 20000L
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
-                                         Some(InternalRangeFunction.SumOverTime), Nil))
+                                         Some(InternalRangeFunction.SumOverTime)))
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
@@ -362,7 +363,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, Nil))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -423,6 +424,21 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryError]
     result.t.getClass shouldEqual classOf[BadQueryException]
+  }
+
+  it("should throw QueryTimeoutException when query processing time is greater than timeout") {
+    import ZeroCopyUTF8String._
+    val filters = Seq (ColumnFilter("_metric_", Filter.Equals("not_a_metric!".utf8)),
+      ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      dsRef, 0, filters, AllChunkScan, QueryContext(submitTime = System.currentTimeMillis() - 180000))
+
+    val thrown = intercept[TestFailedException] {
+      val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+      val result = resp.asInstanceOf[QueryResult]
+    }
+    thrown.getCause.getClass shouldEqual classOf[QueryTimeoutException]
+    thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
 }

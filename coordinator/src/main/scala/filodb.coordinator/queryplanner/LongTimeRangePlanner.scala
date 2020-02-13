@@ -1,7 +1,8 @@
 package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryContext}
+import filodb.core.query.QueryContext
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
 import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
 
 /**

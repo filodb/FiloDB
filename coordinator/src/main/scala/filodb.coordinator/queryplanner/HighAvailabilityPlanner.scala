@@ -4,7 +4,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
-import filodb.query.{LogicalPlan, PromQlInvocationParams, PromQlQueryParams, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.query.{LogicalPlan, PromQlInvocationParams}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
 /**

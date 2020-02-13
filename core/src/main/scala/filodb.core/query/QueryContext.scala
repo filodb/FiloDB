@@ -1,9 +1,8 @@
-package filodb.query
+package filodb.core.query
 
 import java.util.UUID
 
 import filodb.core.{SpreadChange, SpreadProvider}
-import filodb.core.query.{ColumnFilter, Filter}
 
 trait TsdbQueryParams
 case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,

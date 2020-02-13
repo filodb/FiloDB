@@ -11,7 +11,7 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, RangeParams}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, RangeParams}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
 import filodb.query._
@@ -271,7 +271,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
-      lp.endMs, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
+      lp.endMs, window, Some(execRangeFn), options, paramsExec, lp.offset, rawSource)))
     series
   }
 
@@ -279,7 +279,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
     rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
-      None, None, Nil, lp.offset)))
+      None, None, options, Nil, lp.offset)))
     rawSeries
   }
 
@@ -315,7 +315,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       MultiSchemaPartitionsExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), schemaOpt, colName)
+        renamedFilters, toChunkScanMethod(lp.rangeSelector), options, schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }

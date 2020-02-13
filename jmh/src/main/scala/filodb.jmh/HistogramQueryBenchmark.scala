@@ -19,6 +19,7 @@ import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
+import filodb.core.query.QueryContext
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader

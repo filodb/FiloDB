@@ -4,9 +4,9 @@ import scala.concurrent.duration.FiniteDuration
 
 import monix.execution.Scheduler
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QueryContext}
 import filodb.core.store._
 import filodb.query.Query.qLogger
 import filodb.query.QueryConfig
@@ -34,6 +34,7 @@ final case class MultiSchemaPartitionsExec(id: String,
                                            shard: Int,
                                            filters: Seq[ColumnFilter],
                                            chunkMethod: ChunkScanMethod,
+                                           queryContext: QueryContext = QueryContext(),
                                            schema: Option[String] = None,
                                            colName: Option[String] = None) extends LeafExecPlan {
   import SelectRawPartitionsExec._
@@ -45,6 +46,9 @@ final case class MultiSchemaPartitionsExec(id: String,
   private def finalizePlan(source: ChunkSource): ExecPlan = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+
+    val queryTime = (System.currentTimeMillis() - queryContext.submitTime) / 1000
+    if (queryTime >= queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName);
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get

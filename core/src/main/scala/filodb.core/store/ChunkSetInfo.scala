@@ -6,9 +6,10 @@ import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
 import debox.Buffer
 
+import filodb.core.QueryTimeoutException
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataSchema}
-import filodb.core.query.RawDataRangeVector
+import filodb.core.query.{QueryContext, RawDataRangeVector}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.data.ElementIterator
@@ -374,6 +375,7 @@ Exception(f"CorruptVector at 0x$ptr%016x startTime=$chunkStartTime shard=$shard 
  * @param window the # of millis/time units that define the length of each window
  */
 class WindowedChunkIterator(rv: RawDataRangeVector, start: Long, step: Long, end: Long, window: Long,
+                            queryContext: QueryContext,
                             // internal vars, put it here for better performance
                             var curWindowEnd: Long = -1L,
                             var curWindowStart: Long = -1L,
@@ -413,6 +415,10 @@ extends Iterator[ChunkSetInfoReader] {
     // if new window end is beyond end of most recent chunkset, add more chunksets (if there are more)
     while (curWindowEnd > lastEndTime && infos.hasNext) {
       val next = infos.nextInfoReader
+
+      val queryTime = (System.currentTimeMillis() - queryContext.submitTime) / 1000
+      if (queryTime >= queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName);
+
       // Add if next chunkset is within window and not empty.  Otherwise keep going
       if (curWindowStart <= next.endTime && next.numRows > 0) {
         windowInfos += next

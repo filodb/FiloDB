@@ -1,15 +1,14 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.core.DatasetRef
+import filodb.core.query.QueryContext
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryConfig, QueryContext}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryConfig}
 import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {

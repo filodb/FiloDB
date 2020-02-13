@@ -15,6 +15,7 @@ import remote.RemoteStorage.ReadRequest
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
 import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, SpreadChange, SpreadProvider}
+import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._

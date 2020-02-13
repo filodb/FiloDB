@@ -5,9 +5,9 @@ import scala.collection.mutable.ArrayBuffer
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.query.{RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.core.query.{QueryContext, RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.AllChunkScan
-import filodb.core.{MetricsTestData, TestData, MachineMetricsData => MMD}
+import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
 import filodb.memory._
 import filodb.memory.format.{TupleRowReader, vectors => bv}
 import filodb.query.QueryConfig
@@ -116,7 +116,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
     new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
-                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, row)
+                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, QueryContext(), row)
   }
 
   def chunkedWindowItHist(data: Seq[Seq[Any]],
@@ -543,5 +543,21 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       new ZScoreChunkedFunctionD(), queryConfig)
     val aggregated3 = chunkedIt3.map(_.getDouble(1)).toBuffer
     aggregated3(0).isNaN shouldBe true
+  }
+
+  it("should throw QueryTimeoutException when query processing time is greater than timeout") {
+    the[QueryTimeoutException] thrownBy {
+      var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+      val rv = timeValueRV(data)
+      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
+
+      val windowSize = 100
+      val step = 20
+
+      val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
+        new ChangesChunkedFunctionD(), queryConfig, QueryContext(submitTime = System.currentTimeMillis() - 180000))
+      val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
+      aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
+    } should have message "Query timeout in filodb.core.store.WindowedChunkIterator after 180 seconds"
   }
 }
