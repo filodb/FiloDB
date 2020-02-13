@@ -383,7 +383,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
     val parentSpan = Kamon.currentSpan()
-    parentSpan.mark("createcchildtasks")
+    parentSpan.mark("create-child-tasks")
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
@@ -406,9 +406,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-    parentSpan.mark("outputcompose")
+    parentSpan.mark("output-compose")
     val outputRvs = compose(processedTasks, outputSchema, queryConfig)
-    parentSpan.mark("returnresults")
+    parentSpan.mark("return-results")
     ExecResult(outputRvs, outputSchema)
   }
 
