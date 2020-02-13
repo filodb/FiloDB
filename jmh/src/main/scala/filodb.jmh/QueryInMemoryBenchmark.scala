@@ -19,10 +19,11 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
+import filodb.core.query.QueryContext
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryContext, QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryConfig, QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex

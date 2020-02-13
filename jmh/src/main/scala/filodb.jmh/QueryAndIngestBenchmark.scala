@@ -17,12 +17,13 @@ import filodb.core.GlobalConfig
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
+import filodb.core.query.QueryContext
 import filodb.core.store.StoreConfig
 import filodb.gateway.GatewayServer
 import filodb.gateway.conversion.PrometheusInputRecord
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryContext, QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex

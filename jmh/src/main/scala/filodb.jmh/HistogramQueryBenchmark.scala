@@ -24,7 +24,7 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryContext}
+import filodb.query.QueryConfig
 
 //scalastyle:off regex
 /**
