@@ -27,6 +27,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                      ref: DatasetRef)
                      (assignPartId: PartKeyRecord => Int): Task[Long] = {
     val tracer = Kamon.spanBuilder("memstore-recover-index-latency")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum).start()
 
@@ -59,6 +60,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
                   (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
     val tracer = Kamon.spanBuilder("downsample-store-refresh-index-latency")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum).start()
 

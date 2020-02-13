@@ -359,6 +359,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     */
   def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
     val span = Kamon.spanBuilder("index-startTimes-for-odp-lookup-latency")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum)
       .start()
@@ -499,6 +500,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .map { pair => ColumnFilter(pair._1, Filter.Equals(pair._2)) }
 
     val partKeySpan = Kamon.spanBuilder("index-partition-lookup-latency")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum)
       .start()

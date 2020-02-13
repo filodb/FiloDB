@@ -281,6 +281,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
                          checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
       val recoveryTrace = Kamon.spanBuilder("ingestion-recovery-trace")
+                               .asChildOf(Kamon.currentSpan())
                                .tag("shard", shard.toString)
                                .tag("dataset", ref.toString).start()
       val stream = ingestionStream.get

@@ -130,6 +130,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def purgeExpiredIndexEntries(): Unit = {
     val tracer = Kamon.spanBuilder("downsample-store-purge-index-entries-latency")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", rawDatasetRef.toString)
       .tag("shard", shardNum).start()
     try {
@@ -242,6 +243,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
       .mapAsync(storeConfig.demandPagingParallelism * 3) { partBytes =>
         val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
+          .asChildOf(Kamon.currentSpan())
           .tag("dataset", rawDatasetRef.toString)
           .tag("shard", shardNum)
           .start()

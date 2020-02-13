@@ -82,6 +82,7 @@ class ShardDownsampler(datasetName: String,
                                 records: Seq[DownsampleRecords]): Unit = {
     if (enabled) {
       val downsampleTrace = Kamon.spanBuilder("memstore-downsample-records-trace")
+        .asChildOf(Kamon.currentSpan())
         .tag("dataset", datasetName)
         .tag("shard", shardNum).start()
       while (chunksets.hasNext) {

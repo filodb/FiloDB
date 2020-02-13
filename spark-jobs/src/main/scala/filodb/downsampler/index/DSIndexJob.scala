@@ -61,6 +61,7 @@ object DSIndexJob extends StrictLogging with Instance {
     sparkTasksStarted.increment
 
     val span = Kamon.spanBuilder("timetaken-index-migration")
+      .asChildOf(Kamon.currentSpan())
       .tag("shard", shard)
       .start
     val rawDataSource = rawCassandraColStore

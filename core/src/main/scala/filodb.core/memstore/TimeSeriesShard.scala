@@ -841,6 +841,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     assertThreadName(IngestSchedName)
 
     val tracer = Kamon.spanBuilder("chunk-flush-task-latency-after-retries")
+      .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum).start()
 

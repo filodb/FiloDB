@@ -45,6 +45,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   private val strategy = OverflowStrategy.BackPressure(1000)
 
   private def startODPSpan(): Span = Kamon.spanBuilder(s"odp-cassandra-latency")
+    .asChildOf(Kamon.currentSpan())
     .tag("dataset", ref.dataset)
     .tag("shard", shardNum)
     .start()
