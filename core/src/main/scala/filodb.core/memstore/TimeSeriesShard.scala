@@ -1425,7 +1425,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       val partIdsNotInMem = it1.skippedPartIDs
       Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
       val startTimes = if (partIdsToPage.nonEmpty) {
-        Kamon.currentSpan().tag(s"num-partitions-to-page-$shardNum", partIdsToPage.length)
         val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
         logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
           s"startTime lookup for query in dataset=$ref shard=$shardNum " +

@@ -371,6 +371,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene
     withNewSearcher(s => s.search(new TermInSetQuery(PART_ID, terms), collector))
+    span.tag(s"num-partitions-to-page", terms.size())
     span.finish()
     collector.startTimes
   }
