@@ -104,12 +104,11 @@ object DSIndexJob extends StrictLogging with Instance {
 
   def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
-    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey => {
+    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
         count += 1
         logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
           s" start=${pkey.startTime} end=${pkey.endTime}")
         pkey
-      }
     }
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
