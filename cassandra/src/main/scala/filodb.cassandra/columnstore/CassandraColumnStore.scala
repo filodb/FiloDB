@@ -130,7 +130,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
             chunksets: Observable[ChunkSet],
             diskTimeToLiveSeconds: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
-               val span = Kamon.buildSpan("write-chunkset").start()
+               val span = Kamon.spanBuilder("write-chunkset").asChildOf(Kamon.currentSpan()).start()
                val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
                val future =
                  for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
@@ -288,7 +288,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val updateHour = hour()
-    val span = Kamon.buildSpan("write-part-keys").start()
+    val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None

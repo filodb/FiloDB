@@ -17,7 +17,7 @@ object Perftools {
 
   def withTrace[A](source: Task[A], traceName: String): Task[A] =
     Task.defer {
-      val span = Kamon.buildSpan(traceName).start()
+      val span = Kamon.spanBuilder(traceName).asChildOf(Kamon.currentSpan()).start()
       source.doOnFinish(_ => Task.eval(span.finish()))
     }
 
@@ -30,7 +30,7 @@ object Perftools {
                   category: String,
                   library: String = "filodb_core")
                  (code: => T): T = {
-      val span = Kamon.buildSpan(s"$library.$category.$name").start()
+      val span = Kamon.spanBuilder(s"$library.$category.$name").asChildOf(Kamon.currentSpan()).start()
       try { code } finally { span.finish() }
     }
 
@@ -44,7 +44,7 @@ object Perftools {
                        library: String = "filodb_core")
                       (code: => Future[T])
                       (implicit ec: ExecutionContext): Future[T] = {
-    val span = Kamon.buildSpan(s"$library.$category.$name").start()
+    val span = Kamon.spanBuilder(s"$library.$category.$name").asChildOf(Kamon.currentSpan()).start()
     // This assignment actually resolves the lazy parameter!!! Make sure it's only done once.
     val result: Future[T] = code
     result.onComplete { case _ => span.finish() }

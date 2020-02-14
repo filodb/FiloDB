@@ -211,7 +211,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   // Counter is incremented each time shardmapper snapshot is published.
   // value > 0 implies that the node is a ShardManager. For rest of the nodes metric will not be reported.
-  val iamShardManager = Kamon.counter("shardmanager-ping")
+  val iamShardManager = Kamon.counter("shardmanager-ping").withoutTags
 
   val publishInterval = settings.ShardMapPublishFrequency
 

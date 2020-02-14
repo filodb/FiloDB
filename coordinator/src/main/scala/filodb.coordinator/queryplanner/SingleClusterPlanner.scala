@@ -18,7 +18,7 @@ import filodb.query._
 import filodb.query.exec._
 
 object SingleClusterPlanner {
-  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
 }
 
 /**

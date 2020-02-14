@@ -5,14 +5,12 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
