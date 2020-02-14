@@ -67,8 +67,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val lastSampleTime = 1574273042000L
   val downsampler = new Downsampler
 
-  //Run for current hour for testing, actual job migrates previous hour's index updates
-  val indexUpdater = new IndexJobDriver(hour())
+  //Index migration job, runs for current 2hours for testing. actual job migrates last 6 hour's index updates
+  val currentHour = hour()
+  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour)
 
   def partKeyReader(pkr: PartKeyRecord): Seq[(String, String)] = {
     schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)

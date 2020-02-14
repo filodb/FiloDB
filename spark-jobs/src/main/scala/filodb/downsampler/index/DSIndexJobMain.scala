@@ -7,13 +7,29 @@ import org.apache.spark.sql.SparkSession
 
 object DSIndexJobMain extends App {
   import DSIndexJobSettings._
-  val iu = new IndexJobDriver(hour() - 1) // Run for the previous hour
+  val migrateUpto: Long = hour() - 1
+  val iu = new IndexJobDriver(migrateUpto - batchLookbackInHours, migrateUpto) //migrate partkeys between these hours
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
   iu.shutdown()
 }
 
-class IndexJobDriver(epochHour: Long) extends StrictLogging {
+/**
+  * Migrate index updates from Raw dataset to Downsampled dataset.
+  * Updates get applied only to the dataset with highest ttl.
+  *
+  * Updates are applied sequentially between the provided hours inclusive. As the updates are incremental, if a job run
+  * fails and successive runs complete successfully, migration still needs to happen from the failed batch upto the
+  * latest hour. This is to ensure that subsequent mutations were not overwritten. Hence job will be submitted once to
+  * fix the failed cases.
+  *
+  * For e.g if there was a failure 12 hours ago. Job will be submitted to run once with 12 hours as lookback time to
+  * fix the indexes before resuming the regular schedule.
+  *
+  * @param fromHour from epoch hour - inclusive
+  * @param toHour to epoch hour - inclusive
+  */
+class IndexJobDriver(fromHour: Long, toHour: Long) extends StrictLogging {
   import DSIndexJobSettings._
 
   def run(conf: SparkConf): Unit = {
@@ -24,11 +40,11 @@ class IndexJobDriver(epochHour: Long) extends StrictLogging {
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
-
-    val hour = epochHour
+    val startHour = fromHour
+    val endHour = toHour
     val rdd = spark.sparkContext
       .makeRDD(0 until numShards)
-      .foreach(updateDSPartKeyIndex(_, hour))
+      .foreach(updateDSPartKeyIndex(_, startHour, endHour))
 
     Kamon.counter("index-migration-completed").withoutTags().increment
 

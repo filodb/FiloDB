@@ -6,6 +6,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.Scheduler
+import monix.reactive.Observable
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -14,6 +15,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
 import filodb.downsampler.DownsamplerSettings
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
+import filodb.downsampler.index.DSIndexJobSettings.cassWriteTimeout
 import filodb.memory.format.UnsafeUtils
 
 object DSIndexJob extends StrictLogging with Instance {
@@ -55,7 +57,11 @@ object DSIndexJob extends StrictLogging with Instance {
   private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
 
-  def updateDSPartKeyIndex(shard: Int, epochHour: Long): Unit = {
+  val dsDatasource = downsampleCassandraColStore
+  val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
+  val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
+
+  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
     import DSIndexJobSettings._
 
     sparkTasksStarted.increment
@@ -65,29 +71,51 @@ object DSIndexJob extends StrictLogging with Instance {
       .tag("shard", shard)
       .start
     val rawDataSource = rawCassandraColStore
-    val dsDatasource = downsampleCassandraColStore
-    val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest
-    val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
+
     @volatile var count = 0
     try {
-      val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
-        shard = shard.toInt, updateHour = epochHour)
-      val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{ pkey => count += 1; pkey}
-      Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
-        partKeys = pkRecords,
-        diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
-        writeToPkUTTable = false), cassWriteTimeout)
+      if (migrateRawIndex) {
+        logger.info("migrating complete partkey index")
+        val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
+          shard = shard.toInt)
+        count += updateDSPartkeys(partKeys, shard)
+        logger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
+      } else {
+        for (epochHour <- fromHour to toHour) {
+          val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
+            shard = shard.toInt, updateHour = epochHour)
+          count += updateDSPartkeys(partKeys, shard)
+        }
+        logger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
+          s" from=$fromHour to=$toHour")
+      }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
-      logger.info(s"Part key migration successful for shard=$shard numPartKeysWritten=$count hour=$epochHour")
     } catch {
       case e: Exception =>
-        logger.error(s"Exception in task count=$count shard=$shard hour=$epochHour", e)
+        logger.error(s"Exception in task count=$count " +
+          s"shard=$shard from=$fromHour to=$toHour", e)
         sparkTasksFailed.increment
         throw e
     } finally {
       span.finish()
     }
+  }
+
+  def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
+    @volatile var count = 0
+    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
+        count += 1
+        logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
+          s" start=${pkey.startTime} end=${pkey.endTime}")
+        pkey
+    }
+    Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
+      partKeys = pkRecords,
+      diskTTLSeconds = dsJobsettings.ttlByResolution(highestDSResolution),
+      writeToPkUTTable = false), cassWriteTimeout)
+
+    count
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
