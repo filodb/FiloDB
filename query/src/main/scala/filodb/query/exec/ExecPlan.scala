@@ -396,7 +396,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     var sch = ResultSchema.empty
     val processedTasks = childTasks.collect {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
-        sch = reduceSchemas(sch, res, i.toInt)
+        sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, i) =>
         (e, i.toInt)
@@ -418,7 +418,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
    * Can be overridden if needed.
    * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
    */
-  def reduceSchemas(rs: ResultSchema, resp: QueryResult, i: Int): ResultSchema = {
+  def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is

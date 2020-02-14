@@ -45,7 +45,6 @@ object BatchDownsampler extends StrictLogging with Instance {
   val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
   val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
   val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  val numPartitionsDownsampled = Kamon.counter("num-partitions-downsampled").withoutTags()
   val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
   val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
   val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
