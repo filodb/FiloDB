@@ -29,6 +29,8 @@ object DSIndexJobSettings extends StrictLogging {
 
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
+  val migrateRawIndex = dsIndexJobConfig.getBoolean("migrate-raw-index")
+
   // Longer lookback-time is needed to account for failures in the job runs.
   // As the updates need to be applied incrementally, migration needs to happen from the failed batch until the
   // latest hour. This is to ensure that subsequent mutations were not overwritten.
