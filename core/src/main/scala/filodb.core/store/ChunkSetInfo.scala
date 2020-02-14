@@ -164,7 +164,9 @@ object ChunkSetInfo extends StrictLogging {
 
   def getNumRows(infoAcc: MemoryReader, infoAddr: Long): Int = infoAcc.getInt(infoAddr + OffsetNumRows)
 
-  def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
+  def setNumRows(infoPointer: NativePointer, num: Int): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, num)
+
+  def resetNumRows(infoPointer: NativePointer): Unit = setNumRows(infoPointer, 0);
 
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)

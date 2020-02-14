@@ -44,7 +44,7 @@ object Perftools {
                        library: String = "filodb_core")
                       (code: => Future[T])
                       (implicit ec: ExecutionContext): Future[T] = {
-    val span = Kamon.buildSpan(s"$library.$category.$name").start()
+    val span = Kamon.spanBuilder(s"$library.$category.$name").asChildOf(Kamon.currentSpan()).start()
     // This assignment actually resolves the lazy parameter!!! Make sure it's only done once.
     val result: Future[T] = code
     result.onComplete { case _ => span.finish() }

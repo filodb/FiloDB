@@ -62,6 +62,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                       .setList(3, chunkList, classOf[ByteBuffer])
                                       .setInt(4, diskTimeToLive)
     stats.addChunkWriteStats(chunks.length, chunkBytes, chunkInfo.numRows)
+    System.out.print(insert + ", " + Thread.currentThread() + "\n")
     connector.execStmtWithRetries(insert.setConsistencyLevel(writeConsistencyLevel))
   }
 
