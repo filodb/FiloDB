@@ -44,9 +44,10 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
 
-  private def startODPSpan(): Span = Kamon.buildSpan(s"odp-cassandra-latency")
-    .withTag("dataset", ref.dataset)
-    .withTag("shard", shardNum)
+  private def startODPSpan(): Span = Kamon.spanBuilder(s"odp-cassandra-latency")
+    .asChildOf(Kamon.currentSpan())
+    .tag("dataset", ref.dataset)
+    .tag("shard", shardNum)
     .start()
 
   // NOTE: the current implementation is as follows
@@ -145,7 +146,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
-      shardStats.partitionsRestored.increment
+      shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
     // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
     // as opposed to ingestSched

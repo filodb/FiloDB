@@ -6,8 +6,8 @@ import org.apache.kafka.common.serialization.{Deserializer, Serializer}
 import filodb.core.binaryrecord2.RecordContainer
 
 object RecordContainerSerdeStats {
-  val tsBatchSize = Kamon.histogram("kafka-container-size-bytes")
-  val tsCount     = Kamon.counter("kafka-num-containers")
+  val tsBatchSize = Kamon.histogram("kafka-container-size-bytes").withoutTags
+  val tsCount     = Kamon.counter("kafka-num-containers").withoutTags
 }
 
 final class RecordContainerSerializer extends Serializer[RecordContainer] with KafkaSerdes {
@@ -20,7 +20,7 @@ final class RecordContainerDeserializer extends Deserializer[RecordContainer] wi
 
   override def deserialize(topic: String, data: Array[Byte]): RecordContainer = {
     tsBatchSize.record(data.size)
-    tsCount.increment
+    tsCount.increment()
     RecordContainer(data)
   }
 }

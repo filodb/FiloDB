@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -26,8 +27,14 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
                                         timeout: FiniteDuration): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
-    // translate implicit ExecutionContext to monix.Scheduler
-    plan.execute(source, queryConfig)
+
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(Kamon.currentSpan(), false) {
+      // translate implicit ExecutionContext to monix.Scheduler
+      plan.execute(source, queryConfig)
+    }
   }
 
 }

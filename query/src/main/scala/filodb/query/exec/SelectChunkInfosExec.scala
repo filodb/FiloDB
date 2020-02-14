@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -58,6 +59,7 @@ final case class SelectChunkInfosExec(id: String,
     val dataColumn = dataSchema.data.columns(colID)
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
+    Kamon.currentSpan().mark("creating-scanpartitions")
     val rvs = source.scanPartitions(dataset, lookupRes)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>

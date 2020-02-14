@@ -83,7 +83,7 @@ object StoreConfig {
                                            |part-index-flush-max-delay = 60 seconds
                                            |part-index-flush-min-delay = 30 seconds
                                            |multi-partition-odp = false
-                                           |demand-paging-parallelism = 4
+                                           |demand-paging-parallelism = 10
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
                                            |trace-filters = {}

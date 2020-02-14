@@ -26,9 +26,13 @@ trait QueryPlanner {
   /**
     * Trigger orchestration of the ExecPlan. It sends the ExecPlan to the destination where it will be executed.
     */
-  def dispatchExecPlan(execPlan: ExecPlan)(implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
-    val currentSpan = Kamon.currentSpan()
-    Kamon.withSpan(currentSpan) {
+  def dispatchExecPlan(execPlan: ExecPlan,
+                       parentSpan: kamon.trace.Span)
+                      (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(parentSpan, false) {
       execPlan.dispatcher.dispatch(execPlan)
     }
   }

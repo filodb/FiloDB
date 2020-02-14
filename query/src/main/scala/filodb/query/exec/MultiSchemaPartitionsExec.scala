@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.core.DatasetRef
@@ -44,11 +45,12 @@ final case class MultiSchemaPartitionsExec(id: String,
 
   private def finalizePlan(source: ChunkSource): ExecPlan = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    Kamon.currentSpan().mark("filtered-partition-scan")
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+    Kamon.currentSpan().mark("lookup-partitions-done")
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
-
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
     schema.map { s => schemas.schemas(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
@@ -84,8 +86,8 @@ final case class MultiSchemaPartitionsExec(id: String,
                 queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
-     finalPlan = finalizePlan(source)
-     finalPlan.doExecute(source, queryConfig)(sched, timeout)
+    finalPlan = finalizePlan(source)
+    finalPlan.doExecute(source, queryConfig)(sched, timeout)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +
