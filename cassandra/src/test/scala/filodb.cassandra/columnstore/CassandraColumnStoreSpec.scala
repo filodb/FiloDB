@@ -1,15 +1,18 @@
 package filodb.cassandra.columnstore
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
 
+import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.core.metadata.{Dataset, Schemas}
@@ -53,53 +56,103 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
 
-    val partBuilder = new RecordBuilder(TestData.nativeMem)
-    val partKey = partBuilder.partKeyFromObjects(Schemas.gauge, "stuff", seriesTags)
+    var partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey1 = partBuilder.partKeyFromObjects(Schemas.gauge, "stuff", seriesTags)
+    partBuilder = new RecordBuilder(TestData.nativeMem)
+    val partKey2 = partBuilder.partKeyFromObjects(Schemas.gauge, "more_stuff", seriesTags)
+
+    val startTimeMillis = System.currentTimeMillis()
+    var timeMillis = startTimeMillis
+    var partKey = partKey1
+
+    // Fake time and value columns.
+    val chunks = new ArrayBuffer[ByteBuffer]()
+    chunks += ByteBuffer.allocate(1000)
+    chunks += ByteBuffer.allocate(1000)
 
     val infoBuf = ByteBuffer.allocateDirect(100)
     val infoPtr = UnsafeUtils.addressFromDirectBuffer(infoBuf)
     val info = ChunkSetInfo(infoPtr)
     try {
-      infoBuf.clear()
+      for (i <- 1 to 20) {
+        if (i == 10) {
+          partKey = partKey2
+        }
 
-      // FIXME final def chunkID(startTime: Long, ingestionTime: Long): Long
+        infoBuf.clear()
 
-      ChunkSetInfo.setChunkID(infoPtr, 0) // FIXME
-      ChunkSetInfo.setIngestionTime(infoPtr, 0) // FIXME
-      ChunkSetInfo.setNumRows(infoPtr, 10) // FIXME (just keep lying?)
-      ChunkSetInfo.setEndTime(infoPtr, 10) // FIXME
+        ChunkSetInfo.setChunkID(infoPtr, store.chunkID(timeMillis, timeMillis))
+        ChunkSetInfo.setIngestionTime(infoPtr, timeMillis)
+        ChunkSetInfo.setNumRows(infoPtr, 10) // fake
+        ChunkSetInfo.setEndTime(infoPtr, timeMillis + 1) // fake
 
-      val set = ChunkSet(info, partKey, Nil, Nil) // FIXME: last is chunks: Seq[ByteBuffer]
+        val set = ChunkSet(info, partKey, Nil, chunks)
 
-      System.out.print("yo\n")
-      colStore.write(dataset.ref, Observable.fromIterable(Iterable(set))).futureValue
-      System.out.print("yo!\n")
+        colStore.write(dataset.ref, Observable.fromIterable(Iterable(set))).futureValue
+
+        timeMillis += 3600 * 1000
+      }
     } finally {
       // Ensure that GC doesn't reclaim the native memory too soon.
       Reference.reachabilityFence(infoBuf)
     }
 
+    val part1Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey1))
+    val part2Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey2))
+
+    val expectChunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunks(part1Bytes).all()
+    expectChunks1 should have size (9)
+    val expectChunks2 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunks(part2Bytes).all()
+    expectChunks2 should have size (11)
+
+    // Expect 0 chunk records in the target at this point.
+    var chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part1Bytes).all()
+    chunks1 should have size (0)
+    var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part2Bytes).all()
+    chunks2 should have size (0)
+
     colStore.copyChunksByIngestionTimeRange(
       dataset.ref,
       colStore.getScanSplits(dataset.ref).iterator,
-      0,
-      0,
-      1,
-      colStore,
-      targetDataset.ref,
-      1)
+      startTimeMillis, // ingestionTimeStart
+      timeMillis,      // ingestionTimeEnd
+      7,         // batchSize
+      colStore,  // target
+      targetDataset.ref, // targetDatasetRef
+      3600 * 24 * 10) // diskTimeToLiveSeconds
 
-    /*
-    colStore.copyChunksByIngestionTimeRange(
-      datasetRef,
-      splits: Iterator[ScanSplit],
-      ingestionTimeStart: Long,
-      ingestionTimeEnd: Long,
-      batchSize: Int,
-      target: CassandraColumnStore,
-      targetDatasetRef: DatasetRef,
-      diskTimeToLiveSeconds: Int)
-     */
+    // Verify the copy.
+
+    def checkRow(a: Row, b: Row): Unit = {
+      val size = a.getColumnDefinitions().size()
+      b.getColumnDefinitions().size() shouldBe size
+      for (i <- 0 to size - 1) {
+        a.getObject(i) shouldBe b.getObject(i)
+      }
+    }
+
+    def checkRows(a: java.util.List[Row], b: java.util.List[Row]): Unit = {
+      val size = a.size()
+      size shouldBe b.size()
+      for (i <- 0 to size - 1) {
+        checkRow(a.get(i), b.get(i))
+      }
+    }
+
+    chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part1Bytes).all()
+    checkRows(expectChunks1, chunks1)
+    chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part2Bytes).all()
+    checkRows(expectChunks2, chunks2)
+
+    val expectIndex1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRows(part1Bytes).all()
+    expectIndex1 should have size (9)
+    val expectIndex2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRows(part2Bytes).all()
+    expectIndex2 should have size (11)
+
+    val index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRows(part1Bytes).all()
+    checkRows(expectIndex1, index1)
+    val index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRows(part2Bytes).all()
+    checkRows(expectIndex2, index2)
   }
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")

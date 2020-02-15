@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.{ConsistencyLevel, Row}
+import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -36,9 +36,17 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
                      |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  val selectCql = s"SELECT partition, info FROM $tableString WHERE "
-  lazy val allPartReadCql = session.prepare(selectCql + "partition = ?")
-  lazy val inPartReadCql = session.prepare(selectCql + "partition IN ?")
+  lazy val allCql = session.prepare(
+      s"SELECT ingestion_time, start_time, info FROM $tableString " +
+      s" WHERE partition = ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  /**
+    * Test method which returns all rows for a partition.
+    */
+  def readAllRows(partKeyBytes: ByteBuffer): ResultSet = {
+    session.execute(allCql.bind().setBytes(0, partKeyBytes))
+  }
 
   /**
     * Returns Rows consisting of:

@@ -62,7 +62,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                                       .setList(3, chunkList, classOf[ByteBuffer])
                                       .setInt(4, diskTimeToLive)
     stats.addChunkWriteStats(chunks.length, chunkBytes, chunkInfo.numRows)
-    System.out.print(insert + ", " + Thread.currentThread() + "\n")
     connector.execStmtWithRetries(insert.setConsistencyLevel(writeConsistencyLevel))
   }
 
@@ -126,6 +125,17 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     val query = readChunksCql.bind().setBytes(0, partKeyBytes)
                                     .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
     session.execute(query)
+  }
+
+  lazy val readAllChunksCql = session.prepare(
+    s"SELECT chunkid, info, chunks FROM $tableString WHERE partition = ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  /**
+    * Test method which returns the same results as the readChunks method.
+    */
+  def readAllChunks(partKeyBytes: ByteBuffer): ResultSet = {
+    session.execute(readAllChunksCql.bind().setBytes(0, partKeyBytes))
   }
 
   /**
