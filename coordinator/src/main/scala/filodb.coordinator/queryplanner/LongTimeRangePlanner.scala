@@ -29,8 +29,8 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
         else if (p.startMs >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
         else {
-
           // Split the query between raw and downsample planners
+          // TODO incorporate lookback window into this calculation
           val numStepsDownsample = (earliestRawTime - p.startMs) / p.stepMs
           val lastInstantInDownsample = p.startMs + numStepsDownsample * p.stepMs
           val firstInstantInRaw = lastInstantInDownsample + p.stepMs

@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import org.scalatest.{FunSpec, Matchers}
@@ -28,7 +30,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef)
+  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
 
   /*
   This is the PromQL
@@ -251,6 +253,20 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
         l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
       }
     }
+  }
+
+  it("should bound queries until retention period and drop instants outside retention period") {
+     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+       earliestRetainedTimestampFn = System.currentTimeMillis - 3.days.toMillis)
+
+    val now = System.currentTimeMillis() / 1000 * 1000
+    val logicalPlan = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
+      TimeStepParams(now/1000 - 3.days.toSeconds - 5.minutes.toSeconds , 1.minute.toSeconds, now/1000))
+
+    val ep = planner.materialize(logicalPlan, QueryContext()).asInstanceOf[DistConcatExec]
+    val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+                .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    psm.start shouldEqual (now - 3.days.toMillis + 1.minute.toMillis)
   }
 
 }
