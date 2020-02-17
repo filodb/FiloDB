@@ -119,6 +119,8 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     * chunkid: Long
     * info:    ByteBuffer
     * chunks:  List<ByteBuffer>
+    *
+    * Note: This method is intended for use by repair jobs and isn't async-friendly.
     */
   def readChunks(partKeyBytes: ByteBuffer,
                  chunkInfos: Seq[ByteBuffer]): ResultSet = {
@@ -132,7 +134,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
-    * Test method which returns the same results as the readChunks method.
+    * Test method which returns the same results as the readChunks method. Not async-friendly.
     */
   def readAllChunks(partKeyBytes: ByteBuffer): ResultSet = {
     session.execute(readAllChunksCql.bind().setBytes(0, partKeyBytes))

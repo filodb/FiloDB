@@ -42,7 +42,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
-    * Test method which returns all rows for a partition.
+    * Test method which returns all rows for a partition. Not async-friendly.
     */
   def readAllRows(partKeyBytes: ByteBuffer): ResultSet = {
     session.execute(allCql.bind().setBytes(0, partKeyBytes))
@@ -57,6 +57,8 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
     * info:           ByteBuffer
     *
     * The ChunkSetInfo object contains methods for extracting fields from the info column.
+    *
+    * Note: This method is intended for use by repair jobs and isn't async-friendly.
     */
   def scanRowsByIngestionTime(tokens: Seq[(String, String)],
                               ingestionTimeStart: Long,
