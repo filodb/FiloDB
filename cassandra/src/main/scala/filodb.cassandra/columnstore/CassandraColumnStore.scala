@@ -241,7 +241,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val futures = new ArrayBuffer[Future[Response]]()
 
     def finishBatch(partition: ByteBuffer): Unit = {
-      for (row <- sourceChunksTable.readChunks(partition, chunkInfos).iterator.asScala) {
+      for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
         futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
       }
 
@@ -264,7 +264,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     for (split <- splits) {
       val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
-      val rows = sourceIndexTable.scanRowsByIngestionTime(tokens, ingestionTimeStart, ingestionTimeEnd)
+      val rows = sourceIndexTable.scanRowsByIngestionTimeNoAsync(tokens, ingestionTimeStart, ingestionTimeEnd)
       for (row <- rows) {
         val partition = row.getBytes(0) // partition
 

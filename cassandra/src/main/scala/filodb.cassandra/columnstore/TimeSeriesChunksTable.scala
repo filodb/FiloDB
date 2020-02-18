@@ -122,8 +122,8 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     *
     * Note: This method is intended for use by repair jobs and isn't async-friendly.
     */
-  def readChunks(partKeyBytes: ByteBuffer,
-                 chunkInfos: Seq[ByteBuffer]): ResultSet = {
+  def readChunksNoAsync(partKeyBytes: ByteBuffer,
+                        chunkInfos: Seq[ByteBuffer]): ResultSet = {
     val query = readChunksCql.bind().setBytes(0, partKeyBytes)
                                     .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
     session.execute(query)
@@ -136,7 +136,7 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   /**
     * Test method which returns the same results as the readChunks method. Not async-friendly.
     */
-  def readAllChunks(partKeyBytes: ByteBuffer): ResultSet = {
+  def readAllChunksNoAsync(partKeyBytes: ByteBuffer): ResultSet = {
     session.execute(readAllChunksCql.bind().setBytes(0, partKeyBytes))
   }
 

@@ -100,15 +100,15 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val part1Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey1))
     val part2Bytes = ByteBuffer.wrap(BinaryRegionLarge.asNewByteArray(partKey2))
 
-    val expectChunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunks(part1Bytes).all()
+    val expectChunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
     expectChunks1 should have size (9)
-    val expectChunks2 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunks(part2Bytes).all()
+    val expectChunks2 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
     expectChunks2 should have size (11)
 
     // Expect 0 chunk records in the target at this point.
-    var chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part1Bytes).all()
+    var chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
     chunks1 should have size (0)
-    var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part2Bytes).all()
+    var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
     colStore.copyChunksByIngestionTimeRange(
@@ -139,19 +139,19 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       }
     }
 
-    chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part1Bytes).all()
+    chunks1 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part1Bytes).all()
     checkRows(expectChunks1, chunks1)
-    chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunks(part2Bytes).all()
+    chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
     checkRows(expectChunks2, chunks2)
 
-    val expectIndex1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRows(part1Bytes).all()
+    val expectIndex1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
     expectIndex1 should have size (9)
-    val expectIndex2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRows(part2Bytes).all()
+    val expectIndex2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
     expectIndex2 should have size (11)
 
-    val index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRows(part1Bytes).all()
+    val index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part1Bytes).all()
     checkRows(expectIndex1, index1)
-    val index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRows(part2Bytes).all()
+    val index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part2Bytes).all()
     checkRows(expectIndex2, index2)
   }
 

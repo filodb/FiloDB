@@ -44,7 +44,7 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
   /**
     * Test method which returns all rows for a partition. Not async-friendly.
     */
-  def readAllRows(partKeyBytes: ByteBuffer): ResultSet = {
+  def readAllRowsNoAsync(partKeyBytes: ByteBuffer): ResultSet = {
     session.execute(allCql.bind().setBytes(0, partKeyBytes))
   }
 
@@ -60,9 +60,9 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
     *
     * Note: This method is intended for use by repair jobs and isn't async-friendly.
     */
-  def scanRowsByIngestionTime(tokens: Seq[(String, String)],
-                              ingestionTimeStart: Long,
-                              ingestionTimeEnd: Long): Iterator[Row] = {
+  def scanRowsByIngestionTimeNoAsync(tokens: Seq[(String, String)],
+                                     ingestionTimeStart: Long,
+                                     ingestionTimeEnd: Long): Iterator[Row] = {
     def cql(start: String, end: String): String =
       s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
       s"WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
