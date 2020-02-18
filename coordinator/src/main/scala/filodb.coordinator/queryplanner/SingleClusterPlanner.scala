@@ -16,6 +16,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
+import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 import filodb.query.exec._
 
@@ -273,21 +274,31 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
 
-    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs)
+    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs, lp.window, lp.offset.getOrElse(0))
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
     series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
       lp.endMs, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
     series
   }
 
-  private def boundStartInstant(startMs: Long, stepMs: Long, endMs: Long): Long = {
+  private def materializePeriodicSeries(options: QueryContext,
+                                        lp: PeriodicSeries): PlanResult = {
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
+    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs,
+      WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
+      None, None, Nil, lp.offset)))
+    rawSeries
+  }
+
+  private def boundStartInstant(startMs: Long, stepMs: Long, endMs: Long,
+                                windowMs: Long, offsetMs: Long): Long = {
     // In case query is earlier than earliestRetainedTimestamp then we need to drop the first few instants
     // to prevent inaccurate results being served. Inaccuracy creeps in because data can be in memory for which
     // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.
-    // TODO incorporate lookback window into this calculation
     val earliestRetainedTimestamp = earliestRetainedTimestampFn
-    if (startMs < earliestRetainedTimestamp) {
-      val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs) / stepMs
+    if (startMs - windowMs - offsetMs < earliestRetainedTimestamp) {
+      val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
       val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
       lastInstantBeforeRetention + stepMs
     } else {
@@ -295,14 +306,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-  private def materializePeriodicSeries(options: QueryContext,
-                                        lp: PeriodicSeries): PlanResult = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
-    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs)
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-      None, None, Nil, lp.offset)))
-    rawSeries
-  }
 
   /**
     * If there is a _type_ filter, remove it and populate the schema name string.  This is because while

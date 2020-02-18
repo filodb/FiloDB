@@ -11,7 +11,7 @@ import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, Static
 import filodb.core.{MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
@@ -259,14 +259,46 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
      val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
        earliestRetainedTimestampFn = System.currentTimeMillis - 3.days.toMillis)
 
-    val now = System.currentTimeMillis() / 1000 * 1000
-    val logicalPlan = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
-      TimeStepParams(now/1000 - 3.days.toSeconds - 5.minutes.toSeconds , 1.minute.toSeconds, now/1000))
+    val nowSeconds = System.currentTimeMillis() / 1000
 
-    val ep = planner.materialize(logicalPlan, QueryContext()).asInstanceOf[DistConcatExec]
-    val psm = ep.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+    // Case 1: no offset or window
+    val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
+      TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
+
+    val ep1 = planner.materialize(logicalPlan1, QueryContext()).asInstanceOf[DistConcatExec]
+    val psm1 = ep1.children.head.asInstanceOf[MultiSchemaPartitionsExec]
                 .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
-    psm.start shouldEqual (now - 3.days.toMillis + 1.minute.toMillis)
+    psm1.start shouldEqual (nowSeconds * 1000
+                            - 3.days.toMillis // retention
+                            + 1.minute.toMillis // step
+                            + WindowConstants.staleDataLookbackSeconds * 1000) // default window
+
+    // Case 2: no offset, some window
+    val logicalPlan2 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m])""",
+      TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
+
+    val ep2 = planner.materialize(logicalPlan2, QueryContext()).asInstanceOf[DistConcatExec]
+    val psm2 = ep2.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+      .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    psm2.start shouldEqual (nowSeconds * 1000
+      - 3.days.toMillis // retention
+      + 1.minute.toMillis // step
+      + 20.minutes.toMillis) // window
+
+
+    // Case 2: offset and some window
+    val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
+      TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
+
+    val ep3 = planner.materialize(logicalPlan3, QueryContext()).asInstanceOf[DistConcatExec]
+    val psm3 = ep3.children.head.asInstanceOf[MultiSchemaPartitionsExec]
+      .rangeVectorTransformers.head.asInstanceOf[PeriodicSamplesMapper]
+    psm3.start shouldEqual (nowSeconds * 1000
+      - 3.days.toMillis // retention
+      + 1.minute.toMillis // step
+      + 20.minutes.toMillis  // window
+      + 15.minutes.toMillis) // offset
+
   }
 
 }
