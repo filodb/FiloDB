@@ -2,8 +2,9 @@
 
 if [[ $# -ne 6 ]]; then
     echo "Usage: $0 <FILO_ADMIN_KEYSPACE> <FILO_KEYSPACE> <FILO_DOWNSAMPLE_KEYSPACE> <DATASET> <NUM_SHARDS> <RESOLUTIONS>"
-    echo "First Run: $0 filodb_admin filodb filodb_downsample prometheus 4 1,5 > ddl.cql"
-    echo "Then Run: cql --request-timeout 3000 -f ddl.cql"
+    echo "First Run:    $0 filodb_admin filodb filodb_downsample prometheus 4 1,5 > ddl.cql"
+    echo "Then Run:     cql -u cass_username -p cass_password --request-timeout 3000 -f ddl.cql cass_host 9992"
+    echo "Or for Local: cql --request-timeout 3000 -f ddl.cql"
     exit 1
 fi
 
@@ -20,6 +21,7 @@ function create_keyspaces() {
 local KEYSP=$1
 
 cat << EOF
+
 CREATE KEYSPACE IF NOT EXISTS ${KEYSP} WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
 EOF
 
@@ -31,6 +33,7 @@ local KEYSP=$1
 local DSET=$2
 
 cat << EOF
+
 CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_tschunks (
     partition blob,
     chunkid bigint,
@@ -41,6 +44,7 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_tschunks (
 EOF
 
 cat << EOF
+
 CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_ingestion_time_index (
     partition blob,
     ingestion_time bigint,
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_ingestion_time_index (
     PRIMARY KEY (partition, ingestion_time, start_time)
 ) WITH compression = {'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 EOF
+
 }
 
 function create_partkey_tables() {
@@ -56,7 +61,6 @@ local KEYSP=$1
 local DSET=$2
 
 for SHARD in $(seq 0 $((NUM_SHARDS - 1))); do
-
 cat << EOF
 CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_$SHARD (
     partKey blob,
@@ -65,13 +69,29 @@ CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_partitionkeys_$SHARD (
     PRIMARY KEY (partKey)
 ) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 EOF
-
 done
+
+if [[ "${KEYSP}" != "${FILO_DOWNSAMPLE_KEYSPACE}" ]]; then
+cat << EOF
+
+CREATE TABLE IF NOT EXISTS ${KEYSP}.${DSET}_pks_by_update_time (
+    shard int,
+    epochHour bigint,
+    split int,
+    partKey blob,
+    startTime bigint,
+    endTime bigint,
+    PRIMARY KEY ((shard, epochHour, split), partKey)
+) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+EOF
+fi
+
 }
 
 function create_admin_tables() {
 
 cat << EOF
+
 CREATE TABLE IF NOT EXISTS ${FILO_ADMIN_KEYSPACE}.checkpoints (
     databasename text,
     datasetname text,
@@ -80,7 +100,6 @@ CREATE TABLE IF NOT EXISTS ${FILO_ADMIN_KEYSPACE}.checkpoints (
     offset bigint,
     PRIMARY KEY ((databasename, datasetname, shardnum), groupnum)
 ) WITH compression = {'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'};
-
 EOF
 
 }
@@ -100,4 +119,3 @@ do
 done
 
 create_partkey_tables ${FILO_DOWNSAMPLE_KEYSPACE} "${DATASET}_ds_${RESOLUTIONS[-1]}"
-

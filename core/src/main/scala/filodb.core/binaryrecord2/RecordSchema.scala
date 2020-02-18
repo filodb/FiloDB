@@ -336,6 +336,10 @@ final class RecordSchema(val columns: Seq[ColumnInfo],
   }
   def asByteArray(address: NativePointer): Array[Byte] = asByteArray(UnsafeUtils.ZeroPointer, address)
 
+
+  def toHexString(base: Any, offset: Long): String =
+    s"0x${asByteArray(base, offset).map("%02X" format _).mkString}"
+
   /**
    * Allows us to compare two RecordSchemas against each other
    */

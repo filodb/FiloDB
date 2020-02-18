@@ -13,7 +13,7 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.queryengine2.{EmptyFailureProvider, UnavailablePromQlQueryParams}
+import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
@@ -21,7 +21,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryOptions}
+import filodb.query.{QueryConfig, QueryContext}
 import filodb.query.exec.ExecPlan
 import filodb.timeseries.TestTimeseriesProducer
 
@@ -102,8 +102,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves
-  import filodb.coordinator.queryengine2.QueryEngine
-  val engine = new QueryEngine(dataset.ref, Schemas(dataset.schema), shardMapper, EmptyFailureProvider)
+  val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper)
 
   val numQueries = 100       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalSec = samplesDuration.toSeconds  // # minutes between start and stop
@@ -114,7 +113,7 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
     val queryStartTime = ingestionStartTime + 7.minutes.toMillis  // 7 minutes from start until 60 minutes from start
     val qParams = TimeStepParams(queryStartTime/1000, queryStep, queryStartTime/1000 + queryIntervalSec)
     val execPlan = engine.materialize(Parser.queryRangeToLogicalPlan(query, qParams),
-      QueryOptions(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000), UnavailablePromQlQueryParams)
+      QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 0))), 20000))
     var child = execPlan
     while (child.children.size > 0) child = child.children(0)
     child

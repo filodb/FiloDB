@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -15,7 +16,8 @@ import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
-  * Exec Plans for time functions which can execute locally without being dispatched
+  * Exec Plans for time functions which can execute locally without being dispatched as they don't have any input
+  * Query example: time(), hour()
   */
 case class TimeScalarGeneratorExec(id: String,
                                    dataset: DatasetRef, params: RangeParams,
@@ -47,7 +49,10 @@ case class TimeScalarGeneratorExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val recSchema = SerializedRangeVector.toSchema(columns)
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
+      .asChildOf(Kamon.currentSpan())
+      .tag("query-id", id)
+      .start()
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = function match {
       case Time        => Seq(TimeScalar(params))
@@ -60,14 +65,26 @@ case class TimeScalarGeneratorExec(id: String,
       case DaysInMonth => Seq(DaysInMonthScalar(params))
       case _           => throw new BadQueryException("Invalid Function")
     }
-
-    Task {
-      rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-        (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }._1.toListL.map(QueryResult(id, resultSchema, _))
-    }.flatten
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(execPlan2Span, true) {
+      Task {
+        val span = Kamon.spanBuilder(s"transform-${getClass.getSimpleName}")
+          .asChildOf(execPlan2Span)
+          .tag("query-id", id)
+          .start()
+        rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
+          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          span.mark(transf.getClass.getSimpleName)
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
+        }._1.toListL.map({
+          span.finish()
+          QueryResult(id, resultSchema, _)
+        })
+      }.flatten
+    }
   }
 
   /**
@@ -75,5 +92,5 @@ case class TimeScalarGeneratorExec(id: String,
     * to the node where it will be executed. The Query Engine
     * will supply this parameter
     */
-  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+  override final def dispatcher: PlanDispatcher = InProcessPlanDispatcher
 }

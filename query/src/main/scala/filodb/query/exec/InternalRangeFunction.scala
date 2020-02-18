@@ -18,6 +18,8 @@ object InternalRangeFunction {
 
   case object HoltWinters extends InternalRangeFunction
 
+  case object ZScore extends InternalRangeFunction
+
   case object Idelta extends InternalRangeFunction
 
   case object Increase extends InternalRangeFunction
@@ -49,25 +51,31 @@ object InternalRangeFunction {
   case object SumAndMaxOverTime extends InternalRangeFunction
   case object LastSampleHistMax extends InternalRangeFunction
 
+  case object Timestamp extends InternalRangeFunction
+
+  //scalastyle:off cyclomatic.complexity
   def lpToInternalFunc(extFuncId: RangeFunctionId): InternalRangeFunction = extFuncId match {
-    case RangeFunctionId.AvgOverTime   => AvgOverTime
-    case RangeFunctionId.Changes       => Changes
-    case RangeFunctionId.CountOverTime => CountOverTime
-    case RangeFunctionId.Delta         => Delta
-    case RangeFunctionId.Deriv         => Deriv
-    case RangeFunctionId.HoltWinters   => HoltWinters
-    case RangeFunctionId.Idelta        => Idelta
-    case RangeFunctionId.Increase      => Increase
-    case RangeFunctionId.Irate         => Irate
-    case RangeFunctionId.MaxOverTime   => MaxOverTime
-    case RangeFunctionId.MinOverTime   => MinOverTime
-    case RangeFunctionId.PredictLinear => PredictLinear
+    case RangeFunctionId.AvgOverTime      => AvgOverTime
+    case RangeFunctionId.Changes          => Changes
+    case RangeFunctionId.CountOverTime    => CountOverTime
+    case RangeFunctionId.Delta            => Delta
+    case RangeFunctionId.Deriv            => Deriv
+    case RangeFunctionId.HoltWinters      => HoltWinters
+    case RangeFunctionId.ZScore           => ZScore
+    case RangeFunctionId.Idelta           => Idelta
+    case RangeFunctionId.Increase         => Increase
+    case RangeFunctionId.Irate            => Irate
+    case RangeFunctionId.MaxOverTime      => MaxOverTime
+    case RangeFunctionId.MinOverTime      => MinOverTime
+    case RangeFunctionId.PredictLinear    => PredictLinear
     case RangeFunctionId.QuantileOverTime => QuantileOverTime
-    case RangeFunctionId.Rate          => Rate
-    case RangeFunctionId.Resets        => Resets
-    case RangeFunctionId.StdDevOverTime => StdDevOverTime
-    case RangeFunctionId.StdVarOverTime => StdVarOverTime
-    case RangeFunctionId.SumOverTime   => SumOverTime
+    case RangeFunctionId.Rate             => Rate
+    case RangeFunctionId.Resets           => Resets
+    case RangeFunctionId.StdDevOverTime   => StdDevOverTime
+    case RangeFunctionId.StdVarOverTime   => StdVarOverTime
+    case RangeFunctionId.SumOverTime      => SumOverTime
+    case RangeFunctionId.Timestamp        => Timestamp
   }
+  //scalastyle:on cyclomatic.complexity
 }
 

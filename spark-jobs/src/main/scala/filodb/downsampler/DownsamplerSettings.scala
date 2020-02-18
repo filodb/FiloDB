@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
@@ -14,6 +15,8 @@ import filodb.core.store.{IngestionConfig, StoreConfig}
   * from the spark application driver.
   */
 object DownsamplerSettings extends StrictLogging {
+
+  Kamon.init()
 
   val filodbSettings = new FilodbSettings(ConfigFactory.empty)
 

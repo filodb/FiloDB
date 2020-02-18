@@ -121,7 +121,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
     if (ts < timestampOfLatestSample) {
-      shardStats.outOfOrderDropped.increment
+      shardStats.outOfOrderDropped.increment()
       return
     }
 
@@ -346,6 +346,8 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     final def lock(): Unit = chunkmapAcquireShared()
     final def unlock(): Unit = chunkmapReleaseShared()
   }
+
+  def partKeyHash: Int = schema.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
 
   /**
     * startTime of earliest chunk in memory.

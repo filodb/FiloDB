@@ -44,11 +44,17 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   import Column.ColumnType._
 
   def length: Int = columns.length
-  def isTimeSeries: Boolean = columns.length >= 1 && numRowKeyColumns == 1 &&
+  def isTimeSeries: Boolean = columns.nonEmpty && numRowKeyColumns == 1 &&
                               (columns.head.colType == LongColumn || columns.head.colType == TimestampColumn)
   // True if main col is Histogram and extra column is a Double
   def isHistDouble: Boolean = columns.length == 3 &&
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
+
+  def hasSameColumnsAs(other: ResultSchema): Boolean = {
+    // exclude fixedVectorLen
+    other.columns == columns && other.numRowKeyColumns == numRowKeyColumns &&
+      other.brSchemas == brSchemas && other.colIDs == colIDs
+  }
 }
 
 object ResultSchema {

@@ -116,6 +116,12 @@ trait UTF8VectorDataReader extends VectorDataReader {
    */
   def iterate(acc: MemoryReader, vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator
 
+  def debugString(acc: MemoryReader, vector: BinaryVectorPtr, sep: String = "\n"): String = {
+    val it = iterate(acc, vector)
+    val size = length(acc, vector)
+    (0 to size).map(_ => it.next).mkString(sep)
+  }
+
   /**
    * Converts the BinaryVector to an unboxed Buffer.
    * Only returns elements that are "available".

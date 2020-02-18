@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.tag.TagSet
 
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
@@ -87,9 +88,9 @@ object MemFactory {
 class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String, String] = Map.empty)
     extends MemFactory {
 
-  val statFree    = Kamon.gauge("memstore-writebuffer-bytes-free").refine(tags)
-  val statUsed    = Kamon.gauge("memstore-writebuffer-bytes-used").refine(tags)
-  val statEntries = Kamon.gauge("memstore-writebuffer-entries").refine(tags)
+  val statFree    = Kamon.gauge("memstore-writebuffer-bytes-free").withTags(TagSet.from(tags))
+  val statUsed    = Kamon.gauge("memstore-writebuffer-bytes-used").withTags(TagSet.from(tags))
+  val statEntries = Kamon.gauge("memstore-writebuffer-entries").withTags(TagSet.from(tags))
 
   private val sizeMapping = debox.Map.empty[Long, Int]
   @volatile private var usedSoFar = 0L
@@ -147,9 +148,9 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long, val tags: Map[String,
 
   override def updateStats(): Unit = {
     val used = usedSoFar
-    statUsed.set(used)
-    statFree.set(upperBoundSizeInBytes - used)
-    statEntries.set(entries)
+    statUsed.update(used)
+    statFree.update(upperBoundSizeInBytes - used)
+    statEntries.update(entries)
   }
 
   private def entries = synchronized {

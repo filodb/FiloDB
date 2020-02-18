@@ -1,22 +1,29 @@
 package filodb.query
 
+import java.util.UUID
+
 import filodb.core.{SpreadChange, SpreadProvider}
 import filodb.core.query.{ColumnFilter, Filter}
 
+trait TsdbQueryParams
+case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
+                             spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
+case object UnavailablePromQlQueryParams extends TsdbQueryParams
+
 /**
   * This class provides general query processing parameters
-  *
-  * @param spreadFunc a function that returns chronologically ordered spread changes for the filter
   */
-final case class QueryOptions(spreadProvider: Option[SpreadProvider] = None,
-                              parallelism: Int = 16,
+final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
+                              spreadOverride: Option[SpreadProvider] = None,
                               queryTimeoutSecs: Int = 30,
                               sampleLimit: Int = 1000000,
-                              shardOverrides: Option[Seq[Int]] = None)
+                              shardOverrides: Option[Seq[Int]] = None,
+                              queryId: String = UUID.randomUUID().toString,
+                              submitTime: Long = System.currentTimeMillis())
 
-object QueryOptions {
-  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryOptions =
-    QueryOptions(spreadProvider = constSpread, sampleLimit = sampleLimit)
+object QueryContext {
+  def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
+    QueryContext(spreadOverride = constSpread, sampleLimit = sampleLimit)
 
   /**
     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values

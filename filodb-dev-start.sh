@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-# set -x
+#set -x
 
 function showHelp {
         echo "`basename $0` [-h] [-c arg] [-l arg] [-p]"
@@ -23,7 +23,7 @@ while getopts "hc:l:p" opt; do
         ;;
     l)  LOG_SUFFIX=$OPTARG
         ;;
-    p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0"
+    p)  PORTS_ARG="-Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dkamon.prometheus.embedded-server.port=9096"
         ;;
     esac
 done
@@ -36,4 +36,4 @@ if [ ! -f standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar ]; the
 fi
 
 echo "Starting FiloDB standalone server..."
-java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer  &
+java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer &

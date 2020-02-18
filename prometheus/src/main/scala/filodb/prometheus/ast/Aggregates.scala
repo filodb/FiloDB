@@ -50,7 +50,7 @@ trait Aggregates extends Vectors with TimeUnits with Base {
         case num: ScalarExpression =>
           parameter = Seq(num.toScalar)
         case s: InstantExpression =>
-          parameter = Seq(s.metricName)
+          parameter = Seq(s.metricName.get)
         case _ =>
           throw new IllegalArgumentException("First parameter to aggregate operator can be a string or number")
       }
@@ -66,8 +66,8 @@ trait Aggregates extends Vectors with TimeUnits with Base {
     }
 
 
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
-      val periodicSeriesPlan = series.toPeriodicSeriesPlan(timeParams)
+    def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      val periodicSeriesPlan = series.toSeriesPlan(timeParams)
 
       aggregateGrouping match {
         case Some(b: By) =>
