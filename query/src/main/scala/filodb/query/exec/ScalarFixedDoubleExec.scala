@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -19,8 +20,7 @@ import filodb.query.Query.qLogger
 case class ScalarFixedDoubleExec(queryContext: QueryContext,
                                  dataset: DatasetRef,
                                  params: RangeParams,
-                                 value: Double,
-                                 limit: Int) extends LeafExecPlan {
+                                 value: Double) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -46,18 +46,32 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
+      .asChildOf(Kamon.currentSpan())
+      .tag("query-id", queryContext.queryId)
+      .start()
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
-
-    Task {
-      rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${queryContext.queryId} Setting up Transformer ${transf.getClass.getSimpleName}" +
-          s" with ${transf.args}")
-        val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-        (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }._1.toListL.map(QueryResult(queryContext.queryId, resultSchema, _))
-    }.flatten
-
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(execPlan2Span, true) {
+      Task {
+        val span = Kamon.spanBuilder(s"trasnform-${getClass.getSimpleName}")
+          .asChildOf(execPlan2Span)
+          .tag("query-id", queryContext.queryId)
+          .start()
+        rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
+          qLogger.debug(s"queryId: ${queryContext.queryId} Setting up Transformer ${transf.getClass.getSimpleName} " +
+            s"with ${transf.args}")
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
+        }._1.toListL.map({
+          span.finish()
+          QueryResult(queryContext.queryId, resultSchema, _)
+        })
+      }.flatten
+    }
   }
 
   /**

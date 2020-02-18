@@ -5,6 +5,7 @@ import scala.collection.mutable
 import monix.eval.Task
 import monix.reactive.Observable
 
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query._
@@ -80,6 +81,20 @@ final case class StitchRvsExec(queryContext: QueryContext,
     }.map(Observable.fromIterable)
     Observable.fromTask(stitched).flatten
   }
+
+  // overriden since stitch can reduce schemas with different vector lengths as long as the columns are same
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
+    resp match {
+      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+        schema     /// First schema, take as is
+      case QueryResult(_, schema, _) =>
+        if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
+        val fixedVecLen = if (rs.fixedVectorLen.isEmpty && schema.fixedVectorLen.isEmpty) None
+                          else Some(rs.fixedVectorLen.getOrElse(0) + schema.fixedVectorLen.getOrElse(0))
+        rs.copy(fixedVectorLen = fixedVecLen)
+    }
+  }
+
 }
 
 /**

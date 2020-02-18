@@ -18,7 +18,9 @@ object Dependencies {
   val akkaHttpVersion   = "10.1.8"
   val cassDriverVersion = "3.7.1"
   val ficusVersion      = "1.1.2"
-  val kamonVersion      = "1.1.6"
+  val kamonBundleVersion = "2.0.6"
+  val kamonZipkinVersion = "2.0.1"
+  val kamonPrometheusVersion = "2.0.1"
   val monixKafkaVersion = "0.15"
   val sparkVersion      = "2.4.0"
   val sttpVersion       = "1.3.3"
@@ -36,10 +38,7 @@ object Dependencies {
   val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
 
   lazy val commonDeps = Seq(
-    "io.kamon" %% "kamon-core"            % kamonVersion,
-    "io.kamon" %% "kamon-akka-2.5"        % "1.1.3",
-    "io.kamon" %% "kamon-executors"       % "1.0.2",
-    "io.kamon" %% "kamon-akka-remote-2.5" % "1.1.0",
+    "io.kamon" %% "kamon-bundle" % kamonBundleVersion,
     logbackDep % Test,
     scalaTest  % Test,
     "com.softwaremill.quicklens" %% "quicklens" % "1.4.12" % Test,
@@ -53,6 +52,7 @@ object Dependencies {
     "joda-time"            % "joda-time"         % "2.2" withJavadoc(),
     "org.joda"             % "joda-convert"      % "1.2",
     "org.lz4"              %  "lz4-java"         % "1.4",
+    "org.agrona"           %  "agrona"           % "0.9.35",
     "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
     "org.spire-math"       %% "debox"            % "0.8.0" withJavadoc(),
     scalaLoggingDep,
@@ -61,7 +61,7 @@ object Dependencies {
 
   lazy val coreDeps = commonDeps ++ Seq(
     scalaLoggingDep,
-    "io.kamon"                     %% "kamon-zipkin"      % "1.0.0",
+    "io.kamon"                     %% "kamon-zipkin"      % kamonZipkinVersion,
     "org.slf4j"                    % "slf4j-api"          % "1.7.10",
     "com.beachape"                 %% "enumeratum"        % "1.5.10",
     "io.monix"                     %% "monix"             % "2.3.0",
@@ -92,6 +92,7 @@ object Dependencies {
   )
 
   lazy val queryDeps = commonDeps ++ Seq(
+    "com.typesafe.akka"     %% "akka-actor"                           % akkaVersion,
     "com.tdunning"          % "t-digest"                              % "3.1",
     "com.softwaremill.sttp" %% "circe"                                % sttpVersion ,
     "com.softwaremill.sttp" %% "async-http-client-backend-future"     % sttpVersion,
@@ -105,7 +106,7 @@ object Dependencies {
     "com.typesafe.akka"      %% "akka-cluster"                % akkaVersion withJavadoc(),
     "com.github.romix.akka"  %% "akka-kryo-serialization"     % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
     "de.javakaffee"          % "kryo-serializers"             % "0.42" excludeAll(excludeMinlog),
-    "io.kamon"               %% "kamon-prometheus"            % "1.1.1",
+    "io.kamon"               %% "kamon-prometheus"            % kamonPrometheusVersion,
     // Redirect minlog logs to SLF4J
     "com.dorkbox"            % "MinLog-SLF4J"                 % "1.12",
     "com.opencsv"            % "opencsv"                      % "3.3",
@@ -116,10 +117,8 @@ object Dependencies {
 
   lazy val cliDeps = Seq(
     logbackDep,
-    "io.kamon"          %% "kamon-akka-2.5"        % "1.1.3",
-    "io.kamon"          %% "kamon-executors"       % "1.0.2",
-    "io.kamon"          %% "kamon-akka-remote-2.5" % "1.1.0",
-    "com.quantifind"    %% "sumac"                 % "0.3.0"
+    "io.kamon"          %% "kamon-bundle"        % kamonBundleVersion,
+    "com.quantifind"    %% "sumac"               % "0.3.0"
   )
 
   lazy val kafkaDeps = Seq(
@@ -153,7 +152,7 @@ object Dependencies {
 
   lazy val standaloneDeps = Seq(
     logbackDep,
-    "io.kamon"              %% "kamon-zipkin"            % "1.0.0",
+    "io.kamon"              %% "kamon-zipkin"            % kamonZipkinVersion,
     "net.ceedubs"           %% "ficus"                   % ficusVersion      % Test,
     "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
     "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,

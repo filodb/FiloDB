@@ -8,6 +8,7 @@ import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import com.typesafe.config.Config
 import kamon.Kamon
+import kamon.tag.TagSet
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import net.ceedubs.ficus.readers.ValueReader
@@ -86,43 +87,39 @@ final class QueryActor(memStore: MemStore,
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
 
   private val tags = Map("dataset" -> dsRef.toString)
-  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
-  private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
-  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
-  private val queryErrors = Kamon.counter("queryactor-query-errors").refine(tags)
+  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").withTags(TagSet.from(tags))
+  private val epRequests = Kamon.counter("queryactor-execplan-requests").withTags(TagSet.from(tags))
+  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").withTags(TagSet.from(tags))
+  private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    epRequests.increment
+    epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
-      .withTag("query-id", q.queryContext.queryId)
-      .start()
+    Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
     q.execute(memStore, queryConfig)(queryScheduler)
-     .foreach { res =>
+      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
-           queryErrors.increment
+           queryErrors.increment()
            logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
            e.t match {
              case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
              case t: Throwable =>
            }
        }
-       span.finish()
      }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
        logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
        replyTo ! QueryError(q.queryContext.queryId, ex)
-       span.finish()
      }(queryScheduler)
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
     // This is for CLI use only. Always prefer clients to materialize logical plan
-    lpRequests.increment
+    lpRequests.increment()
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       self forward execPlan

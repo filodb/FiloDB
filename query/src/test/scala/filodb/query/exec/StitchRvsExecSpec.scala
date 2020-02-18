@@ -1,9 +1,12 @@
 package filodb.query.exec
 
-import filodb.core.query.TransientRow
+import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
 
 import scala.annotation.tailrec
 import org.scalatest.{FunSpec, Matchers}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
+import filodb.memory.format.UnsafeUtils
+import filodb.query.QueryResult
 
 // scalastyle:off null
 class StitchRvsExecSpec extends FunSpec with Matchers {
@@ -91,6 +94,23 @@ class StitchRvsExecSpec extends FunSpec with Matchers {
     mergeAndValidate(rvs, expected)
   }
 
+  it ("should reduce result schemas with different fixedVecLengths without error") {
+
+    // null needed below since there is a require in code that prevents empty children
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher, Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+
+    val rs1 = ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1))
+    val rs2 = ResultSchema(List(ColumnInfo("timestamp",
+      TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(147), List(0, 1))
+
+    val reduced = exec.reduceSchemas(rs1, QueryResult("someId", rs2, Seq.empty))
+    reduced.columns shouldEqual rs1.columns
+    reduced.numRowKeyColumns shouldEqual rs1.numRowKeyColumns
+    reduced.brSchemas shouldEqual rs1.brSchemas
+    reduced.fixedVectorLen shouldEqual Some(430 + 147)
+    reduced.colIDs shouldEqual rs1.colIDs
+  }
 
   it ("should merge with no overlap correctly") {
     val rvs = Seq (

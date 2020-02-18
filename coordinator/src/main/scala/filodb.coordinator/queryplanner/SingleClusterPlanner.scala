@@ -18,7 +18,7 @@ import filodb.query._
 import filodb.query.exec._
 
 object SingleClusterPlanner {
-  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests")
+  private val mdNoShardKeyFilterRequests = Kamon.counter("queryengine-metadata-no-shardkey-requests").withoutTags
 }
 
 /**
@@ -444,8 +444,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeScalarTimeBased(options: QueryContext,
                                          lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(options, dsRef, lp.rangeParams, lp.function,
-      options.sampleLimit)
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(options, dsRef, lp.rangeParams, lp.function)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
 
@@ -458,8 +457,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeFixedScalar(options: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
-    val scalarFixedDoubleExec = ScalarFixedDoubleExec(options, dsRef, lp.timeStepParams, lp.scalar,
-      options.sampleLimit)
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(options, dsRef, lp.timeStepParams, lp.scalar)
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }
 

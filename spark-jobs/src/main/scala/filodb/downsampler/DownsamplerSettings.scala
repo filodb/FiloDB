@@ -16,6 +16,8 @@ import filodb.core.store.{IngestionConfig, StoreConfig}
   */
 object DownsamplerSettings extends StrictLogging {
 
+  Kamon.init()
+
   val filodbSettings = new FilodbSettings(ConfigFactory.empty)
 
   val filodbConfig = filodbSettings.allConfig.getConfig("filodb")
@@ -64,8 +66,6 @@ object DownsamplerSettings extends StrictLogging {
   val whitelist = downsamplerConfig.as[Seq[Map[String, String]]]("whitelist-filters").map(_.toSeq)
 
   val blacklist = downsamplerConfig.as[Seq[Map[String, String]]]("blacklist-filters").map(_.toSeq)
-
-  Kamon.loadReportersFromConfig() // register metric reporters
 
 }
 

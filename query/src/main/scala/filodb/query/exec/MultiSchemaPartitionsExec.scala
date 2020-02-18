@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import kamon.Kamon
 import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
@@ -40,14 +41,15 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
   private def finalizePlan(source: ChunkSource): ExecPlan = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    Kamon.currentSpan().mark("filtered-partition-scan")
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+    Kamon.currentSpan().mark("lookup-partitions-done")
 
     val queryTime = (System.currentTimeMillis() - queryContext.submitTime) / 1000
     if (queryTime >= queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName)
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
-
     // If we cannot find a schema, or none is provided, we cannot move ahead with specific SRPE planning
     schema.map { s => schemas.schemas(s) }
           .orElse(lookupRes.firstSchemaId.map(schemas.apply))
@@ -79,9 +81,11 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
           }
   }
 
-  def doExecute(source: ChunkSource, queryConfig: QueryConfig)(implicit sched: Scheduler): ExecResult = {
-     finalPlan = finalizePlan(source)
-     finalPlan.doExecute(source, queryConfig)(sched)
+  def doExecute(source: ChunkSource,
+                queryConfig: QueryConfig)
+               (implicit sched: Scheduler): ExecResult = {
+    finalPlan = finalizePlan(source)
+    finalPlan.doExecute(source, queryConfig)(sched)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

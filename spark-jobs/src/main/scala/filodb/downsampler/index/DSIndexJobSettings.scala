@@ -8,6 +8,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.FilodbSettings
 import filodb.downsampler.DownsamplerSettings
+import filodb.downsampler.DownsamplerSettings.downsampleStoreConfig
 
 /**
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
@@ -28,6 +29,14 @@ object DSIndexJobSettings extends StrictLogging {
 
   val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
+  val migrateRawIndex = dsIndexJobConfig.getBoolean("migrate-full-index")
+
+  // Longer lookback-time is needed to account for failures in the job runs.
+  // As the updates need to be applied incrementally, migration needs to happen from the failed batch until the
+  // latest hour. This is to ensure that subsequent mutations were not overwritten.
+  val batchLookbackInHours = dsIndexJobConfig.as[Option[Long]]("batch-lookback-in-hours")
+    .getOrElse(downsampleStoreConfig.flushInterval.toHours)
+
   val numShards = filodbSettings.streamConfigs
     .find(_.getString("dataset") == DownsamplerSettings.rawDatasetName)
     .headOption.getOrElse(ConfigFactory.empty())
@@ -35,4 +44,3 @@ object DSIndexJobSettings extends StrictLogging {
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 }
-

@@ -1,6 +1,7 @@
 package filodb.downsampler
 
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
@@ -28,6 +29,11 @@ import org.apache.spark.sql.SparkSession
   * This will cover all data with userTime 12am to 12am.
   * Since we query for a broader ingestionTime, it will include data arriving early/late by 2 hours.
   *
+  * Important Note: The reason non-real-time data is not included in goals is because we
+  * want chunk alignment between DCs in downsampled data to enable cross-dc repair without chunk surgery.
+  * Without chunk-alignment in raw data and consistency in behavior across DCs, it would be difficult
+  * to achieve chunk alignment in downsampled data. Once we solve that (deferred problem), we will
+  * lift the constraint.
   */
 object DownsamplerMain extends App {
 
@@ -52,6 +58,7 @@ class Downsampler extends StrictLogging {
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
+  // scalastyle:off method.length
   def run(conf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
@@ -89,12 +96,15 @@ class Downsampler extends StrictLogging {
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
         val rawDataSource = rawCassandraColStore
-        rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
+        val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
+        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
           maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
           batchSize = batchSize, batchTime = batchTime).toIterator()
+        batchReadSpan.finish()
+        batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
         downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)

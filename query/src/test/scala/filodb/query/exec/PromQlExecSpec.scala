@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import com.typesafe.config.ConfigFactory
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
@@ -25,7 +26,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
     val exec = PromQlExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams(ConfigFactory.empty(), "", 0, 0 , 0))
     val result = query.Result (Map("instance" ->"inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))), None)
-    val res = exec.toQueryResponse(Data("vector", Seq(result)), "id")
+    val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(3)
@@ -38,7 +39,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
     val expectedResult = List((1000000, 1.0))
     val exec = PromQlExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref, PromQlInvocationParams(ConfigFactory.empty(), "", 0, 0 , 0))
     val result = query.Result (Map("instance" ->"inst1"), None, Some(Sampl(1000, 1)))
-    val res = exec.toQueryResponse(Data("vector", Seq(result)), "id")
+    val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     queryResult.result(0).numRows.get shouldEqual(1)
