@@ -90,7 +90,7 @@ class HistogramQueryBenchmark {
   // Single-threaded query test
   val numQueries = 500
   val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
-    copy(shardOverrides = Some(Seq(0)))
+    copy(shardOverrides = Some(Seq(0)), queryTimeoutSecs = 60)
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
   val hExecPlan = hEngine.materialize(hLogicalPlan, qContext)
   val querySched = Scheduler.singleThread(s"benchmark-query")
@@ -111,7 +111,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def histSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      hExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
+      hExecPlan.execute(memStore, queryConfig)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -123,7 +123,7 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def promSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      pExecPlan.execute(memStore, queryConfig)(querySched, 60.seconds)
+      pExecPlan.execute(memStore, queryConfig)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

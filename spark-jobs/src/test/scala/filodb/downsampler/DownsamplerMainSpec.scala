@@ -2,7 +2,6 @@ package filodb.downsampler
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -18,7 +17,7 @@ import filodb.core.downsample.DownsampledTimeSeriesStore
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, RawDataRangeVector}
+import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawDataRangeVector}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.BatchDownsampler.{schemas, shardStats}
@@ -539,12 +538,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
-      val exec = MultiSchemaPartitionsExec("someId", System.currentTimeMillis(),
-        1000, InProcessPlanDispatcher, BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher, BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
       val queryConfig = new QueryConfig(DownsamplerSettings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler, 1 minute)
+      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
                     .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
