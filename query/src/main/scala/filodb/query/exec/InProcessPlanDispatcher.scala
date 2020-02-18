@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -22,8 +20,7 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
   // Empty query config, since its does not apply in case of non-leaf plans
   val queryConfig: QueryConfig = EmptyQueryConfig
 
-  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
-                                        timeout: FiniteDuration): Task[QueryResponse] = {
+  override def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
     // unsupported source since its does not apply in case of non-leaf plans
     val source = UnsupportedChunkSource()
     // translate implicit ExecutionContext to monix.Scheduler

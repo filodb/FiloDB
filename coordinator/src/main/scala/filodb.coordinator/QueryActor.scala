@@ -95,9 +95,9 @@ final class QueryActor(memStore: MemStore,
     epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}")
-      .withTag("query-id", q.id)
+      .withTag("query-id", q.queryContext.queryId)
       .start()
-    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
+    q.execute(memStore, queryConfig)(queryScheduler)
      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
@@ -105,7 +105,7 @@ final class QueryActor(memStore: MemStore,
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
            queryErrors.increment
-           logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
+           logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
            e.t match {
              case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
              case t: Throwable =>
@@ -114,8 +114,8 @@ final class QueryActor(memStore: MemStore,
        span.finish()
      }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
-       logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
-       replyTo ! QueryError(q.id, ex)
+       logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+       replyTo ! QueryError(q.queryContext.queryId, ex)
        span.finish()
      }(queryScheduler)
   }

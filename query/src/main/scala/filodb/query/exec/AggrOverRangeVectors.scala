@@ -14,7 +14,7 @@ import filodb.query.exec.aggregator.RowAggregator
   * Reduce combined aggregates from children. Can be applied in a
   * hierarchical manner multiple times to arrive at result.
   */
-final case class ReduceAggregateExec(id: String,
+final case class ReduceAggregateExec(queryContext: QueryContext,
                                      dispatcher: PlanDispatcher,
                                      childAggregates: Seq[ExecPlan],
                                      aggrOp: AggregationOperator,

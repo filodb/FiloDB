@@ -1,5 +1,7 @@
 package filodb.query.exec
 
+import java.util.concurrent.TimeUnit
+
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.ActorRef
@@ -8,6 +10,7 @@ import akka.util.Timeout
 import monix.eval.Task
 import monix.execution.Scheduler
 
+import filodb.core.QueryTimeoutException
 import filodb.query.QueryResponse
 
 /**
@@ -16,8 +19,7 @@ import filodb.query.QueryResponse
   */
 trait PlanDispatcher extends java.io.Serializable {
   def dispatch(plan: ExecPlan)
-              (implicit sched: Scheduler,
-               timeout: FiniteDuration): Task[QueryResponse]
+              (implicit sched: Scheduler): Task[QueryResponse]
 }
 
 /**
@@ -26,10 +28,13 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
-  def dispatch(plan: ExecPlan)
-              (implicit sched: Scheduler,
-               timeout: FiniteDuration): Task[QueryResponse] = {
-    implicit val _ = Timeout(timeout)
+  def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
+
+    val queryTime = (System.currentTimeMillis() - plan.queryContext.submitTime) / 1000
+    if (queryTime >= plan.queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName)
+    val timeRemaining = plan.queryContext.queryTimeoutSecs -
+      (System.currentTimeMillis() - plan.queryContext.submitTime) / 1000
+    implicit val _ = Timeout(FiniteDuration(plan.queryContext.queryTimeoutSecs - queryTime, TimeUnit.SECONDS))
     val fut = (target ? plan).map {
       case resp: QueryResponse => resp
       case e =>  throw new IllegalStateException(s"Received bad response $e")

@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -18,12 +16,11 @@ import filodb.query.Query.qLogger
   * Exec Plans for fixed scalars which can execute locally without being dispatched
   * Query example: 3, 4.2
   */
-case class ScalarFixedDoubleExec(id: String,
+case class ScalarFixedDoubleExec(queryContext: QueryContext,
                                  dataset: DatasetRef,
                                  params: RangeParams,
                                  value: Double,
-                                 limit: Int,
-                                 submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+                                 limit: Int) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -34,7 +31,7 @@ case class ScalarFixedDoubleExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                        (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+                        (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
       "readily available static value")
   }
@@ -48,17 +45,17 @@ case class ScalarFixedDoubleExec(id: String,
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
 
     Task {
       rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+        qLogger.debug(s"queryId: ${queryContext.queryId} Setting up Transformer ${transf.getClass.getSimpleName}" +
+          s" with ${transf.args}")
         val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
         (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }._1.toListL.map(QueryResult(id, resultSchema, _))
+      }._1.toListL.map(QueryResult(queryContext.queryId, resultSchema, _))
     }.flatten
 
   }

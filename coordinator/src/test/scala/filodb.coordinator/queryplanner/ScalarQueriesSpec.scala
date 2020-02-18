@@ -1,18 +1,15 @@
 package filodb.coordinator.queryplanner
 
-import scala.concurrent.duration.FiniteDuration
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import monix.eval.Task
-import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
+
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.parse.Parser
-import filodb.query
 import filodb.query._
 import filodb.query.ScalarFunctionId.Time
 import filodb.query.exec._
@@ -31,13 +28,7 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   val dsRef = dataset.ref
   val schemas = Schemas(dataset.schema)
 
-  val emptyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
-                                          timeout: FiniteDuration): Task[query.QueryResponse] = ???
-  }
-
   val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef)
-
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 

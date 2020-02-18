@@ -10,7 +10,7 @@ import filodb.query.Query.qLogger
 /**
   * Simply concatenate results from child ExecPlan objects
   */
-final case class DistConcatExec(id: String,
+final case class DistConcatExec(queryContext: QueryContext,
                                 dispatcher: PlanDispatcher,
                                 children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)

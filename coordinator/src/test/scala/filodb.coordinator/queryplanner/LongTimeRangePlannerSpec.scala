@@ -13,27 +13,26 @@ import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
-  class MockExecPlan(val name: String, val lp: LogicalPlan, val qContext: QueryContext) extends ExecPlan {
-    override def id: String = ???
+  class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
+    override def queryContext: QueryContext = QueryContext()
     override def children: Seq[ExecPlan] = ???
     override def submitTime: Long = ???
-    override def limit: Int = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
     override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                          (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+                          (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???
   }
 
   val rawPlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-      new MockExecPlan("raw", logicalPlan, qContext)
+      new MockExecPlan("raw", logicalPlan)
     }
   }
 
   val downsamplePlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-      new MockExecPlan("downsample", logicalPlan, qContext)
+      new MockExecPlan("downsample", logicalPlan)
     }
   }
 

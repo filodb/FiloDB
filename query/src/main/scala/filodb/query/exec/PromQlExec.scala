@@ -17,12 +17,10 @@ import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
-case class PromQlExec(id: String,
+case class PromQlExec(queryContext: QueryContext,
                       dispatcher: PlanDispatcher,
                       dataset: DatasetRef,
-                      params: PromQlInvocationParams,
-                      submitTime: Long = System.currentTimeMillis())
-                      extends LeafExecPlan {
+                      params: PromQlInvocationParams) extends LeafExecPlan {
 
   protected def args: String = params.toString
   import PromQlExec._
@@ -37,18 +35,17 @@ case class PromQlExec(id: String,
     * node
     */
   def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-               (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+               (implicit sched: Scheduler): ExecResult = ???
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
 
     val queryResponse = PromQlExec.httpGet(params).map { response =>
 
       response.unsafeBody match {
-        case Left(error) => QueryError(id, error.error)
-        case Right(successResponse) => toQueryResponse(successResponse.data, id)
+        case Left(error) => QueryError(queryContext.queryId, error.error)
+        case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId)
       }
 
     }

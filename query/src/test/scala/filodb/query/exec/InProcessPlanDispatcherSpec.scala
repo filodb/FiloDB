@@ -18,7 +18,7 @@ import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -95,12 +95,12 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
-    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan)
-    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan)
+    val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, filters, AllChunkScan)
 
-    val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
+    val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
 
     result match {
@@ -123,12 +123,12 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
-    val execPlan1 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunkScan)
-    val execPlan2 = MultiSchemaPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, emptyFilters, AllChunkScan)
+    val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, filters, AllChunkScan)
+    val execPlan2 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
+      0, emptyFilters, AllChunkScan)
 
-    val sep = StitchRvsExec(queryId, dispatcher, Seq(execPlan1, execPlan2))
+    val sep = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan1, execPlan2))
     val result = dispatcher.dispatch(sep).runAsync.futureValue
 
     result match {
@@ -140,7 +140,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     }
 
     // Switch the order and make sure it's OK if the first result doesn't have any data
-    val sep2 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan1))
+    val sep2 = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan2, execPlan1))
     val result2 = dispatcher.dispatch(sep2).runAsync.futureValue
 
     result2 match {
@@ -152,7 +152,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     }
 
     // Two children none of which returns data
-    val sep3 = StitchRvsExec(queryId, dispatcher, Seq(execPlan2, execPlan2))
+    val sep3 = StitchRvsExec(QueryContext(), dispatcher, Seq(execPlan2, execPlan2))
     val result3 = dispatcher.dispatch(sep3).runAsync.futureValue
 
     result3 match {
@@ -167,8 +167,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfig) extends PlanDispatcher {
   // run locally withing any check.
   override def dispatch(plan: ExecPlan)
-                       (implicit sched: Scheduler,
-                        timeout: FiniteDuration): Task[QueryResponse] = {
+                       (implicit sched: Scheduler): Task[QueryResponse] = {
     plan.execute(memStore, queryConfig)
   }
 }

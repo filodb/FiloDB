@@ -78,10 +78,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case PlanResult(many, stitch) =>
         val targetActor = pickDispatcher(many)
         many.head match {
-          case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext.queryId, targetActor, many)
-          case ske: PartKeysExec => PartKeysDistConcatExec(qContext.queryId, targetActor, many)
+          case lve: LabelValuesExec => LabelValuesDistConcatExec(qContext, targetActor, many)
+          case ske: PartKeysExec => PartKeysDistConcatExec(qContext, targetActor, many)
           case ep: ExecPlan =>
-            val topPlan = DistConcatExec(qContext.queryId, targetActor, many)
+            val topPlan = DistConcatExec(qContext, targetActor, many)
             if (stitch) topPlan.addRangeVectorTransformer(StitchRvsMapper())
             topPlan
         }
@@ -191,10 +191,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeBinaryJoin(options: QueryContext,
                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, options)
-    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(options.queryId, pickDispatcher(lhs.plans), lhs.plans))
+    val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(options, pickDispatcher(lhs.plans), lhs.plans))
     else lhs.plans
     val rhs = walkLogicalPlanTree(lp.rhs, options)
-    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(options.queryId, pickDispatcher(rhs.plans), rhs.plans))
+    val stitchedRhs = if (rhs.needsStitch) Seq(StitchRvsExec(options, pickDispatcher(rhs.plans), rhs.plans))
     else rhs.plans
     // TODO Currently we create separate exec plan node for stitching.
     // Ideally, we can go one step further and add capability to NonLeafNode plans to pre-process
@@ -204,10 +204,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
-      Seq(exec.SetOperatorExec(options.queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator,
+      Seq(exec.SetOperatorExec(options, targetActor, stitchedLhs, stitchedRhs, lp.operator,
         lp.on, lp.ignoring, dsOptions.metricColumn))
     else
-      Seq(BinaryJoinExec(options.queryId, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
+      Seq(BinaryJoinExec(options, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
         lp.on, lp.ignoring, lp.include, dsOptions.metricColumn))
     PlanResult(joined, false)
   }
@@ -237,12 +237,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
         val groupSize = Math.sqrt(toReduceLevel1.plans.size).ceil.toInt
         toReduceLevel1.plans.grouped(groupSize).map { nodePlans =>
           val reduceDispatcher = nodePlans.head.dispatcher
-          ReduceAggregateExec(options.queryId, reduceDispatcher, nodePlans, lp.operator, lp.params)
+          ReduceAggregateExec(options, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
       } else toReduceLevel1.plans
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)
-    val reducer = ReduceAggregateExec(options.queryId, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
+    val reducer = ReduceAggregateExec(options, reduceDispatcher, toReduceLevel2, lp.operator, lp.params)
     reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     PlanResult(Seq(reducer), false) // since we have aggregated, no stitching
   }
@@ -314,8 +314,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val execPlans = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      MultiSchemaPartitionsExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), options, schemaOpt, colName)
+      MultiSchemaPartitionsExec(options, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
+        schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -337,8 +337,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        filters, labelNames, lp.lookbackTimeMs)
+      exec.LabelValuesExec(options, dispatcher, dsRef, shard, filters, labelNames, lp.lookbackTimeMs)
     }
     PlanResult(metaExec, false)
   }
@@ -356,8 +355,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        schemas.part, renamedFilters, lp.startMs, lp.endMs)
+      PartKeysExec(options, dispatcher, dsRef, shard, schemas.part, renamedFilters, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
@@ -369,8 +367,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val metaExec = shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectChunkInfosExec(options.queryId, options.submitTime, options.sampleLimit, dispatcher, dsRef, shard,
-        renamedFilters, toChunkScanMethod(lp.rangeSelector), schemaOpt, colName)
+      SelectChunkInfosExec(options, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
+        schemaOpt, colName)
     }
     PlanResult(metaExec, false)
   }
@@ -404,7 +402,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, options)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(ScalarFunctionMapper(lp.function, RangeParams(lp.startMs, lp.stepMs, lp.endMs)))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -419,7 +417,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, options)
     if(vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(SortFunctionMapper(lp.function))
       PlanResult(Seq(topPlan), vectors.needsStitch)
     } else {
@@ -433,7 +431,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val vectors = walkLogicalPlanTree(lp.vectors, options)
     if (vectors.plans.length > 1) {
       val targetActor = pickDispatcher(vectors.plans)
-      val topPlan = DistConcatExec(options.queryId, targetActor, vectors.plans)
+      val topPlan = DistConcatExec(options, targetActor, vectors.plans)
       topPlan.addRangeVectorTransformer(AbsentFunctionMapper(lp.columnFilters, lp.rangeParams,
         PromMetricLabel))
       PlanResult(Seq(topPlan), vectors.needsStitch)
@@ -446,7 +444,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeScalarTimeBased(options: QueryContext,
                                          lp: ScalarTimeBasedPlan): PlanResult = {
-    val scalarTimeBasedExec = TimeScalarGeneratorExec(options.queryId, dsRef, lp.rangeParams, lp.function,
+    val scalarTimeBasedExec = TimeScalarGeneratorExec(options, dsRef, lp.rangeParams, lp.function,
       options.sampleLimit)
     PlanResult(Seq(scalarTimeBasedExec), false)
   }
@@ -460,7 +458,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeFixedScalar(options: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
-    val scalarFixedDoubleExec = ScalarFixedDoubleExec(options.queryId, dsRef, lp.timeStepParams, lp.scalar,
+    val scalarFixedDoubleExec = ScalarFixedDoubleExec(options, dsRef, lp.timeStepParams, lp.scalar,
       options.sampleLimit)
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }

@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -18,11 +16,10 @@ import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, 
   * Exec Plans for time functions which can execute locally without being dispatched as they don't have any input
   * Query example: time(), hour()
   */
-case class TimeScalarGeneratorExec(id: String,
+case class TimeScalarGeneratorExec(queryContext: QueryContext,
                                    dataset: DatasetRef, params: RangeParams,
                                    function: ScalarFunctionId,
-                                   limit: Int,
-                                   submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+                                   limit: Int) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -33,7 +30,7 @@ case class TimeScalarGeneratorExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+                        (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
       "a readily available static value")
   }
@@ -46,8 +43,7 @@ case class TimeScalarGeneratorExec(id: String,
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = function match {
       case Time        => Seq(TimeScalar(params))
@@ -63,10 +59,11 @@ case class TimeScalarGeneratorExec(id: String,
 
     Task {
       rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+        qLogger.debug(s"queryId: ${queryContext.queryId} Setting up Transformer ${transf.getClass.getSimpleName} " +
+          s"with ${transf.args}")
         val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
         (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }._1.toListL.map(QueryResult(id, resultSchema, _))
+      }._1.toListL.map(QueryResult(queryContext.queryId, resultSchema, _))
     }.flatten
   }
 

@@ -50,12 +50,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             timeRange.startMs / 1000, queryParams.stepSecs, timeRange.endMs / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlInvocationParams)
-          PromQlExec(qContext.queryId, InProcessPlanDispatcher, dsRef, promQlInvocationParams, qContext.submitTime)
+          PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlInvocationParams)
       }
     }
 
     if (execPlans.size == 1) execPlans.head
-    else StitchRvsExec(qContext.queryId,
+    else StitchRvsExec(qContext,
                        InProcessPlanDispatcher,
                        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher

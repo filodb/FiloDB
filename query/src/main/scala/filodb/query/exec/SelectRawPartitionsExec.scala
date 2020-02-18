@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -9,7 +7,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
-import filodb.core.query.ResultSchema
+import filodb.core.query.{QueryContext, ResultSchema}
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
 import filodb.query.Query.qLogger
@@ -103,9 +101,7 @@ object SelectRawPartitionsExec extends  {
   *                      if false, the given schema is expected for all partitions, error will be thrown otherwise.
   * @param colIds the exact column IDs that are needed for querying the raw data
   */
-final case class SelectRawPartitionsExec(id: String,
-                                         submitTime: Long,
-                                         limit: Int,
+final case class SelectRawPartitionsExec(queryContext: QueryContext,
                                          dispatcher: PlanDispatcher,
                                          datasetRef: DatasetRef,
                                          dataSchema: Option[Schema],
@@ -124,9 +120,9 @@ final case class SelectRawPartitionsExec(id: String,
 
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
-    Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")} " +
+               (implicit sched: Scheduler): ExecResult = {
+    Query.qLogger.debug(s"queryId=${queryContext.queryId} on dataset=$datasetRef " +
+      s"shard=${lookupRes.map(_.shard).getOrElse("")} " +
       s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)

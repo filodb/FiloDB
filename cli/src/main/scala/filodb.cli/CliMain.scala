@@ -18,6 +18,7 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
+import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}

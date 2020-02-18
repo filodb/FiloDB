@@ -45,7 +45,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                                                       TimeRange(firstInstantInRaw, p.endMs),
                                                       lookBackTime)
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-          StitchRvsExec(qContext.queryId, stitchDispatcher, Seq(rawEp, downsampleEp))
+          StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
       case _ =>
         // for now send everything else to raw cluster. Metadata queries are TODO

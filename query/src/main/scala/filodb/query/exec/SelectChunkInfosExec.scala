@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -32,9 +30,7 @@ object SelectChunkInfosExec {
   * in the given shard, for the given row key range, for one particular column
   * ID (Long), NumRows (Int), startTime (Long), endTime (Long), numBytes(I) of chunk, readerclass of chunk
   */
-final case class SelectChunkInfosExec(id: String,
-                                      submitTime: Long,
-                                      limit: Int,
+final case class SelectChunkInfosExec(queryContext: QueryContext,
                                       dispatcher: PlanDispatcher,
                                       dataset: DatasetRef,
                                       shard: Int,
@@ -46,8 +42,7 @@ final case class SelectChunkInfosExec(id: String,
 
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
+               (implicit sched: Scheduler): ExecResult = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
 

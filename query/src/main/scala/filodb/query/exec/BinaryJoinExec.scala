@@ -33,7 +33,7 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * @param ignoring fields from range vector keys to exclude while performing the join
   * @param include labels specified in group_left/group_right to be included from one side
   */
-final case class BinaryJoinExec(id: String,
+final case class BinaryJoinExec(queryContext: QueryContext,
                                 dispatcher: PlanDispatcher,
                                 lhs: Seq[ExecPlan],
                                 rhs: Seq[ExecPlan],
