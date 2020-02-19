@@ -306,7 +306,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
   }
 
-
   /**
     * If there is a _type_ filter, remove it and populate the schema name string.  This is because while
     * the _type_ filter is a real filter on time series, we don't index it using Lucene at the moment.
