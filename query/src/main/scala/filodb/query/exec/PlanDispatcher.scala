@@ -32,8 +32,6 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
     val queryTime = (System.currentTimeMillis() - plan.queryContext.submitTime) / 1000
     if (queryTime >= plan.queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName)
-    val timeRemaining = plan.queryContext.queryTimeoutSecs -
-      (System.currentTimeMillis() - plan.queryContext.submitTime) / 1000
     implicit val _ = Timeout(FiniteDuration(plan.queryContext.queryTimeoutSecs - queryTime, TimeUnit.SECONDS))
     val fut = (target ? plan).map {
       case resp: QueryResponse => resp

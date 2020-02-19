@@ -138,7 +138,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     //Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec(QueryContext(sampleLimit = 1), dummyDispatcher,
+    val execPlan = PartKeysExec(QueryContext(sampleLimit = limit-1), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
