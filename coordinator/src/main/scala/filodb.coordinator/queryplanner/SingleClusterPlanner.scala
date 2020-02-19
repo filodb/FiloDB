@@ -298,6 +298,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.
     val earliestRetainedTimestamp = earliestRetainedTimestampFn
     if (startMs - windowMs - offsetMs < earliestRetainedTimestamp) {
+      // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
+      // doesnt fully fall into the retention period. Data required for that instant involves
+      // going backwards from that instant upto windowMs + offsetMs milli-seconds.
       val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
       val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
       lastInstantBeforeRetention + stepMs
