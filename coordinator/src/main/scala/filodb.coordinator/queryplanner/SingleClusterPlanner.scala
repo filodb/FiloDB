@@ -296,10 +296,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // In case query is earlier than earliestRetainedTimestamp then we need to drop the first few instants
     // to prevent inaccurate results being served. Inaccuracy creeps in because data can be in memory for which
     // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.
-    // Also if startMs < 200k, it is usually a unit test case with synthetic data, so don't fiddle
+    // Also if startMs < 500000000000 (before 1985), it is usually a unit test case with synthetic data, so don't fiddle
     // around with those queries
     val earliestRetainedTimestamp = earliestRetainedTimestampFn
-    if (startMs - windowMs - offsetMs < earliestRetainedTimestamp && startMs > 200000L) {
+    if (startMs - windowMs - offsetMs < earliestRetainedTimestamp && startMs > 500000000000L) {
       // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
       // doesnt fully fall into the retention period. Data required for that instant involves
       // going backwards from that instant up to windowMs + offsetMs milli-seconds.
