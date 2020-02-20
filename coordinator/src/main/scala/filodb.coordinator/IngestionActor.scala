@@ -3,8 +3,8 @@ package filodb.coordinator
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.HashSet
-import scala.concurrent.Future
+import scala.collection.mutable
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
@@ -64,8 +64,8 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   import IngestionActor._
 
-  final val streamSubscriptions = (new ConcurrentHashMap[Int, CancelableFuture[Unit]]).asScala
-  final val streams = (new ConcurrentHashMap[Int, IngestionStream]).asScala
+  final val streamSubscriptions = new ConcurrentHashMap[Int, CancelableFuture[Unit]].asScala
+  final val streams = new ConcurrentHashMap[Int, IngestionStream].asScala
   final val nodeCoord = context.parent
   var shardStateVersion: Long = 0
 
@@ -94,7 +94,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
     logger.info(s"Cancelling all streams and calling teardown for dataset=$ref")
-    streamSubscriptions.keys.foreach(stopIngestion(_))
+    streamSubscriptions.keys.foreach(stopIngestion)
   }
 
   def receive: Receive = LoggingReceive {
@@ -123,7 +123,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
     // Start with the full set of all shards being ingested, and remove shards from this set
     // which must continue being ingested.
-    val shardsToStop = HashSet() ++ streams.keySet
+    val shardsToStop = mutable.HashSet() ++ streams.keySet
 
     for (shard <- 0 until state.map.numShards) {
       if (state.map.coordForShard(shard) == context.parent) {
@@ -162,28 +162,31 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   // scalastyle:off method.length
   private def startIngestion(shard: Int): Unit = {
     try memStore.setup(ref, schemas, shard, storeConfig, downsample) catch {
-      case ShardAlreadySetup(ds, shard) =>
-        logger.warn(s"dataset=$ds shard=$shard already setup, skipping....")
+      case ShardAlreadySetup(ds, s) =>
+        logger.warn(s"dataset=$ds shard=$s already setup, skipping....")
         return
     }
 
-    logger.info(s"Initiating ingestion for dataset=$ref shard=${shard}")
-    logger.info(s"Metastore is ${memStore.metastore}")
-    implicit val futureMapDispatcher = actorDispatcher
+    implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
     val ingestion = if (memStore.isReadOnly) {
+      logger.info(s"Initiating shard startup on read-only memstore for dataset=$ref shard=$shard")
       for {
         _ <- memStore.recoverIndex(ref, shard)
       } yield {
+        // bring shard to active state by sending this message - this code path wont invoke normalIngestion
+        statusActor ! IngestionStarted(ref, shard, nodeCoord)
         streamSubscriptions(shard) = CancelableFuture.never // simulate ingestion happens continuously
         streams(shard) = IngestionStream(Observable.never)
       }
     } else {
+      logger.info(s"Initiating ingestion for dataset=$ref shard=$shard")
+      logger.info(s"Metastore is ${memStore.metastore}")
       for {
         _ <- memStore.recoverIndex(ref, shard)
         checkpoints <- memStore.metastore.readCheckpoints(ref, shard)
       } yield {
         if (checkpoints.isEmpty) {
-          logger.info(s"No checkpoints were found for dataset=$ref shard=${shard} -- skipping kafka recovery")
+          logger.info(s"No checkpoints were found for dataset=$ref shard=$shard -- skipping kafka recovery")
           // Start normal ingestion with no recovery checkpoint and flush group 0 first
           normalIngestion(shard, None, 0)
         } else {
@@ -194,9 +197,9 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
           val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
           logger.info(s"Starting recovery for dataset=$ref " +
-            s"shard=${shard} from $startRecoveryWatermark to $endRecoveryWatermark ; " +
+            s"shard=$shard from $startRecoveryWatermark to $endRecoveryWatermark ; " +
             s"last flushed group $lastFlushedGroup")
-          logger.info(s"Checkpoints for dataset=$ref shard=${shard} were $checkpoints")
+          logger.info(s"Checkpoints for dataset=$ref shard=$shard were $checkpoints")
           for {lastOffset <- doRecovery(shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
             checkpoints)}
             yield {
@@ -211,7 +214,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     ingestion.recover {
       case NonFatal(t) =>
         logger.error(s"Error occurred during initialization/execution of ingestion for " +
-          s"dataset=$ref shard=${shard}", t)
+          s"dataset=$ref shard=$shard", t)
         handleError(ref, shard, t)
     }
   }
@@ -233,7 +236,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
       // Define a cancel task to run when ingestion is stopped.
       val onCancel = Task {
-        logger.info(s"Ingstion cancel task invoked for dataset=$ref shard=$shard")
+        logger.info(s"Ingestion cancel task invoked for dataset=$ref shard=$shard")
         val stopped = IngestionStopped(ref, shard)
         self ! stopped
         statusActor ! stopped
@@ -279,9 +282,10 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
                          checkpoints: Map[Int, Long]): Future[Option[Long]] = {
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
-      val recoveryTrace = Kamon.buildSpan("ingestion-recovery-trace")
-                               .withTag("shard", shard.toString)
-                               .withTag("dataset", ref.toString).start()
+      val recoveryTrace = Kamon.spanBuilder("ingestion-recovery-trace")
+                               .asChildOf(Kamon.currentSpan())
+                               .tag("shard", shard.toString)
+                               .tag("dataset", ref.toString).start()
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(ref, shard, nodeCoord, 0)
 
@@ -304,7 +308,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
           streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
-          recoveryTrace.addError(s"Recovery failed for dataset=$ref shard=$shard", ex)
+          recoveryTrace.fail(s"Recovery failed for dataset=$ref shard=$shard", ex)
           logger.error(s"Recovery failed for dataset=$ref shard=$shard", ex)
           handleError(ref, shard, ex)
           recoveryTrace.finish()
@@ -358,7 +362,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
 
   private def ingestionStopped(ref: DatasetRef, shard: Int): Unit = {
     removeAndReleaseResources(ref, shard)
-    logger.info(s"stopIngestion handler done. Ingestion success for dataset=${ref} shard=$shard")
+    logger.info(s"stopIngestion handler done. Ingestion success for dataset=$ref shard=$shard")
   }
 
   private def invalid(dsRef: DatasetRef): Boolean = dsRef != ref

@@ -457,6 +457,8 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
+FiloDB supports computing Z-score queries. It represents the distance between the raw score and the population mean in units of the standard deviation. This can be used for anomaly detection.
+ 
 Since FiloDB supports multiple schemas, with possibly more than one value column per schema, there needs to be a way to specify the target column to query.  This is done using a `::columnName` suffix in the metric name, like this request which pulls out the "min" column:
 
     http_req_timer::min{_ws_="demo", _ns_="foo"}
@@ -483,7 +485,7 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 
 * There is no need to append `_bucket` to the metric name.
 * To compute quantiles:  `histogram_quantile(0.7, sum(rate(http_req_latency{app="foo"}[5m])))`
-* To extract a bucket: `histogram_bucket(100.0, http_req_latency{app="foo"})`
+* To extract a bucket: `http_req_latency{app="foo",_bucket_="100.0"}`  (`_bucket_` is a special filter that translates to the `histogram_bucket` function for bucket extraction)
 * Sum over multiple Histogram time series:  `sum(rate(http_req_latency{app="foo"}[5m]))` - you could then compute quantile over the sum.
   - NOTE: Do NOT use `by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
@@ -707,6 +709,29 @@ You may also configure CLI logging by copying `cli/src/main/resources/logback.xm
 
 You can also change the logging directory by setting the FILO_LOG_DIR environment variable before calling the CLI.
 
+### Debugging Binary Vectors and Binary Records
+
+Following command can be used to formulate BR for a partKey using Prometheus filter. Use this to formulate CQL to issue a cassandra query
+
+    > ./filo-cli --command promFilterToPartKeyBR --promql "myMetricName{_ws_='myWs',_ns_='myNs'}" --schema prom-counter
+    0x2c0000000f1712000000200000004b8b36940c006d794d65747269634e616d650e00c104006d794e73c004006d795773
+    
+Following command can be used to decode partKey BR into tag/value pairs
+
+    > ./filo-cli --command partKeyBrAsString --hexPk 0x2C0000000F1712000000200000004B8B36940C006D794D65747269634E616D650E00C104006D794E73C004006D795773
+    b2[schema=prom-counter  _metric_=myMetricName,tags={_ns_: myNs, _ws_: myWs}]
+
+Following command can be used to decode a ChunkSetInfo read from Cassandra
+
+    > ./filo-cli  --command decodeChunkInfo --hexChunkInfo 0x12e8253a267ea2db060000005046fc896e0100005046fc896e010000
+    ChunkSetInfo id=-2620393330526787566 numRows=6 startTime=1574272801000 endTime=1574273042000
+    
+Following command can be used to decode a Binary Vector. Valid vector types are `d` for double, `i` for integer `l` for long, `h` for histogram and `s` for string
+     
+    > ./filo-cli  --command decodeVector  --vectorType d --hexVector 0x1b000000080800000300000000000000010000000700000006080400109836
+    DoubleLongWrapDataReader$
+    3.0,5.0,13.0,15.0,13.0,11.0,9.0
+ 
 ## Current Status
 
 | Component | Status     |

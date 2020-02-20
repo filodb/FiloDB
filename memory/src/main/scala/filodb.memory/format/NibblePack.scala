@@ -321,6 +321,10 @@ object NibblePack {
       i += 8
     }
 
+    def debugString: String =
+      s"numBuckets=$numBuckets i=$i pos=$pos writePos=$writePos valueDropped=$valueDropped " +
+      s"lastHistDeltas=${lastHistDeltas.toList} originalDeltas=${originalDeltas.toList}"
+
     /**
      * After process(), call this method if it was the start of a new section or first histogram
      */

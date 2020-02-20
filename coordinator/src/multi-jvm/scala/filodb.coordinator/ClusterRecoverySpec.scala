@@ -2,13 +2,14 @@ package filodb.coordinator
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.remote.testkit.MultiNodeConfig
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
-import filodb.coordinator.queryengine2.UnavailablePromQlQueryParams
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.ColumnInfo
@@ -146,11 +147,11 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     // val query = LogicalPlanQuery(dataset6.ref,
     //               simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
-    val qOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
+    val qOpt = QueryContext(shardOverrides = Some(Seq(0, 1)))
     val q2 = LogicalPlan2Query(dataset6.ref,
                PeriodicSeriesWithWindowing(
                  RawSeries(AllChunksSelector, Nil, Seq("AvgTone")),
-                 100L, 1000L, 100L, window = 1000L, function = RangeFunctionId.CountOverTime), UnavailablePromQlQueryParams, qOpt)
+                 100L, 1000L, 100L, window = 1000L, function = RangeFunctionId.CountOverTime), qOpt)
     coordinatorActor ! q2
     expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, schema, vectors) =>

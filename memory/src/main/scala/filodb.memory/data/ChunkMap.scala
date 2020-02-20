@@ -52,9 +52,9 @@ object ChunkMap extends StrictLogging {
   private val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
   private val MaxExclusiveRetryTimeoutNanos = 1.minute.toNanos
 
-  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
-  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
-  private val chunkEvictions = Kamon.counter("memory-chunk-evictions")
+  private val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").withoutTags
+  private val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering").withoutTags
+  private val chunkEvictions = Kamon.counter("memory-chunk-evictions").withoutTags
 
   // Tracks all the shared locks held, by each thread.
   private val sharedLockCounts = new ThreadLocal[Map[ChunkMap, Int]] {

@@ -2,6 +2,7 @@ package filodb.query
 
 import filodb.core.query.{ColumnFilter, RangeParams}
 
+//scalastyle:off number.of.types
 sealed trait LogicalPlan {
   /**
     * Execute failure routing
@@ -10,10 +11,13 @@ sealed trait LogicalPlan {
 }
 
 /**
-  * Super class for a query that results in range vectors with raw samples
+  * Super class for a query that results in range vectors with raw samples (chunks),
+  * or one simple transform from the raw data.  This data is likely non-periodic or at least
+  * not in the same time cadence as user query windowing.
   */
-sealed trait RawSeriesPlan extends LogicalPlan {
+sealed trait RawSeriesLikePlan extends LogicalPlan {
   override def isRoutable: Boolean = false
+  def isRaw: Boolean = false
 }
 
 sealed trait NonLeafLogicalPlan extends LogicalPlan {
@@ -24,9 +28,23 @@ sealed trait NonLeafLogicalPlan extends LogicalPlan {
   * Super class for a query that results in range vectors with samples
   * in regular steps
   */
-sealed trait PeriodicSeriesPlan extends LogicalPlan
+sealed trait PeriodicSeriesPlan extends LogicalPlan {
+  /**
+    * Periodic Query start time in millis
+    */
+  def startMs: Long
 
-sealed trait MetadataQueryPlan extends LogicalPlan{
+  /**
+    * Periodic Query end time in millis
+    */
+  def stepMs: Long
+  /**
+    * Periodic Query step time in millis
+    */
+  def endMs: Long
+}
+
+sealed trait MetadataQueryPlan extends LogicalPlan {
   override def isRoutable: Boolean = false
 }
 
@@ -49,15 +67,17 @@ case class IntervalSelector(from: Long, to: Long) extends RangeSelector
   */
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
-                     columns: Seq[String]) extends RawSeriesPlan
+                     columns: Seq[String]) extends RawSeriesLikePlan {
+  override def isRaw: Boolean = true
+}
 
 case class LabelValues(labelNames: Seq[String],
                        labelConstraints: Map[String, String],
-                       lookbackTimeInMillis: Long) extends MetadataQueryPlan
+                       lookbackTimeMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
-                               start: Long,
-                               end: Long) extends MetadataQueryPlan
+                               startMs: Long,
+                               endMs: Long) extends MetadataQueryPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range
@@ -67,6 +87,11 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
                         filters: Seq[ColumnFilter],
                         column: String) extends PeriodicSeriesPlan {
   override def isRoutable: Boolean = false
+
+  // FIXME - TechDebt - This class should not be a PeriodicSeriesPlan
+  override def startMs: Long = ???
+  override def stepMs: Long = ???
+  override def endMs: Long = ???
 }
 
 /**
@@ -80,10 +105,11 @@ case class RawChunkMeta(rangeSelector: RangeSelector,
   * This should be taken care outside this layer, or we need to have
   * proper validation.
   */
-case class PeriodicSeries(rawSeries: RawSeriesPlan,
-                          start: Long,
-                          step: Long,
-                          end: Long) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
+                          startMs: Long,
+                          stepMs: Long,
+                          endMs: Long,
+                          offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -91,18 +117,18 @@ case class PeriodicSeries(rawSeries: RawSeriesPlan,
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
   *
-  * Applies a range function on raw windowed data before
+  * Applies a range function on raw windowed data (perhaps with instant function applied) before
   * sampling data at regular intervals.
   */
-case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
-                                       start: Long,
-                                       step: Long,
-                                       end: Long,
+case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
+                                       startMs: Long,
+                                       stepMs: Long,
+                                       endMs: Long,
                                        window: Long,
                                        function: RangeFunctionId,
-                                       functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
-  with NonLeafLogicalPlan {
-  override def children: Seq[LogicalPlan] = Seq(rawSeries)
+                                       functionArgs: Seq[FunctionArgsPlan] = Nil,
+                                       offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(series)
 }
 
 /**
@@ -118,6 +144,9 @@ case class Aggregate(operator: AggregationOperator,
                      by: Seq[String] = Nil,
                      without: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
 }
 
 /**
@@ -137,7 +166,14 @@ case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
                       ignoring: Seq[String] = Nil,
                       include: Seq[String] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  require(lhs.startMs == rhs.startMs)
+  require(lhs.endMs == rhs.endMs)
+  require(lhs.stepMs == rhs.stepMs)
   override def children: Seq[LogicalPlan] = Seq(lhs, rhs)
+  override def startMs: Long = lhs.startMs
+  override def stepMs: Long = lhs.stepMs
+  override def endMs: Long = lhs.endMs
+  override def isRoutable: Boolean = lhs.isRoutable && rhs.isRoutable
 }
 
 /**
@@ -148,14 +184,34 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
                                        vector: PeriodicSeriesPlan,
                                        scalarIsLhs: Boolean) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vector)
+  override def startMs: Long = vector.startMs
+  override def stepMs: Long = vector.stepMs
+  override def endMs: Long = vector.endMs
+  override def isRoutable: Boolean = vector.isRoutable
 }
 
 /**
-  * Apply Instant Vector Function to a collection of RangeVectors
+  * Apply Instant Vector Function to a collection of periodic RangeVectors,
+  * returning another set of periodic vectors
   */
 case class ApplyInstantFunction(vectors: PeriodicSeriesPlan,
                                 function: InstantFunctionId,
                                 functionArgs: Seq[FunctionArgsPlan] = Nil) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
+  override def isRoutable: Boolean = vectors.isRoutable
+}
+
+/**
+  * Apply Instant Vector Function to a collection of raw RangeVectors,
+  * returning another set of non-periodic vectors
+  */
+case class ApplyInstantFunctionRaw(vectors: RawSeries,
+                                   function: InstantFunctionId,
+                                   functionArgs: Seq[FunctionArgsPlan] = Nil) extends RawSeriesLikePlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
 }
@@ -168,6 +224,9 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
                                       stringArgs: Seq[String] = Nil) extends PeriodicSeriesPlan
   with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
 }
 
 /**
@@ -176,32 +235,85 @@ case class ApplyMiscellaneousFunction(vectors: PeriodicSeriesPlan,
 case class ApplySortFunction(vectors: PeriodicSeriesPlan,
                              function: SortFunctionId) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
 }
 
+/**
+  * Nested logical plan for argument of function
+  * Example: clamp_max(node_info{job = "app"},scalar(http_requests_total{job = "app"}))
+  */
 trait FunctionArgsPlan extends LogicalPlan
+
+/**
+  * Generate scalar
+  * Example: scalar(http_requests_total), time(), hour()
+  */
 trait ScalarPlan extends LogicalPlan with PeriodicSeriesPlan with FunctionArgsPlan
 
+/**
+  * Generate scalar from vector
+  * Example: scalar(http_requests_total)
+  */
 final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
                                          function: ScalarFunctionId,
-                                         timeStepParams: RangeParams,
                                          functionArgs: Seq[FunctionArgsPlan] = Nil)
-                                         extends ScalarPlan with NonLeafLogicalPlan {
+                                         extends ScalarPlan with PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
 }
 
-
+/**
+  * Scalar generated by time functions which do not have metric as input
+  * Example: time(), hour()
+  */
 final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
   override def isRoutable: Boolean = false
+  override def startMs: Long = rangeParams.start
+  override def stepMs: Long = rangeParams.step
+  override def endMs: Long = rangeParams.end
 }
 
+/**
+  * Logical plan for numeric values. Used in queries like foo + 5
+  * Example: 3, 4.2
+  */
 final case class ScalarFixedDoublePlan(scalar: Double,
                                        timeStepParams: RangeParams)
                                        extends ScalarPlan with FunctionArgsPlan {
   override def isRoutable: Boolean = false
+  override def startMs: Long = timeStepParams.start
+  override def stepMs: Long = timeStepParams.step
+  override def endMs: Long = timeStepParams.end
 }
 
+//scalastyle:off number.of.types
+/**
+  * Generates vector from scalars
+  * Example: vector(3), vector(scalar(http_requests_total)
+  */
 final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(scalars)
+  override def startMs: Long = scalars.startMs
+  override def stepMs: Long = scalars.stepMs
+  override def endMs: Long = scalars.endMs
+  override def isRoutable: Boolean = scalars.isRoutable
+}
+
+/**
+  * Apply Absent Function to a collection of RangeVectors
+  */
+case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
+                               columnFilters: Seq[ColumnFilter],
+                               rangeParams: RangeParams,
+                               functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+  override def children: Seq[LogicalPlan] = Seq(vectors)
+  override def startMs: Long = vectors.startMs
+  override def stepMs: Long = vectors.stepMs
+  override def endMs: Long = vectors.endMs
 }
 
 object LogicalPlan {
@@ -211,8 +323,9 @@ object LogicalPlan {
   def findLeafLogicalPlans (logicalPlan: LogicalPlan) : Seq[LogicalPlan] = {
    logicalPlan match {
      // Find leaf logical plans for all children and concatenate results
-     case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans(_))
+     case lp: NonLeafLogicalPlan => lp.children.flatMap(findLeafLogicalPlans)
      case _                      => Seq(logicalPlan)
    }
   }
 }
+//scalastyle:on number.of.types

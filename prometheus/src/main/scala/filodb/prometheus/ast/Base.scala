@@ -1,6 +1,6 @@
 package filodb.prometheus.ast
 
-import filodb.query.{MetadataQueryPlan, PeriodicSeriesPlan, RawSeriesPlan, _}
+import filodb.query.{MetadataQueryPlan, PeriodicSeriesPlan, _}
 
 sealed trait TimeRangeParams {
   def start: Long   // in seconds sine Epoch
@@ -28,11 +28,11 @@ trait Base {
   trait Series
 
   trait PeriodicSeries extends Series {
-    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan
+    def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan
   }
 
   trait SimpleSeries extends Series {
-    def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan
+    def toSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesLikePlan
   }
 
   trait Metadata extends Expression {
@@ -42,12 +42,16 @@ trait Base {
   /**
    * Converts a TimeRangeParams into a RangeSelector at timeParam.start - startOffset
    * timeParam.start is in seconds, startOffset is in millis
+   * @param startOffset lookback time
+   * @param offset offset function time
    */
-  def timeParamToSelector(timeParam: TimeRangeParams, startOffset: Long): RangeSelector = timeParam match {
-    case TimeStepParams(start, step, end) => IntervalSelector(start * 1000 - startOffset, end * 1000)
-    case InMemoryParam(_)                 => InMemoryChunksSelector
-    case WriteBuffersParam(_)             => WriteBufferSelector
-  }
+  def timeParamToSelector(timeParam: TimeRangeParams, startOffset: Long, offset: Long = 0): RangeSelector =
+    timeParam match {
+      case TimeStepParams(start, step, end) => IntervalSelector(start * 1000 - startOffset - offset,
+                                               end * 1000 - offset)
+      case InMemoryParam(_)                 => InMemoryChunksSelector
+      case WriteBuffersParam(_)             => WriteBufferSelector
+    }
 
   /**
     * An identifier is an unquoted string

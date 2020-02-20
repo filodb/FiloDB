@@ -5,11 +5,11 @@ import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
 import scalaxy.loops._
 
+import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.ColumnFilter
 import filodb.core.store.ChunkSetInfo.emptySkips
-import filodb.core.Types.PartitionKey
 import filodb.memory.{UTF8StringMedium, UTF8StringShort}
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 

@@ -24,11 +24,11 @@ object FiloRelation extends StrictLogging {
   // *** Statistics **
   // For now they are global across all tables.
   // TODO(velvia): Make them per-table?
-  val totalQueries             = Kamon.counter("spark-queries-total")
-  val singlePartQueries        = Kamon.counter("spark-queries-single-partition")
-  val multiPartQueries         = Kamon.counter("spark-queries-multi-partition")
-  val fullFilteredQueries      = Kamon.counter("spark-queries-full-filtered")
-  val fullTableQueries         = Kamon.counter("spark-queries-full-table")
+  val totalQueries             = Kamon.counter("spark-queries-total").withoutTags
+  val singlePartQueries        = Kamon.counter("spark-queries-single-partition").withoutTags
+  val multiPartQueries         = Kamon.counter("spark-queries-multi-partition").withoutTags
+  val fullFilteredQueries      = Kamon.counter("spark-queries-full-filtered").withoutTags
+  val fullTableQueries         = Kamon.counter("spark-queries-full-table").withoutTags
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloDriver.metaStore.getDataset(dataset)) { ds => ds }
@@ -280,12 +280,12 @@ case class FiloRelation(dataset: DatasetRef,
     val _config = this.filoConfig
     val _confStr = _config.root.render(ConfigRenderOptions.concise)
     val _serializedDataset = dataset.asCompactString
-    totalQueries.increment
+    totalQueries.increment()
     val chunkMethod = chunkRangeScan(dataset, groupedFilters)
     partitionQuery(_config, dataset, partitionFilters) match {
       // single partition query
       case Seq(partitionKey) =>
-        singlePartQueries.increment
+        singlePartQueries.increment()
         parallelizePartKeys(Seq(partitionKey), 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_confStr, _serializedDataset, columnIDs,
                                  SinglePartitionScan(partKeyIter.next), chunkMethod)
@@ -294,14 +294,14 @@ case class FiloRelation(dataset: DatasetRef,
       // filtered partition full table scan, with or without range scanning
       case Nil =>
         val colFilters = getPartitionFilters(dataset, partitionFilters)
-        if (colFilters.nonEmpty) fullFilteredQueries.increment else fullTableQueries.increment
+        if (colFilters.nonEmpty) fullFilteredQueries.increment() else fullTableQueries.increment()
         splitsQuery(sqlContext, dataset.ref, splitsPerNode, _confStr, _serializedDataset, columnIDs, chunkMethod) { s =>
           FilteredPartitionScan(s, colFilters)
         }
 
       // multi partition query, no range scan
       case partitionKeys: Seq[Array[Byte]] =>
-        multiPartQueries.increment
+        multiPartQueries.increment()
         parallelizePartKeys(partitionKeys, 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_confStr, _serializedDataset, columnIDs,
                                  MultiPartitionScan(partKeyIter.toSeq), chunkMethod)
