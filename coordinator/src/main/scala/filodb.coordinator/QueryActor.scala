@@ -41,8 +41,11 @@ object QueryActor {
 
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dsRef: DatasetRef, schemas: Schemas, shardMapFunc: => ShardMapper): Props =
-    Props(new QueryActor(memStore, dsRef, schemas, shardMapFunc)).withMailbox("query-actor-mailbox")
+  def props(memStore: MemStore, dsRef: DatasetRef,
+            schemas: Schemas, shardMapFunc: => ShardMapper,
+            earliestRawTimestampFn: => Long): Props =
+    Props(new QueryActor(memStore, dsRef, schemas,
+                         shardMapFunc, earliestRawTimestampFn)).withMailbox("query-actor-mailbox")
 }
 
 /**
@@ -54,7 +57,8 @@ object QueryActor {
 final class QueryActor(memStore: MemStore,
                        dsRef: DatasetRef,
                        schemas: Schemas,
-                       shardMapFunc: => ShardMapper) extends BaseActor {
+                       shardMapFunc: => ShardMapper,
+                       earliestRawTimestampFn: => Long) extends BaseActor {
   import QueryActor._
   import client.QueryCommands._
   import filodb.core.memstore.FiloSchedulers._
@@ -80,7 +84,8 @@ final class QueryActor(memStore: MemStore,
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
-  val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc, functionalSpreadProvider)
+  val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
+                                              functionalSpreadProvider, earliestRawTimestampFn)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)

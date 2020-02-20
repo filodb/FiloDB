@@ -2,6 +2,8 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -14,6 +16,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, RangeParams}
 import filodb.core.store.{AllChunkScan, ChunkScanMethod, InMemoryChunkScan, TimeRangeChunkScan, WriteBufferChunkScan}
 import filodb.prometheus.ast.Vectors.{PromMetricLabel, TypeLabel}
+import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 import filodb.query.exec._
 
@@ -32,7 +35,8 @@ object SingleClusterPlanner {
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider())
+                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
+                           earliestRetainedTimestampFn: => Long = { System.currentTimeMillis - 3.days.toMillis})
                                 extends QueryPlanner with StrictLogging {
 
   private val dsOptions = schemas.part.options
@@ -269,8 +273,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, options)
+
+    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs, lp.window, lp.offset.getOrElse(0))
     val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs,
+    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
       lp.endMs, window, Some(execRangeFn), paramsExec, lp.offset, rawSource)))
     series
   }
@@ -278,9 +284,31 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializePeriodicSeries(options: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, options)
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.startMs, lp.stepMs, lp.endMs,
+    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs,
+      WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
+    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
       None, None, Nil, lp.offset)))
     rawSeries
+  }
+
+  private def boundStartInstant(startMs: Long, stepMs: Long, endMs: Long,
+                                windowMs: Long, offsetMs: Long): Long = {
+    // In case query is earlier than earliestRetainedTimestamp then we need to drop the first few instants
+    // to prevent inaccurate results being served. Inaccuracy creeps in because data can be in memory for which
+    // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.
+    // Also if startMs < 500000000000 (before 1985), it is usually a unit test case with synthetic data, so don't fiddle
+    // around with those queries
+    val earliestRetainedTimestamp = earliestRetainedTimestampFn
+    if (startMs - windowMs - offsetMs < earliestRetainedTimestamp && startMs > 500000000000L) {
+      // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
+      // doesnt fully fall into the retention period. Data required for that instant involves
+      // going backwards from that instant up to windowMs + offsetMs milli-seconds.
+      val numStepsBeforeRetention = (earliestRetainedTimestamp - startMs + windowMs + offsetMs) / stepMs
+      val lastInstantBeforeRetention = startMs + numStepsBeforeRetention * stepMs
+      lastInstantBeforeRetention + stepMs
+    } else {
+      startMs
+    }
   }
 
   /**
