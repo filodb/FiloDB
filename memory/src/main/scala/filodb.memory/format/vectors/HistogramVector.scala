@@ -409,7 +409,7 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
       NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
     } catch {
       case e: Exception =>
-        _log.error(s"RepackError: $debugString\nbuf=$buf h=$h " +
+        _log.error(s"RepackError: $debugString\nh=$h " +
           s"h.debugStr=${h.debugStr}\nSink state: ${repackSink.debugString}",
                    e)
         throw e
