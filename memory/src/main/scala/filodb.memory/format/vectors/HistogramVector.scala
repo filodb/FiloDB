@@ -392,8 +392,6 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
   import BinaryHistogram._
   import HistogramVector._
 
-  _log.debug(s"create AppendableSectDeltaHistVector $this")
-
   override def vectSubType: Int = WireFormat.SUBTYPE_H_SECTDELTA
   private var repackSink = BinaryHistogram.emptySectSink
 
