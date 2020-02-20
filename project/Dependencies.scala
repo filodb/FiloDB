@@ -22,7 +22,7 @@ object Dependencies {
   val kamonZipkinVersion = "2.0.1"
   val kamonPrometheusVersion = "2.0.1"
   val monixKafkaVersion = "0.15"
-  val sparkVersion      = "2.4.0"
+  val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
