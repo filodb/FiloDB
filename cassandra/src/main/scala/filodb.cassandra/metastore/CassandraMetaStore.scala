@@ -2,10 +2,9 @@ package filodb.cassandra.metastore
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.ConsistencyLevel
+import com.datastax.driver.core.{ConsistencyLevel, Session}
 import com.typesafe.config.Config
 
-import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._
 import filodb.core.store.MetaStore
 
@@ -13,13 +12,12 @@ import filodb.core.store.MetaStore
  * A class for Cassandra implementation of the MetaStore.
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
- * @param filoSessionProvider if provided, a session provider provides a session for the configuration
  */
-class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSessionProvider] = None)
+class CassandraMetaStore(config: Config, session: Session)
                         (implicit val ec: ExecutionContext) extends MetaStore {
   private val ingestionConsistencyLevel = ConsistencyLevel.valueOf(config.getString("ingestion-consistency-level"))
-  private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
-  val checkpointTable = new CheckpointTable(config, sessionProvider, ingestionConsistencyLevel)
+
+  val checkpointTable = new CheckpointTable(config, session, ingestionConsistencyLevel)
   private val createTablesEnabled = config.getBoolean("create-tables-enabled")
 
   val defaultKeySpace = config.getString("keyspace")
