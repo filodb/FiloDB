@@ -2,8 +2,6 @@ package filodb.coordinator.queryplanner
 
 import java.util.concurrent.ThreadLocalRandom
 
-import scala.concurrent.duration._
-
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -35,8 +33,8 @@ object SingleClusterPlanner {
 class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
-                           spreadProvider: SpreadProvider = StaticSpreadProvider(),
-                           earliestRetainedTimestampFn: => Long = { System.currentTimeMillis - 3.days.toMillis})
+                           earliestRetainedTimestampFn: => Long,
+                           spreadProvider: SpreadProvider = StaticSpreadProvider())
                                 extends QueryPlanner with StrictLogging {
 
   private val dsOptions = schemas.part.options

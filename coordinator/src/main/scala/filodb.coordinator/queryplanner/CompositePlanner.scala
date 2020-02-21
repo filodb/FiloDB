@@ -27,9 +27,9 @@ class CompositePlanner(dsRef: DatasetRef,
 
   // Note the composition of query planners below using decorator pattern
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc,
-                                  spreadProvider, earliestRawTimestampFn)
+                                  earliestRawTimestampFn, spreadProvider)
   val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc,
-                                  spreadProvider, earliestDownsampleTimestampFn)
+                                  earliestDownsampleTimestampFn, spreadProvider)
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
                                           earliestRawTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryEngineConfig)
