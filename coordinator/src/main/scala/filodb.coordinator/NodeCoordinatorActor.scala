@@ -155,10 +155,11 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         context.watch(ingester)
         ingesters(ref) = ingester
 
-        logger.info(s"Creating QueryActor for dataset $ref")
-        def earliestRawTimestampFn = System.currentTimeMillis() - storeConf.diskTTLSeconds * 1000
+        val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis else storeConf.diskTTLSeconds * 1000
+        def earliestTimestampFn: Long = System.currentTimeMillis() - ttl
+        logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset.ref, schemas,
-                     shardMaps.get(ref), earliestRawTimestampFn), s"$Query-$ref")
+          shardMaps.get(ref), earliestTimestampFn), s"$Query-$ref")
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor

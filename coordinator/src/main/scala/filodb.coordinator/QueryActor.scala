@@ -85,7 +85,7 @@ final class QueryActor(memStore: MemStore,
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
   val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
-                                              functionalSpreadProvider, earliestRawTimestampFn)
+                                              earliestRawTimestampFn, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)

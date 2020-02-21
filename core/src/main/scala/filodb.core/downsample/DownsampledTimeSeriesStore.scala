@@ -28,7 +28,7 @@ extends MemStore with StrictLogging {
 
   val stats = new ChunkSourceStats
 
-  override def isReadOnly: Boolean = true
+  override def isDownsampleStore: Boolean = true
 
   override def metastore: MetaStore = ??? // Not needed
 
