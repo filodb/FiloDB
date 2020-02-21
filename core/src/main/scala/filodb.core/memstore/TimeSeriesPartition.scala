@@ -137,6 +137,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
           case r: VectorTooSmall =>
             switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
             return
+          // Different histogram bucket schema: need a new vector here
+          case BucketSchemaMismatch =>
+            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+            return
           case other: AddResponse =>
         }
       }
