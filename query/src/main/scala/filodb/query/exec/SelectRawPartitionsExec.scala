@@ -69,7 +69,7 @@ object SelectRawPartitionsExec extends  {
       if (colNames.nonEmpty) {
         // query is selecting specific columns
         dataSchema.colIDs(colNames: _*).get
-      } else if (!(dataSchema == Schemas.dsGauge)) {
+      } else if (dataSchema != Schemas.dsGauge) {
         // needs to select raw data
         dataSchema.colIDs(dataSchema.data.valueColName).get
       } else {

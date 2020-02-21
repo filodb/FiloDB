@@ -61,13 +61,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   var statusActor: Option[ActorRef] = None
   var datasetsInitialized = false
 
-  val filodbConfig = settings.allConfig.getConfig("filodb")
-  val downsamplerConfig = filodbConfig.getConfig("downsampler")
-  // Tech Debt TODO: Move downsample store config section out from
-  // server config into raw store config. Everything should come from
-  // store config since it can change per-dataset
-  val downsampleStoreConfig = StoreConfig(downsamplerConfig.getConfig("downsample-store-config"))
-
   private val statusAckTimeout = settings.config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
@@ -164,7 +157,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
         logger.info(s"Creating QueryActor for dataset $ref")
         def earliestRawTimestampFn = if (memStore.isReadOnly) {
-          System.currentTimeMillis() - downsampleStoreConfig.diskTTLSeconds * 1000
+          System.currentTimeMillis() - downsample.ttls.last.toMillis
         } else {
           System.currentTimeMillis() - storeConf.diskTTLSeconds * 1000
         }
