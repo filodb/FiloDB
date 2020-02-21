@@ -29,11 +29,11 @@ final case class PeriodicSamplesMapper(start: Long,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offset: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
-  require(start <= end, "start should be <= end")
-  require(step > 0, "step should be > 0")
+  require(start <= end, s"start $start should be <= end $end")
+  require(step > 0, s"step $step should be > 0")
 
-  val isLastFn = functionId.isEmpty || functionId == Some(InternalRangeFunction.LastSampleHistMax) ||
-    functionId == Some(InternalRangeFunction.Timestamp)
+  val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
+    functionId.contains(InternalRangeFunction.Timestamp)
 
   if (!isLastFn) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
