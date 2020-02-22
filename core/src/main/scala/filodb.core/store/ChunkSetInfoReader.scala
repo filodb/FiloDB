@@ -3,7 +3,6 @@ package filodb.core.store
 import java.nio.ByteBuffer
 
 import filodb.core.Types.ChunkID
-import filodb.core.metadata.Schema
 import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
 import filodb.memory.format.MemoryReader._
 import filodb.memory.format.vectors.LongVectorDataReader
@@ -65,13 +64,8 @@ trait ChunkSetInfoReader {
   def getTsReader: LongVectorDataReader = tsReader
   def getValueReader: VectorDataReader = valueReader
 
-  def debugString(schema: Schema): String = {
-    val vectors = (0 until schema.data.columns.length).map { c =>
-      schema.dataReader(c, vectorAccessor(c), vectorAddress(c))
-        .toHexString(vectorAccessor(c), vectorAddress(c))
-    }
-    s"${getClass.getSimpleName}(id=$id numRows=$numRows startTime=$startTime endTime=$endTime) " +
-      s"vectors: $vectors EOM"
+  def debugString: String = {
+    s"chunkId=$id chunkNumRows=$numRows chunkStartTime=$startTime chunkEndTime=$endTime"
   }
 }
 

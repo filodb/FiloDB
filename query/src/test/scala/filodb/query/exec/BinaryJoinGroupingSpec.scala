@@ -15,6 +15,7 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
+import filodb.query.exec.aggregator.RowAggregator
 
 class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 

@@ -291,7 +291,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
-  val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
+  val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
 
   /**
     * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.

@@ -1,9 +1,11 @@
 package filodb.cassandra.columnstore
 
 import java.net.InetSocketAddress
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
@@ -130,7 +132,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
             chunksets: Observable[ChunkSet],
             diskTimeToLiveSeconds: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
-               val span = Kamon.buildSpan("write-chunkset").start()
+               val span = Kamon.spanBuilder("write-chunkset").asChildOf(Kamon.currentSpan()).start()
                val partBytes = BinaryRegionLarge.asNewByteArray(chunkset.partition)
                val future =
                  for { writeChunksResp   <- writeChunks(ref, partBytes, chunkset, diskTimeToLiveSeconds)
@@ -215,6 +217,79 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
+  /**
+    * Copy a range of chunks to a target ColumnStore, for performing disaster recovery or
+    * backfills.
+    */
+  // scalastyle:off null method.length
+  def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                     splits: Iterator[ScanSplit],
+                                     ingestionTimeStart: Long,
+                                     ingestionTimeEnd: Long,
+                                     batchSize: Int,
+                                     target: CassandraColumnStore,
+                                     targetDatasetRef: DatasetRef,
+                                     diskTimeToLiveSeconds: Int): Unit =
+  {
+    val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
+    val sourceChunksTable = getOrCreateChunkTable(datasetRef)
+
+    val targetIndexTable = target.getOrCreateIngestionTimeIndexTable(targetDatasetRef)
+    val targetChunksTable = target.getOrCreateChunkTable(targetDatasetRef)
+
+    val chunkInfos = new ArrayBuffer[ByteBuffer]()
+    val futures = new ArrayBuffer[Future[Response]]()
+
+    def finishBatch(partition: ByteBuffer): Unit = {
+      for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
+        futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+      }
+
+      chunkInfos.clear()
+
+      for (f <- futures) {
+        try {
+          Await.result(f, Duration(10, SECONDS))
+        } catch {
+          case e: Exception => {
+            logger.error(s"Async cassandra chunk copy failed", e)
+          }
+        }
+      }
+
+      futures.clear()
+    }
+
+    var lastPartition: ByteBuffer = null
+
+    for (split <- splits) {
+      val tokens = split.asInstanceOf[CassandraTokenRangeSplit].tokens
+      val rows = sourceIndexTable.scanRowsByIngestionTimeNoAsync(tokens, ingestionTimeStart, ingestionTimeEnd)
+      for (row <- rows) {
+        val partition = row.getBytes(0) // partition
+
+        if (!partition.equals(lastPartition)) {
+          if (lastPartition != null) {
+            finishBatch(lastPartition);
+          }
+          lastPartition = partition;
+        }
+
+        chunkInfos += row.getBytes(3) // info
+        futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+
+        if (chunkInfos.size >= batchSize) {
+          finishBatch(partition)
+        }
+      }
+    }
+
+    if (lastPartition != null) {
+      finishBatch(lastPartition);
+    }
+  }
+  // scalastyle:on
+
   def shutdown(): Unit = {
     clusterConnector.shutdown()
   }
@@ -283,17 +358,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int): Future[Response] = {
+                    diskTTLSeconds: Int,
+                    writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
     val updateHour = hour()
-    val span = Kamon.buildSpan("write-part-keys").start()
+    val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
       val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
-        case resp if resp == Success => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
-        case resp                    => Future.successful(resp)
+        case resp if resp == Success
+          && writeToPkUTTable => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
+
+        case resp             => Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
         sinkStats.partKeysWrite(1)

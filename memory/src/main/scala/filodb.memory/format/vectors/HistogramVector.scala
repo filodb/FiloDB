@@ -155,7 +155,7 @@ object BinaryHistogram extends StrictLogging {
   }
 }
 
-object HistogramVector {
+object HistogramVector extends StrictLogging {
   type HistIterator = Iterator[Histogram] with TypedIterator
 
   val OffsetNumHistograms = 6
@@ -164,6 +164,8 @@ object HistogramVector {
   val OffsetBucketDef  = 11    // Start of bucket definition
   val OffsetNumBuckets = 11
   // After the bucket area are regions for storing the counter values or pointers to them
+
+  val _log = logger
 
   final def getNumBuckets(acc: MemoryReader, addr: Ptr.U8): Int = addr.add(OffsetNumBuckets).asU16.getU16(acc)
 
@@ -303,6 +305,13 @@ class AppendableHistogramVector(factory: MemFactory,
     res
   }
 
+  def debugString: String = {
+    val hReader = reader.asInstanceOf[RowHistogramReader]
+    s"AppendableHistogramVector(vectPtr=$vectPtr maxBytes=$maxBytes) " +
+    s"numItems=${hReader.length} curSection=$curSection " +
+    { if (hReader.length > 0) s"bucketScheme: ${hReader.buckets} numBuckets=${hReader.numBuckets}" else "<noSchema>" }
+  }
+
   // Inner method to add the histogram to this vector
   protected def appendHist(buf: DirectBuffer, h: BinHistogram, numItems: Int): AddResponse = {
     appendBlob(buf.byteArray, buf.addressOffset + h.valuesIndex, h.valuesNumBytes)
@@ -370,6 +379,13 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
   }
+
+  override def reset(): Unit = {
+    super.reset()
+    // IMPORTANT! Reset the sink so it can create a new sink with new bucket scheme.  Otherwise there is a bug
+    // where a different time series can obtain the smae vector with a stale sink.
+    repackSink = BinaryHistogram.empty2DSink
+  }
 }
 
 /**
@@ -396,7 +412,15 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
 
     // Recompress hist based on original delta.  Do this for ALL histograms so drop detection works correctly
     repackSink.writePos = 0
-    NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
+    try {
+      NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
+    } catch {
+      case e: Exception =>
+        _log.error(s"RepackError: $debugString\nh=$h " +
+          s"h.debugStr=${h.debugStr}\nSink state: ${repackSink.debugString}",
+                   e)
+        throw e
+    }
 
     // If need new section, append blob.  Reset state for originalDeltas as needed.
     if (repackSink.valueDropped) {
@@ -412,6 +436,13 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
       repackSink.reset()
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
+  }
+
+  override def reset(): Unit = {
+    super.reset()
+    // IMPORTANT! Reset the sink so it can create a new sink with new bucket scheme.  Otherwise there is a bug
+    // where a different time series can obtain the smae vector with a stale sink.
+    repackSink = BinaryHistogram.emptySectSink
   }
 
   override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(nativePtrReader, vectPtr)

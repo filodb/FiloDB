@@ -5,14 +5,12 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
@@ -91,7 +89,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 
@@ -119,7 +117,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
     val emptyFilters = Seq (ColumnFilter("__name__", Filter.Equals("nonsense".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+    val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
     val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
 

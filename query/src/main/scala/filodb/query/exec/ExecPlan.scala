@@ -102,33 +102,51 @@ trait ExecPlan extends QueryCommand {
   // scalastyle:off method.length
   def execute(source: ChunkSource, queryConfig: QueryConfig)
              (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+
+    val parentSpan = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
     // Lucene index lookup, and On-Demand Paging orchestration work could suck up nontrivial time and
     // we don't want these to happen in a single thread.
     // Step 1: initiate doExecute, get schema
     lazy val step1 = Task {
+      val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+        .asChildOf(parentSpan)
+        .tag("query-id", id)
+        .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
-      doExecute(source, queryConfig)
+      // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+      // across threads. Note that task/observable will not run on the thread where span is present since
+      // kamon uses thread-locals.
+      Kamon.runWithSpan(span, true) {
+        doExecute(source, queryConfig)
+      }
     }
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
+      val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
+        .asChildOf(parentSpan)
+        .tag("query-id", id)
+        .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
+      span.tag("dontRunTransformers", dontRunTransformers)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
         qLogger.debug(s"Empty plan $this, returning empty results")
+        span.mark("empty-plan")
         Task.eval(QueryResult(id, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
         val builder = SerializedRangeVector.newBuilder()
-        var numResultSamples = 0 // BEWARE - do not modify concurrently!!
+        @volatile var numResultSamples = 0 // BEWARE - do not modify concurrently!!
         finalRes._1
           .map {
             case srv: SerializableRangeVector =>
@@ -153,6 +171,7 @@ trait ExecPlan extends QueryCommand {
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
             SerializedRangeVector.queryResultBytes.record(numBytes)
+            span.mark(s"num-bytes: $numBytes")
             if (numBytes > 5000000) {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
@@ -163,12 +182,16 @@ trait ExecPlan extends QueryCommand {
                 s"Limit was: ${limit}")
             }
             qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
+            span.mark(s"num-result-samples: $numResultSamples")
+            span.mark(s"num-range-vectors: ${r.size}")
+            span.finish()
             QueryResult(id, finalRes._2, r)
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
         if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
           qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+        span.fail(ex)
         QueryError(id, ex)
       }
     }.flatten
@@ -281,11 +304,12 @@ sealed trait FuncArgs {
 final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
-    Observable.fromTask(execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
+    Observable.fromTask(
+      execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
       qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
       QueryError(execPlan.id, ex)
     }.map {
-      case (QueryResult(_, _, result))  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
+      case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
                                             if (result.isEmpty) {
                                               ScalarFixedDouble(timeStepParams, Double.NaN)
                                             } else {
@@ -294,7 +318,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
                                                 case s: ScalarVaryingDouble => s
                                               }
                                             }
-      case (QueryError(_, ex))          =>  throw ex
+      case QueryError(_, ex)          =>  throw ex
     })
   }
 
@@ -335,14 +359,17 @@ abstract class NonLeafExecPlan extends ExecPlan {
   private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
-                                (implicit sched: Scheduler, timeout: FiniteDuration) =
-    Kamon.withSpan(span) {
+                                (implicit sched: Scheduler, timeout: FiniteDuration) = {
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)
       }
     }
-
+  }
   /**
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
@@ -355,12 +382,13 @@ abstract class NonLeafExecPlan extends ExecPlan {
                       queryConfig: QueryConfig)
                      (implicit sched: Scheduler,
                       timeout: FiniteDuration): ExecResult = {
-    val spanFromHelper = Kamon.currentSpan()
+    val parentSpan = Kamon.currentSpan()
+    parentSpan.mark("create-child-tasks")
     // Create tasks for all results.
     // NOTE: It's really important to preserve the "index" of the child task, as joins depend on it
     val childTasks = Observable.fromIterable(children.zipWithIndex)
                                .mapAsync(Runtime.getRuntime.availableProcessors()) { case (plan, i) =>
-                                 dispatchRemotePlan(plan, spanFromHelper).map((_, i))
+                                 dispatchRemotePlan(plan, parentSpan).map((_, i))
                                }
 
     // The first valid schema is returned as the Task.  If all results are empty, then return
@@ -368,7 +396,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     var sch = ResultSchema.empty
     val processedTasks = childTasks.collect {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
-        sch = reduceSchemas(sch, res, i.toInt)
+        sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, i) =>
         (e, i.toInt)
@@ -378,8 +406,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
     val outputSchema = processedTasks.collect {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
-
+    parentSpan.mark("output-compose")
     val outputRvs = compose(processedTasks, outputSchema, queryConfig)
+    parentSpan.mark("return-results")
     ExecResult(outputRvs, outputSchema)
   }
 
@@ -389,7 +418,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
    * Can be overridden if needed.
    * @param rs the ResultSchema from previous calls to reduceSchemas / previous child nodes.  May be empty for first.
    */
-  def reduceSchemas(rs: ResultSchema, resp: QueryResult, i: Int): ResultSchema = {
+  def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
     resp match {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is

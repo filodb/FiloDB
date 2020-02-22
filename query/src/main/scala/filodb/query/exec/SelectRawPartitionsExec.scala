@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -12,8 +13,8 @@ import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.ResultSchema
 import filodb.core.store._
 import filodb.query.{Query, QueryConfig}
-import filodb.query.exec.rangefn.RangeFunction
 import filodb.query.Query.qLogger
+import filodb.query.exec.rangefn.RangeFunction
 
 object SelectRawPartitionsExec extends  {
   import Column.ColumnType._
@@ -68,7 +69,7 @@ object SelectRawPartitionsExec extends  {
       if (colNames.nonEmpty) {
         // query is selecting specific columns
         dataSchema.colIDs(colNames: _*).get
-      } else if (!(dataSchema == Schemas.dsGauge)) {
+      } else if (dataSchema != Schemas.dsGauge) {
         // needs to select raw data
         dataSchema.colIDs(dataSchema.data.valueColName).get
       } else {
@@ -126,11 +127,15 @@ final case class SelectRawPartitionsExec(id: String,
                 queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
+    val span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
+      .asChildOf(Kamon.currentSpan())
+      .start()
     Query.qLogger.debug(s"queryId=$id on dataset=$datasetRef shard=${lookupRes.map(_.shard).getOrElse("")} " +
       s"schema=${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
     val rvs = dataSchema.map { sch =>
       source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)
     }.getOrElse(Observable.empty)
+    span.finish()
     ExecResult(rvs, Task.eval(schemaOfDoExecute()))
   }
 

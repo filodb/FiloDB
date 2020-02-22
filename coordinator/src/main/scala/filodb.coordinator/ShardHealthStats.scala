@@ -19,26 +19,26 @@ class ShardHealthStats(ref: DatasetRef,
                        shardMapFunc: => ShardMapper,
                        reportingInterval: FiniteDuration = 5.seconds) {
 
-  val numActive = Kamon.gauge(s"num-active-shards").refine("dataset", ref.toString)
-  val numRecovering = Kamon.gauge(s"num-recovering-shards").refine("dataset", ref.toString)
-  val numUnassigned = Kamon.gauge(s"num-unassigned-shards").refine("dataset", ref.toString)
-  val numAssigned = Kamon.gauge(s"num-assigned-shards").refine("dataset", ref.toString)
-  val numError = Kamon.gauge(s"num-error-shards").refine("dataset", ref.toString)
-  val numStopped = Kamon.gauge(s"num-stopped-shards").refine("dataset", ref.toString)
-  val numDown = Kamon.gauge(s"num-down-shards").refine("dataset", ref.toString)
+  val numActive = Kamon.gauge(s"num-active-shards").withTag("dataset", ref.toString)
+  val numRecovering = Kamon.gauge(s"num-recovering-shards").withTag("dataset", ref.toString)
+  val numUnassigned = Kamon.gauge(s"num-unassigned-shards").withTag("dataset", ref.toString)
+  val numAssigned = Kamon.gauge(s"num-assigned-shards").withTag("dataset", ref.toString)
+  val numError = Kamon.gauge(s"num-error-shards").withTag("dataset", ref.toString)
+  val numStopped = Kamon.gauge(s"num-stopped-shards").withTag("dataset", ref.toString)
+  val numDown = Kamon.gauge(s"num-down-shards").withTag("dataset", ref.toString)
   val numErrorReassignmentsDone = Kamon.counter(s"num-error-reassignments-done")
-                      .refine("dataset", ref.toString)
+                      .withTag("dataset", ref.toString)
   val numErrorReassignmentsSkipped = Kamon.counter(s"num-error-reassignments-skipped")
-                      .refine("dataset", ref.toString)
+                      .withTag("dataset", ref.toString)
 
   def update(mapper: ShardMapper): Unit = {
-    numActive.set(shardMapFunc.statuses.count(_ == ShardStatusActive))
-    numRecovering.set(shardMapFunc.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
-    numUnassigned.set(shardMapFunc.statuses.count(_ == ShardStatusUnassigned))
-    numAssigned.set(shardMapFunc.statuses.count(_ == ShardStatusAssigned))
-    numError.set(shardMapFunc.statuses.count(_ == ShardStatusError))
-    numStopped.set(shardMapFunc.statuses.count(_ == ShardStatusStopped))
-    numDown.set(shardMapFunc.statuses.count(_ == ShardStatusDown))
+    numActive.update(shardMapFunc.statuses.count(_ == ShardStatusActive))
+    numRecovering.update(shardMapFunc.statuses.count(_.isInstanceOf[ShardStatusRecovery]))
+    numUnassigned.update(shardMapFunc.statuses.count(_ == ShardStatusUnassigned))
+    numAssigned.update(shardMapFunc.statuses.count(_ == ShardStatusAssigned))
+    numError.update(shardMapFunc.statuses.count(_ == ShardStatusError))
+    numStopped.update(shardMapFunc.statuses.count(_ == ShardStatusStopped))
+    numDown.update(shardMapFunc.statuses.count(_ == ShardStatusDown))
   }
 
    /**
@@ -46,12 +46,12 @@ class ShardHealthStats(ref: DatasetRef,
     * forever and ever.
     */
    def reset(): Unit = {
-     numActive.set(0)
-     numRecovering.set(0)
-     numUnassigned.set(0)
-     numAssigned.set(0)
-     numError.set(0)
-     numStopped.set(0)
-     numDown.set(0)
+     numActive.update(0)
+     numRecovering.update(0)
+     numUnassigned.update(0)
+     numAssigned.update(0)
+     numError.update(0)
+     numStopped.update(0)
+     numDown.update(0)
    }
 }

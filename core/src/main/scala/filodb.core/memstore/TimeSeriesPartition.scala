@@ -121,7 +121,7 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
     // NOTE: lastTime is not persisted for recovery.  Thus the first sample after recovery might still be out of order.
     val ts = schema.timestamp(row)
     if (ts < timestampOfLatestSample) {
-      shardStats.outOfOrderDropped.increment
+      shardStats.outOfOrderDropped.increment()
       return
     }
 
@@ -135,6 +135,10 @@ extends ChunkMap(memFactory, initMapSize) with ReadablePartition {
       for { col <- 0 until schema.numDataColumns optimized} {
         currentChunks(col).addFromReaderNoNA(row, col) match {
           case r: VectorTooSmall =>
+            switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
+            return
+          // Different histogram bucket schema: need a new vector here
+          case BucketSchemaMismatch =>
             switchBuffersAndIngest(ingestionTime, ts, row, blockHolder, maxChunkTime)
             return
           case other: AddResponse =>

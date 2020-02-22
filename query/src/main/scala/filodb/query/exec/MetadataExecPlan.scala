@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -17,7 +18,6 @@ import filodb.memory.format.{UTF8MapIteratorRowReader, ZeroCopyUTF8String}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
-
 
 final case class PartKeysDistConcatExec(id: String,
                                       dispatcher: PlanDispatcher,
@@ -121,7 +121,7 @@ final case class PartKeysExec(id: String,
       case other =>
         Observable.empty
     }
-
+    Kamon.currentSpan().mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn)), 1,
                                Map(0 -> partSchema.binSchema))
     ExecResult(rvs, Task.eval(sch))
@@ -146,6 +146,7 @@ final case class  LabelValuesExec(id: String,
                 queryConfig: QueryConfig)
                (implicit sched: Scheduler,
                 timeout: FiniteDuration): ExecResult = {
+    val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
       val curr = System.currentTimeMillis()
@@ -165,6 +166,7 @@ final case class  LabelValuesExec(id: String,
     } else {
       Observable.empty
     }
+    parentSpan.mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }

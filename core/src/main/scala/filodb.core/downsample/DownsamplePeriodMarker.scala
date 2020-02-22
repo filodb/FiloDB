@@ -39,6 +39,12 @@ trait DownsamplePeriodMarker {
   /**
     * Returns sorted collection of row numbers for the given chunkset that mark the
     * periods to downsample. startRow and endRow are inclusive
+    *
+    * @param part Partition with downsampled data
+    * @param chunkset reader to read chunks from partition
+    * @param resMillis downsample resolution in millis
+    * @param startRow start row number (inclusive)
+    * @param endRow end row number (inclusive)
     */
   def periods(part: ReadablePartition,
               chunkset: ChunkSetInfoReader,
@@ -58,8 +64,8 @@ class TimeDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePeriodMa
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): debox.Set[Int] = {
-    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
-      s"chunkset: ${chunkset.debugString(part.schema)}")
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow for " +
+      s"chunkset ${chunkset.debugString} partKey=${part.hexPartKey}")
     val tsAcc = chunkset.vectorAccessor(DataSchema.timestampColID)
     val tsPtr = chunkset.vectorAddress(DataSchema.timestampColID)
     val tsReader = part.chunkReader(DataSchema.timestampColID, tsAcc, tsPtr).asLongReader
@@ -104,8 +110,8 @@ class CounterDownsamplePeriodMarker(val inputColId: Int) extends DownsamplePerio
                        resMillis: Long,
                        startRow: Int,
                        endRow: Int): debox.Set[Int] = {
-    require(startRow <= endRow, s"startRow $startRow > endRow $endRow, " +
-      s"chunkset: ${chunkset.debugString(part.schema)}")
+    require(startRow <= endRow, s"startRow $startRow > endRow $endRow for " +
+      s"chunkset ${chunkset.debugString} partKey=${part.hexPartKey}")
     val result = debox.Set.empty[Int]
     result += startRow // need to add start of every chunk
     if (startRow < endRow) { // there is more than 1 row
