@@ -5,7 +5,7 @@ import remote.RemoteStorage._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector}
-import filodb.query.{QueryResult => FQR, _}
+import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
@@ -14,7 +14,7 @@ object PrometheusModel {
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
    */
-  def convertHistToPromResult(qr: FQR, sch: PartitionSchema): FQR = {
+  def convertHistToPromResult(qr: FiloQueryResult, sch: PartitionSchema): FiloQueryResult = {
     if (!qr.resultSchema.isEmpty && qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn) {
       val mapper = HistToPromSeriesMapper(sch)
       val promVectors = qr.result.flatMap(mapper.expandVector)
@@ -44,14 +44,14 @@ object PrometheusModel {
     }
   }
 
-  def toPromReadResponse(qrs: Seq[FQR]): Array[Byte] = {
+  def toPromReadResponse(qrs: Seq[FiloQueryResult]): Array[Byte] = {
     val b = ReadResponse.newBuilder()
     qrs.foreach(r => b.addResults(toPromQueryResult(r)))
     b.build().toByteArray()
   }
 
   // Creates Prometheus protobuf QueryResult output
-  def toPromQueryResult(qr: FQR): QueryResult = {
+  def toPromQueryResult(qr: FiloQueryResult): QueryResult = {
     val b = QueryResult.newBuilder()
     qr.result.foreach{ srv =>
       b.addTimeseries(toPromTimeSeries(srv))
@@ -74,7 +74,7 @@ object PrometheusModel {
     b.build()
   }
 
-  def toPromSuccessResponse(qr: FQR, verbose: Boolean): SuccessResponse = {
+  def toPromSuccessResponse(qr: FiloQueryResult, verbose: Boolean): SuccessResponse = {
     val results = if (qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
@@ -117,6 +117,7 @@ object PrometheusModel {
         )
       case QueryResultType.InstantVector =>
         Result(tags, None, samples.headOption)
+      // TODO: implememt output for Scalar results
       case QueryResultType.Scalar => ???
     }
   }

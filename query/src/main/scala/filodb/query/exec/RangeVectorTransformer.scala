@@ -414,14 +414,14 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
   protected[exec] def args: String = s"HistToPromSeriesMapper(options=${sch.options})"
 
   def funcParams: Seq[FuncArgs] = Nil
+
+  // NOTE: apply() is only called for explicit instantiation of conversion function.  So this will error out if
+  //       the data source is not histogram.
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
-    // Passthrough if RV is not histogram
-    if (valueColumnType(sourceSchema) != ColumnType.HistogramColumn) return source
-
     source.flatMap { rv =>
       Observable.fromIterable(expandVector(rv))
     }

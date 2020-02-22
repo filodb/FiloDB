@@ -65,6 +65,9 @@ case class PromQlExec(id: String,
     }
   }
 
+  // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
+  //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
+  //   and detect it in execute() above.  Need to discuss compatibility issues with Prometheus.
   def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
     val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
       .asChildOf(parentSpan)

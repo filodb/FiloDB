@@ -180,7 +180,7 @@ For more details, see Prometheus HTTP API Documentation
 params:
 • `explainOnly` -- returns an ExecPlan instead of the query results if `true`
 • `spread` -- override default spread
-* `histogramMap` -- if true, returns histograms in results as a map/object of bucket values.  If false, histograms are automatically translated to Prometheus bucket-per-vector format.
+* `histogramMap` -- if true, returns histograms in results as a map/object of bucket values.  If false, histograms are automatically translated to Prometheus bucket-per-vector format.  Defaults to `false`.
 ```
 
 Normal/double value output:

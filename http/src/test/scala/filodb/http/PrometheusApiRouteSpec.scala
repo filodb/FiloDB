@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 import filodb.coordinator._
 import filodb.core.{AsyncTest, DatasetRef, TestData}
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.query.{ExplainPlanResponse, HistSampl, SuccessResponse}
+import filodb.query.{ExplainPlanResponse, HistSampl, Sampl, SuccessResponse}
 
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
@@ -155,6 +155,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
       resp.data.result.foreach { res =>
         res.value shouldEqual None
         res.values.get.length should be > (1)
+        res.values.get.foreach(_.isInstanceOf[Sampl])
         res.metric.contains("le") shouldEqual true
         res.metric("_metric_").endsWith("_bucket") shouldEqual true
       }
