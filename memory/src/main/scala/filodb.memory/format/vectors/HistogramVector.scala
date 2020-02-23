@@ -379,6 +379,13 @@ class Appendable2DDeltaHistVector(factory: MemFactory,
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
   }
+
+  override def reset(): Unit = {
+    super.reset()
+    // IMPORTANT! Reset the sink so it can create a new sink with new bucket scheme.  Otherwise there is a bug
+    // where a different time series can obtain the smae vector with a stale sink.
+    repackSink = BinaryHistogram.empty2DSink
+  }
 }
 
 /**
@@ -409,7 +416,8 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
       NibblePack.unpackToSink(h.valuesByteSlice, repackSink, h.numBuckets)
     } catch {
       case e: Exception =>
-        _log.error(s"RepackError: $debugString\nh.numBuckets=${h.numBuckets}\nSink state: ${repackSink.debugString}",
+        _log.error(s"RepackError: $debugString\nh=$h " +
+          s"h.debugStr=${h.debugStr}\nSink state: ${repackSink.debugString}",
                    e)
         throw e
     }
@@ -428,6 +436,13 @@ class AppendableSectDeltaHistVector(factory: MemFactory,
       repackSink.reset()
       appendBlob(encodingBuf.byteArray, encodingBuf.addressOffset, repackedLen)
     }
+  }
+
+  override def reset(): Unit = {
+    super.reset()
+    // IMPORTANT! Reset the sink so it can create a new sink with new bucket scheme.  Otherwise there is a bug
+    // where a different time series can obtain the smae vector with a stale sink.
+    repackSink = BinaryHistogram.emptySectSink
   }
 
   override lazy val reader: VectorDataReader = new SectDeltaHistogramReader(nativePtrReader, vectPtr)

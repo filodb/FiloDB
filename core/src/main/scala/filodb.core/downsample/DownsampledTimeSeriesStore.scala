@@ -28,7 +28,7 @@ extends MemStore with StrictLogging {
 
   val stats = new ChunkSourceStats
 
-  override def isReadOnly: Boolean = true
+  override def isDownsampleStore: Boolean = true
 
   override def metastore: MetaStore = ??? // Not needed
 
@@ -105,7 +105,6 @@ extends MemStore with StrictLogging {
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
     shard.scanPartitions(lookupRes)
-
   }
 
   def activeShards(dataset: DatasetRef): Seq[Int] =
@@ -115,7 +114,7 @@ extends MemStore with StrictLogging {
     activeShards(dataset).map(ShardSplit)
 
   def groupsInDataset(ref: DatasetRef): Int =
-    datasets.get(ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+    datasets.get(ref).map(_.values.asScala.head.rawStoreConfig.groupsPerShard).getOrElse(1)
 
   def analyzeAndLogCorruptPtr(ref: DatasetRef, cve: CorruptVectorException): Unit =
     throw new UnsupportedOperationException()

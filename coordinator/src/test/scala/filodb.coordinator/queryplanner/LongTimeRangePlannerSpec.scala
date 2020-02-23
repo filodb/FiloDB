@@ -44,7 +44,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   val longTermPlanner = new LongTimeRangePlanner(rawPlanner, downsamplePlanner, earliestRawTime, disp)
 
   it("should direct raw-cluster-only queries to raw planner") {
-    val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
       TimeStepParams(now/1000 - 7.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds))
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
@@ -53,7 +53,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
   }
 
   it("should direct downsample-only queries to downsample planner") {
-    val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
       TimeStepParams(now/1000 - 20.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 15.minutes.toSeconds))
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
@@ -63,9 +63,12 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
   it("should direct overlapping queries to both raw & downsample planner and stitch") {
 
-    val logicalPlan = Parser.queryRangeToLogicalPlan("foo",
-      TimeStepParams(now/1000 - 30.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 5.minutes.toSeconds))
-      .asInstanceOf[PeriodicSeriesPlan]
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("rate(foo[2m])",
+                                                     TimeStepParams(start, step, end))
+                                                    .asInstanceOf[PeriodicSeriesPlan]
 
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
     val stitchExec = ep.asInstanceOf[StitchRvsExec]
@@ -79,11 +82,17 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
     val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
 
-    downsampleLp.startMs shouldEqual logicalPlan.startMs
-    downsampleLp.endMs shouldEqual logicalPlan.startMs + 20.minutes.toMillis
+    // find first instant with range available within raw data
+    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+      instant - 2.minutes.toMillis > earliestRawTime
+    }.get
 
-    rawLp.startMs shouldEqual logicalPlan.startMs + 21.minutes.toMillis
+    rawLp.startMs shouldEqual rawStart
     rawLp.endMs shouldEqual logicalPlan.endMs
+
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual rawStart - 1.minute.toMillis
+
 
   }
 

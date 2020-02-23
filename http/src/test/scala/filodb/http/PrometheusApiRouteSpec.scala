@@ -55,20 +55,20 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
 
   val settings = new HttpSettings(PrometheusApiRouteSpec.config)
-  val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
+  val prometheusAPIRoute = new PrometheusApiRoute(cluster.coordinatorActor, settings).route
 
   // Wait for cluster actor to start up and register datasets
   val ref = DatasetRef("prometheus")
   probe.send(clusterProxy, NodeClusterActor.GetShardMap(ref))
   probe.expectMsgPF(10.seconds) {
-    case CurrentShardSnapshot(ref, mapper) => info(s"Got mapper for $ref => ${mapper.prettyPrint}")
+    case CurrentShardSnapshot(dsRef, mapper) => info(s"Got mapper for $dsRef => ${mapper.prettyPrint}")
   }
 
   it("should get explainPlan for query") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
@@ -87,45 +87,45 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   it("should take spread override value from config for app") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.count(_.startsWith("--E~MultiSchemaPartitionsExec")) shouldEqual 4
     }
   }
 
   it("should get explainPlan for query based on spread as query parameter") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.count(_.startsWith("--E~MultiSchemaPartitionsExec")) shouldEqual 4
     }
   }
 
     it("should take default spread value if there is no override") {
       val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
-      Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-        s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+      Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+        s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
         handled shouldBe true
         status shouldEqual StatusCodes.OK
         contentType shouldEqual ContentTypes.`application/json`
         val resp = responseAs[ExplainPlanResponse]
         resp.status shouldEqual "success"
-        resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 2
+        resp.debugInfo.count(_.startsWith("--E~MultiSchemaPartitionsExec")) shouldEqual 2
       }
     }
 }

@@ -20,16 +20,19 @@ class CompositePlanner(dsRef: DatasetRef,
                        shardMapperFunc: => ShardMapper,
                        downsampleMapperFunc: => ShardMapper,
                        failureProvider: FailureProvider,
-                       earliestRawTimestamp: => Long,
+                       earliestRawTimestampFn: => Long,
+                       earliestDownsampleTimestampFn: => Long,
                        spreadProvider: SpreadProvider = StaticSpreadProvider(),
                        stitchDispatcher: => PlanDispatcher = { InProcessPlanDispatcher },
                        queryEngineConfig: Config = ConfigFactory.empty()) extends QueryPlanner with StrictLogging {
 
   // Note the composition of query planners below using decorator pattern
-  val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc, spreadProvider)
-  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc, spreadProvider)
+  val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc,
+                                  earliestRawTimestampFn, spreadProvider)
+  val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc,
+                                  earliestDownsampleTimestampFn, spreadProvider)
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
-                                                      earliestRawTimestamp, stitchDispatcher)
+                                          earliestRawTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryEngineConfig)
   //val multiPodPlanner = new MultiClusterPlanner(podLocalityProvider, haPlanner)
 
