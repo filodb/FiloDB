@@ -436,6 +436,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
       val result = resp.asInstanceOf[QueryResult]
     }
     thrown.getCause.getClass shouldEqual classOf[QueryTimeoutException]
+    thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
 }
