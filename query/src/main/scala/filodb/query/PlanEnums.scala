@@ -53,50 +53,60 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   // TODO time, vector, scalar
 }
 
-sealed abstract class RangeFunctionId(override val entryName: String) extends EnumEntry
+sealed trait ParamSpec
+
+case object RangeVectorParam extends ParamSpec
+
+case object InstantVectorParam extends ParamSpec
+
+case object ScalarParam extends ParamSpec
+
+final case class ScalarRangeParam(min: Double, max: Double) extends ParamSpec
+
+sealed abstract class RangeFunctionId(override val entryName: String, val paramSpec: Seq[ParamSpec]) extends EnumEntry
 
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
-  case object AvgOverTime extends RangeFunctionId("avg_over_time")
+  case object AvgOverTime extends RangeFunctionId("avg_over_time", Seq(RangeVectorParam))
 
-  case object Changes extends RangeFunctionId("changes")
+  case object Changes extends RangeFunctionId("changes", Seq(RangeVectorParam))
 
-  case object CountOverTime extends RangeFunctionId("count_over_time")
+  case object CountOverTime extends RangeFunctionId("count_over_time", Seq(RangeVectorParam))
 
-  case object Delta extends RangeFunctionId("delta")
+  case object Delta extends RangeFunctionId("delta", Seq(RangeVectorParam))
 
-  case object Deriv extends RangeFunctionId("deriv")
+  case object Deriv extends RangeFunctionId("deriv", Seq(RangeVectorParam))
 
-  case object HoltWinters extends RangeFunctionId("holt_winters")
+  case object HoltWinters extends RangeFunctionId("holt_winters", Seq(RangeVectorParam, ScalarRangeParam(0, 1), ScalarRangeParam(0, 1)))
 
-  case object ZScore extends RangeFunctionId("z_score")
+  case object ZScore extends RangeFunctionId("z_score", Seq(RangeVectorParam))
 
-  case object Idelta extends RangeFunctionId("idelta")
+  case object Idelta extends RangeFunctionId("idelta", Seq(RangeVectorParam))
 
-  case object Increase extends RangeFunctionId("increase")
+  case object Increase extends RangeFunctionId("increase", Seq(RangeVectorParam))
 
-  case object Irate extends RangeFunctionId("irate")
+  case object Irate extends RangeFunctionId("irate", Seq(RangeVectorParam))
 
-  case object MaxOverTime extends RangeFunctionId("max_over_time")
+  case object MaxOverTime extends RangeFunctionId("max_over_time", Seq(RangeVectorParam))
 
-  case object MinOverTime extends RangeFunctionId("min_over_time")
+  case object MinOverTime extends RangeFunctionId("min_over_time", Seq(RangeVectorParam))
 
-  case object PredictLinear extends RangeFunctionId("predict_linear")
+  case object PredictLinear extends RangeFunctionId("predict_linear", Seq(RangeVectorParam, ScalarParam))
 
-  case object QuantileOverTime extends RangeFunctionId("quantile_over_time")
+  case object QuantileOverTime extends RangeFunctionId("quantile_over_time", Seq(ScalarRangeParam(0,1), RangeVectorParam))
 
-  case object Rate extends RangeFunctionId("rate")
+  case object Rate extends RangeFunctionId("rate", Seq(RangeVectorParam))
 
-  case object Resets extends RangeFunctionId("resets")
+  case object Resets extends RangeFunctionId("resets", Seq(RangeVectorParam))
 
-  case object StdDevOverTime extends RangeFunctionId("stddev_over_time")
+  case object StdDevOverTime extends RangeFunctionId("stddev_over_time", Seq(RangeVectorParam))
 
-  case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
+  case object StdVarOverTime extends RangeFunctionId("stdvar_over_time", Seq(RangeVectorParam))
 
-  case object SumOverTime extends RangeFunctionId("sum_over_time")
+  case object SumOverTime extends RangeFunctionId("sum_over_time", Seq(RangeVectorParam))
 
-  case object Timestamp extends RangeFunctionId("timestamp")
+  case object Timestamp extends RangeFunctionId("timestamp", Seq(InstantVectorParam))
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry

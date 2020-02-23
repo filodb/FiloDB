@@ -186,7 +186,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("topk(5, some_metric)")
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
-    parseSuccessfully("sum_over_time(foo)")
+    // parseSuccessfully("sum_over_time(foo)")
+    parseError("sum_over_time(foo)")
 
 
     parseError("sum(other_metric) by (foo)(some_metric)")
@@ -239,7 +240,132 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("or1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("and1{job=\"SNRT-App-0\"}[1m] ")
     parseSuccessfully("and{job=\"SNRT-App-0\"}[1m] ")
+
+    // negative/positive test-cases for functions in RangeFunctionID
+    // avg_over_time
+    parseSuccessfully("avg_over_time(some_metric[5m])")
+    parseError("avg_over_time(some_metric)") // reason : Expected range-vector
+    parseError("avg_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("avg_over_time(abcd, some_metric[5m])") // reason : Expected range, got instant
+
+    // changes
+    parseSuccessfully("changes(some_metric[5m])")
+    parseError("changes(some_metric)")  // reason : Expected range-vector
+    parseError("changes(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("changes(abcd, some_metric[5m])") // reason : Expected range, got instant
+
+    // count_over_time
+    parseSuccessfully("count_over_time(some_metric[5m])")
+    parseError("count_over_time(some_metric)")  // reason : Expected range-vector
+    parseError("count_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("count_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // delta
+    parseSuccessfully("delta(some_metric[5m])")
+    parseError("delta(some_metric)") // reason : Expected range-vector
+    parseError("delta(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("delta(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // deriv
+    parseSuccessfully("deriv(some_metric[5m])")
+    parseError("delta(some_metric)") // reason : Expected range-vector
+    parseError("deriv(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("deriv(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // holt_winters
+    parseSuccessfully("holt_winters(some_metric[5m], 0.5, 0.5)")
+    parseError("holt_winters(some_metric, 0.5, 0.5)") // reason : Expected range-vector, got instant
+    parseError("holt_winters(some_metric[5m])") // reason : Expected 3 args, got 1
+    parseError("holt_winters(some_metric[5m], 1, 0.1 )") // reason : Invalid smoothing value, 0<sf<1
+    parseError("holt_winters(0.1, 0.1, some_metric[5m])") // reason : Expected range-vector, got scalar
+    parseError("holt_winters(some_metric[5m], 0.5, 0.5, hello)") // reason :Expected 3 args, got 4
+
+    // ZScore
+    parseSuccessfully("z_score(some_metric[5m])")
+    parseError("z_score(some_metric)") // reason : Expected range-vector
+    parseError("z_score(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("z_score(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // Idelta
+    parseSuccessfully("idelta(some_metric[5m])")
+    parseError("idelta(some_metric)") // reason : Expected range-vector
+    parseError("idelta(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("idelta(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // Increase
+    parseSuccessfully("increase(some_metric[5m])")
+    parseError("increase(some_metric)") // reason : Expected range-vector
+    parseError("increase(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("increase(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // Irate
+    parseSuccessfully("irate(some_metric[5m])")
+    parseError("irate(some_metric)") // reason : Expected range-vector
+    parseError("irate(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("irate(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // MaxOverTime
+    parseSuccessfully("max_over_time(some_metric[5m])")
+    parseError("max_over_time(some_metric)") // reason : Expected range-vector
+    parseError("max_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("max_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // MinOverTime
+    parseSuccessfully("min_over_time(some_metric[5m])")
+    parseError("min_over_time(some_metric)") // reason : Expected range-vector
+    parseError("min_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("min_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    // predict_linear
+    parseSuccessfully("predict_linear(some_metric[5m], 0.5)")
+    parseError("predict_linear(some_metric, 0.5)") // reason : Expected range-vector, got instant
+    parseError("predict_linear(some_metric[5m])") // reason : Expected 2 args, got 1
+    parseError("predict_linear(1, some_metric[5m])") // reason : Expected range-vector, got scalar
+    parseError("predict_linear(some_metric[5m], 1, hello)") // reason :Expected 2 args, got 3
+
+    // quantile_over_time
+    parseSuccessfully("quantile_over_time(1, some_metric[5m])")
+    parseError("quantile_over_time(0.5, some_metric)") // reason : Expected range-vector, got instant
+    parseError("quantile_over_time(some_metric[5m])") // reason : Expected 2 args, got 1
+    parseError("quantile_over_time(some_metric[5m], 1)") // reason : Expected scalar, got range_vector
+    parseError("quantile_over_time(1, some_metric[5m], hello)") // reason :Expected 2 args, got 3
+
+    // Rate
+    parseSuccessfully("rate(some_metric[5m])")
+    parseError("rate(some_metric)") // reason : Expected range-vector
+    parseError("rate(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("rate(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    //  Resets
+    parseSuccessfully("resets(some_metric[5m])")
+    parseError("resets(some_metric)") // reason : Expected range-vector
+    parseError("resets(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("resets(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    //  StdDevOverTime
+    parseSuccessfully("stddev_over_time(some_metric[5m])")
+    parseError("std_over_time(some_metric)") // reason : Expected range-vector
+    parseError("std_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("std_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    //  StdVarOverTime
+    parseSuccessfully("stdvar_over_time(some_metric[5m])")
+    parseError("stdvar_over_time(some_metric)") // reason : Expected range-vector
+    parseError("stdvar_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("stdvar_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    //  SumOverTime
+    parseSuccessfully("sum_over_time(some_metric[5m])")
+    parseError("sum_over_time(some_metric)") // reason : Expected range-vector
+    parseError("sum_over_time(some_metric[5m], hello)") // reason : Expected only 1 arg, got 2
+    parseError("sum_over_time(hello, some_metric[5m])") // reason : Expected range, got instant
+
+    //  Timestamp
+    parseSuccessfully("timestamp(some_metric)")
+    parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
+    parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
   }
+
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
@@ -315,10 +441,11 @@ class ParserSpec extends FunSpec with Matchers {
 
       "changes(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List(),None)",
-      "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], 0.4)" ->
+      "quantile_over_time(0.4,http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarFixedDoublePlan(0.4,RangeParams(1524855988,1000,1524855988))),None)",
-      "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], Scalar(http_requests_total))" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),Scalar,List())),None)",
+  //   below quantile_over_time test-case is invalid, because second param needs to be a scalar(number)
+  //    "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], Scalar(http_requests_total))" ->
+  //      "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),Scalar,List())),None)",
        "label_replace(http_requests_total,instance,new-label,instance,\"(.*)-(.*)\")" -> "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),LabelReplace,List(instance, new-label, instance, (.*)-(.*)))",
       "holt_winters(http_requests_total{job=\"api-server\"}[5m], 0.01, 0.1)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(ScalarFixedDoublePlan(0.01,RangeParams(1524855988,1000,1524855988)), ScalarFixedDoublePlan(0.1,RangeParams(1524855988,1000,1524855988))),None)",
