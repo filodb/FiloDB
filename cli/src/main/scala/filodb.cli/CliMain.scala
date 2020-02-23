@@ -272,7 +272,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                       timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(query,timeParams.start, timeParams.step,
+    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(config, query,timeParams.start, timeParams.step,
       timeParams.end))
   }
 
@@ -333,7 +333,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val qOpts = QueryContext(tsdbQueryParams, spreadProvider, options.sampleLimit)
-                             .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
+                             .copy(queryTimeoutMillis = options.timeout.toSeconds.toInt * 1000,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")

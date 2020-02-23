@@ -7,6 +7,7 @@ import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaTypes, StatusCod
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import akka.util.ByteString
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.xerial.snappy.Snappy
@@ -44,7 +45,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
-            spread, PromQlQueryParams(query, start.toLong, step.toLong, end.toLong, spread))
+            spread, PromQlQueryParams(ConfigFactory.empty, query, start.toLong, step.toLong, end.toLong, spread))
         }
       }
     } ~
@@ -59,7 +60,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
         { (query, time, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false), spread, PromQlQueryParams(query, time.toLong, 1000, time.toLong, spread))
+            verbose.getOrElse(false), spread, PromQlQueryParams(ConfigFactory.empty,
+              query, time.toLong, 1000, time.toLong, spread))
         }
       }
     } ~

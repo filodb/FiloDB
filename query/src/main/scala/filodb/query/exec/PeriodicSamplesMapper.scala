@@ -26,7 +26,7 @@ final case class PeriodicSamplesMapper(start: Long,
                                        end: Long,
                                        window: Option[Long],
                                        functionId: Option[InternalRangeFunction],
-                                       queryContext: QueryContext = QueryContext(),
+                                       queryContext: QueryContext,
                                        funcParams: Seq[FuncArgs] = Nil,
                                        offset: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {

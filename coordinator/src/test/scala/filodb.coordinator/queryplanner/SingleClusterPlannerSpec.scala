@@ -2,6 +2,7 @@ package filodb.coordinator.queryplanner
 
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
@@ -55,7 +56,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
+  val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
 
   it ("should generate ExecPlan for LogicalPlan") {
     // final logical plan

@@ -30,7 +30,7 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
       400000L -> 200d,
       500000L -> 200d
     )
-    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None)
+    val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())
     val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema, Nil)
 
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map

@@ -90,7 +90,7 @@ class HistogramQueryBenchmark {
   // Single-threaded query test
   val numQueries = 500
   val qContext = QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 100).
-    copy(shardOverrides = Some(Seq(0)), queryTimeoutSecs = 60)
+    copy(shardOverrides = Some(Seq(0)), queryTimeoutMillis = 60000)
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
   val hExecPlan = hEngine.materialize(hLogicalPlan, qContext)
   val querySched = Scheduler.singleThread(s"benchmark-query")

@@ -45,8 +45,9 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
     Kamon.currentSpan().mark("lookup-partitions-done")
 
-    val queryTime = (System.currentTimeMillis() - queryContext.submitTime) / 1000
-    if (queryTime >= queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName)
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis)
+      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get

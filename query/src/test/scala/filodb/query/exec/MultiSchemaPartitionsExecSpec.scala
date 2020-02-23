@@ -186,7 +186,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -222,7 +222,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -243,7 +243,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -270,7 +270,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
                                         InstantFunctionId.HistogramBucket,
                                         Seq(StaticFuncArgs(16.0, RangeParams(0,0,0)))))
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
-                                         Some(InternalRangeFunction.Rate), rawSource = false))
+                                         Some(InternalRangeFunction.Rate), QueryContext(), rawSource = false))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -316,7 +316,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val step = 20000L
     val end = 185000L
     execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, Some(300 * 1000),  // [5m]
-                                         Some(InternalRangeFunction.SumOverTime)))
+                                         Some(InternalRangeFunction.SumOverTime), QueryContext()))
     execPlan.addRangeVectorTransformer(AggregateMapReduce(AggregationOperator.Sum, Nil, Nil, Nil))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
@@ -361,7 +361,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
     val start = 105000L
     val step = 20000L
     val end = 185000L
-    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None))
+    execPlan.addRangeVectorTransformer(new PeriodicSamplesMapper(start, step, end, None, None, QueryContext()))
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -436,7 +436,6 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
       val result = resp.asInstanceOf[QueryResult]
     }
     thrown.getCause.getClass shouldEqual classOf[QueryTimeoutException]
-    thrown.getCause.getMessage shouldEqual "Query timeout in filodb.query.exec.MultiSchemaPartitionsExec after 180 seconds"
   }
 
 }

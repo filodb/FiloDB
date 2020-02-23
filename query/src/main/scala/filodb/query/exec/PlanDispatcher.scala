@@ -30,10 +30,11 @@ case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
   def dispatch(plan: ExecPlan)(implicit sched: Scheduler): Task[QueryResponse] = {
 
-    val queryTime = (System.currentTimeMillis() - plan.queryContext.submitTime) / 1000
-    if (queryTime >= plan.queryContext.queryTimeoutSecs) throw QueryTimeoutException(queryTime, this.getClass.getName)
-    implicit val _ = Timeout(FiniteDuration(plan.queryContext.queryTimeoutSecs - queryTime, TimeUnit.SECONDS))
-    val fut = (target ? plan).map {
+   val queryTimeElapsed = System.currentTimeMillis() - plan.queryContext.submitTime
+   if (queryTimeElapsed >= plan.queryContext.queryTimeoutMillis)
+      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
+   val t = Timeout(FiniteDuration(plan.queryContext.queryTimeoutMillis - queryTimeElapsed, TimeUnit.MILLISECONDS))
+    val fut = (target ? plan)(t).map {
       case resp: QueryResponse => resp
       case e =>  throw new IllegalStateException(s"Received bad response $e")
     }

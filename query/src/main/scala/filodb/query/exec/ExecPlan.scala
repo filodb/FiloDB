@@ -47,6 +47,7 @@ trait ExecPlan extends QueryCommand {
   /**
     * Throw error if the size of the resultset is greater than Limit
     * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
+    * It is not in QueryContext since for some queries it should be false
     */
   def enforceLimit: Boolean = true
 
@@ -350,8 +351,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final def dataset: DatasetRef = children.head.dataset
 
   final def submitTime: Long = children.head.queryContext.submitTime
-
-  final def limit: Int = children.head.queryContext.sampleLimit
 
   private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
 

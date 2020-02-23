@@ -2,10 +2,12 @@ package filodb.core.query
 
 import java.util.UUID
 
+import com.typesafe.config.Config
+
 import filodb.core.{SpreadChange, SpreadProvider}
 
 trait TsdbQueryParams
-case class PromQlQueryParams(promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
+case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
@@ -14,7 +16,7 @@ case object UnavailablePromQlQueryParams extends TsdbQueryParams
   */
 final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailablePromQlQueryParams,
                               spreadOverride: Option[SpreadProvider] = None,
-                              queryTimeoutSecs: Int = 30,
+                              queryTimeoutMillis: Int = 30000,
                               sampleLimit: Int = 1000000,
                               shardOverrides: Option[Seq[Int]] = None,
                               queryId: String = UUID.randomUUID().toString,
