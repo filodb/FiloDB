@@ -28,8 +28,9 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestampFn
         // FIXME need to incorporate offset here - needs to be addressed in HA Planning too - punt to separate PR
-        val lookbackMs = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
-        if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
+        lazy val lookbackMs = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
+        if (!logicalPlan.isRoutable) rawClusterPlanner.materialize(logicalPlan, qContext)
+        else if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
         else if (p.startMs - lookbackMs >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
         else {
           // Split the query between raw and downsample planners
