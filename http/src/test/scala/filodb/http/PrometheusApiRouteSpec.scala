@@ -66,7 +66,9 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
     case CurrentShardSnapshot(dsRef, mapper) => info(s"Got mapper for $dsRef => ${mapper.prettyPrint}")
   }
 
-  val histData = MMD.linearPromHistSeries(startTs = 1555427432000L).take(100)
+  // Use artifically early timestamp to ensure SingleCLusterPlanner magic doesn't kick in
+  val histDataStart = 1000000000L
+  val histData = MMD.linearPromHistSeries(startTs = histDataStart).take(100)
   val histDS = Dataset("histogram", Schemas.promHistogram)
   // NOTE: data gets sharded to shards 1 and 3
   cluster.memStore.ingest(ref, 1, MMD.records(histDS, histData))
@@ -141,8 +143,8 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   it("should auto convert Histogram data to Prom bucket vectors") {
     val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
 
-    val start = 1555427432
-    val end   = 1555447432
+    val start = histDataStart / 1000
+    val end   = start + 20000
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=$start&end=$end&step=15") ~> prometheusAPIRoute ~> check {
 
@@ -165,8 +167,8 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   it("should output native Histogram maps if histogramMap=true") {
     val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
 
-    val start = 1555427432
-    val end   = 1555447432
+    val start = histDataStart / 1000
+    val end   = start + 20000
     Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
       s"start=$start&end=$end&step=15&histogramMap=true") ~> prometheusAPIRoute ~> check {
 
