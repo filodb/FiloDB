@@ -8,7 +8,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
-import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
+import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -17,7 +17,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -29,6 +29,7 @@ import filodb.memory.BinaryRegionLarge
  * ==Configuration==
  * {{{
  *   cassandra {
+ *     session-provider-fqcn = filodb.cassandra.DefaultFiloSessionProvider
  *     hosts = ["1.2.3.4", "1.2.3.5"]
  *     port = 9042
  *     keyspace = "my_cass_keyspace"
@@ -45,11 +46,10 @@ import filodb.memory.BinaryRegionLarge
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
  * @param readEc A Scheduler for reads.  This must be separate from writes to prevent deadlocks.
- * @param filoSessionProvider if provided, a session provider provides a session for the configuration
  * @param sched A Scheduler for writes
  */
 class CassandraColumnStore(val config: Config, val readEc: Scheduler,
-                           val filoSessionProvider: Option[FiloSessionProvider] = None,
+                           val session: Session,
                            val downsampledData: Boolean = false)
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
@@ -294,7 +294,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterConnector.shutdown()
   }
 
-  private def clusterMeta: Metadata = clusterConnector.session.getCluster.getMetadata
+  private def clusterMeta: Metadata = session.getCluster.getMetadata
 
   /**
    * Splits scans of a dataset across multiple token ranges.
@@ -400,7 +400,7 @@ case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
 trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def config: Config
-  def filoSessionProvider: Option[FiloSessionProvider]
+  def session: Session
   def readEc: Scheduler
 
   implicit val readSched = readEc
@@ -421,8 +421,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
+    def session: Session = CassandraChunkSource.this.session
     def ec: ExecutionContext = readEc
-    val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
 
     val keyspace: String = if (!downsampledData) config.getString("keyspace")
                            else config.getString("downsample-keyspace")

@@ -4,7 +4,6 @@ import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import java.util
 import kamon.Kamon
@@ -55,17 +54,13 @@ object BatchDownsampler extends StrictLogging with Instance {
   private val readSched = Scheduler.io("cass-read-sched")
   private val writeSched = Scheduler.io("cass-write-sched")
 
-  private val sessionProvider = settings.sessionProvider.map { p =>
-                                              val clazz = createClass(p).get
-                                              val args = Seq(classOf[Config] -> settings.cassandraConfig)
-                                              createInstance[FiloSessionProvider](clazz, args).get
-                                            }
+  private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
 
   private[downsampler] val downsampleCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider, true)(writeSched)
+    new CassandraColumnStore(settings.filodbConfig, readSched, session, true)(writeSched)
 
   private[downsampler] val rawCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, sessionProvider, false)(writeSched)
+    new CassandraColumnStore(settings.filodbConfig, readSched, session, false)(writeSched)
 
   private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
