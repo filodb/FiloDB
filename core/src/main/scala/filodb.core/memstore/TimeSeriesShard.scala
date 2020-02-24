@@ -1163,9 +1163,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     } catch {
       case e: OutOfOffheapMemoryException => disableAddPartitions()
       case e: Exception =>
+        shardStats.dataDropped.increment()
         logger.error(s"Unexpected ingestion err in dataset=$ref " +
           s"shard=$shardNum partition=${schema.ingestionSchema.debugString(recordBase, recordOff)}", e)
-        shardStats.dataDropped.increment()
     }
   }
 
