@@ -25,9 +25,7 @@ trait FiloCassandraConnector extends StrictLogging {
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
   def config: Config
-  def sessionProvider: FiloSessionProvider
-
-  lazy val session: Session = sessionProvider.session
+  def session: Session
 
   lazy val baseRetryInterval = config.getDuration("retry-interval").toMillis.millis
   lazy val retryIntervalMaxJitter = config.getDuration("retry-interval-max-jitter").toMillis.toInt

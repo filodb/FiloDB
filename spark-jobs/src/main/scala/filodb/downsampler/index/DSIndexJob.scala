@@ -2,7 +2,6 @@ package filodb.downsampler.index
 
 import scala.concurrent.Await
 
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.execution.Scheduler
@@ -45,17 +44,13 @@ object DSIndexJob extends StrictLogging with Instance {
     */
   private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
-  private val sessionProvider = dsJobsettings.sessionProvider.map { p =>
-    val clazz = createClass(p).get
-    val args = Seq(classOf[Config] -> dsJobsettings.cassandraConfig)
-    createInstance[FiloSessionProvider](clazz, args).get
-  }
+  private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
 
   private[index] val downsampleCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, true)(writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, true)(writeSched)
 
   private[index] val rawCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, sessionProvider, false)(writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, false)(writeSched)
 
   val dsDatasource = downsampleCassandraColStore
   val highestDSResolution = rawDatasetIngestionConfig.downsampleConfig.resolutions.last // data retained longest

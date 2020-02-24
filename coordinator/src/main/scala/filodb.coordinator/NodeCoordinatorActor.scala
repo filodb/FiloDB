@@ -155,7 +155,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         context.watch(ingester)
         ingesters(ref) = ingester
 
-        val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis else storeConf.diskTTLSeconds * 1000
+        val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis
+                  else storeConf.diskTTLSeconds.toLong * 1000
         def earliestTimestampFn: Long = System.currentTimeMillis() - ttl
         logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset.ref, schemas,

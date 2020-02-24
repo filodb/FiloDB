@@ -18,13 +18,15 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
 import filodb.core.store.ColumnStoreSpec
+import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.cassandra.metastore.CassandraMetaStore
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
 
-  lazy val colStore = new CassandraColumnStore(config, s)
-  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
+  lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
+  lazy val colStore = new CassandraColumnStore(config, s, session)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
@@ -157,7 +159,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")
                                              .withFallback(config)
-  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s)
+  val compressSession = new DefaultFiloSessionProvider(configWithChunkCompress.getConfig("cassandra")).session
+  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s, compressSession)
 
   "lz4-chunk-compress" should "write and read compressed chunks successfully" in {
     whenReady(lz4ColStore.write(dataset.ref, chunkSetStream(names take 3))) { response =>
