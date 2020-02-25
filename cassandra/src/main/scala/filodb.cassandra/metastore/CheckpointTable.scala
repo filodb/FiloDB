@@ -4,19 +4,18 @@ import java.lang.{Integer => JInt, Long => JLong}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.ConsistencyLevel
+import com.datastax.driver.core.{ConsistencyLevel, Session}
 import com.typesafe.config.Config
 
-import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
+import filodb.cassandra.FiloCassandraConnector
 
 /**
   * Represents the "checkpoint" Cassandra table tracking each dataset and its column definitions
   *
   * @param config          a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
-  * @param sessionProvider if provided, a session provider provides a session for the configuration
   */
 sealed class CheckpointTable(val config: Config,
-                             val sessionProvider: FiloSessionProvider,
+                             val session: Session,
                              writeConsistencyLevel: ConsistencyLevel)
                              (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")

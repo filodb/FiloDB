@@ -41,7 +41,11 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  */
 trait MemStore extends ChunkSource {
 
-  def isReadOnly: Boolean
+  /**
+    * True if this store is in the mode of serving downsampled data.
+    * This is used to switch ingestion and query behaviors for downsample cluster.
+    */
+  def isDownsampleStore: Boolean
 
   /**
     * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and

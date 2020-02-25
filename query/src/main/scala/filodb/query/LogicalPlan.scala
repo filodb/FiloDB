@@ -6,6 +6,8 @@ import filodb.core.query.{ColumnFilter, RangeParams}
 sealed trait LogicalPlan {
   /**
     * Execute failure routing
+    * Override for Queries which should not be routed e.g time(), month()
+    * It is false for RawSeriesLikePlan, MetadataQueryPlan, RawChunkMeta, ScalarTimeBasedPlan and ScalarFixedDoublePlan
     */
   def isRoutable: Boolean = true
 }

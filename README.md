@@ -472,6 +472,7 @@ Some special functions exist to aid debugging and for other purposes:
 | `_filodb_chunkmeta_all` | (CLI Only) Returns chunk metadata fields for all chunks matching the time range and filter criteria - ID, # rows, start and end time, as well as the number of bytes and type of encoding used for a particular column.  |
 | `histogram_bucket` | Extract a bucket from a HistogramColumn |
 | `histogram_max_quantile` | More accurate `histogram_quantile` when the max is known |
+| `hist_to_prom_vectors` | Convert a histogram to a set of equivalent Prometheus-style bucket time series |
 
 Example of debugging chunk metadata using the CLI:
 
@@ -487,6 +488,7 @@ One major difference FiloDB has from the Prometheus data model is that FiloDB su
 * To compute quantiles:  `histogram_quantile(0.7, sum(rate(http_req_latency{app="foo"}[5m])))`
 * To extract a bucket: `http_req_latency{app="foo",_bucket_="100.0"}`  (`_bucket_` is a special filter that translates to the `histogram_bucket` function for bucket extraction)
 * Sum over multiple Histogram time series:  `sum(rate(http_req_latency{app="foo"}[5m]))` - you could then compute quantile over the sum.
+* To convert a `HistogramColumn` data back to Prometheus-style time series for each bucket, use the `hist_to_prom_vectors` function
   - NOTE: Do NOT use `by (le)` when summing `HistogramColumns`.  This is not appropriate as the "le" tag is not used.  FiloDB knows how to sum multiple histograms together correctly without grouping tricks.
   - FiloDB prevents many incorrect histogram aggregations in Prometheus when using `HistogramColumn`, such as handling of multiple histogram schemas across time series and across time.
 

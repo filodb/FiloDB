@@ -12,6 +12,11 @@ object Vectors {
   val BucketFilterLabel = "_bucket_"
 }
 
+
+object WindowConstants {
+  val staleDataLookbackSeconds = 5 * 60 // 5 minutes
+}
+
 trait Vectors extends Scalars with TimeUnits with Base {
   import Vectors._
 
@@ -165,7 +170,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
                                val labelSelection: Seq[LabelMatch],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
 
-    val staleDataLookbackSeconds = 5 * 60 // 5 minutes
+    import WindowConstants._
     val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
 
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)

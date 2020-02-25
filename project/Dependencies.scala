@@ -22,7 +22,7 @@ object Dependencies {
   val kamonZipkinVersion = "2.0.1"
   val kamonPrometheusVersion = "2.0.1"
   val monixKafkaVersion = "0.15"
-  val sparkVersion      = "2.4.0"
+  val sparkVersion      = "2.4.4"
   val sttpVersion       = "1.3.3"
 
   /* Dependencies shared */
@@ -130,7 +130,8 @@ object Dependencies {
 
   lazy val promDeps = Seq(
     "com.google.protobuf"    % "protobuf-java"             % "2.5.0",
-    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1"
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.1",
+    "com.softwaremill.quicklens" %% "quicklens"            % "1.4.12"
   )
 
   lazy val gatewayDeps = commonDeps ++ Seq(

@@ -168,7 +168,7 @@ private[filodb] final class IngestionActor(ref: DatasetRef,
     }
 
     implicit val futureMapDispatcher: ExecutionContext = actorDispatcher
-    val ingestion = if (memStore.isReadOnly) {
+    val ingestion = if (memStore.isDownsampleStore) {
       logger.info(s"Initiating shard startup on read-only memstore for dataset=$ref shard=$shard")
       for {
         _ <- memStore.recoverIndex(ref, shard)

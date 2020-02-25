@@ -226,6 +226,7 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
 
+  case object HistToPromVectors extends MiscellaneousFunctionId("hist_to_prom_vectors")
 }
 
 sealed abstract class SortFunctionId(override val entryName: String) extends EnumEntry

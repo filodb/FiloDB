@@ -25,8 +25,6 @@ object DownsamplerSettings extends StrictLogging {
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
   logger.info(s"Loaded following downsampler config: ${downsamplerConfig.root().render()}" )
 
-  val sessionProvider = downsamplerConfig.as[Option[String]]("cass-session-provider-fqcn")
-
   val cassandraConfig = filodbConfig.getConfig("cassandra")
 
   val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")

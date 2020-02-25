@@ -18,14 +18,18 @@ import filodb.core.store.{NullColumnStore, NullMetaStore}
  * @param ioPool a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
  */
 class CassandraTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
-  val colStore = new CassandraColumnStore(config, ioPool)(ioPool)
-  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)
+  val cassandraConfig = config.getConfig("cassandra")
+  val session = FiloSessionProvider.openSession(cassandraConfig)
+  val colStore = new CassandraColumnStore(config, ioPool, session)(ioPool)
+  val metaStore = new CassandraMetaStore(cassandraConfig, session)(ioPool)
   val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
 }
 
 class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
-  val downsampleColStore = new CassandraColumnStore(config, ioPool, None, true)(ioPool)
-  val rawColStore = new CassandraColumnStore(config, ioPool, None, false)(ioPool)
+  val cassandraConfig = config.getConfig("cassandra")
+  val session = FiloSessionProvider.openSession(cassandraConfig)
+  val rawColStore = new CassandraColumnStore(config, ioPool, session, false)(ioPool)
+  val downsampleColStore = new CassandraColumnStore(config, ioPool, session, true)(ioPool)
   val metaStore = NullMetaStore
   val memStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore, config)(ioPool)
 }
@@ -40,7 +44,9 @@ class DownsampledTSStoreFactory(config: Config, ioPool: Scheduler) extends Store
   * @param ioPool a Monix Scheduler, recommended to be the standard I/O pool, for scheduling asynchronous I/O
   */
 class NonPersistentTSStoreFactory(config: Config, ioPool: Scheduler) extends StoreFactory {
+  val cassandraConfig = config.getConfig("cassandra")
+  val session = FiloSessionProvider.openSession(cassandraConfig)
   val colStore = new NullColumnStore()(ioPool)
-  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(ioPool)
+  val metaStore = new CassandraMetaStore(cassandraConfig, session)(ioPool)
   val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(ioPool)
 }
