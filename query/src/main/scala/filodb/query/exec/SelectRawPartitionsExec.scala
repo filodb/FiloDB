@@ -28,7 +28,7 @@ object SelectRawPartitionsExec extends  {
   }
 
   def findFirstRangeFunction(transformers: Seq[RangeVectorTransformer]): Option[InternalRangeFunction] =
-    transformers.collect { case p: PeriodicSamplesMapper => p.functionId }.headOption.flatten
+    transformers.collectFirst { case p: PeriodicSamplesMapper => p.functionId }.flatten
 
   def replaceRangeFunction(transformers: Seq[RangeVectorTransformer],
                            oldFunc: Option[InternalRangeFunction],

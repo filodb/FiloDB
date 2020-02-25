@@ -8,7 +8,6 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import monix.reactive.observables.ConnectableObservable
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
@@ -114,7 +113,6 @@ trait ExecPlan extends QueryCommand {
         .tag("query-id", id)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
-      qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
@@ -134,12 +132,11 @@ trait ExecPlan extends QueryCommand {
       span.tag("dontRunTransformers", dontRunTransformers)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
-        qLogger.debug(s"Empty plan $this, returning empty results")
+        qLogger.debug(s"queryId: $id Empty plan $this, returning empty results")
         span.mark("empty-plan")
         Task.eval(QueryResult(id, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
@@ -176,12 +173,9 @@ trait ExecPlan extends QueryCommand {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
-              qLogger.warn(s"queryId: ${id} result was " +
-                s"large size ${numBytes}. May need to tweak limits. " +
-                s"ExecPlan was: ${printTree()} " +
-                s"Limit was: ${limit}")
+              qLogger.warn(s"queryId: $id result was large size $numBytes. May need to tweak limits. " +
+                s"ExecPlan was: ${printTree()} ; Limit was: $limit")
             }
-            qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
             span.finish()
@@ -247,7 +241,7 @@ trait ExecPlan extends QueryCommand {
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
-    ((transf :+ curNode) ++ childr)
+    (transf :+ curNode) ++ childr
   }
 
   protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
@@ -330,8 +324,7 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
-    Observable.now(
-     new ScalarFixedDouble(timeStepParams, scalar))
+    Observable.now(ScalarFixedDouble(timeStepParams, scalar))
   }
 }
 
@@ -340,8 +333,7 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
   override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
-    Observable.now(
-      new TimeScalar(timeStepParams))
+    Observable.now(TimeScalar(timeStepParams))
   }
 }
 
@@ -355,8 +347,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final def submitTime: Long = children.head.submitTime
 
   final def limit: Int = children.head.limit
-
-  private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
                                 (implicit sched: Scheduler, timeout: FiniteDuration) = {
@@ -398,8 +388,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
         sch = reduceSchemas(sch, res)
         (res, i.toInt)
-      case (e: QueryError, i) =>
-        (e, i.toInt)
+      case (e: QueryError, _) =>
+        throw e.t
     // cache caches results so that multiple subscribers can process
     }.cache
 

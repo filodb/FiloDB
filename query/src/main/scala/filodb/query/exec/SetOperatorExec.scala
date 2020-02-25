@@ -85,7 +85,7 @@ final case class SetOperatorExec(id: String,
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      if (!jk.isEmpty)
+      if (jk.nonEmpty)
         rhsKeysSet += jk
     }
 
