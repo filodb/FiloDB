@@ -13,7 +13,7 @@ import filodb.core.{DatasetRef, Instance}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.{BatchDownsampler, DownsamplerSettings}
+import filodb.downsampler.DownsamplerSettings
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
 import filodb.downsampler.index.DSIndexJobSettings.cassWriteTimeout
 import filodb.memory.format.UnsafeUtils
@@ -118,7 +118,7 @@ object DSIndexJob extends StrictLogging with Instance {
     val rawSchemaId = RecordSchema.schemaID(pkRecord.partKey, UnsafeUtils.arayOffset)
     schemas(rawSchemaId).downsample match {
       case Some(dsSchema) =>
-        BatchDownsampler.updateDataSchema(pkRecord.partKey, UnsafeUtils.arayOffset, dsSchema.schemaHash.toShort)
+        RecordSchema.updateSchemaID(pkRecord.partKey, UnsafeUtils.arayOffset, dsSchema.schemaHash)
         val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
         PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
       case None => pkRecord

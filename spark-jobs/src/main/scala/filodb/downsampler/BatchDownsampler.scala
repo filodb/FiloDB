@@ -183,6 +183,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                              userTimeStart: Long,
                              userTimeEndExclusive: Long,
                              dsRecordBuilder: RecordBuilder) = {
+
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
@@ -194,12 +195,11 @@ object BatchDownsampler extends StrictLogging with Instance {
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
 
-        updateDataSchema(rawReadablePart.partKeyBase, rawReadablePart.partKeyOffset,
-          downsampleSchema.schemaHash.toShort)
-
         val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
                                                    rawReadablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
+
+        RecordSchema.updateSchemaID(partKeyPtr, downsampleSchema.schemaHash)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,

@@ -457,6 +457,25 @@ object RecordSchema {
     UnsafeUtils.getShort(base, offset + 4) & 0x0ffff
   }
 
+  /**
+    * Update schemaID of a PartitionKey - Used during downsampling to mutate the resulting dataschema esp. for Guage
+    * @param base
+    * @param offset
+    * @param schemaId
+    */
+  final def updateSchemaID(base: Any, offset: Long, schemaId: Int): Unit = {
+    require(UnsafeUtils.getInt(base, offset) >= 2, "Empty BinaryRecord/not large enough")
+    UnsafeUtils.setShort(base, offset + 4, schemaId.toShort)
+  }
+
+  /**
+    * Update schemaID of a PartitionKey - Used during downsampling to mutate the resulting dataschema esp. for Guage
+    * @param addr
+    * @param schemaId
+    */
+  final def updateSchemaID(addr: BinaryRegion.NativePointer, schemaId: Int): Unit =
+    updateSchemaID(UnsafeUtils.ZeroPointer, addr, schemaId)
+
   final def schemaID(addr: BinaryRegion.NativePointer): Int = schemaID(UnsafeUtils.ZeroPointer, addr)
 
   final def schemaID(bytes: Array[Byte]): Int =
