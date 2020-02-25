@@ -101,6 +101,7 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
   val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 
   val metricBytes = metricColumn.getBytes
+  val metricUTF8 = ZCUTF8(metricBytes)
   val metricHash = BinaryRegion.hash32(metricBytes)
 }
 

@@ -37,7 +37,7 @@ class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 }
 
 class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
-                                 val storeConfig: StoreConfig,
+                                 val rawStoreConfig: StoreConfig,
                                  val schemas: Schemas,
                                  store: ColumnStore, // downsample colStore
                                  rawColStore: ColumnStore,
@@ -52,8 +52,10 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val indexDataset = downsampledDatasetRefs.last
   private val indexTtl = downsampleTtls.last
 
+  private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
+
   // since all partitions are paged from store, this would be much lower than what is configured for raw data
-  private val maxQueryMatches = storeConfig.maxQueryMatches * 0.5 // TODO configure if really necessary
+  private val maxQueryMatches = downsampleStoreConfig.maxQueryMatches
 
   private val nextPartitionID = new AtomicInteger(0)
 
@@ -118,9 +120,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // we are sure that in one raw dataset flush period, we wont get two updated part key
     // records with same part key. This is true since we update part keys only once per flush interval in raw dataset.
     logger.info(s"Starting housekeeping for downsample cluster of dataset=$rawDatasetRef shard=$shardNum " +
-                s"every ${storeConfig.flushInterval}")
-    houseKeepingFuture = Observable.intervalWithFixedDelay(storeConfig.flushInterval,
-                                                          storeConfig.flushInterval).mapAsync { _ =>
+                s"every ${rawStoreConfig.flushInterval}")
+    houseKeepingFuture = Observable.intervalWithFixedDelay(rawStoreConfig.flushInterval,
+                                                           rawStoreConfig.flushInterval).mapAsync { _ =>
       purgeExpiredIndexEntries()
       indexRefresh()
     }.map { _ =>
@@ -169,7 +171,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def startStatsUpdateTask(): Unit = {
     logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
-      s"every ${storeConfig.flushInterval}")
+      s"every ${rawStoreConfig.flushInterval}")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
@@ -241,7 +243,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
-      .mapAsync(storeConfig.demandPagingParallelism * 3) { partBytes =>
+      .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partBytes =>
         val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
           .asChildOf(Kamon.currentSpan())
           .tag("dataset", rawDatasetRef.toString)
@@ -249,7 +251,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           .start()
         // TODO test multi-partition scan if latencies are high
         store.readRawPartitions(downsampledDataset,
-                                storeConfig.maxChunkTime.toMillis,
+                                downsampleStoreConfig.maxChunkTime.toMillis,
                                 SinglePartitionScan(partBytes, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>

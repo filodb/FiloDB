@@ -7,9 +7,36 @@ import com.datastax.driver.core._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.Instance
+
 trait FiloSessionProvider {
-  // It is recommended this be implemented via lazy val.  Don't want to recreate a session every time.
   def session: Session
+}
+
+object FiloSessionProvider extends Instance {
+  /**
+    * Reads the "session-provider-fqcn" config key, which names a class that implements
+    * FiloSessionProvider. It must have a public constructor which accepts a Config
+    * instance. The same config instance passed to this method is passed to the constructor.
+    *
+    * Example:
+    *
+    *   session-provider-fqcn = filodb.cassandra.DefaultFiloSessionProvider
+    *
+    */
+  def openSession(config: Config): Session = {
+    val path = "session-provider-fqcn"
+
+    val clazz = if (config.hasPath(path)) {
+      createClass(config.getString(path)).get
+    } else {
+      classOf[DefaultFiloSessionProvider]
+    }
+
+    val args = Seq(classOf[Config] -> config)
+
+    createInstance[FiloSessionProvider](clazz, args).get.session
+  }
 }
 
 trait BaseCassandraOptions {
