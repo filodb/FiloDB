@@ -13,13 +13,15 @@ import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.coordinator.FilodbSettings
+
 trait FiloRoute {
   def route: Route
 }
 
-class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
+class FiloHttpServer(actorSystem: ActorSystem, filoSettings: FilodbSettings) extends StrictLogging {
 
-  val settings = new HttpSettings(actorSystem.settings.config)
+  val settings = new HttpSettings(actorSystem.settings.config, filoSettings)
 
   private var binding: Http.ServerBinding = _
 

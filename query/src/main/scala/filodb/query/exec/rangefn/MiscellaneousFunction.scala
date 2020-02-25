@@ -11,9 +11,7 @@ trait MiscellaneousFunction {
   def execute(source: Observable[RangeVector]): Observable[RangeVector]
 }
 
-case class LabelReplaceFunction(funcParams: Seq[String])
-  extends MiscellaneousFunction {
-
+final case class LabelReplaceFunction(funcParams: Seq[String]) extends MiscellaneousFunction {
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
 
   require(funcParams.size == 4,
@@ -79,9 +77,7 @@ case class LabelReplaceFunction(funcParams: Seq[String])
   }
 }
 
-case class LabelJoinFunction(funcParams: Seq[String])
-  extends MiscellaneousFunction {
-
+final case class LabelJoinFunction(funcParams: Seq[String]) extends MiscellaneousFunction {
   val labelIdentifier: String = "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*"
 
   require(funcParams.size >= 2,
@@ -121,6 +117,5 @@ case class LabelJoinFunction(funcParams: Seq[String])
       return CustomRangeVectorKey(rangeVectorKey.labelValues -
         ZeroCopyUTF8String(dstLabel), rangeVectorKey.sourceShards)
     }
-
   }
 }

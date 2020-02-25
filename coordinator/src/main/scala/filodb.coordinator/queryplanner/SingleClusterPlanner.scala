@@ -404,7 +404,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeApplyMiscellaneousFunction(options: QueryContext,
                                                     lp: ApplyMiscellaneousFunction): PlanResult = {
     val vectors = walkLogicalPlanTree(lp.vectors, options)
-    vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
+    if (lp.function == MiscellaneousFunctionId.HistToPromVectors)
+      vectors.plans.foreach(_.addRangeVectorTransformer(HistToPromSeriesMapper(schemas.part)))
+    else
+      vectors.plans.foreach(_.addRangeVectorTransformer(MiscellaneousFunctionMapper(lp.function, lp.stringArgs)))
     vectors
   }
 
