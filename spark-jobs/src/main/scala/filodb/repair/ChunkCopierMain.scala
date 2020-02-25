@@ -20,6 +20,7 @@ object ChunkCopierMain extends App {
 
 class ChunkCopier extends StrictLogging {
 
+  // scalastyle:off method.length
   def run(conf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
@@ -85,4 +86,5 @@ class ChunkCopier extends StrictLogging {
     sourceCassandraColStore.shutdown()
     targetCassandraColStore.shutdown()
   }
+  // scalastyle:on
 }
