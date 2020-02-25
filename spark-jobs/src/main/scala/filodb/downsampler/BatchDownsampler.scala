@@ -366,13 +366,5 @@ object BatchDownsampler extends StrictLogging with Instance {
       blacklist.forall(w => !w.forall(pkPairs.contains))
     }
   }
-  /**
-    * This method is used for updating Partkey's schema to downsampled schema as gauge has different
-    * downsampled schema.
-    * schemaId is stored at offset+4.
-    */
-  private[downsampler] def updateDataSchema(partKeyBase: Array[Byte], partKeyOffset: Long, schemaId: Short): Unit = {
-    UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, schemaId)
-  }
 
 }
