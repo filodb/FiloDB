@@ -10,9 +10,10 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.DownsamplerSettings
+import filodb.downsampler.{BatchDownsampler, DownsamplerSettings}
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
 import filodb.downsampler.index.DSIndexJobSettings.cassWriteTimeout
 import filodb.memory.format.UnsafeUtils
@@ -114,8 +115,14 @@ object DSIndexJob extends StrictLogging with Instance {
   }
 
   def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
-    val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
-    PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
+    val rawSchemaId = RecordSchema.schemaID(pkRecord.partKey, UnsafeUtils.arayOffset)
+    schemas(rawSchemaId).downsample match {
+      case Some(dsSchema) =>
+        BatchDownsampler.updateDataSchema(pkRecord.partKey, UnsafeUtils.arayOffset, dsSchema.schemaHash.toShort)
+        val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
+        PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
+      case None => pkRecord
+    }
   }
 
 }

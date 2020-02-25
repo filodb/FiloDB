@@ -193,6 +193,10 @@ object BatchDownsampler extends StrictLogging with Instance {
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
+
+        updateDataSchema(rawReadablePart.partKeyBase, rawReadablePart.partKeyOffset,
+          downsampleSchema.schemaHash.toShort)
+
         val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
                                                    rawReadablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
@@ -361,6 +365,10 @@ object BatchDownsampler extends StrictLogging with Instance {
     } else {
       blacklist.forall(w => !w.forall(pkPairs.contains))
     }
+  }
+
+  private[downsampler] def updateDataSchema(partKeyBase: Array[Byte], partKeyOffset: Long, schemaId: Short): Unit = {
+    UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, schemaId)
   }
 
 }
