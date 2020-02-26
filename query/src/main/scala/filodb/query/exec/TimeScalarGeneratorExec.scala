@@ -12,7 +12,6 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
-import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**

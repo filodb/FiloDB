@@ -12,7 +12,6 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryConfig, QueryResponse, QueryResult}
-import filodb.query.Query.qLogger
 
 
 /**

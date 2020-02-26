@@ -5,7 +5,6 @@ import monix.reactive.Observable
 
 import filodb.core.query._
 import filodb.query._
-import filodb.query.Query.qLogger
 
 /**
   * Simply concatenate results from child ExecPlan objects
