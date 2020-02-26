@@ -16,16 +16,18 @@ import filodb.core.{DatasetRef, GlobalConfig}
 
 object ChunkCopierMain extends App {
   new ChunkCopier().run(new SparkConf(loadDefaults = true))
+
+  // Define here so they don't get serialized. This is really nasty by the way, relying on
+  // global state.
+  var sourceCassandraColStore: CassandraColumnStore = _
+  var targetCassandraColStore: CassandraColumnStore = _
 }
 
 class ChunkCopier extends StrictLogging {
 
-  // Define here so they don't get serialized.
-  var sourceCassandraColStore: CassandraColumnStore = _
-  var targetCassandraColStore: CassandraColumnStore = _
-
   // scalastyle:off method.length
   def run(conf: SparkConf): Unit = {
+    import ChunkCopierMain._
 
     val spark = SparkSession.builder()
       .appName("FiloDBChunkCopier")
@@ -69,6 +71,11 @@ class ChunkCopier extends StrictLogging {
     sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
     targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
+    // Need this here because function will be serialized, and Instant class isn't Java 8
+    // compatible, and Spark is stuck on Java 8.
+    val startMillis = ingestionTimeStart.toEpochMilli()
+    val endMillis = ingestionTimeEnd.toEpochMilli()
+
     val splits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
 
     logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
@@ -80,8 +87,8 @@ class ChunkCopier extends StrictLogging {
         sourceCassandraColStore.copyChunksByIngestionTimeRange(
           sourceDatasetRef,
           splitIter,
-          ingestionTimeStart.toEpochMilli(),
-          ingestionTimeEnd.toEpochMilli(),
+          startMillis,
+          endMillis,
           batchSize,
           targetCassandraColStore,
           targetDatasetRef,
