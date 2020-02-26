@@ -12,13 +12,17 @@ import org.apache.spark.sql.SparkSession
 
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, GlobalConfig}
 
 object ChunkCopierMain extends App {
   new ChunkCopier().run(new SparkConf(loadDefaults = true))
 }
 
 class ChunkCopier extends StrictLogging {
+
+  // Define here so they don't get serialized.
+  var sourceCassandraColStore: CassandraColumnStore = _
+  var targetCassandraColStore: CassandraColumnStore = _
 
   // scalastyle:off method.length
   def run(conf: SparkConf): Unit = {
@@ -30,7 +34,10 @@ class ChunkCopier extends StrictLogging {
 
     logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
 
-    def openConfig(str: String) = ConfigFactory.parseFile(new File(conf.get(str))).getConfig("filodb")
+    def openConfig(str: String) = {
+      val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
+      ConfigFactory.parseFile(new File(conf.get(str))).getConfig("filodb").withFallback(sysConfig)
+    }
 
     // Both "source" and "target" refer to file paths which define config files that have a
     // top-level "filodb" section and a "cassandra" subsection.
@@ -59,8 +66,8 @@ class ChunkCopier extends StrictLogging {
     val sourceSession = FiloSessionProvider.openSession(sourceCassConfig)
     val targetSession = FiloSessionProvider.openSession(targetCassConfig)
 
-    val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
-    val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
+    sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
+    targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
     val splits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
 
