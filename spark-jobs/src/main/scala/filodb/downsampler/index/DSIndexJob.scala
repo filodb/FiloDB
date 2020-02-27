@@ -10,11 +10,12 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
-import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.DownsamplerSettings
+import filodb.downsampler.{DownsamplerSettings, OffHeapMemory}
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
+import filodb.downsampler.DownsamplerUtil._
 import filodb.downsampler.index.DSIndexJobSettings.cassWriteTimeout
 import filodb.memory.format.UnsafeUtils
 
@@ -31,14 +32,29 @@ object DSIndexJob extends StrictLogging with Instance {
   val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
   val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
 
+  private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
+    "owner" -> "DSIndexJob")
+
+  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+
+  /**
+    * Downsample Schemas
+    */
+  private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
+
+
+  // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
+  // possible mis-calculation of max block meta size.
+  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
+
+  private val offHeapMem = new OffHeapMemory(dsSchemas,
+    kamonTags, maxMetaSize, settings.downsampleStoreConfig)
+
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
   private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
     .zip(settings.downsampledDatasetRefs).toMap
-
-
-  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
   /**
     * Raw dataset from which we downsample data
@@ -114,13 +130,14 @@ object DSIndexJob extends StrictLogging with Instance {
     count
   }
 
-  def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+  private def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+    val dsRecordBuilder = new RecordBuilder(offHeapMem.nativeMemoryManager)
     val rawSchemaId = RecordSchema.schemaID(pkRecord.partKey, UnsafeUtils.arayOffset)
     schemas(rawSchemaId).downsample match {
       case Some(dsSchema) =>
-        RecordSchema.updateSchemaID(pkRecord.partKey, UnsafeUtils.arayOffset, dsSchema.schemaHash)
-        val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
-        PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
+        val partKey = downsampledPk(pkRecord.partKey, dsSchema, offHeapMem.nativeMemoryManager)
+        val hash = Option(schemas.part.binSchema.partitionHash(partKey, UnsafeUtils.arayOffset))
+        PartKeyRecord(partKey, pkRecord.startTime, pkRecord.endTime, hash)
       case None => pkRecord
     }
   }
