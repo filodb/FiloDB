@@ -14,21 +14,15 @@ import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, GlobalConfig}
 
-object ChunkCopierMain extends App {
-  new ChunkCopier().run(new SparkConf(loadDefaults = true))
+object ChunkCopierMain extends App with StrictLogging {
+  run(new SparkConf(loadDefaults = true))
 
-  // Define here so they don't get serialized. This is really nasty by the way, relying on
-  // global state.
+  // Define here so they don't get serialized.
   var sourceCassandraColStore: CassandraColumnStore = _
   var targetCassandraColStore: CassandraColumnStore = _
-}
-
-class ChunkCopier extends StrictLogging {
 
   // scalastyle:off method.length
   def run(conf: SparkConf): Unit = {
-    import ChunkCopierMain._
-
     val spark = SparkSession.builder()
       .appName("FiloDBChunkCopier")
       .config(conf)
