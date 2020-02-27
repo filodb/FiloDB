@@ -17,7 +17,9 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 
-  val configPath = "conf/timeseries-filodb-server.conf"
+  // For some reason, locally loaded config becomes global when using Spark. Use the downsample
+  // config here to ensure that the unrelated downsample Spark tests work correctly.
+  val configPath = "conf/downsample-filodb-server.conf"
 
   val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
   val config = ConfigFactory.parseFile(new java.io.File(configPath))
