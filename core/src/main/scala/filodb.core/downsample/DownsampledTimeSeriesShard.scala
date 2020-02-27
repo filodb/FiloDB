@@ -170,8 +170,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def startStatsUpdateTask(): Unit = {
-    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
-      s"every ${rawStoreConfig.flushInterval}")
+    logger.info(s"Starting Stats Update task from raw dataset=$rawDatasetRef shard=$shardNum every 1 minute")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)

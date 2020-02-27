@@ -67,8 +67,7 @@ object RangeVectorTransformer {
   */
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], queryConfig: QueryConfig,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
@@ -194,8 +193,7 @@ private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
 final case class ScalarOperationMapper(operator: BinaryOperator,
                                        scalarOnLhs: Boolean,
                                        funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"operator=$operator, scalarOnLhs=$scalarOnLhs"
+  protected[exec] def args: String = s"operator=$operator, scalarOnLhs=$scalarOnLhs"
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
@@ -259,8 +257,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
 }
 
 final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -297,8 +294,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,
                                       timeStepParams: RangeParams) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function, funcParams=$funcParams"
+  protected[exec] def args: String = s"function=$function, funcParams=$funcParams"
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 
@@ -327,8 +323,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
 }
 
 final case class VectorFunctionMapper() extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"funcParams=$funcParams"
+  protected[exec] def args: String = s"funcParams=$funcParams"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
