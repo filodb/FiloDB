@@ -178,8 +178,50 @@ For more details, see Prometheus HTTP API Documentation
 
 ```
 params:
-• `explainOnly` -- returns an ExecPlan instead of the query results
+• `explainOnly` -- returns an ExecPlan instead of the query results if `true`
 • `spread` -- override default spread
+* `histogramMap` -- if true, returns histograms in results as a map/object of bucket values.  If false, histograms are automatically translated to Prometheus bucket-per-vector format.  Defaults to `false`.
+```
+
+Normal/double value output:
+
+```json
+      "values": [
+          [
+            1580319538,
+            "24.0"
+          ],
+          [
+            1580319598,
+            "24.0"
+          ],
+          [
+            1580319658,
+            "30.0"
+          ],
+      ]
+```
+
+`histogramMap=true` output:
+
+```json
+      "values": [
+          [
+            1580319538,
+            {
+              "100.0": 18,
+              "1000.0": 20,
+              "30.0": 0,
+              "100000.0": 24,
+              "10.0": 0,
+              "30000.0": 24,
+              "3000.0": 22,
+              "10000.0": 24,
+              "300.0": 18,
+              "+Inf": 24
+            }
+          ]
+      ]
 ```
 
 #### GET /promql/{dataset}/api/v1/query?query={promQLString}&time={timestamp}

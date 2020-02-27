@@ -63,13 +63,15 @@ case class PromQlExec(queryContext: QueryContext,
     }
   }
 
+  // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
+  //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
+  //   and detect it in execute() above.  Need to discuss compatibility issues with Prometheus.
   def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
     val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
       .asChildOf(parentSpan)
       .tag("query-id", id)
       .start()
     val rangeVectors = data.result.map { r =>
-
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
@@ -78,7 +80,7 @@ case class PromQlExec(queryContext: QueryContext,
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
         override def rows: Iterator[RowReader] = {
-          samples.iterator.map { v =>
+          samples.iterator.collect { case v: Sampl =>
             row.setLong(0, v.timestamp * 1000)
             row.setDouble(1, v.value)
             row

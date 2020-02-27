@@ -28,9 +28,12 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   import FailFastCirceSupport._
   import io.circe.generic.auto._
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
-  // Needed to override Sampl case class Encoder.
+  // Needed to override DataSampl case class Encoder/Decoders.
+  import PromCirceSupport._
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
+
+  val schemas = settings.filoSettings.schemas
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -39,14 +42,15 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     // [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
     path( "api" / "v1" / "query_range") {
       get {
-        parameter('query.as[String], 'start.as[Double], 'end.as[Double],
+        parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'histogramMap.as[Boolean].?,
                   'step.as[Int], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?, 'spread.as[Int].?)
-        { (query, start, end, step, explainOnly, verbose, spread) =>
+        { (query, start, end, histMap, step, explainOnly, verbose, spread) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, TimeStepParams(start.toLong, step, end.toLong))
 
           // No cross-cluster failure routing in this API, hence we pass empty config
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
-            spread, PromQlQueryParams(ConfigFactory.empty, query, start.toLong, step.toLong, end.toLong, spread))
+            spread, PromQlQueryParams(ConfigFactory.empty, query, start.toLong, step.toLong, end.toLong, spread),
+            histMap.getOrElse(false))
         }
       }
     } ~
@@ -57,12 +61,13 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
     path( "api" / "v1" / "query") {
       get {
         parameter('query.as[String], 'time.as[Double], 'explainOnly.as[Boolean].?, 'verbose.as[Boolean].?,
-          'spread.as[Int].?)
-        { (query, time, explainOnly, verbose, spread) =>
+          'spread.as[Int].?, 'histogramMap.as[Boolean].?)
+        { (query, time, explainOnly, verbose, spread, histMap) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
-            verbose.getOrElse(false), spread, PromQlQueryParams(ConfigFactory.empty,
-              query, time.toLong, 1000, time.toLong, spread))
+            verbose.getOrElse(false), spread, PromQlQueryParams(ConfigFactory.empty, query, time.toLong, 1000,
+              time.toLong, spread),
+            histMap.getOrElse(false))
         }
       }
     } ~
@@ -95,7 +100,10 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
               case Some(UnknownDataset) => complete(Codes.NotFound ->
                                            ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
               case Some(a: Any)      => throw new IllegalStateException(s"Got $a as query response")
-              case None              => val rrBytes = toPromReadResponse(qr.asInstanceOf[Seq[filodb.query.QueryResult]])
+              case None              => val promQrs = qr.asInstanceOf[Seq[filodb.query.QueryResult]].map { r =>
+                                          convertHistToPromResult(r, schemas.part)
+                                        }
+                                        val rrBytes = toPromReadResponse(promQrs)
                                         // Would have ideally liked to have the encoding driven by akka directives,
                                         // but Akka doesnt support snappy out of the box.
                                         // Elegant solution is a TODO for later.
@@ -110,7 +118,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
   }
 
   private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan, explainOnly: Boolean, verbose: Boolean,
-                                 spread: Option[Int], tsdbQueryParams: TsdbQueryParams) = {
+                                 spread: Option[Int], tsdbQueryParams: TsdbQueryParams, histMap: Boolean) = {
     val spreadProvider: Option[SpreadProvider] = spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val command = if (explainOnly) {
       ExplainPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
@@ -119,7 +127,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
       LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan, QueryContext(tsdbQueryParams, spreadProvider))
     }
     onSuccess(asyncAsk(nodeCoord, command, settings.queryAskTimeout)) {
-      case qr: QueryResult => complete(toPromSuccessResponse(qr, verbose))
+      case qr: QueryResult => val translated = if (histMap) qr else convertHistToPromResult(qr, schemas.part)
+                              complete(toPromSuccessResponse(translated, verbose))
       case qr: QueryError => complete(toPromErrorResponse(qr))
       case qr: ExecPlan => complete(toPromExplainPlanResponse(qr))
       case UnknownDataset => complete(Codes.NotFound ->
