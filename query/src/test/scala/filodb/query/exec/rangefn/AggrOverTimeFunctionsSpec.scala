@@ -34,9 +34,99 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     blockStore.releaseBlocks()
   }
 
+  // Below function computes summation of the squared values of the sequence
+  // Limitation : If the sequence contains combination of NaN and not NaN values, the computed summed squared value will be NaN
   def sumSquares(nn: Seq[Double]): Double = nn.map(n => n*n).sum.toDouble
+
+  // Below function computes average of the sequence
+  // Limitation : If the sequence contains combination of NaN and not NaN values, the computed average will be NaN
   def avg(nn: Seq[Double]): Double = nn.sum.toDouble / nn.length
+
+  // Below function computes stdVar of the sequence
+  // Limitation : If the sequence contains combination ofNaN and not NaN values, the standard variation will be NaN
   def stdVar(nn: Seq[Double]): Double = sumSquares(nn)/nn.length - avg(nn)*avg(nn)
+
+  // Below function count no. of non-nan values in the sequence
+  def countNonNaN(arr: Seq[Double]): Int = {
+    var count = 0
+    var currPos = 0
+    val length = arr.length
+    if (length > 0) {
+      while (currPos < length) {
+        if(!arr(currPos).isNaN) {
+          count += 1
+        }
+        currPos += 1
+      }
+    }
+    count
+  }
+
+  // Below function computes sum of the sequence when the sequence contains combination of NaN and not NaN values
+  // sum = summation of non-nan values.
+  def sumWithNaN(arr: Seq[Double]): Double = {
+    var currPos = 0
+    var length = arr.length
+    var sum = Double.NaN
+    var count = 0
+    if (length > 0) {
+      while (currPos < length) {
+        if(!arr(currPos).isNaN) {
+          if (sum.isNaN) sum = 0d
+          sum += arr(currPos)
+          count +=1
+        }
+        currPos += 1
+      }
+    }
+    sum
+  }
+
+  // Below function computes average of the sequence when the sequence contains combination of NaN and not NaN values
+  // avg = summation of non-nan values/no. of non-nan values.
+  def avgWithNaN(arr: Seq[Double]): Double = {
+    sumWithNaN(arr)/countNonNaN(arr)
+  }
+
+  // Below function computes the summation of the squared values of the sequence when the sequence contains combination of NaN and not NaN values
+  // squaredSum = summation of squares of non-nan values.
+  def sumSquaresWithNaN(arr: Seq[Double]): Double = {
+    var currPos = 0
+    var sumSquares = Double.NaN
+    val length = arr.length
+    if (length > 0) {
+      while (currPos < length) {
+        if(!arr(currPos).isNaN) {
+          if (sumSquares.isNaN) sumSquares = 0d
+          sumSquares += arr(currPos) * arr(currPos)
+        }
+        currPos += 1
+      }
+    }
+    sumSquares
+  }
+
+
+  // Below function computes stdVar of the sequence when the sequence contains combination of NaN and non-NaN values
+  // standard variation = (summation of squares of non-nan values/no. of non-nan values) - square of avg of non-nan values
+  def stdVarWithNaN(arr: Seq[Double]): Double = {
+    val avg = avgWithNaN(arr)
+    (sumSquaresWithNaN(arr) / countNonNaN(arr)) - (avg * avg)
+  }
+
+  // Below function computes zscore for the last Sample of the input sequence.
+  // zscore = (lastSampleValue - avg(sequence))/stddev(sequence)
+  def z_score(arr: Seq[Double]): Double = {
+    var zscore = Double.NaN
+    if (arr.length > 0) {
+      if (!arr.last.isNaN) {
+        val av = avgWithNaN(arr)
+        val sd = Math.sqrt(stdVarWithNaN(arr))
+        zscore = (arr.last - av) / sd
+      }
+    }
+    zscore
+  }
 
   val defaultStartTS = 100000L
   val pubFreq = 10000L
@@ -151,7 +241,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
       val slidingIt = slidingWindowIt(data, rv, new SumOverTimeFunction(), windowSize, step)
       val aggregated = slidingIt.map(_.getDouble(1)).toBuffer
       // drop first sample because of exclusive start
@@ -168,7 +258,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(50) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val chunkedIt = chunkedWindowItHist(data, rv, new SumOverTimeChunkedFunctionH(), windowSize, step)
       chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
@@ -187,7 +277,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(50) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val row = new TransientHistMaxRow()
       val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
@@ -211,7 +301,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val minSlidingIt = slidingWindowIt(data, rv, new MinMaxOverTimeFunction(Ordering[Double].reverse), windowSize, step)
       val aggregated = minSlidingIt.map(_.getDouble(1)).toBuffer
@@ -241,7 +331,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val countSliding = slidingWindowIt(data, rv, new CountOverTimeFunction(), windowSize, step)
       val aggregated1 = countSliding.map(_.getDouble(1)).toBuffer
@@ -255,6 +345,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val aggregated3 = avgSliding.map(_.getDouble(1)).toBuffer
       aggregated3 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
 
+      // In sample_data2, there are no NaN's, that's why using avg function is fine
       val avgChunked = chunkedWindowIt(data, rv, new AvgOverTimeChunkedFunctionD(), windowSize, step)
       val aggregated4 = avgChunked.map(_.getDouble(1)).toBuffer
       aggregated4 shouldEqual data.sliding(windowSize, step).map(a => avg(a drop 1)).toBuffer
@@ -273,7 +364,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val varSlidingIt = slidingWindowIt(data, rv, new StdVarOverTimeFunction(), windowSize, step)
       val aggregated2 = varSlidingIt.map(_.getDouble(1)).toBuffer
@@ -313,7 +404,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val twoSampleData = Seq(0.0, 1.0)
     val threeSampleData = Seq(1.0, 0.0, 2.0)
     val unevenSampleData = Seq(0.0, 1.0, 4.0)
-    val  rangeParams = RangeParams(100,20, 500)
+    val rangeParams = RangeParams(100, 20, 500)
 
     val quantiles = Seq(0, 0.5, 0.75, 0.8, 1, -1, 2).map(x => StaticFuncArgs(x, rangeParams))
     val twoSampleDataResponses = Seq(0, 0.5, 0.75, 0.8, 1, Double.NegativeInfinity, Double.PositiveInfinity)
@@ -348,7 +439,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     aggregatedEmpty(0) isNaN
 
     def median(s: Seq[Double]): Double = {
-      val (lower, upper) = s.sortWith(_<_).splitAt(s.size / 2)
+      val (lower, upper) = s.sortWith(_ < _).splitAt(s.size / 2)
       if (s.size % 2 == 0) (lower.last + upper.head) / 2.0 else upper.head
     }
 
@@ -357,25 +448,25 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
-      val minChunkedIt = chunkedWindowIt(data, rv2,  new QuantileOverTimeChunkedFunctionD
+      val minChunkedIt = chunkedWindowIt(data, rv2, new QuantileOverTimeChunkedFunctionD
       (Seq(StaticFuncArgs(0.5, rangeParams))), windowSize, step)
 
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
     }
   }
-  
+
   it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
     "than one chunks") {
-    val data1= (1 to 240).map(_.toDouble)
-    val data2 : Seq[Double]= Seq[Double]( 1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
+    val data1 = (1 to 240).map(_.toDouble)
+    val data2: Seq[Double] = Seq[Double](1.1, 1.5, 2.5, 3.5, 4.5, 5.5)
 
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(50) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
       // Append double data and shuffle so that it becomes DoubleVectorDataReader
       val data = scala.util.Random.shuffle(data2 ++ data1)
 
@@ -398,11 +489,11 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
   it("should correctly calculate holt winters") {
     val positiveTrendData2 = Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0)
-    val positiveTrendData3 = Seq(23850.0,23880.0,23910.0,23940.0,23970.0, 24000.0)
+    val positiveTrendData3 = Seq(23850.0, 23880.0, 23910.0, 23940.0, 23970.0, 24000.0)
     val positiveTrendData4 = Seq(31800.0, 31840.0, 31880.0, 31920.0, 31960.0, 32000.0)
 
     val negativeTrendData2 = Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0)
-    val params = Seq(StaticFuncArgs(0.01, RangeParams(100,20,500)), StaticFuncArgs(0.1, RangeParams(100,20,500)))
+    val params = Seq(StaticFuncArgs(0.01, RangeParams(100, 20, 500)), StaticFuncArgs(0.1, RangeParams(100, 20, 500)))
 
     def holt_winters(arr: Seq[Double]): Double = {
       val sf = 0.01
@@ -414,8 +505,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       if (n >= 2) {
         b0 = arr(1) - arr(0)
         for (i <- 1 until n) {
-          smoothedResult  = sf*arr(i) + (1-sf)*(s0 + b0)
-          b0 = tf*(smoothedResult - s0) + (1-tf)*b0
+          smoothedResult = sf * arr(i) + (1 - sf) * (s0 + b0)
+          b0 = tf * (smoothedResult - s0) + (1 - tf) * b0
           s0 = smoothedResult
 
         }
@@ -455,7 +546,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
       val step = rand.nextInt(75) + 5
-      info(s"  iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
       val minChunkedIt = chunkedWindowIt(data, rv2, new HoltWintersChunkedFunctionD(params), windowSize, step)
       val aggregated2 = minChunkedIt.map(_.getDouble(1)).toBuffer
@@ -475,7 +566,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val data = (1 to 500).map(_.toDouble)
     val rv2 = timeValueRV(data)
     val duration = 50
-    val params = Seq(StaticFuncArgs(50, RangeParams(100,20,500)))
+    val params = Seq(StaticFuncArgs(50, RangeParams(100, 20, 500)))
 
     def predict_linear(s: Seq[Double], interceptTime: Long, startTime: Long): Double = {
       val n = s.length.toDouble
@@ -505,7 +596,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val step = rand.nextInt(50) + 5
     (0 until numIterations).foreach { x =>
       val windowSize = rand.nextInt(100) + 10
-      info(s" iteration $x  windowSize=$windowSize step=$step")
+      info(s"iteration $x windowSize=$windowSize step=$step")
       val ChunkedIt = chunkedWindowIt(data, rv2, new PredictLinearChunkedFunctionD(params), windowSize, step)
       val aggregated2 = ChunkedIt.map(_.getDouble(1)).toBuffer
       var res = new ArrayBuffer[Double]
@@ -516,32 +607,65 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
         startTime += step * pubFreq
         endTime += step * pubFreq
       }
-      aggregated2 shouldEqual(res)
+      aggregated2 shouldEqual (res)
     }
   }
 
   it("it should correctly calculate zscore") {
-    val data = Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0, 16020.0)
-    val data2 = Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0)
-    val data3 = Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0, Double.NaN)
-    val params = Seq(StaticFuncArgs(0.01, RangeParams(100,20,500)))
+    val data = (1 to 500).map(_.toDouble)
+    val rv = timeValueRV(data)
 
-    var rv = timeValueRV(data)
-    val chunkedIt = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new ZScoreChunkedFunctionD(), queryConfig)
-    val aggregated = chunkedIt.map(_.getDouble(1)).toBuffer
-    aggregated(0) shouldBe 1.5
+    (0 until numIterations).foreach { x =>
+      val windowSize = rand.nextInt(100) + 10
+      val step = rand.nextInt(50) + 5
+      info(s"iteration $x windowSize=$windowSize step=$step")
 
-    var rv2 = timeValueRV(data2)
-    val chunkedIt2 = new ChunkedWindowIteratorD(rv2, 160000, 100000, 180000, 100000,
-      new ZScoreChunkedFunctionD(), queryConfig)
-    val aggregated2 = chunkedIt2.map(_.getDouble(1)).toBuffer
-    aggregated2(0) shouldBe (-1.463850109429032 +- 0.0000000001)
+      val chunkedIt = chunkedWindowIt(data, rv, new ZScoreChunkedFunctionD(), windowSize, step)
+      val aggregated = chunkedIt.map(_.getDouble(1)).toBuffer
+      aggregated shouldEqual data.sliding(windowSize, step).map(d => z_score(d drop 1)).toBuffer
+    }
+  }
 
-    var rv3 = timeValueRV(data3)
-    val chunkedIt3 = new ChunkedWindowIteratorD(rv3, 160000, 100000, 180000, 100000,
-      new ZScoreChunkedFunctionD(), queryConfig)
-    val aggregated3 = chunkedIt3.map(_.getDouble(1)).toBuffer
-    aggregated3(0).isNaN shouldBe true
+  it("it should correctly calculate sum_over_time, avg_over_time, stddev_over_time & zscore when the sequence contains NaNs or is empty") {
+    val test_data = Seq(
+      Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0, 16020.0),
+      Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0),
+      Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0, Double.NaN),
+      Seq(23850.0, 23880.0, 23910.0, 23940.0, 23970.0, 24000.0),
+      Seq(31800.0, 31840.0, 31880.0, 31920.0, 31960.0, 32000.0),
+      Seq(31800.0, 31840.0, 31880.0, Double.NaN, 31920.0, 31960.0, 32000.0),
+      Seq(Double.NaN, 31800.0, 31840.0, 31880.0, 31920.0, 31960.0, 32000.0),
+      Seq(Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN),
+      Seq()
+    )
+
+    for (data <- test_data) {
+      val rv = timeValueRV(data)
+
+      // sum_over_time
+      val chunkedItSumOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new SumOverTimeChunkedFunctionD(), queryConfig)
+      val aggregatedSumOverTime = chunkedItSumOverTime.map(_.getDouble(1)).toBuffer
+      if (aggregatedSumOverTime(0).isNaN) aggregatedSumOverTime(0).isNaN shouldBe true else aggregatedSumOverTime(0) shouldBe sumWithNaN(data)
+
+      // avg_over_time
+      val chunkedItAvgOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new AvgOverTimeChunkedFunctionD(), queryConfig)
+      val aggregatedAvgOverTime = chunkedItAvgOverTime.map(_.getDouble(1)).toBuffer
+      if (aggregatedAvgOverTime(0).isNaN) aggregatedAvgOverTime(0).isNaN shouldBe true else aggregatedAvgOverTime(0) shouldBe avgWithNaN(data)
+
+      // stdvar_over_time
+      val chunkedItStdVarOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdVarOverTimeChunkedFunctionD(), queryConfig)
+      val aggregatedStdVarOverTime = chunkedItStdVarOverTime.map(_.getDouble(1)).toBuffer
+      if (aggregatedStdVarOverTime(0).isNaN) aggregatedStdVarOverTime(0).isNaN shouldBe true else aggregatedStdVarOverTime(0) shouldBe stdVarWithNaN(data)
+
+      // stddev_over_time
+      val chunkedItStdDevOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdDevOverTimeChunkedFunctionD(), queryConfig)
+      val aggregatedStdDevOverTime = chunkedItStdDevOverTime.map(_.getDouble(1)).toBuffer
+      if (aggregatedStdDevOverTime(0).isNaN) aggregatedStdDevOverTime(0).isNaN shouldBe true else aggregatedStdDevOverTime(0) shouldBe Math.sqrt(stdVarWithNaN(data))
+
+      // zscore
+      val chunkedItZscore = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new ZScoreChunkedFunctionD(), queryConfig)
+      val aggregatedZscore = chunkedItZscore.map(_.getDouble(1)).toBuffer
+      if (aggregatedZscore(0).isNaN) aggregatedZscore(0).isNaN shouldBe true else aggregatedZscore(0) shouldBe z_score(data)
+    }
   }
 }
