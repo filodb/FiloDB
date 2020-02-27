@@ -50,7 +50,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
             timeRange.startMs / 1000, queryParams.stepSecs, timeRange.endMs / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlExec(qContext.copy(origQueryParams = promQlParams), InProcessPlanDispatcher, dsRef)
+          PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
     }
 

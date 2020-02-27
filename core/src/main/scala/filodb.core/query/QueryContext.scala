@@ -7,6 +7,11 @@ import com.typesafe.config.Config
 import filodb.core.{SpreadChange, SpreadProvider}
 
 trait TsdbQueryParams
+
+/**
+  * This class provides PromQl query paramaters
+  * Config has routing parameters
+  */
 case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams

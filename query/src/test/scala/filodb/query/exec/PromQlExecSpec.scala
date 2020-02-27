@@ -22,10 +22,11 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
                          (implicit sched: Scheduler): Task[QueryResponse] = ???
   }
 
-  val queryContext = QueryContext(origQueryParams = PromQlQueryParams(ConfigFactory.empty(), "", 0, 0 , 0))
+  val queryContext = QueryContext()
+  val params = PromQlQueryParams(ConfigFactory.empty(), "", 0, 0 , 0)
   it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
-    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref)
+    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))), None)
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -38,7 +39,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should convert vector Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0))
-    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref)
+    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), None, Some(Sampl(1000, 1)))
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true

@@ -22,9 +22,10 @@ import filodb.query._
 
 case class PromQlExec(queryContext: QueryContext,
                       dispatcher: PlanDispatcher,
-                      dataset: DatasetRef) extends LeafExecPlan {
+                      dataset: DatasetRef,
+                      params: PromQlQueryParams) extends LeafExecPlan {
 
-  protected def args: String = queryContext.origQueryParams.toString
+  protected def args: String = params.toString
   import PromQlExec._
 
   val builder = SerializedRangeVector.newBuilder()
@@ -47,7 +48,7 @@ case class PromQlExec(queryContext: QueryContext,
       .tag("query-id", queryContext.queryId)
       .start()
 
-    val queryResponse = PromQlExec.httpGet(queryContext).
+    val queryResponse = PromQlExec.httpGet(params, queryContext.submitTime).
       map { response =>
       response.unsafeBody match {
         case Left(error) => QueryError(queryContext.queryId, error.error)
@@ -113,11 +114,10 @@ object PromQlExec extends StrictLogging {
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(params: QueryContext)(implicit scheduler: Scheduler):
+  def httpGet(promQlQueryParams: PromQlQueryParams, submitTime: Long)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val promQlQueryParams = params.origQueryParams.asInstanceOf[PromQlQueryParams]
     val endpoint = promQlQueryParams.config.as[Option[String]]("buddy.http.endpoint").get
-    val queryTimeElapsed = System.currentTimeMillis() - params.submitTime
+    val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val buddyHttpTimeout = promQlQueryParams.config.as[Option[FiniteDuration]]("buddy.http.timeout").
                             getOrElse(60000.millis)
     val readTimeout = FiniteDuration(buddyHttpTimeout.toMillis - queryTimeElapsed, TimeUnit.MILLISECONDS)
