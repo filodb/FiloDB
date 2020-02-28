@@ -296,8 +296,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val dsGaugePartKeyBytes = gaugePartKeyBytes.clone()
-    RecordSchema.updateSchemaID(dsGaugePartKeyBytes, UnsafeUtils.arayOffset, Schemas.dsGauge.schemaHash.toShort)
+    val dsGaugePartKeyBytes = RecordSchema.buildDSPartKey(gaugePartKeyBytes.clone, schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -326,9 +325,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val dsGaugeLowFreqPartKeyBytes = gaugeLowFreqPartKeyBytes.clone()
-    RecordSchema.updateSchemaID(dsGaugeLowFreqPartKeyBytes, UnsafeUtils.arayOffset,
-      Schemas.dsGauge.schemaHash.toShort)
+    val dsGaugeLowFreqPartKeyBytes = RecordSchema.buildDSPartKey(gaugeLowFreqPartKeyBytes.clone, schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -438,8 +435,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
-    val dsGaugePartKeyBytes = gaugePartKeyBytes.clone
-    RecordSchema.updateSchemaID(dsGaugePartKeyBytes, UnsafeUtils.arayOffset, Schemas.dsGauge.schemaHash.toShort)
+    val dsGaugePartKeyBytes = RecordSchema.buildDSPartKey(gaugePartKeyBytes.clone, schemas)
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
@@ -461,7 +457,6 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       (1574273042000L, 3.0, 17.0, 112.0, 10.0, 11.2)
     )
   }
-
 
   it("should read and verify prom counter data in cassandra using PagedReadablePartition for 5-min downsampled data") {
 

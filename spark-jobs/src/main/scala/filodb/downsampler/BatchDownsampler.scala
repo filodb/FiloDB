@@ -133,7 +133,7 @@ object BatchDownsampler extends StrictLogging with Instance {
           val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
           if (isEligibleForDownsample(pkPairs)) {
             try {
-              downsamplePart(offHeapMem, rawPart, pkPairs, pagedPartsToFree, downsampledPartsToFree,
+              downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
@@ -175,10 +175,8 @@ object BatchDownsampler extends StrictLogging with Instance {
     * @param downsampledPartsToFree downsample partitions to be freed are added to this mutable list
     * @param downsampledChunksToPersist downsample chunks to persist are added to this mutable map
     */
-  // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
                              rawPart: RawPartData,
-                             pkPairs: Seq[(String, String)],
                              pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
                              downsampledPartsToFree: ArrayBuffer[TimeSeriesPartition],
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
@@ -190,7 +188,6 @@ object BatchDownsampler extends StrictLogging with Instance {
     val rawPartSchema = schemas(rawSchemaId)
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
-
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
         logger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
@@ -198,12 +195,11 @@ object BatchDownsampler extends StrictLogging with Instance {
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
 
-        val dsPartKey = DownsamplerUtil.downsampledPk(pkPairs, downsampleSchema, offHeapMem.nativeMemoryManager)
-        val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(dsPartKey,
-                                                   UnsafeUtils.arayOffset,
+        val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
+                                                   rawReadablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
 
-        //RecordSchema.updateSchemaID(partKeyPtr, downsampleSchema.schemaHash)
+        RecordSchema.updateDSSchema(partKeyPtr, schemas)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,

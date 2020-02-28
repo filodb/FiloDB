@@ -10,12 +10,11 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
-import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.{DownsamplerSettings, OffHeapMemory}
+import filodb.downsampler.DownsamplerSettings
 import filodb.downsampler.DownsamplerSettings.rawDatasetIngestionConfig
-import filodb.downsampler.DownsamplerUtil._
 import filodb.downsampler.index.DSIndexJobSettings.cassWriteTimeout
 import filodb.memory.format.UnsafeUtils
 
@@ -46,9 +45,6 @@ object DSIndexJob extends StrictLogging with Instance {
   // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
   // possible mis-calculation of max block meta size.
   private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
-
-  private val offHeapMem = new OffHeapMemory(dsSchemas,
-    kamonTags, maxMetaSize, settings.downsampleStoreConfig)
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
@@ -116,7 +112,7 @@ object DSIndexJob extends StrictLogging with Instance {
 
   def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
-    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
+    val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{pkey =>
         count += 1
         logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
           s" start=${pkey.startTime} end=${pkey.endTime}")
@@ -130,16 +126,10 @@ object DSIndexJob extends StrictLogging with Instance {
     count
   }
 
-  private def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
-    val dsRecordBuilder = new RecordBuilder(offHeapMem.nativeMemoryManager)
-    val rawSchemaId = RecordSchema.schemaID(pkRecord.partKey, UnsafeUtils.arayOffset)
-    schemas(rawSchemaId).downsample match {
-      case Some(dsSchema) =>
-        val partKey = downsampledPk(pkRecord.partKey, dsSchema, offHeapMem.nativeMemoryManager)
-        val hash = Option(schemas.part.binSchema.partitionHash(partKey, UnsafeUtils.arayOffset))
-        PartKeyRecord(partKey, pkRecord.startTime, pkRecord.endTime, hash)
-      case None => pkRecord
-    }
+  private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+    val dsPartKey = RecordSchema.buildDSPartKey(pkRecord.partKey, schemas)
+    val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
+    PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
 
 }

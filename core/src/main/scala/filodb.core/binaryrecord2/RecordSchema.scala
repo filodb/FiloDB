@@ -462,6 +462,30 @@ object RecordSchema {
   final def schemaID(bytes: Array[Byte]): Int =
     if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
 
+  /**
+    * mutate the dataschema of a partitionKey.
+    * Used during downsampling to mutate the resulting partkey's dataschema esp. for Guages.
+    *
+    * @throws java.util.NoSuchElementException if there is not downsample schema
+    */
+  final def updateDSSchema(addr: BinaryRegion.NativePointer, schemas: Schemas): Unit = {
+    val dsSchemaId = schemas(schemaID(addr)).downsample.get
+    UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, addr + 4, dsSchemaId.schemaHash.toShort)
+  }
+
+  /**
+    * Build a partkey from the source partkey and change the downsample schema.
+    * Useful during downsampling as dataschema may differ.
+    *
+    * @throws java.util.NoSuchElementException if there is not downsample schema
+    */
+  final def buildDSPartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
+    val dsPkeyByte = pkByte.clone
+    val dsSchemaId = schemas(schemaID(pkByte)).downsample.get
+    UnsafeUtils.setShort(dsPkeyByte, UnsafeUtils.arayOffset + 4, dsSchemaId.schemaHash.toShort)
+    dsPkeyByte
+  }
+
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
     new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4)
