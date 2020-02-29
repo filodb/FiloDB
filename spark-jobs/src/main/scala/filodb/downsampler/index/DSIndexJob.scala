@@ -31,20 +31,7 @@ object DSIndexJob extends StrictLogging with Instance {
   val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
   val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
 
-  private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
-    "owner" -> "DSIndexJob")
-
   private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
-
-  /**
-    * Downsample Schemas
-    */
-  private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
-
-
-  // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
-  // possible mis-calculation of max block meta size.
-  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
