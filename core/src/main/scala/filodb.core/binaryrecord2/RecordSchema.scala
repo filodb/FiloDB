@@ -463,26 +463,28 @@ object RecordSchema {
     if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
 
   /**
-    * mutate the dataschema of a partitionKey.
-    * Used during downsampling to mutate the resulting partkey's dataschema esp. for Guages.
+    * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
+    * than raw schema (e.g. Guages)
     *
-    * @throws java.util.NoSuchElementException if there is not downsample schema
+    * @throws java.util.NoSuchElementException if there is no downsample schema
     */
-  final def updateDSSchema(addr: BinaryRegion.NativePointer, schemas: Schemas): Unit = {
-    val dsSchemaId = schemas(schemaID(addr)).downsample.get
-    UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, addr + 4, dsSchemaId.schemaHash.toShort)
+  final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
+    val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
+    val downsampleSchema = rawSchema.downsample.get
+    if (rawSchema != downsampleSchema) {
+      UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, downsampleSchema.schemaHash.toShort)
+    }
   }
 
   /**
     * Build a partkey from the source partkey and change the downsample schema.
     * Useful during downsampling as dataschema may differ.
     *
-    * @throws java.util.NoSuchElementException if there is not downsample schema
+    * @throws java.util.NoSuchElementException if there is no downsample schema
     */
-  final def buildDSPartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
+  final def buildDownsamplePartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
     val dsPkeyByte = pkByte.clone
-    val dsSchemaId = schemas(schemaID(pkByte)).downsample.get
-    UnsafeUtils.setShort(dsPkeyByte, UnsafeUtils.arayOffset + 4, dsSchemaId.schemaHash.toShort)
+    updateDownsampleSchema(dsPkeyByte, UnsafeUtils.arayOffset, schemas)
     dsPkeyByte
   }
 

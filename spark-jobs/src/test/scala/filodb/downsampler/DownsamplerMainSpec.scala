@@ -296,7 +296,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val dsGaugePartKeyBytes = RecordSchema.buildDSPartKey(gaugePartKeyBytes.clone, schemas)
+    val dsGaugePartKeyBytes = RecordSchema.buildDownsamplePartKey(gaugePartKeyBytes.clone, schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -325,7 +325,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val dsGaugeLowFreqPartKeyBytes = RecordSchema.buildDSPartKey(gaugeLowFreqPartKeyBytes.clone, schemas)
+    val dsGaugeLowFreqPartKeyBytes = RecordSchema.buildDownsamplePartKey(gaugeLowFreqPartKeyBytes.clone, schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -435,7 +435,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
-    val dsGaugePartKeyBytes = RecordSchema.buildDSPartKey(gaugePartKeyBytes.clone, schemas)
+    val dsGaugePartKeyBytes = RecordSchema.buildDownsamplePartKey(gaugePartKeyBytes.clone, schemas)
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
       BatchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,

@@ -127,7 +127,7 @@ object DSIndexJob extends StrictLogging with Instance {
   }
 
   private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
-    val dsPartKey = RecordSchema.buildDSPartKey(pkRecord.partKey, schemas)
+    val dsPartKey = RecordSchema.buildDownsamplePartKey(pkRecord.partKey, schemas)
     val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
     PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
