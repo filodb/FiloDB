@@ -5,7 +5,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
 import com.typesafe.scalalogging.StrictLogging
-import java.util
+//import java.util
 import kamon.Kamon
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -36,72 +36,77 @@ import filodb.query.exec.UnknownSchemaQueryErr
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-object BatchDownsampler extends StrictLogging with Instance {
+case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging with Instance {
 
-  val settings = DownsamplerSettings
+  @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
+  @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
+  @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
+  @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
+  @transient lazy val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
+  @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
+  @transient lazy val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
+  @transient lazy val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
+  @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
+  @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
+  @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 
-  val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
-  val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
-  val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
-  val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
-  val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
-  val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
-  val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
-  val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
-  val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
-  val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
+  @transient lazy private val readSched = Scheduler.io("cass-read-sched")
+  @transient lazy private val writeSched = Scheduler.io("cass-write-sched")
 
-  private val readSched = Scheduler.io("cass-read-sched")
-  private val writeSched = Scheduler.io("cass-write-sched")
+  @transient lazy private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
 
-  private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
-
-  private[downsampler] val downsampleCassandraColStore =
+  @transient lazy private[downsampler] val downsampleCassandraColStore =
     new CassandraColumnStore(settings.filodbConfig, readSched, session, true)(writeSched)
 
-  private[downsampler] val rawCassandraColStore =
+  @transient lazy private[downsampler] val rawCassandraColStore =
     new CassandraColumnStore(settings.filodbConfig, readSched, session, false)(writeSched)
 
-  private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
+  @transient lazy private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
 
-  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
-  private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
+  @transient lazy private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
 
   /**
     * Downsample Schemas
     */
-  private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
+  @transient lazy private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
 
   /**
     * Chunk Downsamplers by Raw Schema Id
     */
-  private val chunkDownsamplersByRawSchemaId = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
-  rawSchemas.foreach { s => chunkDownsamplersByRawSchemaId += s.schemaHash -> s.data.downsamplers }
+  @transient lazy private val chunkDownsamplersByRawSchemaId = {
+    val map = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+    rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplers }
+    map
+  }
 
-  private val downsamplePeriodMarkersByRawSchemaId = debox.Map.empty[Int, DownsamplePeriodMarker]
-  rawSchemas.foreach { s => downsamplePeriodMarkersByRawSchemaId += s.schemaHash -> s.data.downsamplePeriodMarker }
+  @transient lazy private val downsamplePeriodMarkersByRawSchemaId = {
+    val map = debox.Map.empty[Int, DownsamplePeriodMarker]
+    rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplePeriodMarker }
+    map
+  }
+
 
   /**
     * Raw dataset from which we downsample data
     */
-  private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
+  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
   // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
   // possible mis-calculation of max block meta size.
-  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
+  @transient lazy private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
+  @transient lazy private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
                 .zip(settings.downsampledDatasetRefs).toMap
 
-  private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
+  @transient lazy private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
-  import java.time.Instant._
+//  import java.time.Instant._
 
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
@@ -110,9 +115,9 @@ object BatchDownsampler extends StrictLogging with Instance {
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-    logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
-      s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+//    logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+//      s"rawDataset=${settings.rawDatasetName} for " +
+//      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
     numBatchesStarted.increment()
     val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
@@ -263,7 +268,7 @@ object BatchDownsampler extends StrictLogging with Instance {
 
             val downsamplePeriods =
               periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
-            util.Arrays.sort(downsamplePeriods)
+            java.util.Arrays.sort(downsamplePeriods)
 
             try {
               // for each downsample period
@@ -357,11 +362,10 @@ object BatchDownsampler extends StrictLogging with Instance {
     * (b) It should not match any filter in blacklist
     */
   private def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
-    import DownsamplerSettings._
-    if (whitelist.nonEmpty && !whitelist.exists(w => w.forall(pkPairs.contains))) {
+    if (settings.whitelist.nonEmpty && !settings.whitelist.exists(w => w.forall(pkPairs.contains))) {
       false
     } else {
-      blacklist.forall(w => !w.forall(pkPairs.contains))
+      settings.blacklist.forall(w => !w.forall(pkPairs.contains))
     }
   }
 

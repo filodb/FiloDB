@@ -37,33 +37,33 @@ import org.apache.spark.sql.SparkSession
   */
 object DownsamplerMain extends App {
 
-  val d = new Downsampler
+  val settings = DownsamplerSettings()
+  val batchDownsampler = new BatchDownsampler(settings)
+
+  val d = new Downsampler(settings, batchDownsampler)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
   d.shutdown()
 }
 
-class Downsampler extends StrictLogging {
+case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends StrictLogging {
 
-  import BatchDownsampler._
-  import DownsamplerSettings._
-
-  import java.time.Instant._
+//  import java.time.Instant._
 
   def shutdown(): Unit = {
-    rawCassandraColStore.shutdown()
-    downsampleCassandraColStore.shutdown()
+    batchDownsampler.rawCassandraColStore.shutdown()
+    batchDownsampler.downsampleCassandraColStore.shutdown()
   }
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
   // scalastyle:off method.length
-  def run(conf: SparkConf): Unit = {
+  def run(sparkConf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
-      .config(conf)
+      .config(sparkConf)
       .getOrCreate()
 
     logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
@@ -73,41 +73,42 @@ class Downsampler extends StrictLogging {
     // Generally disabled, defaults the period that just ended prior to now.
     // Specified during reruns for downsampling old data
     val userTimeInPeriod: Long = spark.sparkContext.getConf.get("spark.filodb.downsampler.userTimeOverride",
-      s"${System.currentTimeMillis() - downsampleChunkDuration}").toLong
+      s"${System.currentTimeMillis() - settings.downsampleChunkDuration}").toLong
     // by default assume a time in the previous downsample period
 
-    val userTimeStart: Long = (userTimeInPeriod / downsampleChunkDuration) * downsampleChunkDuration
-    val userTimeEndExclusive: Long = userTimeStart + downsampleChunkDuration
-    val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
-    val ingestionTimeEnd: Long = userTimeEndExclusive + widenIngestionTimeRangeBy.toMillis
+    val userTimeStart: Long = (userTimeInPeriod / settings.downsampleChunkDuration) * settings.downsampleChunkDuration
+    val userTimeEndExclusive: Long = userTimeStart + settings.downsampleChunkDuration
+    val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
+    val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
-    logger.info(s"This is the Downsampling driver. Starting downsampling job " +
-      s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
-      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
-      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+//    logger.info(s"This is the Downsampling driver. Starting downsampling job " +
+//      s"rawDataset=${settings.rawDatasetName} for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
+//      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
+//      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
+//      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
 
-    val splits = rawCassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
+    val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
+                                                                     settings.splitsPerNode)
     logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-      s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
+      s"Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
-        val rawDataSource = rawCassandraColStore
+        val rawDataSource = batchDownsampler.rawCassandraColStore
         val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
-        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
+        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = batchDownsampler.rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
-          maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = batchSize, batchTime = batchTime).toIterator()
+          maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          batchSize = settings.batchSize, batchTime = settings.batchTime).toIterator()
         batchReadSpan.finish()
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
-        downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
     logger.info(s"Downsampling Driver completed successfully")

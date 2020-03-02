@@ -101,9 +101,10 @@ trait ExecPlan extends QueryCommand {
     // we don't want these to happen in a single thread.
     // Step 1: initiate doExecute, get schema
     lazy val step1 = Task {
-      val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
+      val span = Kamon.spanBuilder(s"execute-step1")
         .asChildOf(parentSpan)
         .tag("query-id", queryContext.queryId)
+        .tag("exec-plan-type", getClass.getSimpleName)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
@@ -116,9 +117,10 @@ trait ExecPlan extends QueryCommand {
 
     // Step 2: Set up transformers and loop over all rangevectors, creating the result
     def step2(res: ExecResult) = res.schema.map { resSchema =>
-      val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
+      val span = Kamon.spanBuilder(s"execute-step2")
         .asChildOf(parentSpan)
         .tag("query-id", queryContext.queryId)
+        .tag("exec-plan-type", getClass.getSimpleName)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
@@ -228,12 +230,12 @@ trait ExecPlan extends QueryCommand {
   }
 
   def curNodeText(level: Int): String =
-    s"${"-"*level}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    s"${"-"*level}E~${getClass.getSimpleName}($args) on $dispatcher"
 
   final def getPlan(level: Int = 0): Seq[String] = {
     val transf = printRangeVectorTransformersForLevel(level).flatMap(x => x.split("\n"))
     val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on $dispatcher"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
     (transf :+ curNode) ++ childr
   }
@@ -250,7 +252,7 @@ trait ExecPlan extends QueryCommand {
       Seq("")
     } else {
       rvt.funcParams.zipWithIndex.map { case (f, i) =>
-        val prefix = s"\n${"-" * (level)}FA${i + 1}~"
+        val prefix = s"\n${"-" * level}FA${i + 1}~"
         f match {
           case e: ExecPlanFuncArgs => prefix + "\n" + e.execPlan.printTree(true, level)
           case _                   => prefix + f.toString
