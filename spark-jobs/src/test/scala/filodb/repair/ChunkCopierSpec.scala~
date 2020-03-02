@@ -1,4 +1,0 @@
-package filodb.repair
-
-class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll {
-}
