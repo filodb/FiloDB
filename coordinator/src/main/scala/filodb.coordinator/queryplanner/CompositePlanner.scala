@@ -7,6 +7,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.metadata.Schemas
+import filodb.core.query.QueryContext
 import filodb.query._
 import filodb.query.exec._
 

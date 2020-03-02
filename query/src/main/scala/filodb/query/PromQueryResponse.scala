@@ -12,11 +12,15 @@ final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "s
 
 final case class Data(resultType: String, result: Seq[Result])
 
-final case class Result(metric: Map[String, String], values: Option[Seq[Sampl]], value: Option[Sampl] = None)
+final case class Result(metric: Map[String, String], values: Option[Seq[DataSampl]], value: Option[DataSampl] = None)
+
+sealed trait DataSampl
 
 /**
   * Metric value for a given timestamp
   * @param timestamp in seconds since epoch
   * @param value value of metric
   */
-final case class Sampl(timestamp: Long, value: Double)
+final case class Sampl(timestamp: Long, value: Double) extends DataSampl
+
+final case class HistSampl(timestamp: Long, buckets: Map[String, Double]) extends DataSampl

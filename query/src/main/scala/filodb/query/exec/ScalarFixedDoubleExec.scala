@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -12,19 +10,16 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{QueryConfig, QueryResponse, QueryResult}
-import filodb.query.Query.qLogger
 
 
 /**
   * Exec Plans for fixed scalars which can execute locally without being dispatched
   * Query example: 3, 4.2
   */
-case class ScalarFixedDoubleExec(id: String,
+case class ScalarFixedDoubleExec(queryContext: QueryContext,
                                  dataset: DatasetRef,
                                  params: RangeParams,
-                                 value: Double,
-                                 limit: Int,
-                                 submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+                                 value: Double) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -35,7 +30,7 @@ case class ScalarFixedDoubleExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                        (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+                        (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
       "readily available static value")
   }
@@ -49,11 +44,10 @@ case class ScalarFixedDoubleExec(id: String,
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
-      .tag("query-id", id)
+      .tag("query-id", queryContext.queryId)
       .start()
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
@@ -64,15 +58,14 @@ case class ScalarFixedDoubleExec(id: String,
       Task {
         val span = Kamon.spanBuilder(s"trasnform-${getClass.getSimpleName}")
           .asChildOf(execPlan2Span)
-          .tag("query-id", id)
+          .tag("query-id", queryContext.queryId)
           .start()
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
           span.finish()
-          QueryResult(id, resultSchema, _)
+          QueryResult(queryContext.queryId, resultSchema, _)
         })
       }.flatten
     }

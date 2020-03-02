@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -19,9 +17,9 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
 
-final case class PartKeysDistConcatExec(id: String,
-                                      dispatcher: PlanDispatcher,
-                                      children: Seq[ExecPlan]) extends NonLeafExecPlan {
+final case class PartKeysDistConcatExec(queryContext: QueryContext,
+                                        dispatcher: PlanDispatcher,
+                                        children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 
@@ -51,9 +49,9 @@ final case class PartKeysDistConcatExec(id: String,
 
 }
 
-final case class LabelValuesDistConcatExec(id: String,
-                                    dispatcher: PlanDispatcher,
-                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+final case class LabelValuesDistConcatExec(queryContext: QueryContext,
+                                           dispatcher: PlanDispatcher,
+                                           children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 
@@ -97,9 +95,7 @@ final case class LabelValuesDistConcatExec(id: String,
 
 }
 
-final case class PartKeysExec(id: String,
-                              submitTime: Long,
-                              limit: Int,
+final case class PartKeysExec(queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
                               dataset: DatasetRef,
                               shard: Int,
@@ -112,11 +108,10 @@ final case class PartKeysExec(id: String,
 
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
+               (implicit sched: Scheduler): ExecResult = {
     val rvs = source match {
       case memStore: MemStore =>
-        val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
+        val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, queryContext.sampleLimit)
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new PartKeyRowReader(response)))
       case other =>
         Observable.empty
@@ -127,12 +122,10 @@ final case class PartKeysExec(id: String,
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, limit=$limit"
+  def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.sampleLimit}"
 }
 
-final case class  LabelValuesExec(id: String,
-                                  submitTime: Long,
-                                  limit: Int,
+final case class  LabelValuesExec(queryContext: QueryContext,
                                   dispatcher: PlanDispatcher,
                                   dataset: DatasetRef,
                                   shard: Int,
@@ -144,8 +137,7 @@ final case class  LabelValuesExec(id: String,
 
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
+               (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
@@ -154,12 +146,13 @@ final case class  LabelValuesExec(id: String,
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
         // retrieves label values for a single label - no column filter
-        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, limit)
+        case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, queryContext.sampleLimit)
           .map(termInfo => Map(columns.head.utf8 -> termInfo.term))
           .toIterator
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
-        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, end, start, limit)
+        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, end, start,
+          queryContext.sampleLimit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(response)))
@@ -171,5 +164,6 @@ final case class  LabelValuesExec(id: String,
     ExecResult(rvs, Task.eval(sch))
   }
 
-  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=$limit, lookBackInMillis=$lookBackInMillis"
+  def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.sampleLimit}, " +
+    s"lookBackInMillis=$lookBackInMillis"
 }

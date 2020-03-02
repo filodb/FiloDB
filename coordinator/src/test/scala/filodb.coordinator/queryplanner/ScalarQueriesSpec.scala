@@ -1,20 +1,15 @@
 package filodb.coordinator.queryplanner
 
-import scala.concurrent.duration.FiniteDuration
-
 import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
-import monix.eval.Task
-import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, RangeParams}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext, RangeParams}
 import filodb.prometheus.parse.Parser
-import filodb.query
 import filodb.query._
 import filodb.query.ScalarFunctionId.Time
 import filodb.query.exec._
@@ -33,18 +28,12 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   val dsRef = dataset.ref
   val schemas = Schemas(dataset.schema)
 
-  val emptyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)(implicit sched: Scheduler,
-                                          timeout: FiniteDuration): Task[query.QueryResponse] = ???
-  }
-
   val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
-
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
   val queryEngineConfig = ConfigFactory.parseString(queryEngineConfigString)
-  val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
+  val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
 
 
   val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),

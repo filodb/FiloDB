@@ -18,6 +18,7 @@ import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.{Column, Schemas}
+import filodb.core.query.{PromQlQueryParams, QueryContext, TsdbQueryParams, UnavailablePromQlQueryParams}
 import filodb.core.store.ChunkSetInfoOnHeap
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryVector, Classes, MemoryReader, RowReader}
@@ -271,7 +272,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                       timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(query,timeParams.start, timeParams.step,
+    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(systemConfig.getConfig("routing"), query,timeParams.start, timeParams.step,
       timeParams.end))
   }
 
@@ -332,7 +333,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
     val ref = DatasetRef(dataset)
     val spreadProvider: Option[SpreadProvider] = options.spread.map(s => StaticSpreadProvider(SpreadChange(0, s)))
     val qOpts = QueryContext(tsdbQueryParams, spreadProvider, options.sampleLimit)
-                             .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
+                             .copy(queryTimeoutMillis = options.timeout.toMillis.toInt,
                                    shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")

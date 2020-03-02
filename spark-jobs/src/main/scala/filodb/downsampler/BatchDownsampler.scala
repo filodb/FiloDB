@@ -48,7 +48,8 @@ object BatchDownsampler extends StrictLogging with Instance {
   val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
   val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
   val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
-  val numChunksSkipped = Kamon.counter("num-chunks-skipped").withoutTags()
+  val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
+  val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
   val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 
   private val readSched = Scheduler.io("cass-read-sched")
@@ -312,8 +313,9 @@ object BatchDownsampler extends StrictLogging with Instance {
             }
             dsRecordBuilder.removeAndFreeContainers(dsRecordBuilder.allContainers.size)
           }
+          numRawChunksDownsampled.increment()
         } else {
-          numChunksSkipped.increment()
+          numRawChunksSkipped.increment()
           logger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
             s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
             s"startRow=$startRow " +

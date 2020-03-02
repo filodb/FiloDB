@@ -24,17 +24,16 @@ import filodb.query.BinaryOperator.{LAND, LOR, LUnless}
   * @param lhs ExecPlan that will return results of LHS expression
   * @param rhs ExecPlan that will return results of RHS expression
   * @param binaryOp the binary operator
-  * @param cardinality the cardinality of the join relationship as a hint
   * @param on fields from range vector keys to include while performing the join
   * @param ignoring fields from range vector keys to exclude while performing the join
   */
-final case class SetOperatorExec(id: String,
-                                dispatcher: PlanDispatcher,
-                                lhs: Seq[ExecPlan],
-                                rhs: Seq[ExecPlan],
-                                binaryOp: BinaryOperator,
-                                on: Seq[String],
-                                ignoring: Seq[String],
+final case class SetOperatorExec(queryContext: QueryContext,
+                                 dispatcher: PlanDispatcher,
+                                 lhs: Seq[ExecPlan],
+                                 rhs: Seq[ExecPlan],
+                                 binaryOp: BinaryOperator,
+                                 on: Seq[String],
+                                 ignoring: Seq[String],
                                  metricColumn: String) extends NonLeafExecPlan {
   require(on == Nil || ignoring == Nil, "Cannot specify both 'on' and 'ignoring' clause")
   require(!on.contains(metricColumn), "On cannot contain metric name")
@@ -85,7 +84,7 @@ final case class SetOperatorExec(id: String,
     var result = new ListBuffer[RangeVector]()
     rhsRvs.foreach { rv =>
       val jk = joinKeys(rv.key)
-      if (!jk.isEmpty)
+      if (jk.nonEmpty)
         rhsKeysSet += jk
     }
 

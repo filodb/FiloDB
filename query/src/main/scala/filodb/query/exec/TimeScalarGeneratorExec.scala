@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -12,18 +10,15 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
-import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
   * Exec Plans for time functions which can execute locally without being dispatched as they don't have any input
   * Query example: time(), hour()
   */
-case class TimeScalarGeneratorExec(id: String,
+case class TimeScalarGeneratorExec(queryContext: QueryContext,
                                    dataset: DatasetRef, params: RangeParams,
-                                   function: ScalarFunctionId,
-                                   limit: Int,
-                                   submitTime: Long = System.currentTimeMillis()) extends LeafExecPlan {
+                                   function: ScalarFunctionId) extends LeafExecPlan {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
@@ -34,7 +29,7 @@ case class TimeScalarGeneratorExec(id: String,
     * node
     */
   override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                                  (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = {
+                        (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
       "a readily available static value")
   }
@@ -47,11 +42,10 @@ case class TimeScalarGeneratorExec(id: String,
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
-      .tag("query-id", id)
+      .tag("query-id", queryContext.queryId)
       .start()
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = function match {
@@ -72,16 +66,15 @@ case class TimeScalarGeneratorExec(id: String,
       Task {
         val span = Kamon.spanBuilder(s"transform-${getClass.getSimpleName}")
           .asChildOf(execPlan2Span)
-          .tag("query-id", id)
+          .tag("query-id", queryContext.queryId)
           .start()
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
           span.finish()
-          QueryResult(id, resultSchema, _)
+          QueryResult(queryContext.queryId, resultSchema, _)
         })
       }.flatten
     }
