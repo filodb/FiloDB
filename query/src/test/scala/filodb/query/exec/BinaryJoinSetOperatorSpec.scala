@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
@@ -36,8 +35,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
+                         (implicit sched: Scheduler): Task[QueryResponse] = ???
   }
   val resultSchema = ResultSchema(MetricsTestData.timeseriesSchema.infosFromIDs(0 to 1), 1)
   val resSchemaTask = Task.now(resultSchema)
@@ -178,7 +176,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should join many-to-many with and") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -213,7 +211,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
 
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -250,7 +248,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
 
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -287,7 +285,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
 
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -323,7 +321,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
 
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -358,7 +356,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should do LAND with ignoring having multiple labels") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProductionInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -393,7 +391,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should return Lhs when LAND is done with vector having no labels with on dummy") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleNoKey.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -415,7 +413,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should return Lhs when LAND is done with vector having no labels and ignoring is used om Lhs labels") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleNoKey.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LAND,
@@ -437,7 +435,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should join many-to-many with or") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleProduction.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -465,7 +463,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance1.toList)
 
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -525,7 +523,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     "the instance label when performing LOR on instance") {
 
     // Query (http_requests{group="canary"} + 1) or on(instance) (http_requests or vector_matching_a)
-    val execPlan1 = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -540,7 +538,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
-    val execPlan2 = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan2 = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -596,7 +594,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     "the instance label when performing LOR with ignoring on l, group and job") {
 
     // Query (http_requests{group="canary"} + 1) or ignoring(l, group, job) (http_requests or vector_matching_a)
-    val execPlan1 = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan1 = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -611,7 +609,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     val result1 = execPlan1.compose(Observable.fromIterable(Seq((rhs1, 1), (lhs1, 0))), resSchemaTask, queryConfig)
       .toListL.runAsync.futureValue
 
-    val execPlan2 = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan2 = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LOR,
@@ -666,7 +664,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should join many-to-many with unless") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
@@ -700,7 +698,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should not return any results when rhs has same vector on joining with on labels with LUnless") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
@@ -731,7 +729,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("LUnless should return lhs samples which are not present in rhs and where on labels are not equal") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
@@ -766,7 +764,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
   it("should not return any results when rhs has same vector on joining without ignoring labels with LUnless") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,
@@ -798,7 +796,7 @@ class BinaryJoinSetOperatorSpec extends FunSpec with Matchers with ScalaFutures 
     "ignoring labels are not equal") {
 
     val sampleRhsShuffled = scala.util.Random.shuffle(sampleInstance0.toList)
-    val execPlan = SetOperatorExec("someID", dummyDispatcher,
+    val execPlan = SetOperatorExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.LUnless,

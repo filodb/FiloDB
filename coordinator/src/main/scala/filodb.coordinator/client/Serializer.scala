@@ -12,7 +12,6 @@ import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.{Column, PartitionSchema, Schema, Schemas}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query.QueryContext
 
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to

@@ -1,5 +1,7 @@
 package filodb.query.exec
 
+import java.util.concurrent.TimeUnit
+
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
@@ -18,12 +20,10 @@ import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
-case class PromQlExec(id: String,
+case class PromQlExec(queryContext: QueryContext,
                       dispatcher: PlanDispatcher,
                       dataset: DatasetRef,
-                      params: PromQlInvocationParams,
-                      submitTime: Long = System.currentTimeMillis())
-                      extends LeafExecPlan {
+                      params: PromQlQueryParams) extends LeafExecPlan {
 
   protected def args: String = params.toString
   import PromQlExec._
@@ -38,24 +38,22 @@ case class PromQlExec(id: String,
     * node
     */
   def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-               (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+               (implicit sched: Scheduler): ExecResult = ???
 
   override def execute(source: ChunkSource,
                        queryConfig: QueryConfig)
-                      (implicit sched: Scheduler,
-                       timeout: FiniteDuration): Task[QueryResponse] = {
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
-      .tag("query-id", id)
+      .tag("query-id", queryContext.queryId)
       .start()
 
-    val queryResponse = PromQlExec.httpGet(params).map { response =>
-
+    val queryResponse = PromQlExec.httpGet(params, queryContext.submitTime).
+      map { response =>
       response.unsafeBody match {
-        case Left(error) => QueryError(id, error.error)
-        case Right(successResponse) => toQueryResponse(successResponse.data, id, execPlan2Span)
+        case Left(error) => QueryError(queryContext.queryId, error.error)
+        case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
       }
-
     }
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
@@ -100,7 +98,7 @@ case class PromQlExec(id: String,
 
 }
 
-object PromQlExec extends  StrictLogging{
+object PromQlExec extends StrictLogging {
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
@@ -118,17 +116,19 @@ object PromQlExec extends  StrictLogging{
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(params: PromQlInvocationParams)(implicit scheduler: Scheduler):
+  def httpGet(promQlQueryParams: PromQlQueryParams, submitTime: Long)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").get
-    val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
-    var urlParams = Map("query" -> params.promQl,
-                        "start" -> params.startSecs,
-                        "end" -> params.endSecs,
-                        "step" -> params.stepSecs,
-                        "processFailure" -> params.processFailure)
-    if (params.spread.isDefined)
-      urlParams = urlParams + ("spread" -> params.spread.get)
+    val endpoint = promQlQueryParams.config.as[Option[String]]("buddy.http.endpoint").get
+    val queryTimeElapsed = System.currentTimeMillis() - submitTime
+    val buddyHttpTimeout = promQlQueryParams.config.as[Option[FiniteDuration]]("buddy.http.timeout").
+                            getOrElse(60000.millis)
+    val readTimeout = FiniteDuration(buddyHttpTimeout.toMillis - queryTimeElapsed, TimeUnit.MILLISECONDS)
+    var urlParams = Map("query" -> promQlQueryParams.promQl,
+                        "start" -> promQlQueryParams.startSecs,
+                        "end" -> promQlQueryParams.endSecs,
+                        "step" -> promQlQueryParams.stepSecs,
+                        "processFailure" -> promQlQueryParams.processFailure)
+    if (promQlQueryParams.spread.isDefined) urlParams = urlParams + ("spread" -> promQlQueryParams.spread.get)
 
     val url = uri"$endpoint?$urlParams"
     logger.debug("promqlexec url is {}", url)

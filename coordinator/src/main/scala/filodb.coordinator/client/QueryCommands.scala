@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
-import filodb.core.query.ColumnFilter
-import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand, QueryContext}
+import filodb.core.query.{ColumnFilter, QueryContext}
+import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand}
 
 object QueryCommands {
   import filodb.core._

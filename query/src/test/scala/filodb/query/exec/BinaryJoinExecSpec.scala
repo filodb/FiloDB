@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
 import com.typesafe.config.ConfigFactory
@@ -33,8 +32,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
+                         (implicit sched: Scheduler): Task[QueryResponse] = ???
   }
 
   private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)
@@ -84,7 +82,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(samplesRhs.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -114,7 +112,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(samplesRhs.take(100).toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -150,7 +148,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
     }
 
     val samplesRhs2 = scala.util.Random.shuffle(duplicate +: samplesRhs.toList) // they may come out of order
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -181,7 +179,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesLhs2 = scala.util.Random.shuffle(duplicate +: samplesLhs.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("some ID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -202,7 +200,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
   it("should join one-to-one with ignoring") {
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -231,7 +229,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   it("should join one-to-one with on") {
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -258,7 +256,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
   it("should join one-to-one when metric name is not _name_") {
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),       // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.ADD,
@@ -327,7 +325,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
       }
     }
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.GTR,

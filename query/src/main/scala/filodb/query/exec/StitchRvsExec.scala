@@ -57,7 +57,7 @@ object StitchRvsExec {
 /**
   * Use when data for same time series spans multiple shards, or clusters.
   */
-final case class StitchRvsExec(id: String,
+final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)

@@ -4,7 +4,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
-import filodb.query.{LogicalPlan, PromQlInvocationParams, PromQlQueryParams, QueryContext}
+import filodb.core.query.{PromQlQueryParams, QueryContext}
+import filodb.query.LogicalPlan
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
 /**
@@ -45,16 +46,16 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           val routingConfig = queryEngineConfig.getConfig("routing")
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val promQlInvocationParams = PromQlInvocationParams(routingConfig, queryParams.promQl,
+          val promQlParams = PromQlQueryParams(routingConfig, queryParams.promQl,
             timeRange.startMs / 1000, queryParams.stepSecs, timeRange.endMs / 1000,
             queryParams.spread, processFailure = false)
-          logger.debug("PromQlExec params:" + promQlInvocationParams)
-          PromQlExec(qContext.queryId, InProcessPlanDispatcher, dsRef, promQlInvocationParams, qContext.submitTime)
+          logger.debug("PromQlExec params:" + promQlParams)
+          PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
     }
 
     if (execPlans.size == 1) execPlans.head
-    else StitchRvsExec(qContext.queryId,
+    else StitchRvsExec(qContext,
                        InProcessPlanDispatcher,
                        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
