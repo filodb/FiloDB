@@ -102,6 +102,16 @@ class HistogramTest extends NativeVectorTest {
       }
     }
 
+    it("should serialize to and from BinHistograms for MutableHistograms with doubles") {
+      val dblHist = MutableHistogram(mutableHistograms.head.buckets,
+                                     mutableHistograms.head.values.map(_ + .5))
+      val buf = new ExpandableArrayBuffer()
+      dblHist.serialize(Some(buf))
+
+      val deserHist = BinaryHistogram.BinHistogram(buf).toHistogram
+      deserHist shouldEqual dblHist
+    }
+
     it("should serialize to and from BinaryHistograms with custom buckets") {
       val longHist = LongHistogram(customScheme, Array[Long](10, 15, 17, 20, 25, 34, 76))
       val buf = new ExpandableArrayBuffer()

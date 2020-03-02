@@ -173,7 +173,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowItHist(data, rv, new SumOverTimeChunkedFunctionH(), windowSize, step)
       chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.MutableHistogram])
+        val sumRawHist = rawDataWindow.map(_(3).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
       }
@@ -193,7 +193,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val chunkedIt = chunkedWindowItHist(data, rv, new SumAndMaxOverTimeFuncHD(3), windowSize, step, row)
       chunkedIt.zip(data.sliding(windowSize, step).map(_.drop(1))).foreach { case (aggRow, rawDataWindow) =>
         val aggHist = aggRow.getHistogram(1)
-        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.MutableHistogram])
+        val sumRawHist = rawDataWindow.map(_(4).asInstanceOf[bv.LongHistogram])
                                       .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
         aggHist shouldEqual sumRawHist
 
@@ -366,7 +366,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       aggregated2 shouldEqual data.sliding(windowSize, step).map(_.drop(1)).map(median).toBuffer
     }
   }
-  
+
   it("should correctly do changes for DoubleVectorDataReader and DeltaDeltaDataReader when window has more " +
     "than one chunks") {
     val data1= (1 to 240).map(_.toDouble)

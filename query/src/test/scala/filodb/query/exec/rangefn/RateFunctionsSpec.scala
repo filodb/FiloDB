@@ -5,7 +5,7 @@ import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.memstore.{TimeSeriesPartition, WriteBufferPool}
 import filodb.core.metadata.Dataset
 import filodb.core.query.TransientRow
-import filodb.memory.format.vectors.MutableHistogram
+import filodb.memory.format.vectors.{LongHistogram, MutableHistogram}
 import filodb.query.exec.{ChunkedWindowIteratorD, ChunkedWindowIteratorH, QueueBasedWindow}
 import filodb.query.util.IndexedArrayQueue
 
@@ -197,10 +197,10 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val endTs =   161000L // just past 7th sample
     val lastTime = 160000L
     val headTime = 100000L
-    val headHist = data(0)(3).asInstanceOf[MutableHistogram]
-    val lastHist = data(6)(3).asInstanceOf[MutableHistogram]
+    val headHist = data(0)(3).asInstanceOf[LongHistogram]
+    val lastHist = data(6)(3).asInstanceOf[LongHistogram]
     val expectedRates = (0 until headHist.numBuckets).map { b =>
-      (lastHist.bucketValue(b) - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
+      (lastHist.bucketValue(b).toDouble - headHist.bucketValue(b)) / (lastTime - headTime) * 1000
     }
     val expected = MutableHistogram(MachineMetricsData.histBucketScheme, expectedRates.toArray)
 
@@ -234,8 +234,8 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val endTs =   171000L // just past 8th sample, the first dropped one
     val lastTime = 170000L
     val headTime = 100000L
-    val headHist = data(0)(3).asInstanceOf[MutableHistogram]
-    val corrHist = data(6)(3).asInstanceOf[MutableHistogram]
+    val headHist = data(0)(3).asInstanceOf[LongHistogram]
+    val corrHist = data(6)(3).asInstanceOf[LongHistogram]
     val lastHist = headHist.copy   // 8th sample == first sample + correction
     lastHist.add(corrHist)
     val expectedRates = (0 until headHist.numBuckets).map { b =>
