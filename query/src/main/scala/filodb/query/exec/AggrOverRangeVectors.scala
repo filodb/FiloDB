@@ -27,7 +27,7 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
                         firstSchema: Task[ResultSchema],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
     val results = childResponses.flatMap {
-        case (QueryResult(_, schema, result), _) => Observable.fromIterable(result)
+        case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
     }
     val task = for { schema <- firstSchema }
@@ -133,7 +133,7 @@ object RangeVectorAggregator extends StrictLogging {
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = aggHolder.map(_.toRowReader)
-        new IteratorBackedRangeVector(rvk, rowIterator)
+        IteratorBackedRangeVector(rvk, rowIterator)
       }
     }
     Observable.fromTask(task).flatMap(rvs => Observable.fromIterable(rvs))
@@ -212,7 +212,7 @@ object RangeVectorAggregator extends StrictLogging {
 
     aggObs.flatMap { _ =>
       if (count > 0) {
-        Observable.now(new IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
+        Observable.now(IteratorBackedRangeVector(CustomRangeVectorKey.empty, accs.toIterator.map(_.toRowReader)))
       } else {
         Observable.empty
       }

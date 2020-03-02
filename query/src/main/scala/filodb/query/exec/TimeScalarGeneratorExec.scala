@@ -10,7 +10,6 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
 import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
-import filodb.query.Query.qLogger
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
@@ -70,8 +69,6 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
           .tag("query-id", queryContext.queryId)
           .start()
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-          qLogger.debug(s"queryId: ${queryContext.queryId} Setting up Transformer ${transf.getClass.getSimpleName}" +
-            s" with ${transf.args}")
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
           (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))

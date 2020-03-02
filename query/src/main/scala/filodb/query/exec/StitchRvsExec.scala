@@ -28,7 +28,7 @@ object StitchRvsExec {
         bVectors.foreach { r =>
           if (r.hasNext) {
             val t = r.head.getLong(0)
-            if (mins.size == 0) {
+            if (mins.isEmpty) {
               minTime = t
               mins += r
             }
