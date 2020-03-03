@@ -15,7 +15,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder}
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
 import filodb.core.downsample.DownsampledTimeSeriesStore
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
@@ -78,8 +78,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val currentHour = hour()
   val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour, settings, dsIndexJobSettings)
 
-  def partKeyReader(pkr: PartKeyRecord): Seq[(String, String)] = {
-    batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+  def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
+    val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
+    val partSchema = batchDownsampler.schemas(schemaId)
+    val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+    (strPairs.filter(p => p._1 == "_metric_").head._2, partSchema.data.name)
   }
 
   override def beforeAll(): Unit = {
@@ -287,25 +290,28 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     indexUpdater.run(sparkConf)
   }
 
-  it ("should recover migrated partKey data") {
-    val metrics = Seq(counterName, gaugeName, gaugeLowFreqName, histName)
+  it ("should recover migrated partKey data and match the downsampled schema") {
+    val metrics = Seq((counterName, Schemas.promCounter.name),
+      (gaugeName, Schemas.dsGauge.name),
+      (gaugeLowFreqName, Schemas.dsGauge.name),
+      (histName, Schemas.promHistogram.name))
     val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
-    val partition = Await.result(partKeys.map(partKeyReader).toListL.runAsync, 1 minutes)
-      .map(tags => tags.find(_._1 == "_metric_").get._2).sorted
-    partition shouldEqual metrics
+    val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runAsync, 1 minutes)
+    tsSchemaMetric.sorted shouldEqual metrics
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
+    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
-      SinglePartitionScan(gaugePartKeyBytes))
+      SinglePartitionScan(dsGaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
 
-    downsampledPart1.partKeyBytes shouldEqual gaugePartKeyBytes
+    downsampledPart1.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
 
@@ -325,15 +331,17 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
+    val dsGaugeLowFreqPartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugeLowFreqPartKeyBytes,
+                                                                          batchDownsampler.schemas)
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
-      SinglePartitionScan(gaugeLowFreqPartKeyBytes))
+      SinglePartitionScan(dsGaugeLowFreqPartKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart1 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData1)
 
-    downsampledPart1.partKeyBytes shouldEqual gaugeLowFreqPartKeyBytes
+    downsampledPart1.partKeyBytes shouldEqual dsGaugeLowFreqPartKeyBytes
 
     val rv1 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart1, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
 
@@ -434,15 +442,16 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
+    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas)
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
-      SinglePartitionScan(gaugePartKeyBytes))
+      SinglePartitionScan(dsGaugePartKeyBytes))
       .toListL.runAsync.futureValue.head
 
     val downsampledPart2 = new PagedReadablePartition(Schemas.gauge.downsample.get, 0, 0, downsampledPartData2)
 
-    downsampledPart2.partKeyBytes shouldEqual gaugePartKeyBytes
+    downsampledPart2.partKeyBytes shouldEqual dsGaugePartKeyBytes
 
     val rv2 = RawDataRangeVector(CustomRangeVectorKey.empty, downsampledPart2, AllChunkScan, Array(0, 1, 2, 3, 4, 5))
 
@@ -553,7 +562,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
       val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
-                    .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+        .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 1
@@ -561,4 +570,28 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     }
 
   }
+
+  it("should bring up DownsampledTimeSeriesShard and be able to read specific columns " +
+      "from gauge using MultiSchemaPartitionsExec") {
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
+      settings.filodbConfig)
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+    downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+    val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
+    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
+      batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
+      colName = Option("sum"))
+    val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
+    val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+    val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+      .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+    queryScheduler.shutdown()
+    res.result.size shouldEqual 1
+    res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
+      List((1574372982000L, 88.0), (1574373042000L, 24.0))
+  }
+
 }
