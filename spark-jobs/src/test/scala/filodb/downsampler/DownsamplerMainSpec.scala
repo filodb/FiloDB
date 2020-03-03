@@ -93,7 +93,6 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   override def afterAll(): Unit = {
     offheapMem.free()
-    downsampler.shutdown()
   }
 
   it ("should write gauge data to cassandra") {

@@ -8,7 +8,7 @@ import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
-import filodb.downsampler.DownsamplerLogger
+import filodb.downsampler.Housekeeping
 
 
 /**
@@ -25,7 +25,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val downsamplerConfig = {
     val conf = filodbConfig.getConfig("downsampler")
-    DownsamplerLogger.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
+    Housekeeping.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
     conf
   }
 
@@ -34,11 +34,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
   @transient lazy val rawDatasetIngestionConfig = {
-    DownsamplerLogger.dsLogger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
+    Housekeeping.dsLogger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
     val ingConf = filodbSettings.streamConfigs.map { config =>
       IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
     }.find(_.ref.toString == rawDatasetName).get
-    DownsamplerLogger.dsLogger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
+    Housekeeping.dsLogger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
     ingConf
   }
 

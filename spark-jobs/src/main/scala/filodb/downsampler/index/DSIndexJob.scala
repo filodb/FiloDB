@@ -11,15 +11,12 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.DownsamplerLogger
+import filodb.downsampler.Housekeeping
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
 class DSIndexJob(dsSettings: DownsamplerSettings,
                  dsJobsettings: DSIndexJobSettings) extends Instance with Serializable {
-
-  @transient lazy private val readSched = Scheduler.io("cass-index-read-sched")
-  @transient lazy private val writeSched = Scheduler.io("cass-index-write-sched")
 
   @transient lazy private val sparkTasksStarted = Kamon.counter("spark-tasks-started").withoutTags()
   @transient lazy private val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
@@ -41,13 +38,20 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     */
   @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(dsSettings.rawDatasetName)
 
-  @transient lazy private val session = FiloSessionProvider.openSession(dsSettings.cassandraConfig)
+  @transient lazy private val session = {
+    import filodb.core._
+    Housekeeping.sessionMap.getOrElseUpdate(dsSettings.cassandraConfig, { conf =>
+      Housekeeping.dsLogger.info(s"Creating new Cassandra session")
+      FiloSessionProvider.openSession(conf)
+    })
+  }
 
   @transient lazy private[index] val downsampleCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, true)(writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, Housekeeping.readSched, session, true)(Housekeeping.writeSched)
 
   @transient lazy private[index] val rawCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, false)(writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, Housekeeping.readSched, session,
+                              false)(Housekeeping.writeSched)
 
   @transient lazy private val dsDatasource = downsampleCassandraColStore
   // data retained longest
@@ -67,31 +71,31 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     @volatile var count = 0
     try {
       if (dsJobsettings.migrateRawIndex) {
-        DownsamplerLogger.dsLogger.info("migrating complete partkey index")
+        Housekeeping.dsLogger.info("migrating complete partkey index")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
           shard = shard.toInt)
         count += updateDSPartkeys(partKeys, shard)
-        DownsamplerLogger.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
+        Housekeeping.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
       } else {
         for (epochHour <- fromHour to toHour) {
           val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
             shard = shard.toInt, updateHour = epochHour)
           count += updateDSPartkeys(partKeys, shard)
         }
-        DownsamplerLogger.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
+        Housekeeping.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
           s" from=$fromHour to=$toHour")
       }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
     } catch { case e: Exception =>
-      DownsamplerLogger.dsLogger.error(s"Exception in task count=$count " +
+      Housekeeping.dsLogger.error(s"Exception in task count=$count " +
         s"shard=$shard from=$fromHour to=$toHour", e)
       sparkTasksFailed.increment
       throw e
     } finally {
       span.finish()
-      rawCassandraColStore.shutdown()
-      downsampleCassandraColStore.shutdown()
+//      rawCassandraColStore.shutdown()
+//      downsampleCassandraColStore.shutdown()
     }
   }
 
@@ -99,7 +103,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     @volatile var count = 0
     val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
       count += 1
-      DownsamplerLogger.dsLogger.debug(s"migrating partition " +
+      Housekeeping.dsLogger.debug(s"migrating partition " +
         s"pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
         s" start=${pkey.startTime} end=${pkey.endTime}")
       pkey
