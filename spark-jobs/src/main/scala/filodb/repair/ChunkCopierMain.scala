@@ -20,7 +20,7 @@ import filodb.core.store.ScanSplit
   * and is cached.
   */
 class ChunkCopier(conf: SparkConf) {
-  def openConfig(str: String) = {
+  private def openConfig(str: String) = {
     val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
     ConfigFactory.parseFile(new File(conf.get(str))).getConfig("filodb").withFallback(sysConfig)
   }
@@ -37,7 +37,7 @@ class ChunkCopier(conf: SparkConf) {
   val targetDatasetRef = DatasetRef.fromDotString(conf.get("spark.filodb.chunkcopier.target.dataset"))
 
   // Examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
-  def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
+  private def parseDateTime(str: String) = Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str))
 
   val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeStart"))
   val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeEnd"))
@@ -55,7 +55,7 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
-  def getScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
+  private[repair] def getScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
 
   def run(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyChunksByIngestionTimeRange(
