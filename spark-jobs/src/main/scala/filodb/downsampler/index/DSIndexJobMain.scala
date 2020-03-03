@@ -18,7 +18,6 @@ object DSIndexJobMain extends App {
                               migrateUpto, settings, dsIndexJobSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
-  iu.shutdown()
 }
 
 /**
@@ -59,9 +58,6 @@ class IndexJobDriver(fromHour: Long,
 
     Kamon.counter("index-migration-completed").withoutTags().increment
     DownsamplerLogger.dsLogger.info(s"IndexUpdater Driver completed successfully")
-  }
-
-  def shutdown(): Unit = {
   }
 
 }

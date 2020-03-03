@@ -48,15 +48,14 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
   @transient lazy private[index] val rawCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, false)(writeSched)
 
-  @transient lazy val dsDatasource = downsampleCassandraColStore
+  @transient lazy private val dsDatasource = downsampleCassandraColStore
   // data retained longest
-  @transient lazy val highestDSResolution = settings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
-  @transient lazy val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
+  @transient lazy private val highestDSResolution = settings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
+  @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
 
     sparkTasksStarted.increment
-
     val span = Kamon.spanBuilder("per-shard-index-migration-latency")
       .asChildOf(Kamon.currentSpan())
       .tag("shard", shard)
@@ -82,12 +81,11 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
       }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
-    } catch {
-      case e: Exception =>
-        DownsamplerLogger.dsLogger.error(s"Exception in task count=$count " +
-          s"shard=$shard from=$fromHour to=$toHour", e)
-        sparkTasksFailed.increment
-        throw e
+    } catch { case e: Exception =>
+      DownsamplerLogger.dsLogger.error(s"Exception in task count=$count " +
+        s"shard=$shard from=$fromHour to=$toHour", e)
+      sparkTasksFailed.increment
+      throw e
     } finally {
       span.finish()
       rawCassandraColStore.shutdown()
@@ -98,17 +96,16 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
   def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
     val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
-        count += 1
+      count += 1
       DownsamplerLogger.dsLogger.debug(s"migrating partition " +
         s"pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
-          s" start=${pkey.startTime} end=${pkey.endTime}")
-        pkey
+        s" start=${pkey.startTime} end=${pkey.endTime}")
+      pkey
     }
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
       diskTTLSeconds = settings.ttlByResolution(highestDSResolution),
       writeToPkUTTable = false), settings.cassWriteTimeout)
-
     count
   }
 

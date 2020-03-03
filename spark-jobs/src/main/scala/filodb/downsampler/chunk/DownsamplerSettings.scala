@@ -3,14 +3,13 @@ package filodb.downsampler.chunk
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
-
-import filodb.downsampler.DownsamplerLogger
-//import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
 import filodb.core.store.{IngestionConfig, StoreConfig}
+import filodb.downsampler.DownsamplerLogger
+
 
 /**
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
