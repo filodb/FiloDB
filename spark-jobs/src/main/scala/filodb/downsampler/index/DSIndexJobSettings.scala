@@ -41,7 +41,6 @@ class DSIndexJobSettings(settings: DownsamplerSettings) extends Serializable {
   @transient lazy val numShards = filodbSettings.streamConfigs
     .find(_.getString("dataset") == settings.rawDatasetName)
     .getOrElse(ConfigFactory.empty())
-    .as[Option[Int]]("num-shards").getOrElse(0)
+    .as[Option[Int]]("num-shards").get
 
-  def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 }

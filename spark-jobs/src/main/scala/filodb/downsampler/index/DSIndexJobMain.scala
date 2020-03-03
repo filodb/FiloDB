@@ -9,15 +9,18 @@ import filodb.downsampler.chunk.DownsamplerSettings
 
 object DSIndexJobMain extends App {
 
-  val settings = new DownsamplerSettings()
-  val dsIndexJobSettings = new DSIndexJobSettings(settings)
+  val dsSettings = new DownsamplerSettings()
+  val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
 
-  val migrateUpto: Long = dsIndexJobSettings.hour() - 1
+  val migrateUpto: Long = hour() - 1
   //migrate partkeys between these hours
   val iu = new IndexJobDriver(migrateUpto - dsIndexJobSettings.batchLookbackInHours,
-                              migrateUpto, settings, dsIndexJobSettings)
+                              migrateUpto, dsSettings, dsIndexJobSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
+
+  def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
+
 }
 
 /**
@@ -37,7 +40,7 @@ object DSIndexJobMain extends App {
   */
 class IndexJobDriver(fromHour: Long,
                      toHour: Long,
-                     settings: DownsamplerSettings,
+                     dsSettings: DownsamplerSettings,
                      dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
   def run(conf: SparkConf): Unit = {
@@ -52,7 +55,7 @@ class IndexJobDriver(fromHour: Long,
     spark.sparkContext
       .makeRDD(0 until dsIndexJobSettings.numShards)
       .foreach { shard =>
-        val job = new DSIndexJob(settings, dsIndexJobSettings)
+        val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
         job.updateDSPartKeyIndex(shard, startHour, endHour)
       }
 

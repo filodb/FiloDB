@@ -15,7 +15,8 @@ import filodb.downsampler.DownsamplerLogger
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
-class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSettings) extends Instance with Serializable {
+class DSIndexJob(dsSettings: DownsamplerSettings,
+                 dsJobsettings: DSIndexJobSettings) extends Instance with Serializable {
 
   @transient lazy private val readSched = Scheduler.io("cass-index-read-sched")
   @transient lazy private val writeSched = Scheduler.io("cass-index-write-sched")
@@ -29,18 +30,18 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  @transient lazy private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
-    .zip(settings.downsampledDatasetRefs).toMap
+  @transient lazy private[downsampler] val downsampleRefsByRes = dsSettings.downsampleResolutions
+    .zip(dsSettings.downsampledDatasetRefs).toMap
 
 
-  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
   /**
     * Raw dataset from which we downsample data
     */
-  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
+  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(dsSettings.rawDatasetName)
 
-  @transient lazy private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
+  @transient lazy private val session = FiloSessionProvider.openSession(dsSettings.cassandraConfig)
 
   @transient lazy private[index] val downsampleCassandraColStore =
     new CassandraColumnStore(dsJobsettings.filodbConfig, readSched, session, true)(writeSched)
@@ -50,7 +51,8 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
 
   @transient lazy private val dsDatasource = downsampleCassandraColStore
   // data retained longest
-  @transient lazy private val highestDSResolution = settings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
+  @transient lazy private val highestDSResolution =
+      dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
@@ -104,8 +106,8 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
     }
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
-      diskTTLSeconds = settings.ttlByResolution(highestDSResolution),
-      writeToPkUTTable = false), settings.cassWriteTimeout)
+      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution),
+      writeToPkUTTable = false), dsSettings.cassWriteTimeout)
     count
   }
 
