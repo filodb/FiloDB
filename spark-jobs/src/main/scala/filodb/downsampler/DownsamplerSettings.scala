@@ -2,8 +2,8 @@ package filodb.downsampler
 
 import scala.concurrent.duration._
 
-import com.typesafe.config.{ConfigFactory}
-import com.typesafe.scalalogging.StrictLogging
+import com.typesafe.config.{Config, ConfigFactory}
+//import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
@@ -14,11 +14,9 @@ import filodb.core.store.{IngestionConfig, StoreConfig}
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor
   * from the spark application driver.
   */
-case class DownsamplerSettings(confAsString: String = "") extends StrictLogging {
+class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable {
 
   Kamon.init()
-
-  @transient lazy val conf = ConfigFactory.parseString(confAsString)
 
   @transient lazy val filodbSettings = new FilodbSettings(conf)
 
@@ -26,7 +24,7 @@ case class DownsamplerSettings(confAsString: String = "") extends StrictLogging 
 
   @transient lazy val downsamplerConfig = {
     val conf = filodbConfig.getConfig("downsampler")
-    logger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
+//    logger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
     conf
   }
 
@@ -35,11 +33,11 @@ case class DownsamplerSettings(confAsString: String = "") extends StrictLogging 
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
   @transient lazy val rawDatasetIngestionConfig = {
-    logger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
+//    logger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
     val ingConf = filodbSettings.streamConfigs.map { config =>
       IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
     }.find(_.ref.toString == rawDatasetName).get
-    logger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
+//    logger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
     ingConf
   }
 

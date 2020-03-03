@@ -1,6 +1,6 @@
 package filodb.downsampler
 
-import com.typesafe.scalalogging.StrictLogging
+//import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
@@ -37,7 +37,7 @@ import org.apache.spark.sql.SparkSession
   */
 object DownsamplerMain extends App {
 
-  val settings = DownsamplerSettings()
+  val settings = new DownsamplerSettings()
   val batchDownsampler = new BatchDownsampler(settings)
 
   val d = new Downsampler(settings, batchDownsampler)
@@ -46,7 +46,7 @@ object DownsamplerMain extends App {
   d.shutdown()
 }
 
-case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends StrictLogging {
+class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
 
 //  import java.time.Instant._
 
@@ -66,7 +66,7 @@ case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDow
       .config(sparkConf)
       .getOrCreate()
 
-    logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    DownsamplerLogger.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
     // Use the spark property spark.filodb.downsampler.user-time-override to override the
     // userTime period for which downsampling should occur.
@@ -81,7 +81,7 @@ case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDow
     val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
-//    logger.info(s"This is the Downsampling driver. Starting downsampling job " +
+//    DownsamplerLogger.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
 //      s"rawDataset=${settings.rawDatasetName} for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
 //      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
 //      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
@@ -89,7 +89,7 @@ case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDow
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)
-    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+    DownsamplerLogger.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
       s"Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
@@ -111,7 +111,7 @@ case class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDow
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
-    logger.info(s"Downsampling Driver completed successfully")
+    DownsamplerLogger.dsLogger.info(s"Downsampling Driver completed successfully")
   }
 
 }

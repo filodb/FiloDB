@@ -1,7 +1,10 @@
 package filodb.downsampler
 
-//import scala.concurrent.Await
+import java.io.File
+
+import scala.concurrent.Await
 import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -20,6 +23,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawDataRangeVector}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
+import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, MutableHistogram}
@@ -34,9 +38,10 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   implicit val defaultPatience = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  val confAsString = scala.io.Source.fromFile("conf/timeseries-filodb-server.conf").mkString
+  val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
 
-  val settings = DownsamplerSettings(confAsString)
+  val settings = new DownsamplerSettings(conf)
+  val dsIndexJobSettings = new DSIndexJobSettings(settings)
   val batchDownsampler = new BatchDownsampler(settings)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
@@ -67,8 +72,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val downsampler = new Downsampler(settings, batchDownsampler)
 
 //  //Index migration job, runs for current 2hours for testing. actual job migrates last 6 hour's index updates
-//  val currentHour = hour()
-//  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour)
+  val currentHour = dsIndexJobSettings.hour()
+  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour, settings, dsIndexJobSettings)
 
   def partKeyReader(pkr: PartKeyRecord): Seq[(String, String)] = {
     batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
@@ -273,20 +278,20 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
     downsampler.run(sparkConf)
   }
-//
-//  it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
-//    val sparkConf = new SparkConf(loadDefaults = true)
-//    sparkConf.setMaster("local[2]")
-//    indexUpdater.run(sparkConf)
-//  }
 
-//  it ("should recover migrated partKey data") {
-//    val metrics = Seq(counterName, gaugeName, gaugeLowFreqName, histName)
-//    val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
-//    val partition = Await.result(partKeys.map(partKeyReader).toListL.runAsync, 1 minutes)
-//      .map(tags => tags.find(_._1 == "_metric_").get._2).sorted
-//    partition shouldEqual metrics
-//  }
+  it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    indexUpdater.run(sparkConf)
+  }
+
+  it ("should recover migrated partKey data") {
+    val metrics = Seq(counterName, gaugeName, gaugeLowFreqName, histName)
+    val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
+    val partition = Await.result(partKeys.map(partKeyReader).toListL.runAsync, 1 minutes)
+      .map(tags => tags.find(_._1 == "_metric_").get._2).sorted
+    partition shouldEqual metrics
+  }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 

@@ -4,8 +4,6 @@ import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.scalalogging.StrictLogging
-//import java.util
 import kamon.Kamon
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -36,7 +34,7 @@ import filodb.query.exec.UnknownSchemaQueryErr
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging with Instance {
+class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Serializable {
 
   @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
   @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
@@ -115,7 +113,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-//    logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+//    DownsamplerLogger.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
 //      s"rawDataset=${settings.rawDatasetName} for " +
 //      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
     numBatchesStarted.increment()
@@ -143,7 +141,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
-              logger.error(s"Error occurred when downsampling partition $pkPairs", e)
+              DownsamplerLogger.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
               numPartitionsFailed.increment()
             }
           } else {
@@ -151,7 +149,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
           }
         } else {
           numPartitionsSkipped.increment()
-          logger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
+          DownsamplerLogger.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
         }
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
@@ -165,7 +163,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
     }
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
-    logger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
+    DownsamplerLogger.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
       s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
   }
 
@@ -195,7 +193,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
-        logger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
+        DownsamplerLogger.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
@@ -223,8 +221,8 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
         }
         downsamplePartSpan.finish()
       case None =>
-        logger.warn(s"Encountered partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)}" +
-          s" which does not have a downsample schema")
+        DownsamplerLogger.dsLogger.warn(s"Encountered partition " +
+          s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
     }
   }
 
@@ -300,7 +298,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
               }
             } catch {
               case e: Exception =>
-                logger.error(s"Error downsampling partition " +
+                DownsamplerLogger.dsLogger.error(s"Error downsampling partition " +
                   s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
                   s"schema=${rawPartToDownsample.schema.name} " +
                   s"resolution=$resolution " +
@@ -316,7 +314,7 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
           numRawChunksDownsampled.increment()
         } else {
           numRawChunksSkipped.increment()
-          logger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
+          DownsamplerLogger.dsLogger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
             s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
             s"startRow=$startRow " +
             s"endRow=$endRow " +
@@ -347,9 +345,9 @@ case class BatchDownsampler(settings: DownsamplerSettings) extends StrictLogging
 
     writeFut.foreach { fut =>
       val response = Await.result(fut, settings.cassWriteTimeout)
-      logger.debug(s"Got message $response for cassandra write call")
+      DownsamplerLogger.dsLogger.debug(s"Got message $response for cassandra write call")
       if (response.isInstanceOf[ErrorResponse])
-        logger.error(s"Got response $response when writing to Cassandra")
+        DownsamplerLogger.dsLogger.error(s"Got response $response when writing to Cassandra")
     }
     numDownsampledChunksWritten.increment(numChunks)
     batchWriteSpan.finish()
