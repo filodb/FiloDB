@@ -114,9 +114,10 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-//    DownsamplerLogger.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
-//      s"rawDataset=${settings.rawDatasetName} for " +
-//      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+    DownsamplerLogger.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+      s"rawDataset=${settings.rawDatasetName} for " +
+      s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
+      s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
     numBatchesStarted.increment()
     val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()

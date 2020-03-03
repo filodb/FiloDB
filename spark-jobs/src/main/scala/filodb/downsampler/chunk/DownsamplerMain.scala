@@ -49,8 +49,6 @@ object DownsamplerMain extends App {
 
 class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
 
-//  import java.time.Instant._
-
   def shutdown(): Unit = {
     batchDownsampler.rawCassandraColStore.shutdown()
     batchDownsampler.downsampleCassandraColStore.shutdown()
@@ -59,6 +57,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
+  // See https://medium.com/onzo-tech/serialization-challenges-with-spark-and-scala-a2287cd51c54
   // scalastyle:off method.length
   def run(sparkConf: SparkConf): Unit = {
 
@@ -82,11 +81,13 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
-//    DownsamplerLogger.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
-//      s"rawDataset=${settings.rawDatasetName} for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
-//      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
-//      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
-//      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+    DownsamplerLogger.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
+      s"rawDataset=${settings.rawDatasetName} for " +
+      s"userTimeInPeriod=${java.time.Instant.ofEpochMilli(userTimeInPeriod)} " +
+      s"ingestionTimeStart=${java.time.Instant.ofEpochMilli(ingestionTimeStart)} " +
+      s"ingestionTimeEnd=${java.time.Instant.ofEpochMilli(ingestionTimeEnd)} " +
+      s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
+      s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)
