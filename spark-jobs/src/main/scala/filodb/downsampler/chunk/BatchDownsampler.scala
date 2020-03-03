@@ -105,8 +105,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
 
   @transient lazy private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
-//  import java.time.Instant._
-
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
     */
