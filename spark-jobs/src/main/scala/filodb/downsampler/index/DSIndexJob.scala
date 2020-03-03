@@ -11,7 +11,8 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.{DownsamplerLogger, DownsamplerSettings}
+import filodb.downsampler.DownsamplerLogger
+import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
 class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSettings) extends Instance with Serializable {
@@ -89,6 +90,8 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
         throw e
     } finally {
       span.finish()
+      rawCassandraColStore.shutdown()
+      downsampleCassandraColStore.shutdown()
     }
   }
 
@@ -113,5 +116,4 @@ class DSIndexJob(settings: DownsamplerSettings, dsJobsettings: DSIndexJobSetting
     val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
     PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
-
 }

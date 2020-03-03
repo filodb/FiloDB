@@ -5,7 +5,8 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import net.ceedubs.ficus.Ficus._
 
-import filodb.downsampler.{DownsamplerLogger, DownsamplerSettings}
+import filodb.downsampler.DownsamplerLogger
+import filodb.downsampler.chunk.DownsamplerSettings
 
 /**
   * DownsamplerSettings is always used in the context of an object so that it need not be serialized to a spark executor

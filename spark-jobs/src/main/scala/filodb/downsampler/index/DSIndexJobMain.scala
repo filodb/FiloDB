@@ -4,7 +4,8 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-import filodb.downsampler.{DownsamplerLogger, DownsamplerSettings}
+import filodb.downsampler.DownsamplerLogger
+import filodb.downsampler.chunk.DownsamplerSettings
 
 object DSIndexJobMain extends App {
 
@@ -40,8 +41,6 @@ class IndexJobDriver(fromHour: Long,
                      settings: DownsamplerSettings,
                      dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
-  val job = new DSIndexJob(settings, dsIndexJobSettings)
-
   def run(conf: SparkConf): Unit = {
     val spark = SparkSession.builder()
       .appName("FiloDB_DS_IndexUpdater")
@@ -51,18 +50,18 @@ class IndexJobDriver(fromHour: Long,
     DownsamplerLogger.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
     val startHour = fromHour
     val endHour = toHour
-    val rdd = spark.sparkContext
+    spark.sparkContext
       .makeRDD(0 until dsIndexJobSettings.numShards)
-      .foreach(job.updateDSPartKeyIndex(_, startHour, endHour))
+      .foreach { shard =>
+        val job = new DSIndexJob(settings, dsIndexJobSettings)
+        job.updateDSPartKeyIndex(shard, startHour, endHour)
+      }
 
     Kamon.counter("index-migration-completed").withoutTags().increment
-
     DownsamplerLogger.dsLogger.info(s"IndexUpdater Driver completed successfully")
   }
 
   def shutdown(): Unit = {
-    job.rawCassandraColStore.shutdown()
-    job.downsampleCassandraColStore.shutdown()
   }
 
 }

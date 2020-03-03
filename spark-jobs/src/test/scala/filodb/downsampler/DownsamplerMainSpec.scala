@@ -23,6 +23,7 @@ import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawDataRangeVector}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
+import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings, OffHeapMemory}
 import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._

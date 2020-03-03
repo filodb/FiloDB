@@ -1,4 +1,4 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
 import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
@@ -17,6 +17,7 @@ import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
+import filodb.downsampler.DownsamplerLogger
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.exec.UnknownSchemaQueryErr

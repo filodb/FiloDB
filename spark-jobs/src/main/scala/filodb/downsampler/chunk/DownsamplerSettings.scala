@@ -1,8 +1,10 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
+
+import filodb.downsampler.DownsamplerLogger
 //import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
@@ -24,7 +26,7 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val downsamplerConfig = {
     val conf = filodbConfig.getConfig("downsampler")
-//    logger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
+    DownsamplerLogger.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
     conf
   }
 
@@ -33,11 +35,11 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
   @transient lazy val rawDatasetName = downsamplerConfig.getString("raw-dataset-name")
 
   @transient lazy val rawDatasetIngestionConfig = {
-//    logger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
+    DownsamplerLogger.dsLogger.info(s"Parsing dataset configs at ${filodbSettings.datasetConfPaths}")
     val ingConf = filodbSettings.streamConfigs.map { config =>
       IngestionConfig(config, NodeClusterActor.noOpSource.streamFactoryClass).get
     }.find(_.ref.toString == rawDatasetName).get
-//    logger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
+    DownsamplerLogger.dsLogger.info(s"DatasetConfig for dataset $rawDatasetName was $ingConf")
     ingConf
   }
 

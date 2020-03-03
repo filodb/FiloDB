@@ -1,9 +1,10 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
-//import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
+
+import filodb.downsampler.DownsamplerLogger
 
 /**
   *
