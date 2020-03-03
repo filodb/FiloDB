@@ -85,8 +85,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)
-    DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-      s"Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
+    DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
+      s"partitions. Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
