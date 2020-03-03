@@ -4,7 +4,7 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-import filodb.downsampler.Housekeeping
+import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 
 object DSIndexJobMain extends App {
@@ -49,7 +49,7 @@ class IndexJobDriver(fromHour: Long,
       .config(conf)
       .getOrCreate()
 
-    Housekeeping.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
     val startHour = fromHour
     val endHour = toHour
     spark.sparkContext
@@ -60,7 +60,7 @@ class IndexJobDriver(fromHour: Long,
       }
 
     Kamon.counter("index-migration-completed").withoutTags().increment
-    Housekeeping.dsLogger.info(s"IndexUpdater Driver completed successfully")
+    DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
   }
 
 }

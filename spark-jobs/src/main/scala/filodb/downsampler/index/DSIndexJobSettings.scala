@@ -5,7 +5,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import net.ceedubs.ficus.Ficus._
 
-import filodb.downsampler.Housekeeping
+import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 
 /**
@@ -20,7 +20,7 @@ class DSIndexJobSettings(settings: DownsamplerSettings) extends Serializable {
 
   @transient lazy val dsIndexJobConfig = {
     val conf = filodbConfig.getConfig("ds-index-job")
-    Housekeeping.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
+    DownsamplerContext.dsLogger.info(s"Loaded following downsampler config: ${conf.root().render()}" )
     conf
   }
 

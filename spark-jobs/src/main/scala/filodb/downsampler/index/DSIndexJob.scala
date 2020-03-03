@@ -5,13 +5,12 @@ import scala.concurrent.Await
 import kamon.Kamon
 import monix.reactive.Observable
 
-import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
-import filodb.downsampler.Housekeeping
+import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 import filodb.memory.format.UnsafeUtils
 
@@ -37,20 +36,15 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     */
   @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(dsSettings.rawDatasetName)
 
-  @transient lazy private val session = {
-    import filodb.core._
-    Housekeeping.sessionMap.getOrElseUpdate(dsSettings.cassandraConfig, { conf =>
-      Housekeeping.dsLogger.info(s"Creating new Cassandra session")
-      FiloSessionProvider.openSession(conf)
-    })
-  }
+  @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(dsSettings.cassandraConfig)
 
   @transient lazy private[index] val downsampleCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, Housekeeping.readSched, session, true)(Housekeeping.writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, DownsamplerContext.readSched,
+                             session, true)(DownsamplerContext.writeSched)
 
   @transient lazy private[index] val rawCassandraColStore =
-    new CassandraColumnStore(dsJobsettings.filodbConfig, Housekeeping.readSched, session,
-                              false)(Housekeeping.writeSched)
+    new CassandraColumnStore(dsJobsettings.filodbConfig, DownsamplerContext.readSched, session,
+                              false)(DownsamplerContext.writeSched)
 
   @transient lazy private val dsDatasource = downsampleCassandraColStore
   // data retained longest
@@ -70,24 +64,24 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     @volatile var count = 0
     try {
       if (dsJobsettings.migrateRawIndex) {
-        Housekeeping.dsLogger.info("migrating complete partkey index")
+        DownsamplerContext.dsLogger.info("migrating complete partkey index")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
           shard = shard.toInt)
         count += updateDSPartkeys(partKeys, shard)
-        Housekeeping.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
+        DownsamplerContext.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
       } else {
         for (epochHour <- fromHour to toHour) {
           val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
             shard = shard.toInt, updateHour = epochHour)
           count += updateDSPartkeys(partKeys, shard)
         }
-        Housekeeping.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
+        DownsamplerContext.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
           s" from=$fromHour to=$toHour")
       }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
     } catch { case e: Exception =>
-      Housekeeping.dsLogger.error(s"Exception in task count=$count " +
+      DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
         s"shard=$shard from=$fromHour to=$toHour", e)
       sparkTasksFailed.increment
       throw e
@@ -102,7 +96,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     @volatile var count = 0
     val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{ pkey =>
       count += 1
-      Housekeeping.dsLogger.debug(s"migrating partition " +
+      DownsamplerContext.dsLogger.debug(s"migrating partition " +
         s"pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
         s" start=${pkey.startTime} end=${pkey.endTime}")
       pkey

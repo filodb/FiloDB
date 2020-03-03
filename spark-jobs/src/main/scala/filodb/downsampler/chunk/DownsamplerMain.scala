@@ -4,7 +4,7 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-import filodb.downsampler.Housekeeping
+import filodb.downsampler.DownsamplerContext
 
 /**
   *
@@ -60,7 +60,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       .config(sparkConf)
       .getOrCreate()
 
-    Housekeeping.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
     // Use the spark property spark.filodb.downsampler.user-time-override to override the
     // userTime period for which downsampling should occur.
@@ -75,7 +75,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
     val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
-    Housekeeping.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
+    DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeInPeriod=${java.time.Instant.ofEpochMilli(userTimeInPeriod)} " +
       s"ingestionTimeStart=${java.time.Instant.ofEpochMilli(ingestionTimeStart)} " +
@@ -85,7 +85,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)
-    Housekeeping.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+    DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
       s"Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
@@ -107,7 +107,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
-    Housekeeping.dsLogger.info(s"Downsampling Driver completed successfully")
+    DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
   }
 
 }

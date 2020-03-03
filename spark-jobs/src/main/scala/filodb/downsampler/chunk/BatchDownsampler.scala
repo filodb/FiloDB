@@ -8,7 +8,6 @@ import kamon.Kamon
 import monix.reactive.Observable
 import scalaxy.loops._
 
-import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
@@ -16,7 +15,7 @@ import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
-import filodb.downsampler.Housekeeping
+import filodb.downsampler.DownsamplerContext
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.exec.UnknownSchemaQueryErr
@@ -48,19 +47,15 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
   @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 
-  @transient lazy private val session = {
-    import filodb.core._
-    Housekeeping.sessionMap.getOrElseUpdate(settings.cassandraConfig, { conf =>
-      Housekeeping.dsLogger.info(s"Creating new Cassandra session")
-      FiloSessionProvider.openSession(conf)
-    })
-  }
+  @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
 
   @transient lazy private[downsampler] val downsampleCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, Housekeeping.readSched, session, true)(Housekeeping.writeSched)
+    new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
+                             true)(DownsamplerContext.writeSched)
 
   @transient lazy private[downsampler] val rawCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, Housekeeping.readSched, session, false)(Housekeeping.writeSched)
+    new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
+                             false)(DownsamplerContext.writeSched)
 
   @transient lazy private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
@@ -113,7 +108,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-    Housekeeping.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+    DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
@@ -142,7 +137,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
-              Housekeeping.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
+              DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
               numPartitionsFailed.increment()
             }
           } else {
@@ -150,7 +145,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
           }
         } else {
           numPartitionsSkipped.increment()
-          Housekeeping.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
+          DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
         }
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
@@ -164,7 +159,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     }
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
-    Housekeeping.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
+    DownsamplerContext.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
       s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
   }
 
@@ -195,7 +190,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
-        Housekeeping.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
+        DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
@@ -227,7 +222,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         }
         downsamplePartSpan.finish()
       case None =>
-        Housekeeping.dsLogger.warn(s"Encountered partition " +
+        DownsamplerContext.dsLogger.warn(s"Encountered partition " +
           s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
     }
   }
@@ -304,7 +299,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               }
             } catch {
               case e: Exception =>
-                Housekeeping.dsLogger.error(s"Error downsampling partition " +
+                DownsamplerContext.dsLogger.error(s"Error downsampling partition " +
                   s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
                   s"schema=${rawPartToDownsample.schema.name} " +
                   s"resolution=$resolution " +
@@ -320,7 +315,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
           numRawChunksDownsampled.increment()
         } else {
           numRawChunksSkipped.increment()
-          Housekeeping.dsLogger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
+          DownsamplerContext.dsLogger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
             s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
             s"startRow=$startRow " +
             s"endRow=$endRow " +
@@ -351,9 +346,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
 
     writeFut.foreach { fut =>
       val response = Await.result(fut, settings.cassWriteTimeout)
-      Housekeeping.dsLogger.debug(s"Got message $response for cassandra write call")
+      DownsamplerContext.dsLogger.debug(s"Got message $response for cassandra write call")
       if (response.isInstanceOf[ErrorResponse])
-        Housekeeping.dsLogger.error(s"Got response $response when writing to Cassandra")
+        DownsamplerContext.dsLogger.error(s"Got response $response when writing to Cassandra")
     }
     numDownsampledChunksWritten.increment(numChunks)
     batchWriteSpan.finish()
