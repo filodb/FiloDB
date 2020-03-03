@@ -10,6 +10,7 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
 import filodb.downsampler.DownsamplerSettings
@@ -30,14 +31,13 @@ object DSIndexJob extends StrictLogging with Instance {
   val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
   val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
 
+  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
   private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
     .zip(settings.downsampledDatasetRefs).toMap
-
-
-  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
   /**
     * Raw dataset from which we downsample data
@@ -99,7 +99,7 @@ object DSIndexJob extends StrictLogging with Instance {
 
   def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
-    val pkRecords = partKeys.map(toPartkeyRecordWithHash).map{pkey =>
+    val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{pkey =>
         count += 1
         logger.debug(s"migrating partition pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
           s" start=${pkey.startTime} end=${pkey.endTime}")
@@ -113,9 +113,10 @@ object DSIndexJob extends StrictLogging with Instance {
     count
   }
 
-  def toPartkeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
-    val hash = Option(schemas.part.binSchema.partitionHash(pkRecord.partKey, UnsafeUtils.arayOffset))
-    PartKeyRecord(pkRecord.partKey, pkRecord.startTime, pkRecord.endTime, hash)
+  private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+    val dsPartKey = RecordBuilder.buildDownsamplePartKey(pkRecord.partKey, schemas)
+    val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
+    PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
 
 }

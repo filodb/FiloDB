@@ -4,7 +4,8 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema}
+import filodb.core.binaryrecord2.RecordSchema.schemaID
+import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -687,5 +688,31 @@ object RecordBuilder {
                                            }
       case _                            => shardKeyColValue
     }
+  }
+
+  /**
+    * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
+    * than raw schema (e.g. Guages)
+    *
+    * @throws java.util.NoSuchElementException if there is no downsample schema
+    */
+  final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
+    val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
+    val downsampleSchema = rawSchema.downsample.get
+    if (rawSchema != downsampleSchema) {
+      UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, downsampleSchema.schemaHash.toShort)
+    }
+  }
+
+  /**
+    * Build a partkey from the source partkey and change the downsample schema.
+    * Useful during downsampling as dataschema may differ.
+    *
+    * @throws java.util.NoSuchElementException if there is no downsample schema
+    */
+  final def buildDownsamplePartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
+    val dsPkeyByte = pkByte.clone
+    updateDownsampleSchema(dsPkeyByte, UnsafeUtils.arayOffset, schemas)
+    dsPkeyByte
   }
 }
