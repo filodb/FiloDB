@@ -21,8 +21,6 @@ trait Functions extends Base with Operators with Vectors {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
-
-
     /**
       *
       * @return true when function is scalar or time

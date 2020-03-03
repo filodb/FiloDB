@@ -55,8 +55,6 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
 sealed abstract class RangeFunctionId(override val entryName: String) extends EnumEntry
 
-
-
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
