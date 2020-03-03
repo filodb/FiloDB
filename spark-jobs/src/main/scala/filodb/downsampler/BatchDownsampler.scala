@@ -201,7 +201,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                                                    offHeapMem.nativeMemoryManager)
 
         //update dataschema of the partitionKey, only if the downsample schema is different than raw schema
-        RecordSchema.updateDownsampleSchema(UnsafeUtils.ZeroPointer, partKeyPtr, schemas)
+        RecordBuilder.updateDownsampleSchema(UnsafeUtils.ZeroPointer, partKeyPtr, schemas)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,

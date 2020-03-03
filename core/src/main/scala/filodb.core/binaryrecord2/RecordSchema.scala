@@ -462,32 +462,6 @@ object RecordSchema {
   final def schemaID(bytes: Array[Byte]): Int =
     if (bytes.size >= 6) schemaID(bytes, UnsafeUtils.arayOffset) else -1
 
-  /**
-    * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
-    * than raw schema (e.g. Guages)
-    *
-    * @throws java.util.NoSuchElementException if there is no downsample schema
-    */
-  final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
-    val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
-    val downsampleSchema = rawSchema.downsample.get
-    if (rawSchema != downsampleSchema) {
-      UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, downsampleSchema.schemaHash.toShort)
-    }
-  }
-
-  /**
-    * Build a partkey from the source partkey and change the downsample schema.
-    * Useful during downsampling as dataschema may differ.
-    *
-    * @throws java.util.NoSuchElementException if there is no downsample schema
-    */
-  final def buildDownsamplePartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
-    val dsPkeyByte = pkByte.clone
-    updateDownsampleSchema(dsPkeyByte, UnsafeUtils.arayOffset, schemas)
-    dsPkeyByte
-  }
-
   def fromSerializableTuple(tuple: (Seq[ColumnInfo],
                                     Option[Int], Seq[String], Map[Int, RecordSchema])): RecordSchema =
     new RecordSchema(tuple._1, tuple._2, tuple._3, tuple._4)

@@ -10,7 +10,7 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
-import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
 import filodb.downsampler.DownsamplerSettings
@@ -114,7 +114,7 @@ object DSIndexJob extends StrictLogging with Instance {
   }
 
   private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
-    val dsPartKey = RecordSchema.buildDownsamplePartKey(pkRecord.partKey, schemas)
+    val dsPartKey = RecordBuilder.buildDownsamplePartKey(pkRecord.partKey, schemas)
     val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
     PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
   }
