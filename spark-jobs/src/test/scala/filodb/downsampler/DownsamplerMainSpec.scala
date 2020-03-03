@@ -548,12 +548,13 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     Seq(gaugeName, gaugeLowFreqName, counterName, histName).foreach { metricName =>
       val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(metricName))
-      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher, BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
+        BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
       val queryConfig = new QueryConfig(DownsamplerSettings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
       val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
-                    .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+        .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
       res.result.size shouldEqual 1
@@ -572,17 +573,17 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     downsampleTSStore.recoverIndex(BatchDownsampler.rawDatasetRef, 0).futureValue
     val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
     val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(gaugeName))
-    val exec = MultiSchemaPartitionsExec("someId", System.currentTimeMillis(),
-      1000, InProcessPlanDispatcher, BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
+    val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
+      BatchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
       colName = Option("sum"))
     val queryConfig = new QueryConfig(DownsamplerSettings.filodbConfig.getConfig("query"))
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-    val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler, 1 minute)
+    val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
       .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
-      List((1574273042000L, 112.0))
+      List((1574372982000L, 88.0), (1574373042000L, 24.0))
   }
 
 }
