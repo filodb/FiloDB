@@ -406,7 +406,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
       case QueryResult(_, schema, _) =>
-        if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
+        if (rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }
   }
