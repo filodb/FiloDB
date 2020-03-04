@@ -107,8 +107,7 @@ object ChunkCopier {
 object ChunkCopierMain extends App with StrictLogging {
   run(new SparkConf(loadDefaults = true))
 
-  // scalastyle:off method.length
-  def run(conf: SparkConf): Unit = {
+  def run(conf: SparkConf): SparkSession = {
     logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
 
     val copier = ChunkCopier.lookup(conf)
@@ -130,6 +129,6 @@ object ChunkCopierMain extends App with StrictLogging {
     logger.info(s"ChunkCopier Driver completed successfully")
 
     copier.shutdown()
+    spark
   }
-  // scalastyle:on
 }

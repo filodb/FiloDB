@@ -1,6 +1,6 @@
 package filodb.repair
 
-//import org.apache.spark.SparkConf
+import org.apache.spark.SparkConf
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -39,7 +39,6 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
     colStore.initialize(targetDataset.ref, 1).futureValue
     colStore.truncate(targetDataset.ref, 1).futureValue
 
-    /*
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
 
@@ -53,10 +52,9 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
     sparkConf.set("spark.filodb.chunkcopier.ingestionTimeEnd",   "2020-02-26T23:00:00Z")
     sparkConf.set("spark.filodb.chunkcopier.diskTimeToLive", "7d")
 
-    ChunkCopierMain.run(sparkConf)
+    ChunkCopierMain.run(sparkConf).close()
 
     colStore.truncate(dataset.ref, 1).futureValue
     colStore.truncate(targetDataset.ref, 1).futureValue
-     */
   }
 }
