@@ -29,16 +29,15 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
   it ("should run a simple Spark job") {
     // This test verifies that the configuration can be read and that Spark runs. A full test
     // that verifies chunks are copied correctly is found in CassandraColumnStoreSpec.
-    {
-      val dataset = Dataset("source", Schemas.gauge)
-      val targetDataset = Dataset("target", Schemas.gauge)
 
-      colStore.initialize(dataset.ref, 1).futureValue
-      colStore.truncate(dataset.ref, 1).futureValue
+    val dataset = Dataset("source", Schemas.gauge)
+    val targetDataset = Dataset("target", Schemas.gauge)
 
-      colStore.initialize(targetDataset.ref, 1).futureValue
-      colStore.truncate(targetDataset.ref, 1).futureValue
-    }
+    colStore.initialize(dataset.ref, 1).futureValue
+    colStore.truncate(dataset.ref, 1).futureValue
+
+    colStore.initialize(targetDataset.ref, 1).futureValue
+    colStore.truncate(targetDataset.ref, 1).futureValue
 
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
@@ -54,5 +53,8 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
     sparkConf.set("spark.filodb.chunkcopier.diskTimeToLive", "7d")
 
     ChunkCopierMain.run(sparkConf)
+
+    colStore.truncate(dataset.ref, 1).futureValue
+    colStore.truncate(targetDataset.ref, 1).futureValue
   }
 }
