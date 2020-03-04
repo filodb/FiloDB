@@ -25,7 +25,7 @@ import filodb.downsampler.index.DSIndexJobSettings._
 import filodb.downsampler.index.IndexJobDriver
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.format.vectors.{CustomBuckets, MutableHistogram}
+import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
 import filodb.query.{QueryConfig, QueryResult}
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 
@@ -231,24 +231,24 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = Stream( // time, sum, count, hist, name, tags
-      Seq(1574372801000L, 0d, 1d, MutableHistogram(bucketScheme, Array(0d, 0d, 1d)), histName, seriesTags),
-      Seq(1574372801500L, 2d, 3d, MutableHistogram(bucketScheme, Array(0d, 2d, 3d)), histName, seriesTags),
-      Seq(1574372802000L, 5d, 6d, MutableHistogram(bucketScheme, Array(2d, 5d, 6d)), histName, seriesTags),
+      Seq(1574372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histName, seriesTags),
+      Seq(1574372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
+      Seq(1574372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
 
-      Seq(1574372861000L, 9d, 9d, MutableHistogram(bucketScheme, Array(2d, 5d, 9d)), histName, seriesTags),
-      Seq(1574372861500L, 10d, 10d, MutableHistogram(bucketScheme, Array(2d, 5d, 10d)), histName, seriesTags),
-      Seq(1574372862000L, 11d, 14d, MutableHistogram(bucketScheme, Array(2d, 8d, 14d)), histName, seriesTags),
+      Seq(1574372861000L, 9d, 9d, LongHistogram(bucketScheme,   Array(2L, 5, 9)), histName, seriesTags),
+      Seq(1574372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
+      Seq(1574372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
 
-      Seq(1574372921000L, 2d, 2d, MutableHistogram(bucketScheme, Array(0d, 0d, 2d)), histName, seriesTags),
-      Seq(1574372921500L, 7d, 9d, MutableHistogram(bucketScheme, Array(1d, 7d, 9d)), histName, seriesTags),
-      Seq(1574372922000L, 15d, 19d, MutableHistogram(bucketScheme, Array(1d, 15d, 19d)), histName, seriesTags),
+      Seq(1574372921000L, 2d, 2d, LongHistogram(bucketScheme,   Array(0L, 0, 2)), histName, seriesTags),
+      Seq(1574372921500L, 7d, 9d, LongHistogram(bucketScheme,   Array(1L, 7, 9)), histName, seriesTags),
+      Seq(1574372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
 
-      Seq(1574372981000L, 17d, 21d, MutableHistogram(bucketScheme, Array(2d, 16d, 21d)), histName, seriesTags),
-      Seq(1574372981500L, 1d, 1d, MutableHistogram(bucketScheme, Array(0d, 1d, 1d)), histName, seriesTags),
-      Seq(1574372982000L, 15d, 15d, MutableHistogram(bucketScheme, Array(0d, 15d, 15d)), histName, seriesTags),
+      Seq(1574372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
+      Seq(1574372981500L, 1d, 1d, LongHistogram(bucketScheme,   Array(0L, 1, 1)), histName, seriesTags),
+      Seq(1574372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
 
-      Seq(1574373041000L, 18d, 19d, MutableHistogram(bucketScheme, Array(1d, 16d, 19d)), histName, seriesTags),
-      Seq(1574373042000L, 20d, 25d, MutableHistogram(bucketScheme, Array(4d, 20d, 25d)), histName, seriesTags)
+      Seq(1574373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
+      Seq(1574373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
