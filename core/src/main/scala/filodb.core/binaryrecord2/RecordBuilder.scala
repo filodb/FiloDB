@@ -694,7 +694,7 @@ object RecordBuilder {
     * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
     * than raw schema (e.g. Guages)
     *
-    * @throws java.util.NoSuchElementException if there is no downsample schema
+    * @throws NoSuchElementException if there is no downsample schema
     */
   final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
     val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
@@ -708,7 +708,7 @@ object RecordBuilder {
     * Build a partkey from the source partkey and change the downsample schema.
     * Useful during downsampling as dataschema may differ.
     *
-    * @throws java.util.NoSuchElementException if there is no downsample schema
+    * @throws NoSuchElementException if there is no downsample schema
     */
   final def buildDownsamplePartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
     val dsPkeyByte = pkByte.clone
