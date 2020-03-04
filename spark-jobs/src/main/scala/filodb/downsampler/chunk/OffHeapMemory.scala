@@ -1,4 +1,4 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
 import com.typesafe.scalalogging.StrictLogging
 
@@ -15,7 +15,6 @@ class OffHeapMemory(schemas: Seq[Schema],
 
   private val blockMemSize = storeConfig.shardMemSize
   private val nativeMemSize = storeConfig.ingestionBufferMemSize
-
 
   logger.info(s"Allocating OffHeap memory $this with nativeMemManagerSize=$nativeMemSize " +
     s"and blockMemorySize=$blockMemSize")
