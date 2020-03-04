@@ -17,7 +17,10 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 
-  val configPath = "conf/timeseries-filodb-server.conf"
+  // For some reason, using the same config file as the downsample tests causes them to
+  // fail. Use some thing else instead as a workaround. Ironically, use a downsample config
+  // file that it doesn't use.
+  val configPath = "conf/downsample-filodb-server.conf"
 
   val sysConfig = GlobalConfig.systemConfig.getConfig("filodb")
   val config = ConfigFactory.parseFile(new java.io.File(configPath))
