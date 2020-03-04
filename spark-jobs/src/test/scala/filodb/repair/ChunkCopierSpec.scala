@@ -1,6 +1,6 @@
 package filodb.repair
 
-import org.apache.spark.SparkConf
+//import org.apache.spark.SparkConf
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
