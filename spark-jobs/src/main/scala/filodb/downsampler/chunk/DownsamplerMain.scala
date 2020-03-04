@@ -1,9 +1,10 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
-import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
+
+import filodb.downsampler.DownsamplerContext
 
 /**
   *
@@ -37,80 +38,76 @@ import org.apache.spark.sql.SparkSession
   */
 object DownsamplerMain extends App {
 
-  val d = new Downsampler
+  val settings = new DownsamplerSettings()
+  val batchDownsampler = new BatchDownsampler(settings)
+
+  val d = new Downsampler(settings, batchDownsampler)
   val sparkConf = new SparkConf(loadDefaults = true)
   d.run(sparkConf)
-  d.shutdown()
 }
 
-class Downsampler extends StrictLogging {
-
-  import BatchDownsampler._
-  import DownsamplerSettings._
-
-  import java.time.Instant._
-
-  def shutdown(): Unit = {
-    rawCassandraColStore.shutdown()
-    downsampleCassandraColStore.shutdown()
-  }
+class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
+  // See https://medium.com/onzo-tech/serialization-challenges-with-spark-and-scala-a2287cd51c54
   // scalastyle:off method.length
-  def run(conf: SparkConf): Unit = {
+  def run(sparkConf: SparkConf): Unit = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
-      .config(conf)
+      .config(sparkConf)
       .getOrCreate()
 
-    logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
 
     // Use the spark property spark.filodb.downsampler.user-time-override to override the
     // userTime period for which downsampling should occur.
     // Generally disabled, defaults the period that just ended prior to now.
     // Specified during reruns for downsampling old data
     val userTimeInPeriod: Long = spark.sparkContext.getConf.get("spark.filodb.downsampler.userTimeOverride",
-      s"${System.currentTimeMillis() - downsampleChunkDuration}").toLong
+      s"${System.currentTimeMillis() - settings.downsampleChunkDuration}").toLong
     // by default assume a time in the previous downsample period
 
-    val userTimeStart: Long = (userTimeInPeriod / downsampleChunkDuration) * downsampleChunkDuration
-    val userTimeEndExclusive: Long = userTimeStart + downsampleChunkDuration
-    val ingestionTimeStart: Long = userTimeStart - widenIngestionTimeRangeBy.toMillis
-    val ingestionTimeEnd: Long = userTimeEndExclusive + widenIngestionTimeRangeBy.toMillis
+    val userTimeStart: Long = (userTimeInPeriod / settings.downsampleChunkDuration) * settings.downsampleChunkDuration
+    val userTimeEndExclusive: Long = userTimeStart + settings.downsampleChunkDuration
+    val ingestionTimeStart: Long = userTimeStart - settings.widenIngestionTimeRangeBy.toMillis
+    val ingestionTimeEnd: Long = userTimeEndExclusive + settings.widenIngestionTimeRangeBy.toMillis
 
-    logger.info(s"This is the Downsampling driver. Starting downsampling job " +
-      s"rawDataset=$rawDatasetName for userTimeInPeriod=${ofEpochMilli(userTimeInPeriod)} " +
-      s"ingestionTimeStart=${ofEpochMilli(ingestionTimeStart)} " +
-      s"ingestionTimeEnd=${ofEpochMilli(ingestionTimeEnd)} " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+    DownsamplerContext.dsLogger.info(s"This is the Downsampling driver. Starting downsampling job " +
+      s"rawDataset=${settings.rawDatasetName} for " +
+      s"userTimeInPeriod=${java.time.Instant.ofEpochMilli(userTimeInPeriod)} " +
+      s"ingestionTimeStart=${java.time.Instant.ofEpochMilli(ingestionTimeStart)} " +
+      s"ingestionTimeEnd=${java.time.Instant.ofEpochMilli(ingestionTimeEnd)} " +
+      s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
+      s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
 
-    val splits = rawCassandraColStore.getScanSplits(rawDatasetRef, splitsPerNode)
-    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-      s"Tune splitsPerNode which was $splitsPerNode if parallelism is low")
+    val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
+                                                                     settings.splitsPerNode)
+    DownsamplerContext.dsLogger.info(s"Cassandra split size: ${splits.size}. We will have this many spark " +
+      s"partitions. Tune splitsPerNode which was ${settings.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
         import filodb.core.Iterators._
-        val rawDataSource = rawCassandraColStore
+        val rawDataSource = batchDownsampler.rawCassandraColStore
         val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
-        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = rawDatasetRef,
+        val batchIter = rawDataSource.getChunksByIngestionTimeRange(datasetRef = batchDownsampler.rawDatasetRef,
           splits = splitIter, ingestionTimeStart = ingestionTimeStart,
           ingestionTimeEnd = ingestionTimeEnd,
           userTimeStart = userTimeStart, endTimeExclusive = userTimeEndExclusive,
-          maxChunkTime = rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
-          batchSize = batchSize, batchTime = batchTime).toIterator()
+          maxChunkTime = settings.rawDatasetIngestionConfig.storeConfig.maxChunkTime.toMillis,
+          batchSize = settings.batchSize, batchTime = settings.batchTime).toIterator()
         batchReadSpan.finish()
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
-        downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
+        batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
-    logger.info(s"Downsampling Driver completed successfully")
+    DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
   }
 
 }

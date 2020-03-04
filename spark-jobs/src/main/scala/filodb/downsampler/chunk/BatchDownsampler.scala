@@ -1,17 +1,13 @@
-package filodb.downsampler
+package filodb.downsampler.chunk
 
 import scala.collection.mutable.{ArrayBuffer, Map => MMap}
 import scala.concurrent.Await
 import scala.concurrent.duration.FiniteDuration
 
-import com.typesafe.scalalogging.StrictLogging
-import java.util
 import kamon.Kamon
-import monix.execution.Scheduler
 import monix.reactive.Observable
 import scalaxy.loops._
 
-import filodb.cassandra.FiloSessionProvider
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
@@ -19,6 +15,7 @@ import filodb.core.downsample._
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
+import filodb.downsampler.DownsamplerContext
 import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.exec.UnknownSchemaQueryErr
@@ -36,72 +33,73 @@ import filodb.query.exec.UnknownSchemaQueryErr
   *
   * All of the necessary params for the behavior are loaded from DownsampleSettings.
   */
-object BatchDownsampler extends StrictLogging with Instance {
+class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Serializable {
 
-  val settings = DownsamplerSettings
+  @transient lazy val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
+  @transient lazy val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
+  @transient lazy val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
+  @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
+  @transient lazy val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
+  @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
+  @transient lazy val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
+  @transient lazy val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
+  @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
+  @transient lazy val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
+  @transient lazy val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
 
-  val numBatchesStarted = Kamon.counter("num-batches-started").withoutTags()
-  val numBatchesCompleted = Kamon.counter("num-batches-completed").withoutTags()
-  val numBatchesFailed = Kamon.counter("num-batches-failed").withoutTags()
-  val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
-  val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
-  val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
-  val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
-  val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
-  val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
-  val numRawChunksDownsampled = Kamon.counter("num-raw-chunks-downsampled").withoutTags()
-  val numDownsampledChunksWritten = Kamon.counter("num-downsampled-chunks-written").withoutTags()
+  @transient lazy private val session = DownsamplerContext.getOrCreateCassandraSession(settings.cassandraConfig)
 
-  private val readSched = Scheduler.io("cass-read-sched")
-  private val writeSched = Scheduler.io("cass-write-sched")
+  @transient lazy private[downsampler] val downsampleCassandraColStore =
+    new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
+                             true)(DownsamplerContext.writeSched)
 
-  private val session = FiloSessionProvider.openSession(settings.cassandraConfig)
+  @transient lazy private[downsampler] val rawCassandraColStore =
+    new CassandraColumnStore(settings.filodbConfig, DownsamplerContext.readSched, session,
+                             false)(DownsamplerContext.writeSched)
 
-  private[downsampler] val downsampleCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, session, true)(writeSched)
-
-  private[downsampler] val rawCassandraColStore =
-    new CassandraColumnStore(settings.filodbConfig, readSched, session, false)(writeSched)
-
-  private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
+  @transient lazy private val kamonTags = Map( "rawDataset" -> settings.rawDatasetName,
                                "owner" -> "BatchDownsampler")
 
-  private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
+  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(settings.filodbConfig).get
 
-  private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
+  @transient lazy private val rawSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s)}
 
   /**
     * Downsample Schemas
     */
-  private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
+  @transient lazy private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
 
   /**
     * Chunk Downsamplers by Raw Schema Id
     */
-  private val chunkDownsamplersByRawSchemaId = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
-  rawSchemas.foreach { s => chunkDownsamplersByRawSchemaId += s.schemaHash -> s.data.downsamplers }
+  @transient lazy private val chunkDownsamplersByRawSchemaId = {
+    val map = debox.Map.empty[Int, scala.Seq[ChunkDownsampler]]
+    rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplers }
+    map
+  }
 
-  private val downsamplePeriodMarkersByRawSchemaId = debox.Map.empty[Int, DownsamplePeriodMarker]
-  rawSchemas.foreach { s => downsamplePeriodMarkersByRawSchemaId += s.schemaHash -> s.data.downsamplePeriodMarker }
+  @transient lazy private val downsamplePeriodMarkersByRawSchemaId = {
+    val map = debox.Map.empty[Int, DownsamplePeriodMarker]
+    rawSchemas.foreach { s => map += s.schemaHash -> s.data.downsamplePeriodMarker }
+    map
+  }
 
   /**
     * Raw dataset from which we downsample data
     */
-  private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
+  @transient lazy private[downsampler] val rawDatasetRef = DatasetRef(settings.rawDatasetName)
 
   // FIXME * 4 exists to workaround an issue where we see under-allocation for metaspan due to
   // possible mis-calculation of max block meta size.
-  private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
+  @transient lazy private val maxMetaSize = dsSchemas.map(_.data.blockMetaSize).max * 4
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
     */
-  private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
+  @transient lazy private[downsampler] val downsampleRefsByRes = settings.downsampleResolutions
                 .zip(settings.downsampledDatasetRefs).toMap
 
-  private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
-
-  import java.time.Instant._
+  @transient lazy private[downsampler] val shardStats = new TimeSeriesShardStats(rawDatasetRef, -1) // TODO fix
 
   /**
     * Downsample batch of raw partitions, and store downsampled chunks to cassandra
@@ -110,9 +108,10 @@ object BatchDownsampler extends StrictLogging with Instance {
   def downsampleBatch(rawPartsBatch: Seq[RawPartData],
                       userTimeStart: Long,
                       userTimeEndExclusive: Long): Unit = {
-    logger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
+    DownsamplerContext.dsLogger.info(s"Starting to downsample batchSize=${rawPartsBatch.size} partitions " +
       s"rawDataset=${settings.rawDatasetName} for " +
-      s"userTimeStart=${ofEpochMilli(userTimeStart)} userTimeEndExclusive=${ofEpochMilli(userTimeEndExclusive)}")
+      s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
+      s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
     numBatchesStarted.increment()
     val startedAt = System.currentTimeMillis()
     val downsampledChunksToPersist = MMap[FiniteDuration, Iterator[ChunkSet]]()
@@ -138,7 +137,7 @@ object BatchDownsampler extends StrictLogging with Instance {
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
-              logger.error(s"Error occurred when downsampling partition $pkPairs", e)
+              DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
               numPartitionsFailed.increment()
             }
           } else {
@@ -146,7 +145,7 @@ object BatchDownsampler extends StrictLogging with Instance {
           }
         } else {
           numPartitionsSkipped.increment()
-          logger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
+          DownsamplerContext.dsLogger.warn(s"Skipping series with unknown schema ID $rawSchemaId")
         }
       }
       numDsChunks = persistDownsampledChunks(downsampledChunksToPersist)
@@ -160,7 +159,7 @@ object BatchDownsampler extends StrictLogging with Instance {
     }
     numBatchesCompleted.increment()
     val endedAt = System.currentTimeMillis()
-    logger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
+    DownsamplerContext.dsLogger.info(s"Finished iterating through and downsampling batchSize=${rawPartsBatch.size} " +
       s"partitions in current executor timeTakenMs=${endedAt-startedAt} numDsChunks=$numDsChunks")
   }
 
@@ -184,19 +183,24 @@ object BatchDownsampler extends StrictLogging with Instance {
                              userTimeStart: Long,
                              userTimeEndExclusive: Long,
                              dsRecordBuilder: RecordBuilder) = {
+
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
     if (rawPartSchema == Schemas.UnknownSchema) throw UnknownSchemaQueryErr(rawSchemaId)
     rawPartSchema.downsample match {
       case Some(downsampleSchema) =>
         val rawReadablePart = new PagedReadablePartition(rawPartSchema, 0, 0, rawPart)
-        logger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
+        DownsamplerContext.dsLogger.debug(s"Downsampling partition ${rawReadablePart.stringPartition}")
         val bufferPool = offHeapMem.bufferPools(rawPartSchema.downsample.get.schemaHash)
         val downsamplers = chunkDownsamplersByRawSchemaId(rawSchemaId)
         val periodMarker = downsamplePeriodMarkersByRawSchemaId(rawSchemaId)
+
         val (_, partKeyPtr, _) = BinaryRegionLarge.allocateAndCopy(rawReadablePart.partKeyBase,
                                                    rawReadablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
+
+        //update dataschema of the partitionKey, only if the downsample schema is different than raw schema
+        RecordBuilder.updateDownsampleSchema(UnsafeUtils.ZeroPointer, partKeyPtr, schemas)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
@@ -218,8 +222,8 @@ object BatchDownsampler extends StrictLogging with Instance {
         }
         downsamplePartSpan.finish()
       case None =>
-        logger.warn(s"Encountered partition ${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)}" +
-          s" which does not have a downsample schema")
+        DownsamplerContext.dsLogger.warn(s"Encountered partition " +
+          s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
     }
   }
 
@@ -263,7 +267,7 @@ object BatchDownsampler extends StrictLogging with Instance {
 
             val downsamplePeriods =
               periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
-            util.Arrays.sort(downsamplePeriods)
+            java.util.Arrays.sort(downsamplePeriods)
 
             try {
               // for each downsample period
@@ -295,7 +299,7 @@ object BatchDownsampler extends StrictLogging with Instance {
               }
             } catch {
               case e: Exception =>
-                logger.error(s"Error downsampling partition " +
+                DownsamplerContext.dsLogger.error(s"Error downsampling partition " +
                   s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
                   s"schema=${rawPartToDownsample.schema.name} " +
                   s"resolution=$resolution " +
@@ -311,7 +315,7 @@ object BatchDownsampler extends StrictLogging with Instance {
           numRawChunksDownsampled.increment()
         } else {
           numRawChunksSkipped.increment()
-          logger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
+          DownsamplerContext.dsLogger.warn(s"Not downsampling chunk of partition since startRow lessThan endRow " +
             s"hexPartKey=${rawPartToDownsample.hexPartKey} " +
             s"startRow=$startRow " +
             s"endRow=$endRow " +
@@ -342,9 +346,9 @@ object BatchDownsampler extends StrictLogging with Instance {
 
     writeFut.foreach { fut =>
       val response = Await.result(fut, settings.cassWriteTimeout)
-      logger.debug(s"Got message $response for cassandra write call")
+      DownsamplerContext.dsLogger.debug(s"Got message $response for cassandra write call")
       if (response.isInstanceOf[ErrorResponse])
-        logger.error(s"Got response $response when writing to Cassandra")
+        DownsamplerContext.dsLogger.error(s"Got response $response when writing to Cassandra")
     }
     numDownsampledChunksWritten.increment(numChunks)
     batchWriteSpan.finish()
@@ -357,11 +361,10 @@ object BatchDownsampler extends StrictLogging with Instance {
     * (b) It should not match any filter in blacklist
     */
   private def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
-    import DownsamplerSettings._
-    if (whitelist.nonEmpty && !whitelist.exists(w => w.forall(pkPairs.contains))) {
+    if (settings.whitelist.nonEmpty && !settings.whitelist.exists(w => w.forall(pkPairs.contains))) {
       false
     } else {
-      blacklist.forall(w => !w.forall(pkPairs.contains))
+      settings.blacklist.forall(w => !w.forall(pkPairs.contains))
     }
   }
 
