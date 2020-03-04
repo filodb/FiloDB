@@ -39,6 +39,7 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
     colStore.initialize(targetDataset.ref, 1).futureValue
     colStore.truncate(targetDataset.ref, 1).futureValue
 
+    /*
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
 
@@ -56,5 +57,6 @@ class ChunkCopierSpec extends FunSpec with Matchers with BeforeAndAfterAll with 
 
     colStore.truncate(dataset.ref, 1).futureValue
     colStore.truncate(targetDataset.ref, 1).futureValue
+     */
   }
 }
