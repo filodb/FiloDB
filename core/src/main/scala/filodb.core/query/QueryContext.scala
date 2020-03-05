@@ -2,7 +2,7 @@ package filodb.core.query
 
 import java.util.UUID
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigRenderOptions}
 
 import filodb.core.{SpreadChange, SpreadProvider}
 
@@ -12,8 +12,20 @@ trait TsdbQueryParams
   * This class provides PromQl query paramaters
   * Config has routing parameters
   */
-case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
+case class PromQlQueryParams(config: String, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
                              spread: Option[Int] = None, processFailure: Boolean = true) extends TsdbQueryParams
+object PromQlQueryParams {
+  def apply(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
+            spread: Option[Int], processFailure: Boolean): PromQlQueryParams = {
+    // Config object requires custom serialization
+    PromQlQueryParams(config.root().render(ConfigRenderOptions.concise()), promQl, startSecs, stepSecs, endSecs, spread,
+      processFailure)
+  }
+
+  def apply(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long): PromQlQueryParams =
+    PromQlQueryParams(config.root().render(ConfigRenderOptions.concise()), promQl, startSecs, stepSecs, endSecs, None,
+      true)
+}
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 
 /**

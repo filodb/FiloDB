@@ -3,6 +3,7 @@ package filodb.coordinator.client
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
@@ -312,4 +313,22 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     actual.toList shouldEqual expected
   }
 
+  it ("should serialize and deserialize serialize ExecPlan with config") {
+    val node0 = TestProbe().ref
+    val mapper = new ShardMapper(1)
+    def mapperRef: ShardMapper = mapper
+    mapper.registerNode(Seq(0), node0)
+    val to = System.currentTimeMillis() / 1000
+    val from = to - 50
+    val qParams = TimeStepParams(from, 10, to)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0)
+
+    val logicalPlan = Parser.queryRangeToLogicalPlan(
+      s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
+      qParams)
+    val  param = PromQlQueryParams(ConfigFactory.empty(), "test", 1000, 200, 5000)
+    val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = param,
+      spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0)))))
+    roundTrip(execPlan) shouldEqual execPlan
+  }
 }

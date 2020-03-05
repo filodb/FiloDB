@@ -4,6 +4,7 @@ import java.util.concurrent.TimeUnit
 
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
@@ -118,9 +119,11 @@ object PromQlExec extends StrictLogging {
 
   def httpGet(promQlQueryParams: PromQlQueryParams, submitTime: Long)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val endpoint = promQlQueryParams.config.as[Option[String]]("buddy.http.endpoint").get
+
+    val config = ConfigFactory.parseString(promQlQueryParams.config)
+    val endpoint = config.as[Option[String]]("buddy.http.endpoint").get
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
-    val buddyHttpTimeout = promQlQueryParams.config.as[Option[FiniteDuration]]("buddy.http.timeout").
+    val buddyHttpTimeout = config.as[Option[FiniteDuration]]("buddy.http.timeout").
                             getOrElse(60000.millis)
     val readTimeout = FiniteDuration(buddyHttpTimeout.toMillis - queryTimeElapsed, TimeUnit.MILLISECONDS)
     var urlParams = Map("query" -> promQlQueryParams.promQl,
