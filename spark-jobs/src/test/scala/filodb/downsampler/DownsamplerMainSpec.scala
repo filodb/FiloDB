@@ -281,13 +281,13 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
-    downsampler.run(sparkConf)
+    downsampler.run(sparkConf).close()
   }
 
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    indexUpdater.run(sparkConf)
+    indexUpdater.run(sparkConf).close()
   }
 
   it ("should recover migrated partKey data and match the downsampled schema") {

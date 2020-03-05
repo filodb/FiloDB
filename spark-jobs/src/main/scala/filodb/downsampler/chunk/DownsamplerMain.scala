@@ -53,7 +53,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
   // Otherwise, config values below were not being sent over.
   // See https://medium.com/onzo-tech/serialization-challenges-with-spark-and-scala-a2287cd51c54
   // scalastyle:off method.length
-  def run(sparkConf: SparkConf): Unit = {
+  def run(sparkConf: SparkConf): SparkSession = {
 
     val spark = SparkSession.builder()
       .appName("FiloDBDownsampler")
@@ -108,6 +108,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       }
 
     DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
+    spark
   }
 
 }

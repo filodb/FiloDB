@@ -43,7 +43,7 @@ class IndexJobDriver(fromHour: Long,
                      dsSettings: DownsamplerSettings,
                      dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
-  def run(conf: SparkConf): Unit = {
+  def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
       .appName("FiloDB_DS_IndexUpdater")
       .config(conf)
@@ -61,6 +61,7 @@ class IndexJobDriver(fromHour: Long,
 
     Kamon.counter("index-migration-completed").withoutTags().increment
     DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
+    spark
   }
 
 }
