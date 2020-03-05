@@ -378,8 +378,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     // an empty schema.  Validate that the other schemas are the same.  Skip over empty schemas.
     var sch = ResultSchema.empty
     val processedTasks = childTasks.collect {
-      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
-        sch = reduceSchemas(sch, res)
+      case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty => sch = reduceSchemas(sch, res)
         (res, i.toInt)
       case (e: QueryError, _) =>
         throw e.t
@@ -406,7 +405,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
         schema     /// First schema, take as is
       case QueryResult(_, schema, _) =>
-        if (rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
+        if (rs != schema) throw SchemaMismatch(rs.toString, schema.toString)
         else rs
     }
   }

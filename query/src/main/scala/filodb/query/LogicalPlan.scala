@@ -274,9 +274,9 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   */
 final case class ScalarTimeBasedPlan(function: ScalarFunctionId, rangeParams: RangeParams) extends ScalarPlan {
   override def isRoutable: Boolean = false
-  override def startMs: Long = rangeParams.start * 1000
-  override def stepMs: Long = rangeParams.step * 1000
-  override def endMs: Long = rangeParams.end * 1000
+  override def startMs: Long = rangeParams.startSecs * 1000
+  override def stepMs: Long = rangeParams.stepSecs * 1000
+  override def endMs: Long = rangeParams.endSecs * 1000
 }
 
 /**
@@ -287,9 +287,9 @@ final case class ScalarFixedDoublePlan(scalar: Double,
                                        timeStepParams: RangeParams)
                                        extends ScalarPlan with FunctionArgsPlan {
   override def isRoutable: Boolean = false
-  override def startMs: Long = timeStepParams.start * 1000
-  override def stepMs: Long = timeStepParams.step * 1000
-  override def endMs: Long = timeStepParams.end * 1000
+  override def startMs: Long = timeStepParams.startSecs * 1000
+  override def stepMs: Long = timeStepParams.stepSecs * 1000
+  override def endMs: Long = timeStepParams.endSecs * 1000
 }
 
 //scalastyle:off number.of.types
