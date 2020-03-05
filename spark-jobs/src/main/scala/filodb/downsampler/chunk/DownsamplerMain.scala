@@ -1,5 +1,8 @@
 package filodb.downsampler.chunk
 
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
@@ -66,9 +69,13 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     // userTime period for which downsampling should occur.
     // Generally disabled, defaults the period that just ended prior to now.
     // Specified during reruns for downsampling old data
-    val userTimeInPeriod: Long = spark.sparkContext.getConf.get("spark.filodb.downsampler.userTimeOverride",
-      s"${System.currentTimeMillis() - settings.downsampleChunkDuration}").toLong
-    // by default assume a time in the previous downsample period
+    val userTimeInPeriod: Long = spark.sparkContext.getConf
+      .getOption("spark.filodb.downsampler.userTimeOverride") match {
+        // by default assume a time in the previous downsample period
+        case None => System.currentTimeMillis() - settings.downsampleChunkDuration
+        // examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
+        case Some(str) => Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli()
+      }
 
     val userTimeStart: Long = (userTimeInPeriod / settings.downsampleChunkDuration) * settings.downsampleChunkDuration
     val userTimeEndExclusive: Long = userTimeStart + settings.downsampleChunkDuration
