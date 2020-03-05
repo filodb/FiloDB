@@ -6,6 +6,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
+import java.time.Instant
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -280,7 +281,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    sparkConf.set("spark.filodb.downsampler.userTimeOverride", lastSampleTime.toString)
+    sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString())
     downsampler.run(sparkConf).close()
   }
 
