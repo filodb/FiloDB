@@ -60,7 +60,6 @@ class IndexJobDriver(fromHour: Long,
         it
       }
       .foreach { shard =>
-        Kamon.init()  // kamon init should be first thing in worker jvm
         val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
         job.updateDSPartKeyIndex(shard, startHour, endHour)
       }
