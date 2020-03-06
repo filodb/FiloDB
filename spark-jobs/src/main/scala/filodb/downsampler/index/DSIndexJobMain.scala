@@ -9,6 +9,7 @@ import filodb.downsampler.chunk.DownsamplerSettings
 
 object DSIndexJobMain extends App {
 
+  Kamon.init()  // kamon init should be first thing in driver jvm
   val dsSettings = new DownsamplerSettings()
   val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
 
@@ -54,7 +55,12 @@ class IndexJobDriver(fromHour: Long,
     val endHour = toHour
     spark.sparkContext
       .makeRDD(0 until dsIndexJobSettings.numShards)
+      .mapPartitions { it =>
+        Kamon.init()  // kamon init should be first thing in worker jvm
+        it
+      }
       .foreach { shard =>
+        Kamon.init()  // kamon init should be first thing in worker jvm
         val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
         job.updateDSPartKeyIndex(shard, startHour, endHour)
       }

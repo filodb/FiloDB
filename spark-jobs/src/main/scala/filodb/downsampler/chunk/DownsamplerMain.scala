@@ -41,6 +41,7 @@ import filodb.downsampler.DownsamplerContext
   */
 object DownsamplerMain extends App {
 
+  Kamon.init()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val batchDownsampler = new BatchDownsampler(settings)
 
@@ -98,6 +99,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
+        Kamon.init() // kamon init should be first thing in worker jvm
         import filodb.core.Iterators._
         val rawDataSource = batchDownsampler.rawCassandraColStore
         val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
@@ -111,6 +113,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
+        Kamon.init()  // kamon init should be first thing in worker jvm
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 

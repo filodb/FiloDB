@@ -23,7 +23,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
   @transient lazy private val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
 
-  private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
+  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
