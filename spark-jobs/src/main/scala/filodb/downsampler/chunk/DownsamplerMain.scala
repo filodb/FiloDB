@@ -113,6 +113,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
+        Kamon.init()
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
