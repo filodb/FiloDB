@@ -326,7 +326,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan = Parser.queryRangeToLogicalPlan(
       s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",
       qParams)
-    val  param = PromQlQueryParams(ConfigFactory.empty(), "test", 1000, 200, 5000)
+    val  param = PromQlQueryParams(ConfigFactory.empty(), "test", 1000, 200, 5000, None, true)
     val execPlan = engine.materialize(logicalPlan, QueryContext(origQueryParams = param,
       spreadOverride = Some(new StaticSpreadProvider(SpreadChange(0, 0)))))
     roundTrip(execPlan) shouldEqual execPlan

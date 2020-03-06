@@ -120,7 +120,7 @@ object PromQlExec extends StrictLogging {
   def httpGet(promQlQueryParams: PromQlQueryParams, submitTime: Long)(implicit scheduler: Scheduler):
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
 
-    val config = ConfigFactory.parseString(promQlQueryParams.config)
+    @transient lazy val config = ConfigFactory.parseString(promQlQueryParams.configString)
     val endpoint = config.as[Option[String]]("buddy.http.endpoint").get
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val buddyHttpTimeout = config.as[Option[FiniteDuration]]("buddy.http.timeout").

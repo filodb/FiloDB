@@ -23,7 +23,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   val queryContext = QueryContext()
-  val params = PromQlQueryParams(ConfigFactory.empty(), "", 0, 0 , 0)
+  val params = PromQlQueryParams(ConfigFactory.empty(), "", 0, 0 , 0, None, true)
   it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
     val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
