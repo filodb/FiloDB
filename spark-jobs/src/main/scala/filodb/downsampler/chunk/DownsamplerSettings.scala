@@ -3,7 +3,6 @@ package filodb.downsampler.chunk
 import scala.concurrent.duration._
 
 import com.typesafe.config.{Config, ConfigFactory}
-import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
@@ -16,8 +15,6 @@ import filodb.downsampler.DownsamplerContext
   * from the spark application driver.
   */
 class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializable {
-
-  Kamon.init()
 
   @transient lazy val filodbSettings = new FilodbSettings(conf)
 
