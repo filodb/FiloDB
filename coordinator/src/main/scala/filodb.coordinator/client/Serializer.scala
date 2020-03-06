@@ -98,6 +98,7 @@ class KryoInit {
     kryo.register(classOf[QueryCommands.BadQuery])
     kryo.register(classOf[QueryContext])
     kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
+    kryo.register(classOf[PromQlQueryParams], new PromQlQueryParamsSerializer)
   }
 }
 
