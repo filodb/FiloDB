@@ -13,7 +13,6 @@ import filodb.core.metadata.{Column, PartitionSchema, Schema, Schemas}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.ZeroCopyUTF8String
 
-
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
  * send over the FQCN, which wastes tons of space like Java serialization
