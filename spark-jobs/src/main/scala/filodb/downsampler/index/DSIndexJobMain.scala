@@ -60,6 +60,7 @@ class IndexJobDriver(fromHour: Long,
         it
       }
       .foreach { shard =>
+        Kamon.init()
         val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
         job.updateDSPartKeyIndex(shard, startHour, endHour)
       }
