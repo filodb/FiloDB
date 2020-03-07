@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.Future
 
-import com.datastax.driver.core.{ConsistencyLevel, Row}
+import com.datastax.driver.core.{ConsistencyLevel, ResultSet, Row}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -65,6 +65,22 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     connector.execStmtWithRetries(insert.setConsistencyLevel(writeConsistencyLevel))
   }
 
+  /**
+    * Writes a single record, exactly as-is from the readChunks method. Is
+    * used to copy records from one column store to another.
+    */
+  def writeChunks(partKeyBytes: ByteBuffer,
+                  row: Row,
+                  diskTimeToLiveSeconds: Int): Future[Response] = {
+    connector.execStmtWithRetries(writeChunksCql.bind(
+      partKeyBytes,                        // partition
+      row.getLong(0): java.lang.Long,      // chunkid
+      row.getBytes(1),                     // info
+      row.getList(2, classOf[ByteBuffer]), // chunks
+      diskTimeToLiveSeconds: java.lang.Integer)
+    )
+  }
+
   lazy val readChunkInCql = session.prepare(
                                  s"""SELECT info, chunks FROM $tableString WHERE
                                   | partition = ?
@@ -91,6 +107,37 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
       case b: ByteBuffer => decompressChunk(b)
     }
     RawChunkSet(row.getBytes(infoIndex).array, chunks)
+  }
+
+  lazy val readChunksCql = session.prepare(
+    s"SELECT chunkid, info, chunks FROM $tableString WHERE partition = ? AND chunkid IN ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  /**
+    * Reads raw chunk set Rows consisting of:
+    *
+    * chunkid: Long
+    * info:    ByteBuffer
+    * chunks:  List<ByteBuffer>
+    *
+    * Note: This method is intended for use by repair jobs and isn't async-friendly.
+    */
+  def readChunksNoAsync(partKeyBytes: ByteBuffer,
+                        chunkInfos: Seq[ByteBuffer]): ResultSet = {
+    val query = readChunksCql.bind().setBytes(0, partKeyBytes)
+                                    .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
+    session.execute(query)
+  }
+
+  lazy val readAllChunksCql = session.prepare(
+    s"SELECT chunkid, info, chunks FROM $tableString WHERE partition = ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  /**
+    * Test method which returns the same results as the readChunks method. Not async-friendly.
+    */
+  def readAllChunksNoAsync(partKeyBytes: ByteBuffer): ResultSet = {
+    session.execute(readAllChunksCql.bind().setBytes(0, partKeyBytes))
   }
 
   /**

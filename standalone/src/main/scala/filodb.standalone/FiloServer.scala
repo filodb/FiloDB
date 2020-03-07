@@ -5,6 +5,7 @@ import scala.util.control.NonFatal
 
 import akka.actor.ActorRef
 import akka.cluster.Cluster
+import com.typesafe.scalalogging.StrictLogging
 
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
@@ -63,7 +64,7 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
       scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
       val bootstrapper = bootstrap(cluster.cluster)
       val singleton = cluster.clusterSingleton(role, watcher)
-      filoHttpServer = new FiloHttpServer(cluster.system)
+      filoHttpServer = new FiloHttpServer(cluster.system, cluster.settings)
       filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
       // Launch the profiler after startup, if configured.
       SimpleProfiler.launch(systemConfig.getConfig("filodb.profiler"))
@@ -86,7 +87,12 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
   }
 }
 
-object FiloServer {
-  def main(args: Array[String]): Unit =
-    new FiloServer().start()
+object FiloServer extends StrictLogging {
+  def main(args: Array[String]): Unit = {
+    try {
+      new FiloServer().start()
+    } catch { case e: Exception =>
+      logger.error("Could not start FiloDB server", e)
+    }
+  }
 }

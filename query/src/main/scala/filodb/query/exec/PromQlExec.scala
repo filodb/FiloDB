@@ -3,6 +3,7 @@ package filodb.query.exec
 import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import scala.concurrent.Future
@@ -19,7 +20,8 @@ import filodb.query._
 
 case class PromQlExec(id: String,
                       dispatcher: PlanDispatcher,
-                      dataset: DatasetRef, params: PromQlInvocationParams,
+                      dataset: DatasetRef,
+                      params: PromQlInvocationParams,
                       submitTime: Long = System.currentTimeMillis())
                       extends LeafExecPlan {
 
@@ -42,22 +44,36 @@ case class PromQlExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
+      .asChildOf(Kamon.currentSpan())
+      .tag("query-id", id)
+      .start()
 
     val queryResponse = PromQlExec.httpGet(params).map { response =>
 
       response.unsafeBody match {
         case Left(error) => QueryError(id, error.error)
-        case Right(successResponse) => toQueryResponse(successResponse.data, id)
+        case Right(successResponse) => toQueryResponse(successResponse.data, id, execPlan2Span)
       }
 
     }
-    Task.fromFuture(queryResponse)
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(execPlan2Span, true) {
+      Task.fromFuture(queryResponse)
+    }
   }
 
-  def toQueryResponse(data: Data, id: String): QueryResponse = {
-
+  // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
+  //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
+  //   and detect it in execute() above.  Need to discuss compatibility issues with Prometheus.
+  def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse = {
+    val span = Kamon.spanBuilder(s"create-queryresponse-${getClass.getSimpleName}")
+      .asChildOf(parentSpan)
+      .tag("query-id", id)
+      .start()
     val rangeVectors = data.result.map { r =>
-
       val samples = r.values.getOrElse(Seq(r.value.get))
 
       val rv = new RangeVector {
@@ -66,7 +82,7 @@ case class PromQlExec(id: String,
         override def key: RangeVectorKey = CustomRangeVectorKey(r.metric.map (m => m._1.utf8 -> m._2.utf8))
 
         override def rows: Iterator[RowReader] = {
-          samples.iterator.map { v =>
+          samples.iterator.collect { case v: Sampl =>
             row.setLong(0, v.timestamp * 1000)
             row.setDouble(1, v.value)
             row
@@ -78,6 +94,7 @@ case class PromQlExec(id: String,
       }
       SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
     }
+    span.finish()
     QueryResult(id, resultSchema, rangeVectors)
   }
 
@@ -105,8 +122,11 @@ object PromQlExec extends  StrictLogging{
   Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val endpoint = params.config.as[Option[String]]("buddy.http.endpoint").get
     val readTimeout = params.config.as[Option[FiniteDuration]]("buddy.http.timeout").getOrElse(60.seconds)
-    var urlParams = Map("query" -> params.promQl, "start" -> params.start, "end" -> params.end, "step" -> params.step,
-      "processFailure" -> params.processFailure)
+    var urlParams = Map("query" -> params.promQl,
+                        "start" -> params.startSecs,
+                        "end" -> params.endSecs,
+                        "step" -> params.stepSecs,
+                        "processFailure" -> params.processFailure)
     if (params.spread.isDefined)
       urlParams = urlParams + ("spread" -> params.spread.get)
 

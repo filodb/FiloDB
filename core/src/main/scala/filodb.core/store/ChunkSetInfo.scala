@@ -164,7 +164,9 @@ object ChunkSetInfo extends StrictLogging {
 
   def getNumRows(infoAcc: MemoryReader, infoAddr: Long): Int = infoAcc.getInt(infoAddr + OffsetNumRows)
 
-  def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
+  def setNumRows(infoPointer: NativePointer, num: Int): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, num)
+
+  def resetNumRows(infoPointer: NativePointer): Unit = setNumRows(infoPointer, 0);
 
   def incrNumRows(infoPointer: NativePointer): Unit =
     UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
@@ -185,23 +187,25 @@ object ChunkSetInfo extends StrictLogging {
   def setVectorPtr(infoPointer: NativePointer, colNo: Int, vector: BinaryVector.BinaryVectorPtr): Unit =
     UnsafeUtils.setLong(infoPointer + OffsetVectors + 8 * colNo, vector)
 
-  // deprecated - Use reader api instead TODO remove this API
-  def getNumRows(infoBytes: Array[Byte]): Int = UnsafeUtils.getInt(infoBytes, UnsafeUtils.arayOffset + OffsetNumRows)
+  def getNumRows(info: ByteBuffer): Int = getNumRows(fromByteBuffer(info), 0)
 
-  // deprecated - Use reader api instead TODO remove this API
-  def getChunkID(infoBytes: Array[Byte]): ChunkID =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+  def getChunkID(info: ByteBuffer): ChunkID = getChunkID(fromByteBuffer(info), 0)
 
-  // deprecated - Use reader api instead TODO remove this API
-  def getIngestionTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetIngestionTime)
+  def getIngestionTime(info: ByteBuffer): Long = getIngestionTime(fromByteBuffer(info), 0)
 
-  // deprecated - Use reader api instead TODO remove this API
-  def getStartTime(infoBytes: Array[Byte]): Long = startTimeFromChunkID(getChunkID(infoBytes))
+  def getStartTime(info: ByteBuffer): Long = startTimeFromChunkID(getChunkID(info))
 
-  // deprecated - Use reader api instead TODO remove this API
-  def getEndTime(infoBytes: Array[Byte]): Long =
-    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
+  def getEndTime(info: ByteBuffer): Long = getEndTime(fromByteBuffer(info), 0)
+
+  def getNumRows(info: Array[Byte]): Int = getNumRows(fromArray(info), 0)
+
+  def getChunkID(info: Array[Byte]): ChunkID = getChunkID(fromArray(info), 0)
+
+  def getIngestionTime(info: Array[Byte]): Long = getIngestionTime(fromArray(info), 0)
+
+  def getStartTime(info: Array[Byte]): Long = startTimeFromChunkID(getChunkID(info))
+
+  def getEndTime(info: Array[Byte]): Long = getEndTime(fromArray(info), 0)
 
   /**
    * Copies the non-vector-pointer portion of ChunkSetInfo

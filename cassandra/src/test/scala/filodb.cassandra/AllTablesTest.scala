@@ -13,7 +13,8 @@ trait AllTablesTest extends FunSpec with AsyncTest {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
 
-  lazy val columnStore = new CassandraColumnStore(config, scheduler)
-  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
+  lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
+  lazy val columnStore = new CassandraColumnStore(config, scheduler, session)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
 
 }

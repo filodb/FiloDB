@@ -10,8 +10,6 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object Abs extends InstantFunctionId("abs")
 
-  case object Absent extends InstantFunctionId("absent")
-
   case object Ceil extends InstantFunctionId("ceil")
 
   case object ClampMax extends InstantFunctionId("clamp_max")
@@ -72,6 +70,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
   case object HoltWinters extends RangeFunctionId("holt_winters")
 
+  case object ZScore extends RangeFunctionId("z_score")
+
   case object Idelta extends RangeFunctionId("idelta")
 
   case object Increase extends RangeFunctionId("increase")
@@ -95,6 +95,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
 
   case object SumOverTime extends RangeFunctionId("sum_over_time")
+
+  case object Timestamp extends RangeFunctionId("timestamp")
 }
 
 sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry
@@ -224,7 +226,7 @@ object MiscellaneousFunctionId extends Enum[MiscellaneousFunctionId] {
 
   case object LabelJoin extends MiscellaneousFunctionId("label_join")
 
-  case object Timestamp extends MiscellaneousFunctionId("timestamp")
+  case object HistToPromVectors extends MiscellaneousFunctionId("hist_to_prom_vectors")
 }
 
 sealed abstract class SortFunctionId(override val entryName: String) extends EnumEntry
@@ -266,6 +268,13 @@ sealed abstract class VectorFunctionId(override val entryName: String) extends E
 object VectorFunctionId extends Enum[VectorFunctionId] {
   val values = findValues
   case object Vector extends VectorFunctionId("vector")
+}
+
+sealed abstract class AbsentFunctionId(override val entryName: String) extends EnumEntry
+
+object AbsentFunctionId extends Enum[AbsentFunctionId] {
+  val values = findValues
+  case object Absent extends AbsentFunctionId("absent")
 }
 
 

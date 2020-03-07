@@ -67,3 +67,15 @@ trait MetaStore {
   def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]]
 
 }
+
+object NullMetaStore extends MetaStore {
+  override def initialize(): Future[Response] = Future.successful(Success)
+  override def clearAllData(): Future[Response] = Future.successful(Success)
+  override def shutdown(): Unit = {}
+  override def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int,
+                               offset: Long): Future[Response] = Future.successful(Success)
+  override def readEarliestCheckpoint(dataset: DatasetRef,
+                                      shardNum: Int): Future[Long] = Future.successful(0)
+  override def readCheckpoints(dataset: DatasetRef,
+                               shardNum: Int): Future[Map[Int, Long]] = Future.successful(Map.empty)
+}

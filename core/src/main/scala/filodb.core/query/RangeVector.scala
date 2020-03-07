@@ -3,6 +3,7 @@ package filodb.core.query
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
 import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
 import kamon.Kamon
 import org.joda.time.DateTime
 
@@ -290,7 +291,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 object SerializedRangeVector extends StrictLogging {
   import filodb.core._
 
-  val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
+  val queryResultBytes = Kamon.histogram("query-engine-result-bytes").withoutTags
 
   /**
     * Creates a SerializedRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
@@ -353,3 +354,20 @@ object SerializedRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: Iterator[RowReader]) extends RangeVector
+
+final case class BufferRangeVector(key: RangeVectorKey,
+                                   timestamps: Buffer[Long],
+                                   values: Buffer[Double]) extends RangeVector {
+  require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
+
+  def rows: Iterator[RowReader] = new Iterator[RowReader] {
+    val row = new TransientRow()
+    var n = 0
+    def hasNext: Boolean = n < timestamps.length
+    def next: RowReader = {
+      row.setValues(timestamps(n), values(n))
+      n += 1
+      row
+    }
+  }
+}

@@ -4,6 +4,7 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{FilodbSettings, NodeClusterActor}
@@ -15,14 +16,14 @@ import filodb.core.store.{IngestionConfig, StoreConfig}
   */
 object DownsamplerSettings extends StrictLogging {
 
+  Kamon.init()
+
   val filodbSettings = new FilodbSettings(ConfigFactory.empty)
 
   val filodbConfig = filodbSettings.allConfig.getConfig("filodb")
 
   val downsamplerConfig = filodbConfig.getConfig("downsampler")
   logger.info(s"Loaded following downsampler config: ${downsamplerConfig.root().render()}" )
-
-  val sessionProvider = downsamplerConfig.as[Option[String]]("cass-session-provider-fqcn")
 
   val cassandraConfig = filodbConfig.getConfig("cassandra")
 
