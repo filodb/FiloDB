@@ -10,7 +10,8 @@ import org.scalatest.FunSpec
 import scala.concurrent.duration._
 import filodb.coordinator._
 import filodb.core.{AsyncTest, DatasetRef, TestData}
-import filodb.query.ExplainPlanResponse
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.query.{ExplainPlanResponse, HistSampl, Sampl, SuccessResponse}
 
 
 object PrometheusApiRouteSpec extends ActorSpecConfig {
@@ -37,6 +38,7 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
 
   import FailFastCirceSupport._
   import io.circe.generic.auto._
+  import filodb.core.{MachineMetricsData => MMD}
 
   // Use our own ActorSystem with our test config so we can init cluster properly
   // Dataset will be created and ingestion started
@@ -54,21 +56,29 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   cluster.join()
   val clusterProxy = cluster.clusterSingleton(ClusterRole.Server, None)
 
-  val settings = new HttpSettings(PrometheusApiRouteSpec.config)
+  val settings = new HttpSettings(PrometheusApiRouteSpec.config, cluster.settings)
   val prometheusAPIRoute = (new PrometheusApiRoute(cluster.coordinatorActor, settings)).route
 
   // Wait for cluster actor to start up and register datasets
   val ref = DatasetRef("prometheus")
   probe.send(clusterProxy, NodeClusterActor.GetShardMap(ref))
   probe.expectMsgPF(10.seconds) {
-    case CurrentShardSnapshot(ref, mapper) => info(s"Got mapper for $ref => ${mapper.prettyPrint}")
+    case CurrentShardSnapshot(dsRef, mapper) => info(s"Got mapper for $dsRef => ${mapper.prettyPrint}")
   }
+
+  // Use artifically early timestamp to ensure SingleCLusterPlanner magic doesn't kick in
+  val histDataStart = 1000000000L
+  val histData = MMD.linearPromHistSeries(startTs = histDataStart).take(100)
+  val histDS = Dataset("histogram", Schemas.promHistogram)
+  // NOTE: data gets sharded to shards 1 and 3
+  cluster.memStore.ingest(ref, 1, MMD.records(histDS, histData))
+  cluster.memStore.refreshIndexForTesting(ref)
 
   it("should get explainPlan for query") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
@@ -87,46 +97,95 @@ class PrometheusApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncT
   it("should take spread override value from config for app") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-0\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.count(_.startsWith("--E~MultiSchemaPartitionsExec")) shouldEqual 4
     }
   }
 
   it("should get explainPlan for query based on spread as query parameter") {
     val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
-    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-      s"start=1555427432&end=1555447432&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true&spread=2") ~> prometheusAPIRoute ~> check {
 
       handled shouldBe true
       status shouldEqual StatusCodes.OK
       contentType shouldEqual ContentTypes.`application/json`
       val resp = responseAs[ExplainPlanResponse]
       resp.status shouldEqual "success"
-      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 4
+      resp.debugInfo.count(_.startsWith("--E~MultiSchemaPartitionsExec")) shouldEqual 4
     }
   }
 
-    it("should take default spread value if there is no override") {
-      val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
+  it("should take default spread value if there is no override") {
+    val query = "heap_usage{_ws_=\"demo\",_ns_=\"App-1\"}"
 
-      Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
-        s"start=1555427432&end=1555447432&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+    Get(s"/promql/prometheus/api/v1/query_range?query=$query&" +
+      s"start=1000&end=1500&step=15&explainOnly=true") ~> prometheusAPIRoute ~> check {
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[ExplainPlanResponse]
+      resp.status shouldEqual "success"
+      resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 2
+    }
+  }
 
-        handled shouldBe true
-        status shouldEqual StatusCodes.OK
-        contentType shouldEqual ContentTypes.`application/json`
-        val resp = responseAs[ExplainPlanResponse]
-        resp.status shouldEqual "success"
-        resp.debugInfo.filter(_.startsWith("--E~MultiSchemaPartitionsExec")).length shouldEqual 2
+  import filodb.query.PromCirceSupport._
+
+  it("should auto convert Histogram data to Prom bucket vectors") {
+    val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
+
+    val start = histDataStart / 1000
+    val end   = start + 20000
+    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+      s"start=$start&end=$end&step=15") ~> prometheusAPIRoute ~> check {
+
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[SuccessResponse]
+      resp.status shouldEqual "success"
+      resp.data.result should have length (80)    // 8 vectors, one for each bucket * 10 series
+      resp.data.result.foreach { res =>
+        res.value shouldEqual None
+        res.values.get.length should be > (1)
+        res.values.get.foreach(_.isInstanceOf[Sampl])
+        res.metric.contains("le") shouldEqual true
+        res.metric("_metric_").endsWith("_bucket") shouldEqual true
       }
     }
+  }
+
+  it("should output native Histogram maps if histogramMap=true") {
+    val query = "request-latency{_ws_=\"demo\",_ns_=\"testapp\"}"
+
+    val start = histDataStart / 1000
+    val end   = start + 20000
+    Get(s"/promql/prometheus/api/v1/query_range?query=${query}&" +
+      s"start=$start&end=$end&step=15&histogramMap=true") ~> prometheusAPIRoute ~> check {
+
+      handled shouldBe true
+      status shouldEqual StatusCodes.OK
+      contentType shouldEqual ContentTypes.`application/json`
+      val resp = responseAs[SuccessResponse]
+      resp.status shouldEqual "success"
+      resp.data.result should have length (10)    // 10 series, one histogram each, each with 8 buckets
+      resp.data.result.foreach { res =>
+        res.value shouldEqual None
+        res.values.get.length should be > (1)
+        res.values.get.foreach(_.asInstanceOf[HistSampl].buckets.size shouldEqual 8)
+        res.metric.contains("le") shouldEqual false
+        res.metric("_metric_").endsWith("_bucket") shouldEqual false
+      }
+    }
+  }
 }
 

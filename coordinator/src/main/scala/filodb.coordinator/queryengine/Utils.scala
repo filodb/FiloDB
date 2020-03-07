@@ -17,7 +17,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
-import filodb.query.QueryOptions
+import filodb.query.QueryContext
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -35,11 +35,11 @@ object Utils extends StrictLogging {
    * @param dataset the Dataset to query
    * @param shardMap a ShardMapper containing the routing from shards to nodes/coordinators
    * @param partQuery the PartitionQuery to validate
-   * @param options the QueryOptions
+   * @param options the QueryContext
    */
   def validatePartQuery(dataset: Dataset, shardMap: ShardMapper,
                         partQuery: PartitionQuery,
-                        options: QueryOptions, spreadProvider: SpreadProvider):
+                        options: QueryContext, spreadProvider: SpreadProvider):
   Seq[PartitionScanMethod] Or ErrorResponse =
     Try(partQuery match {
       case SinglePartitionQuery(keyParts) =>

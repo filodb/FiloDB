@@ -100,7 +100,15 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def initializeDataset(dataset: Dataset, ingestConfig: IngestionConfig): Unit = {
     logger.info(s"Initializing dataset ${dataset.ref}")
+
+    // FIXME initialization of cass tables below for dev environments is async - need to wait before continuing
+    // for now if table is not initialized in dev on first run, simply restart server :(
     memStore.store.initialize(dataset.ref, ingestConfig.numShards)
+    // if downsampling is enabled, then initialize downsample datasets
+    ingestConfig.downsampleConfig
+                .downsampleDatasetRefs(dataset.ref.dataset)
+                .foreach { downsampleDataset => memStore.store.initialize(downsampleDataset, ingestConfig.numShards) }
+
     setupDataset( dataset,
                   ingestConfig.storeConfig,
                   IngestionSource(ingestConfig.streamFactoryClass, ingestConfig.sourceConfig),
@@ -147,9 +155,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         context.watch(ingester)
         ingesters(ref) = ingester
 
-        logger.info(s"Creating QueryActor for dataset $ref")
-        val queryRef = context.actorOf(QueryActor.props(
-                         memStore, dataset.ref, schemas, shardMaps.get(ref)), s"$Query-$ref")
+        val ttl = if (memStore.isDownsampleStore) downsample.ttls.last.toMillis
+                  else storeConf.diskTTLSeconds.toLong * 1000
+        def earliestTimestampFn: Long = System.currentTimeMillis() - ttl
+        logger.info(s"Creating QueryActor for dataset $ref with dataset ttlMs=$ttl")
+        val queryRef = context.actorOf(QueryActor.props(memStore, dataset.ref, schemas,
+          shardMaps.get(ref), earliestTimestampFn), s"$Query-$ref")
         queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
@@ -208,7 +219,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def registered(e: CoordinatorRegistered): Unit = {
     logger.info(s"Registering new ClusterActor ${e.clusterActor}")
     clusterActor = Some(e.clusterActor)
-    if (!statusActor.isDefined) {
+    if (statusActor.isEmpty) {
       statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
     } else {
       statusActor.get ! e.clusterActor    // update proxy.  NOTE: this is temporary fix

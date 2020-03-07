@@ -2,6 +2,7 @@ package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
 
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -16,6 +17,7 @@ import filodb.query.Query.qLogger
 
 /**
   * Exec Plans for fixed scalars which can execute locally without being dispatched
+  * Query example: 3, 4.2
   */
 case class ScalarFixedDoubleExec(id: String,
                                  dataset: DatasetRef,
@@ -49,18 +51,31 @@ case class ScalarFixedDoubleExec(id: String,
                        queryConfig: QueryConfig)
                       (implicit sched: Scheduler,
                        timeout: FiniteDuration): Task[QueryResponse] = {
-    val recSchema = SerializedRangeVector.toSchema(columns)
+    val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
+      .asChildOf(Kamon.currentSpan())
+      .tag("query-id", id)
+      .start()
     val resultSchema = ResultSchema(columns, 1)
     val rangeVectors : Seq[RangeVector] = Seq(ScalarFixedDouble(params, value))
-
-    Task {
-      rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
-        val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-        (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
-      }._1.toListL.map(QueryResult(id, resultSchema, _))
-    }.flatten
-
+    // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
+    // across threads. Note that task/observable will not run on the thread where span is present since
+    // kamon uses thread-locals.
+    Kamon.runWithSpan(execPlan2Span, true) {
+      Task {
+        val span = Kamon.spanBuilder(s"trasnform-${getClass.getSimpleName}")
+          .asChildOf(execPlan2Span)
+          .tag("query-id", id)
+          .start()
+        rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
+          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+          val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
+          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
+        }._1.toListL.map({
+          span.finish()
+          QueryResult(id, resultSchema, _)
+        })
+      }.flatten
+    }
   }
 
   /**
@@ -68,6 +83,6 @@ case class ScalarFixedDoubleExec(id: String,
     * to the node where it will be executed. The Query Engine
     * will supply this parameter
     */
-  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher()
+  override def dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
 }

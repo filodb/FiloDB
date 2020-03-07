@@ -10,8 +10,8 @@ import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.OutputTimeUnit
 import scalaxy.loops._
 
-import filodb.memory.format._
 import filodb.memory.NativeMemoryManager
+import filodb.memory.format._
 
 /**
  * Measures the speed of encoding different types of data,

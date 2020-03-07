@@ -337,6 +337,14 @@ sealed trait HistogramBuckets {
     tops
   }
 
+  final def bucketSet: debox.Set[Double] = {
+    val tops = debox.Set.empty[Double]
+    for { b <- 0 until numBuckets optimized } {
+      tops += bucketTop(b)
+    }
+    tops
+  }
+
   override def toString: String = allBucketTops.mkString("buckets[", ", ", "]")
 
   /**

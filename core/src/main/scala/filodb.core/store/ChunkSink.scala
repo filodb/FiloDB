@@ -13,7 +13,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 
-case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
+case class PartKeyRecord(partKey: Array[Byte], startTime: Long, endTime: Long, hash: Option[Int])
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
@@ -31,10 +31,24 @@ trait ChunkSink {
    */
   def write(ref: DatasetRef, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
+  /**
+    * Used to bootstrap lucene index with partition keys for a shard
+    */
   def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord]
 
+  /**
+    * Used by downsample shard to do periodic pulls of new partition keys
+    * into lucene index
+    *
+    * @param updateHour hour since epoch, essentially millis / 1000 / 60 / 60
+    */
+  def getPartKeysByUpdateHour(ref: DatasetRef,
+                              shard: Int,
+                              updateHour: Long): Observable[PartKeyRecord]
+
   def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response]
+                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
+                    writeToPkUTTable: Boolean = true): Future[Response]
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
@@ -60,15 +74,15 @@ trait ChunkSink {
  * Stats for a ChunkSink
  */
 class ChunkSinkStats {
-  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call")
-  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call")
-  private val chunkLenHist       = Kamon.histogram("chunk-length")
+  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call").withoutTags
+  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call").withoutTags
+  private val chunkLenHist       = Kamon.histogram("chunk-length").withoutTags
 
-  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num")
-  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
+  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num").withoutTags
+  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call").withoutTags
 
-  private val chunksetWrites     = Kamon.counter("chunkset-writes")
-  private val partKeysWrites     = Kamon.counter("partKey-writes")
+  private val chunksetWrites     = Kamon.counter("chunkset-writes").withoutTags
+  private val partKeysWrites     = Kamon.counter("partKey-writes").withoutTags
 
   val chunksetsWritten = new AtomicInteger(0)
   val partKeysWritten = new AtomicInteger(0)
@@ -80,12 +94,12 @@ class ChunkSinkStats {
   }
 
   def addIndexWriteStats(indexBytes: Long): Unit = {
-    numIndexWriteCalls.increment
+    numIndexWriteCalls.increment()
     indexBytesHist.record(indexBytes)
   }
 
   def chunksetWrite(): Unit = {
-    chunksetWrites.increment
+    chunksetWrites.increment()
     chunksetsWritten.incrementAndGet()
   }
 
@@ -142,8 +156,11 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   override def scanPartKeys(ref: DatasetRef, shard: Int): Observable[PartKeyRecord] = Observable.empty
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
-                    partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int): Future[Response] = {
+                             partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
+                             writeToPkUTTable: Boolean = true): Future[Response] = {
     partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
   }
 
+  override def getPartKeysByUpdateHour(ref: DatasetRef, shard: Int,
+                                       updateHour: Long): Observable[PartKeyRecord] = Observable.empty
 }
