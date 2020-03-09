@@ -113,7 +113,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
-        Kamon.init()
+        Kamon.init() // kamon init should be first thing in worker jvm
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
