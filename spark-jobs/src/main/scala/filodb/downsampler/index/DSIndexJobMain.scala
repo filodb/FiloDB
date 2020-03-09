@@ -12,11 +12,12 @@ object DSIndexJobMain extends App {
   Kamon.init()  // kamon init should be first thing in driver jvm
   val dsSettings = new DownsamplerSettings()
   val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
+  val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
 
   val migrateUpto: Long = hour() - 1
   //migrate partkeys between these hours
   val iu = new IndexJobDriver(migrateUpto - dsIndexJobSettings.batchLookbackInHours,
-                              migrateUpto, dsSettings, dsIndexJobSettings)
+                              migrateUpto, dsIndexJobSettings.numShards, job)
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
 
@@ -41,8 +42,8 @@ object DSIndexJobMain extends App {
   */
 class IndexJobDriver(fromHour: Long,
                      toHour: Long,
-                     dsSettings: DownsamplerSettings,
-                     dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
+                     numShards: Int,
+                     job: DSIndexJob) extends Serializable {
 
   def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
@@ -54,18 +55,16 @@ class IndexJobDriver(fromHour: Long,
     val startHour = fromHour
     val endHour = toHour
     spark.sparkContext
-      .makeRDD(0 until dsIndexJobSettings.numShards)
+      .makeRDD(0 until numShards)
       .mapPartitions { it =>
         Kamon.init()  // kamon init should be first thing in worker jvm
         it
       }
       .foreach { shard =>
-        Kamon.init()
-        val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
+        Kamon.init() // kamon init should be first thing in worker jvm
         job.updateDSPartKeyIndex(shard, startHour, endHour)
       }
 
-    Kamon.counter("index-migration-completed").withoutTags().increment
     DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
     spark
   }
