@@ -199,7 +199,7 @@ final case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingle
 final case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   override def getValue(time: Long): Double = {
     val dayOfWeek = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC).getDayOfWeek
-    if (dayOfWeek == 7) 0 else dayOfWeek.getValue
+    if (dayOfWeek.getValue == 7) 0 else dayOfWeek.getValue
   }
 }
 
