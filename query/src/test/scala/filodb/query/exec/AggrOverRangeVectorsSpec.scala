@@ -482,8 +482,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.MutableHistogram])
-      h1.add(row2(3).asInstanceOf[bv.MutableHistogram])
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(3).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
@@ -512,8 +512,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(4).asInstanceOf[bv.MutableHistogram])
-      h1.add(row2(4).asInstanceOf[bv.MutableHistogram])
+      val h1 = bv.MutableHistogram(row1(4).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(4).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
@@ -547,7 +547,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result.flatMap(_.rows.map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
 
   }
-  
+
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{
