@@ -1,12 +1,12 @@
 package filodb.downsampler
 
 import java.io.File
+import java.time.Instant
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
-import java.time.Instant
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.spark.SparkConf
@@ -25,7 +25,7 @@ import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawD
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings, OffHeapMemory}
-import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
+import filodb.downsampler.index.{DSIndexJob, DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
@@ -77,7 +77,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
 //  //Index migration job, runs for current 2hours for testing. actual job migrates last 6 hour's index updates
   val currentHour = hour()
-  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour, settings, dsIndexJobSettings)
+  val job = new DSIndexJob(settings, dsIndexJobSettings)
+  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour, dsIndexJobSettings.numShards, job)
 
   def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
     val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
@@ -246,16 +247,16 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       Seq(1574372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
       Seq(1574372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
 
-      Seq(1574372861000L, 9d, 9d, LongHistogram(bucketScheme,   Array(2L, 5, 9)), histName, seriesTags),
+      Seq(1574372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histName, seriesTags),
       Seq(1574372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
       Seq(1574372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
 
-      Seq(1574372921000L, 2d, 2d, LongHistogram(bucketScheme,   Array(0L, 0, 2)), histName, seriesTags),
-      Seq(1574372921500L, 7d, 9d, LongHistogram(bucketScheme,   Array(1L, 7, 9)), histName, seriesTags),
+      Seq(1574372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histName, seriesTags),
+      Seq(1574372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histName, seriesTags),
       Seq(1574372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
 
       Seq(1574372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
-      Seq(1574372981500L, 1d, 1d, LongHistogram(bucketScheme,   Array(0L, 1, 1)), histName, seriesTags),
+      Seq(1574372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histName, seriesTags),
       Seq(1574372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
 
       Seq(1574373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
