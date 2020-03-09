@@ -242,7 +242,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
     def finishBatch(partition: ByteBuffer): Unit = {
       for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-        futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+        futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
       }
 
       chunkInfos.clear()
@@ -276,7 +276,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         }
 
         chunkInfos += row.getBytes(3) // info
-        futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+        futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
 
         if (chunkInfos.size >= batchSize) {
           finishBatch(partition)
