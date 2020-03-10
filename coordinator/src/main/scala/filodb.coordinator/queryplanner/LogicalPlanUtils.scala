@@ -33,7 +33,7 @@ object LogicalPlanUtils {
       case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarVaryingDoublePlan     => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.startSecs, lp.rangeParams.endSecs)
+      case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.start, lp.rangeParams.end)
       case lp: VectorPlan                  => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
       case lp: ApplyAbsentFunction         => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case _                               => throw new BadQueryException(s"Invalid logical plan")
