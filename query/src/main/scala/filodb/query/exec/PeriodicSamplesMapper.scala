@@ -5,13 +5,13 @@ import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Schemas
 import filodb.core.query._
 import filodb.core.store.WindowedChunkIterator
 import filodb.memory.format._
 import filodb.memory.format.vectors.LongBinaryVector
 import filodb.query._
 import filodb.query.Query.qLogger
+import filodb.query.exec.InternalRangeFunction.AvgWithSumAndCountOverTime
 import filodb.query.exec.rangefn._
 import filodb.query.util.IndexedArrayQueue
 
@@ -117,10 +117,14 @@ final case class PeriodicSamplesMapper(start: Long,
 
   // Transform source double or long to double schema
   override def schema(source: ResultSchema): ResultSchema = {
-    // Special treatment for downsampled gauge schema - return regular timestamp/value
-    if (source.columns == Schemas.dsGauge.dataInfos) {
+    // Special treatment for downsampled gauge schema.
+    // Source schema will be the selected columns. Result of this mapper should be regular timestamp/value
+    // since the avg will be calculated using sum and count
+    // FIXME dont like that this is hardcoded; but the check is needed.
+    if (functionId.contains(AvgWithSumAndCountOverTime) &&
+                        source.columns.map(_.name) == Seq("timestamp", "sum", "count")) {
       source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
-        ColumnInfo("value", ColumnType.DoubleColumn)))
+                                ColumnInfo("value", ColumnType.DoubleColumn)))
     } else {
       source.copy(columns = source.columns.zipWithIndex.map {
         // Transform if its not a row key column
