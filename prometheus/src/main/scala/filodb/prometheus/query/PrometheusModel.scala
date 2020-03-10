@@ -75,7 +75,8 @@ object PrometheusModel {
   }
 
   def toPromSuccessResponse(qr: FiloQueryResult, verbose: Boolean): SuccessResponse = {
-    val results = if (qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
+    val results = if (qr.resultSchema.columns.nonEmpty &&
+                      qr.resultSchema.columns(1).colType == ColumnType.HistogramColumn)
                     qr.result.map(toHistResult(_, verbose, qr.resultType))
                   else
                     qr.result.map(toPromResult(_, verbose, qr.resultType))
