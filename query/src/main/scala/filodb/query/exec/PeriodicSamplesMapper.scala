@@ -117,8 +117,12 @@ final case class PeriodicSamplesMapper(start: Long,
 
   // Transform source double or long to double schema
   override def schema(source: ResultSchema): ResultSchema = {
-    // Special treatment for downsampled gauge schema - return regular timestamp/value
-    if (functionId.contains(AvgWithSumAndCountOverTime)) {
+    // Special treatment for downsampled gauge schema.
+    // Source schema will be the selected columns. Result of this mapper should be regular timestamp/value
+    // since the avg will be calculated using sum and count
+    // FIXME dont like that this is hardcoded; but the check is needed.
+    if (functionId.contains(AvgWithSumAndCountOverTime) &&
+                        source.columns.map(_.name) == Seq("timestamp", "sum", "count")) {
       source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
                                 ColumnInfo("value", ColumnType.DoubleColumn)))
     } else {
