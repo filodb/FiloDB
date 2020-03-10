@@ -368,7 +368,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     val resultRv = nonNanTimestamps.map {
       t =>
         val rowList = new ListBuffer[TransientRow]()
-        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+        for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
           if (!t.contains(i * 1000))
             rowList += new TransientRow(i * 1000, 1)
         }
