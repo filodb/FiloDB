@@ -557,16 +557,3 @@ class TimestampChunkedFunction (var value: Double = Double.NaN) extends ChunkedR
   }
 }
 
-class LastSampleChunkedFunctionWithNanD extends LastSampleChunkedFuncDblVal() {
-  def updateValue(ts: Long, valAcc: MemoryReader, valVector: BinaryVectorPtr,
-                  valReader: VectorDataReader, endRowNum: Int): Unit = {
-    val dblReader = valReader.asDoubleReader
-    val doubleVal = dblReader(valAcc, valVector, endRowNum)
-    // If the last value is NaN, that may be Prometheus end of time series marker.
-    // In that case try to get the sample before last.
-    // If endRowNum==0, we are at beginning of chunk, and if the window included the last chunk, then
-    // the call to addChunks to the last chunk would have gotten the last sample value anyways.
-    timestamp = ts
-    value = doubleVal
-  }
-}
