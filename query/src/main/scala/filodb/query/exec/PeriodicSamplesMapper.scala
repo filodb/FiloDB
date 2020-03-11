@@ -123,7 +123,7 @@ final case class PeriodicSamplesMapper(start: Long,
     // FIXME dont like that this is hardcoded; but the check is needed.
     if (functionId.contains(AvgWithSumAndCountOverTime) &&
                         source.columns.map(_.name) == Seq("timestamp", "sum", "count")) {
-      source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+      source.copy(columns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                 ColumnInfo("value", ColumnType.DoubleColumn)))
     } else {
       source.copy(columns = source.columns.zipWithIndex.map {
