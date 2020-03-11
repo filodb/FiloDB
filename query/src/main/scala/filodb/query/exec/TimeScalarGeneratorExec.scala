@@ -20,7 +20,7 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
                                    dataset: DatasetRef, params: RangeParams,
                                    function: ScalarFunctionId) extends LeafExecPlan {
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
 
   /**

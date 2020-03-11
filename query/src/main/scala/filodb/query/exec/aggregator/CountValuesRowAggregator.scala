@@ -82,7 +82,8 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
   }
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
-    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
+    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control

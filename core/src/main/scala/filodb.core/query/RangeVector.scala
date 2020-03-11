@@ -124,16 +124,16 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
   override def numRowsInt: Int = timeValueMap.size
 }
 
-final case class RangeParams(start: Long, step: Long, end: Long)
+final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
   override def rows: Iterator[RowReader] = {
-    Iterator.from(0, rangeParams.step.toInt).takeWhile(_ <= rangeParams.end - rangeParams.start).map { i =>
+    Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
-      val t = i + rangeParams.start
+      val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
     }
   }
