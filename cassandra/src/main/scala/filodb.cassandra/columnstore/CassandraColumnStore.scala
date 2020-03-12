@@ -477,14 +477,14 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
-                                    { dataset: DatasetRef =>
-                                      new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
-  }
+                        { dataset: DatasetRef =>
+                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+}
 
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
-        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector)(readEc) })
+        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {

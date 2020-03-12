@@ -12,7 +12,8 @@ import filodb.core.{DatasetRef, Response}
 import filodb.core.store.PartKeyRecord
 
 sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
-                                            val connector: FiloCassandraConnector)
+                                            val connector: FiloCassandraConnector,
+                                            writeConsistencyLevel: ConsistencyLevel)
                                            (implicit ec: ExecutionContext) extends BaseDatasetTable {
 
   import filodb.cassandra.Util._
@@ -32,11 +33,16 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
        |    WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
       // TODO time window compaction since we have time component in the primary key
 
-  lazy val writePartitionKeyCql =
-    session.prepare(
-      s"INSERT INTO ${tableString} (shard, epochHour, split, partKey, startTime, endTime) " +
-        s"VALUES (?, ?, ?, ?, ?, ?) USING TTL ?")
-      .setConsistencyLevel(ConsistencyLevel.ONE)
+  private lazy val writePartitionKeyCql = session.prepare(
+    s"INSERT INTO $tableString (shard, epochHour, split, partKey, startTime, endTime) " +
+    s"VALUES (?, ?, ?, ?, ?, ?) USING TTL ?")
+    .setConsistencyLevel(writeConsistencyLevel)
+
+  private lazy val readCql = session.prepare(
+    s"SELECT * FROM $tableString " +
+    s"WHERE shard = ? AND epochHour = ? AND split = ? ")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
 
   def writePartKey(shard: Int, updateHour: Long, split: Int,
                    pk: PartKeyRecord, ttlSeconds: Int): Future[Response] = {
@@ -45,8 +51,6 @@ sealed class PartitionKeysByUpdateTimeTable(val dataset: DatasetRef,
       toBuffer(pk.partKey), pk.startTime: JLong, pk.endTime: JLong, ttlSeconds: JInt))
   }
 
-  lazy val readCql = session.prepare(s"SELECT * FROM $tableString " +
-    s"WHERE shard = ? AND epochHour = ? AND split = ? ")
   def scanPartKeys(shard: Int, updateHour: Long, split: Int): Observable[PartKeyRecord] = {
     session.executeAsync(readCql.bind(shard: JInt, updateHour: JLong, split: JInt))
       .toObservable.handleObservableErrors

@@ -40,10 +40,36 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
                     |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val writeChunksCql = session.prepare(
-    s"""INSERT INTO $tableString (partition, chunkid, info, chunks
-      |) VALUES (?, ?, ?, ?) USING TTL ?""".stripMargin
-  ).setConsistencyLevel(writeConsistencyLevel)
+  private lazy val writeChunksCql = session.prepare(
+    s"INSERT INTO $tableString (partition, chunkid, info, chunks) " +
+    s"VALUES (?, ?, ?, ?) USING TTL ?")
+    .setConsistencyLevel(writeConsistencyLevel)
+
+  private lazy val readChunkInCql = session.prepare(
+    s"SELECT info, chunks FROM $tableString " +
+    s"WHERE partition = ? AND chunkid IN ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val readChunksCql = session.prepare(
+    s"SELECT chunkid, info, chunks FROM $tableString " +
+    s"WHERE partition = ? AND chunkid IN ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val readAllChunksCql = session.prepare(
+    s"SELECT chunkid, info, chunks FROM $tableString " +
+    s"WHERE partition = ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val scanBySplit = session.prepare(
+    s"SELECT partition, info, chunks FROM $tableString " +
+    s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val readChunkRangeCql = session.prepare(
+    s"SELECT partition, info, chunks FROM $tableString " +
+    s"WHERE partition IN ? AND chunkid >= ? AND chunkid < ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
 
   def writeChunks(partition: Array[Byte],
                   chunkInfo: ChunkSetInfo,
@@ -81,12 +107,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     )
   }
 
-  lazy val readChunkInCql = session.prepare(
-                                 s"""SELECT info, chunks FROM $tableString WHERE
-                                  | partition = ?
-                                  | AND chunkid IN ?""".stripMargin)
-                              .setConsistencyLevel(ConsistencyLevel.ONE)
-
   /**
    * Reads and returns a single RawPartData, raw data for a single partition/time series
    */
@@ -109,10 +129,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     RawChunkSet(row.getBytes(infoIndex).array, chunks)
   }
 
-  lazy val readChunksCql = session.prepare(
-    s"SELECT chunkid, info, chunks FROM $tableString WHERE partition = ? AND chunkid IN ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
-
   /**
     * Reads raw chunk set Rows consisting of:
     *
@@ -129,10 +145,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     session.execute(query)
   }
 
-  lazy val readAllChunksCql = session.prepare(
-    s"SELECT chunkid, info, chunks FROM $tableString WHERE partition = ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
-
   /**
     * Test method which returns the same results as the readChunks method. Not async-friendly.
     */
@@ -143,12 +155,6 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   /**
    * Reads and returns a stream of RawPartDatas given a range of chunkIDs from multiple partitions
    */
-  lazy val readChunkRangeCql = session.prepare(
-                                 s"""SELECT partition, info, chunks FROM $tableString WHERE
-                                  | partition IN ?
-                                  | AND chunkid >= ? AND chunkid < ?""".stripMargin)
-                              .setConsistencyLevel(ConsistencyLevel.ONE)
-
   def readRawPartitionRange(partitions: Seq[Array[Byte]],
                             startTime: Long,
                             endTimeExclusive: Long): Observable[RawPartData] = {
@@ -177,10 +183,10 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   }
 
   def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
-    def cql(start: String, end: String): String =
-      s"SELECT partition, info, chunks FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end "
+
     val res: Observable[Future[Iterator[RawPartData]]] = Observable.fromIterable(tokens).map { case (start, end) =>
-      session.executeAsync(cql(start, end)).toIterator.handleErrors
+      val stmt = scanBySplit.bind(start.toLong: java.lang.Long, end.toLong: java.lang.Long)
+      session.executeAsync(stmt).toIterator.handleErrors
               .map { rowIt =>
                 rowIt.map { row => (row.getBytes(0), chunkSetFromRow(row, 1)) }
                   .sortedGroupBy(_._1)
