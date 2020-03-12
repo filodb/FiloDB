@@ -84,6 +84,11 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                      ingestionTimeEnd: Long): Iterator[Row] = {
 
     tokens.iterator.flatMap { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
       val stmt = scanCql1.bind(start.toLong: java.lang.Long,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,
@@ -96,6 +101,11 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
                                   ingestionTimeStart: Long,
                                   ingestionTimeEnd: Long): Observable[ByteBuffer] = {
     val it = tokens.iterator.flatMap { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
       val stmt = scanCql2.bind(start.toLong: java.lang.Long,
                                end.toLong: java.lang.Long,
                                ingestionTimeStart: java.lang.Long,

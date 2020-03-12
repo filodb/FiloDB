@@ -185,6 +185,11 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   def scanPartitionsBySplit(tokens: Seq[(String, String)]): Observable[RawPartData] = {
 
     val res: Observable[Future[Iterator[RawPartData]]] = Observable.fromIterable(tokens).map { case (start, end) =>
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way to bind tokens is to do stmt.bind().setPartitionKeyToken(token)
+       */
       val stmt = scanBySplit.bind(start.toLong: java.lang.Long, end.toLong: java.lang.Long)
       session.executeAsync(stmt).toIterator.handleErrors
               .map { rowIt =>

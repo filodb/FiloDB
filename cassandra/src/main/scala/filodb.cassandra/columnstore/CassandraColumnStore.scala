@@ -391,6 +391,11 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 }
 
+/**
+  * FIXME this works only for Murmur3Partitioner because it generates
+  * Long based tokens. If other partitioners are used, this can potentially break.
+  * Correct way is to pass Token objects so CQL stmts can bind tokens with stmt.bind().setPartitionKeyToken(token)
+  */
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
                                     replicas: Set[InetSocketAddress]) extends ScanSplit {
   // NOTE: You need both the host string and the IP address for Spark's locality to work
