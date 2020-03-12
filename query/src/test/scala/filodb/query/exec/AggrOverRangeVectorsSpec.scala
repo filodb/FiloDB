@@ -19,7 +19,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val rand = new Random()
   val error = 0.0000001d
 
-  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
   val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
@@ -282,7 +282,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result7 = resultObs7.toListL.runAsync.futureValue
     result7.size shouldEqual 1
 
-    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializedRangeVector.newBuilder()
     val srv = SerializedRangeVector(result7(0), builder, recSchema, "Unit-Test")

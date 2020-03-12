@@ -22,9 +22,9 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
-  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
-  val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val tvSchemaTask = Task.now(tvSchema)
 

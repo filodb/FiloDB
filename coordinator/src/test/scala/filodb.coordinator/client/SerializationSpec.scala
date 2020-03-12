@@ -131,7 +131,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     }.toBuffer
 
 
-    val cols = Array(new ColumnInfo("timestamp", ColumnType.LongColumn),
+    val cols = Array(new ColumnInfo("timestamp", ColumnType.TimestampColumn),
       new ColumnInfo("value", ColumnType.DoubleColumn))
     val srvs = for { i <- 0 to 9 } yield {
       val rv = new RangeVector {

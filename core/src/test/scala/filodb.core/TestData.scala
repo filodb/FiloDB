@@ -217,7 +217,7 @@ object GdeltTestData {
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
-  val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
+  val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
   val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,

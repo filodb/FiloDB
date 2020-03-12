@@ -368,7 +368,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     val resultRv = nonNanTimestamps.map {
       t =>
         val rowList = new ListBuffer[TransientRow]()
-        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+        for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
           if (!t.contains(i * 1000))
             rowList += new TransientRow(i * 1000, 1)
         }
@@ -382,7 +382,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
   }
   override def funcParams: Seq[FuncArgs] = Nil
   override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
-    ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   override def canHandleEmptySchemas: Boolean = true
 }
@@ -454,7 +454,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   override def schema(source: ResultSchema): ResultSchema =
     if (valueColumnType(source) != ColumnType.HistogramColumn) source else
-    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   private def addNewBuckets(newScheme: HistogramBuckets,
                             buckets: debox.Map[Double, debox.Buffer[Double]],
