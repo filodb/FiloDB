@@ -107,7 +107,7 @@ object ChunkCopier {
 object ChunkCopierMain extends App with StrictLogging {
   run(new SparkConf(loadDefaults = true))
 
-  private def run(conf: SparkConf): SparkSession = {
+  def run(conf: SparkConf): SparkSession = {
     try {
       logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
 
