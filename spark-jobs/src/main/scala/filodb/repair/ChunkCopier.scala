@@ -125,19 +125,27 @@ object ChunkCopierMain extends App with StrictLogging {
 
       spark.sparkContext
         .makeRDD(splits)
-        .foreachPartition(splitIter => ChunkCopier.lookup(conf).run(splitIter))
+        .foreachPartition(splitIter => {
+          try {
+            ChunkCopier.lookup(conf).run(splitIter)
+          } catch {
+            case e: Throwable => throw addTrace(e)
+          }
+        })
 
       logger.info(s"ChunkCopier Driver completed successfully")
 
       copier.shutdown()
       spark
     } catch {
-      case e: Throwable => {
-        val trace = e.getStackTrace().mkString(" at ")
-        val e2 = new RuntimeException(s"$e: $trace")
-        e2.initCause(e)
-        throw e2
-      }
+      case e: Throwable => throw addTrace(e)
     }
+  }
+
+  private def addTrace(cause: Throwable): Throwable = {
+    val trace = cause.getStackTrace().mkString(" at ")
+    val e = new RuntimeException(s"$cause: $trace")
+    e.initCause(cause)
+    e
   }
 }
