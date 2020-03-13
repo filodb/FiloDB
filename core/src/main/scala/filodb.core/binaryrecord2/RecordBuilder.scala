@@ -697,7 +697,7 @@ object RecordBuilder {
   final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
     val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
     val downsampleSchema = rawSchema.downsample.get
-    if (rawSchema != downsampleSchema) {
+    if (rawSchema.schemaHash != downsampleSchema.schemaHash) {
       UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, downsampleSchema.schemaHash.toShort)
     }
   }
