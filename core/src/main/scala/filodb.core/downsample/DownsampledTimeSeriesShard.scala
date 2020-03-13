@@ -155,7 +155,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // before refresh happens because we will not revist the hour again.
     val toHour = hour() - 2
     val fromHour = indexUpdatedHour.get() + 1
-    indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+    indexRefresher.refreshWithDownsamplePartKeys(partKeyIndex, shardNum, rawDatasetRef,
+                                                 fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
         indexUpdatedHour.set(toHour)
         stats.indexEntriesRefreshed.increment(count)
@@ -181,8 +182,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
   }
 
-  private def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
-    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset).getOrElse(createPartitionID())
+  private def lookupOrCreatePartId(pk: Array[Byte]): Int = {
+    partKeyIndex.partIdFromPartKeySlow(pk, UnsafeUtils.arayOffset).getOrElse(createPartitionID())
   }
 
   /**
