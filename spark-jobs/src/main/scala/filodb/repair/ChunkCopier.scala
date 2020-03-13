@@ -105,7 +105,16 @@ object ChunkCopier {
   * For launching the Spark job.
   */
 object ChunkCopierMain extends App with StrictLogging {
-  run(new SparkConf(loadDefaults = true))
+  try {
+    run(new SparkConf(loadDefaults = true))
+  } catch {
+    case e: Throwable => {
+      val trace = e.getStackTrace().mkString(" at ")
+      val e2 = new RuntimeException(s"$e: $trace")
+      e2.initCause(e)
+      throw e2
+    }
+  }
 
   def run(conf: SparkConf): SparkSession = {
     logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
