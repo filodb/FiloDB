@@ -174,7 +174,6 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("some_metric OFFSET 1m[5m]")
     parseError("(foo + bar)[5m]")
 
-
     parseSuccessfully("sum by (foo)(some_metric)")
     parseSuccessfully("avg by (foo)(some_metric)")
     parseSuccessfully("max by (foo)(some_metric)")
@@ -186,9 +185,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("topk(5, some_metric)")
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
-    // parseSuccessfully("sum_over_time(foo)")
     parseError("sum_over_time(foo)")
-
 
     parseError("sum(other_metric) by (foo)(some_metric)")
     parseError("sum without(==)(some_metric)")
@@ -277,6 +274,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("holt_winters(some_metric, 0.5, 0.5)") // reason : Expected range-vector, got instant
     parseError("holt_winters(some_metric[5m])") // reason : Expected 3 args, got 1
     parseError("holt_winters(some_metric[5m], 1, 0.1 )") // reason : Invalid smoothing value, 0<sf<1
+    parseError("holt_winters(some_metric[5m], 0.1, 100 )") // reason : Invalid trend value, 0<sf<1
+    parseError("holt_winters(some_metric[5m], 100, 100 )") // reason : Invalid trend value, 0<sf<1
     parseError("holt_winters(0.1, 0.1, some_metric[5m])") // reason : Expected range-vector, got scalar
     parseError("holt_winters(some_metric[5m], 0.5, 0.5, hello)") // reason :Expected 3 args, got 4
 
@@ -443,9 +442,6 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,Changes,List(),None)",
       "quantile_over_time(0.4,http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarFixedDoublePlan(0.4,RangeParams(1524855988,1000,1524855988))),None)",
-  //   below quantile_over_time test-case is invalid, because second param needs to be a scalar(number)
-  //    "quantile_over_time(http_requests_total{job=\"api-server\"}[5m], Scalar(http_requests_total))" ->
-  //      "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,QuantileOverTime,List(ScalarVaryingDoublePlan(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),Scalar,List())),None)",
        "label_replace(http_requests_total,instance,new-label,instance,\"(.*)-(.*)\")" -> "ApplyMiscellaneousFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),LabelReplace,List(instance, new-label, instance, (.*)-(.*)))",
       "holt_winters(http_requests_total{job=\"api-server\"}[5m], 0.01, 0.1)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,300000,HoltWinters,List(ScalarFixedDoublePlan(0.01,RangeParams(1524855988,1000,1524855988)), ScalarFixedDoublePlan(0.1,RangeParams(1524855988,1000,1524855988))),None)",

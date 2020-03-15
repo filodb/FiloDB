@@ -26,13 +26,9 @@ trait Functions extends Base with Operators with Vectors {
     // In case of invalid params/invalid syntax, then throw exceptions with similar error-messages like promql.
 
     // error messages
-    val errExpectedRangeVector = "Expected type range vector in call to function "
-    val errExpectedScalar = "Expected type scalar in call to function "
-    val errExpectedInstantVector = "Expected type instant vector in call to function "
     val errWrongArgumentCount = "argument(s) in call to function "
 
     val functionId = RangeFunctionId.withNameLowercaseOnlyOption(name.toLowerCase)
-
     if (functionId.nonEmpty) {
       val funcName = functionId.get.entryName
       // get the parameter spec of the function from RangeFunctionID
@@ -40,43 +36,37 @@ trait Functions extends Base with Operators with Vectors {
 
       // if the length of the args in param spec is NOT similar to the args in the i/p query, then the i/p query is INCORRECT
       // throw invalid no. of args exception.
-      if(paramSpec.length != allParams.length)
+      if (paramSpec.length != allParams.length)
         throw new IllegalArgumentException(s"Expected ${paramSpec.length} $errWrongArgumentCount $funcName, got ${allParams.size}")
 
-      // if length of param spec and all params is same, then check the type of each arguments and also check the order of the arguments.
+      // if length of param spec and all params is same, then check the type of each argument and check the order of the arguments.
       else {
         paramSpec.zipWithIndex.foreach {
           case (specType, index) => specType match {
-            case RangeVectorParam =>
+            case RangeVectorParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[RangeExpression])
-                throw new IllegalArgumentException(s"$errExpectedRangeVector $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
 
-            case InstantVectorParam =>
+            case InstantVectorParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[InstantExpression])
-                throw new IllegalArgumentException(s"$errExpectedInstantVector $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
 
-            case ScalarParam =>
+            case ScalarParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[ScalarExpression])
-                throw new IllegalArgumentException(s"$errExpectedScalar $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
 
-            case ScalarRangeParam(min, max) =>
+            case ScalarRangeParam(min, max, errorMsg) =>
               val paramObj = allParams(index)
               // Function like "Holt-winters" needs trend & smoothing factor between 0 and 1.
               // If the obj is Scalar Expression, validate the value of the obj to be between 0 and 1.
               // If the obj is not Scalar Expression, then throw exception.
               if (!paramObj.isInstanceOf[ScalarExpression])
-                throw new IllegalArgumentException(s"$errExpectedScalar $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
 
               else {
                 val paramValue = paramObj.asInstanceOf[ScalarExpression].toScalar
-                if (!(paramValue > min && paramValue < max)) {
-                  // if index == 1 ; then it's a smoothing factor
-                  if (index == 1)
-                    throw new IllegalArgumentException(s"Invalid Smoothing factor. Expected: 0 < sf < 1, got: $paramValue")
-                  // if index == 2 ; then it's a trend factor
-                  if (index == 2)
-                    throw new IllegalArgumentException(s"Invalid Trend factor. Expected: 0 < tf < 1, got: $paramValue")
-                }
+                if (!(paramValue > min && paramValue < max))
+                  throw new IllegalArgumentException(s"$errorMsg $paramValue")
               }
 
             case _ => throw new IllegalArgumentException("Invalid Query")
