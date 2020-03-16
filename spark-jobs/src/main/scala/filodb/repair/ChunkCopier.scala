@@ -120,7 +120,7 @@ object ChunkCopierMain extends App with StrictLogging {
     val splits = copier.getScanSplits
 
     logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-      s"Tune splitsPerNode which was $copier.splitsPerNode if parallelism is low")
+      s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
