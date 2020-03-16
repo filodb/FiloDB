@@ -108,36 +108,27 @@ object ChunkCopierMain extends App with StrictLogging {
   run(new SparkConf(loadDefaults = true))
 
   def run(conf: SparkConf): SparkSession = {
-    try {
-      logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
+    logger.info(s"ChunkCopier Spark Job Properties: ${conf.toDebugString}")
 
-      val copier = ChunkCopier.lookup(conf)
+    val copier = ChunkCopier.lookup(conf)
 
-      val spark = SparkSession.builder()
-        .appName("FiloDBChunkCopier")
-        .config(conf)
-        .getOrCreate()
+    val spark = SparkSession.builder()
+      .appName("FiloDBChunkCopier")
+      .config(conf)
+      .getOrCreate()
 
-      val splits = copier.getScanSplits
+    val splits = copier.getScanSplits
 
-      logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-        s"Tune splitsPerNode which was $copier.splitsPerNode if parallelism is low")
+    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+      s"Tune splitsPerNode which was $copier.splitsPerNode if parallelism is low")
 
-      spark.sparkContext
-        .makeRDD(splits)
-        .foreachPartition(splitIter => ChunkCopier.lookup(conf).run(splitIter))
+    spark.sparkContext
+      .makeRDD(splits)
+      .foreachPartition(splitIter => ChunkCopier.lookup(conf).run(splitIter))
 
-      logger.info(s"ChunkCopier Driver completed successfully")
+    logger.info(s"ChunkCopier Driver completed successfully")
 
-      copier.shutdown()
-      spark
-    } catch {
-      case e: Throwable => {
-        val trace = e.getStackTrace().mkString(" at ")
-        val e2 = new RuntimeException(s"$e: $trace")
-        e2.initCause(e)
-        throw e2
-      }
-    }
+    copier.shutdown()
+    spark
   }
 }
