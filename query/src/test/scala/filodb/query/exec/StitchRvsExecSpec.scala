@@ -1,10 +1,9 @@
 package filodb.query.exec
 
-import filodb.core.query.{ColumnInfo, ResultSchema, TransientRow}
+import filodb.core.query.{ColumnInfo, QueryContext, ResultSchema, TransientRow}
+
 import scala.annotation.tailrec
-
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.memory.format.UnsafeUtils
 import filodb.query.QueryResult
@@ -98,7 +97,7 @@ class StitchRvsExecSpec extends FunSpec with Matchers {
   it ("should reduce result schemas with different fixedVecLengths without error") {
 
     // null needed below since there is a require in code that prevents empty children
-    val exec = StitchRvsExec("someId", InProcessPlanDispatcher, Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
+    val exec = StitchRvsExec(QueryContext(), InProcessPlanDispatcher, Seq(UnsafeUtils.ZeroPointer.asInstanceOf[ExecPlan]))
 
     val rs1 = ResultSchema(List(ColumnInfo("timestamp",
       TimestampColumn), ColumnInfo("value", DoubleColumn)), 1, Map(), Some(430), List(0, 1))

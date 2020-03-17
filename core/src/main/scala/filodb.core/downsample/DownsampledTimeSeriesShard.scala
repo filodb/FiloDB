@@ -155,7 +155,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     // before refresh happens because we will not revist the hour again.
     val toHour = hour() - 2
     val fromHour = indexUpdatedHour.get() + 1
-    indexRefresher.refreshIndex(partKeyIndex, shardNum, rawDatasetRef, fromHour, toHour)(lookupOrCreatePartId)
+    indexRefresher.refreshWithDownsamplePartKeys(partKeyIndex, shardNum, rawDatasetRef,
+                                                 fromHour, toHour, schemas)(lookupOrCreatePartId)
       .map { count =>
         indexUpdatedHour.set(toHour)
         stats.indexEntriesRefreshed.increment(count)
@@ -170,8 +171,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   private def startStatsUpdateTask(): Unit = {
-    logger.info(s"Starting Index Refresh task from raw dataset=$rawDatasetRef shard=$shardNum " +
-      s"every ${rawStoreConfig.flushInterval}")
+    logger.info(s"Starting Stats Update task from raw dataset=$rawDatasetRef shard=$shardNum every 1 minute")
     gaugeUpdateFuture = Observable.intervalWithFixedDelay(1.minute).map { _ =>
       updateGauges()
     }.onErrorRestartUnlimited.completedL.runAsync(housekeepingSched)
@@ -182,8 +182,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     stats.indexRamBytes.update(partKeyIndex.indexRamBytes)
   }
 
-  private def lookupOrCreatePartId(pk: PartKeyRecord): Int = {
-    partKeyIndex.partIdFromPartKeySlow(pk.partKey, UnsafeUtils.arayOffset).getOrElse(createPartitionID())
+  private def lookupOrCreatePartId(pk: Array[Byte]): Int = {
+    partKeyIndex.partIdFromPartKeySlow(pk, UnsafeUtils.arayOffset).getOrElse(createPartitionID())
   }
 
   /**
@@ -270,7 +270,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
       val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
       RecordSchema.schemaID(pkBytesRef.bytes, unsafeKeyOffset)
-    }.getOrElse(throw new IllegalStateException("PartId returned by lucene, but partKey not found"))
+    }.getOrElse(throw new IllegalStateException(s"PartId $partID returned by lucene, but partKey not found"))
   }
 
   private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = {
@@ -285,9 +285,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
 
   private def makePagedPartition(part: RawPartData, firstSchemaId: Int): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
-    if (schemaId != firstSchemaId)
-      throw new IllegalArgumentException("Query involves results with multiple schema. " +
-        "Use type tag to provide narrower query")
+    if (schemaId != firstSchemaId) {
+      throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
+    }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
     new PagedReadablePartition(schemas(schemaId), shardNum, -1, part)
   }
@@ -339,8 +339,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       // TODO small optimization for some other day
       util.Arrays.copyOfRange(partKeyBytes.get.bytes, partKeyBytes.get.offset,
         partKeyBytes.get.offset + partKeyBytes.get.length)
-    else throw new IllegalStateException("This is not an expected behavior." +
-      " PartId should always have a corresponding PartKey!")
+    else throw new IllegalStateException(s"Could not find partKey or partId $partId. This is not a expected behavior.")
   }
 
   def cleanup(): Unit = {

@@ -82,7 +82,8 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
   }
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
-    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
+    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializedRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
@@ -109,7 +110,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
       ChunkMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>
-      val numRows = builder.allContainers.map(_.countRecords).sum
+      val numRows = builder.allContainers.map(_.countRecords()).sum
       new SerializedRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }
@@ -122,7 +123,7 @@ class CountValuesRowAggregator(label: String, limit: Int = 1000) extends RowAggr
   }
 
   def presentationSchema(reductionSchema: ResultSchema): ResultSchema = {
-    ResultSchema(Array(reductionSchema.columns(0), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema(Array(reductionSchema.columns.head, ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   }
 }
 

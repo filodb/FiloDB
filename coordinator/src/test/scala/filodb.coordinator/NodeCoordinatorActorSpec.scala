@@ -119,9 +119,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     }
   }
 
-  val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
-  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("count", DoubleColumn)), 1)
-  val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("value", DoubleColumn)), 1)
+  val timeMinSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("min", DoubleColumn)), 1)
+  val countSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("count", DoubleColumn)), 1)
+  val valueSchema = ResultSchema(Seq(ColumnInfo("timestamp", TimestampColumn), ColumnInfo("value", DoubleColumn)), 1)
   val qOpt = QueryContext(shardOverrides = Some(Seq(0)))
 
   describe("QueryActor commands and responses") {

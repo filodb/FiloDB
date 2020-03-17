@@ -2,10 +2,11 @@ package com.esotericsoftware.kryo.io
 
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.Kryo
+import com.typesafe.config.{ ConfigFactory, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
-import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey}
+import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey, PromQlQueryParams}
 import filodb.memory.format._
 
 // NOTE: This file has to be in the kryo namespace so we can use the require() method
@@ -75,5 +76,28 @@ class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
     kryo.writeObject(output, info.schema)
     BinaryRegionUtils.writeLargeRegion(info.base, info.offset, output)
     output.writeInt(info.shardNo)
+  }
+}
+
+class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
+  override def read(kryo: Kryo, input: Input, typ: Class[PromQlQueryParams]): PromQlQueryParams = {
+    val config = ConfigFactory.parseString(input.readString())
+    val promQl = input.readString()
+    val start = input.readLong()
+    val step = input.readLong()
+    val end = input.readLong()
+    val spreadInt = input.readInt()
+    val spread = if (spreadInt == -1) None else Some(spreadInt)
+    val procFailure = input.readBoolean()
+    PromQlQueryParams(config, promQl, start, step, end, spread, procFailure)
+  }
+  override def write(kryo: Kryo, output: Output, promParam: PromQlQueryParams): Unit = {
+    output.writeString(promParam.config.root().render(ConfigRenderOptions.concise()))
+    output.writeString(promParam.promQl)
+    output.writeLong(promParam.startSecs)
+    output.writeLong(promParam.stepSecs)
+    output.writeLong(promParam.endSecs)
+    output.writeInt(promParam.spread.getOrElse(-1))
+    output.writeBoolean(promParam.processFailure)
   }
 }

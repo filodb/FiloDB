@@ -1,14 +1,12 @@
 package filodb.query.exec
 
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import monix.reactive.observables.ConnectableObservable
 
 import filodb.core.DatasetRef
 import filodb.core.memstore.{FiloSchedulers, SchemaMismatch}
@@ -41,27 +39,21 @@ final case class ExecResult(rvs: Observable[RangeVector], schema: Task[ResultSch
   */
 trait ExecPlan extends QueryCommand {
   /**
-    * The query id
+    * Query Processing parameters
     */
-  def id: String
+  def queryContext: QueryContext
+
+  /**
+    * Throw error if the size of the resultset is greater than Limit
+    * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
+    * It is not in QueryContext since for some queries it should be false
+    */
+  def enforceLimit: Boolean = true
 
   /**
     * Child execution plans representing sub-queries
     */
   def children: Seq[ExecPlan]
-
-  def submitTime: Long
-
-  /**
-    * Limit on number of samples returned by this ExecPlan
-    */
-  def limit: Int
-
-  /**
-    * Throw error if the size of the resultset is greater than Limit
-    * Take first n (limit) elements if the flag is false. Applicable for Metadata Queries
-    */
-  def enforceLimit: Boolean = true
 
   def dataset: DatasetRef
 
@@ -101,7 +93,7 @@ trait ExecPlan extends QueryCommand {
     */
   // scalastyle:off method.length
   def execute(source: ChunkSource, queryConfig: QueryConfig)
-             (implicit sched: Scheduler, timeout: FiniteDuration): Task[QueryResponse] = {
+             (implicit sched: Scheduler): Task[QueryResponse] = {
 
     val parentSpan = Kamon.currentSpan()
     // NOTE: we launch the preparatory steps as a Task too.  This is important because scanPartitions,
@@ -111,10 +103,9 @@ trait ExecPlan extends QueryCommand {
     lazy val step1 = Task {
       val span = Kamon.spanBuilder(s"execute-step1-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
-        .tag("query-id", id)
+        .tag("query-id", queryContext.queryId)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
-      qLogger.debug(s"queryId: ${id} Setting up ExecPlan ${getClass.getSimpleName} with $args")
       // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
@@ -127,22 +118,21 @@ trait ExecPlan extends QueryCommand {
     def step2(res: ExecResult) = res.schema.map { resSchema =>
       val span = Kamon.spanBuilder(s"execute-step2-${getClass.getSimpleName}")
         .asChildOf(parentSpan)
-        .tag("query-id", id)
+        .tag("query-id", queryContext.queryId)
         .start()
       FiloSchedulers.assertThreadName(QuerySchedName)
       val dontRunTransformers = if (allTransformers.isEmpty) true else !allTransformers.forall(_.canHandleEmptySchemas)
       span.tag("dontRunTransformers", dontRunTransformers)
       // It is possible a null schema is returned (due to no time series). In that case just return empty results
       val resultTask = if (resSchema == ResultSchema.empty && dontRunTransformers) {
-        qLogger.debug(s"Empty plan $this, returning empty results")
+        qLogger.debug(s"queryId: ${queryContext.queryId} Empty plan $this, returning empty results")
         span.mark("empty-plan")
-        Task.eval(QueryResult(id, resSchema, Nil))
+        Task.eval(QueryResult(queryContext.queryId, resSchema, Nil))
       } else {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
-          qLogger.debug(s"queryId: ${id} Setting up Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, limit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
         val builder = SerializedRangeVector.newBuilder()
@@ -152,8 +142,8 @@ trait ExecPlan extends QueryCommand {
             case srv: SerializableRangeVector =>
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > limit)
-                throw new BadQueryException(s"This query results in more than $limit samples. " +
+              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
+                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
                   s"Try applying more filters or reduce time range.")
               srv
             case rv: RangeVector =>
@@ -161,12 +151,12 @@ trait ExecPlan extends QueryCommand {
               val srv = SerializedRangeVector(rv, builder, recSchema, printTree(false))
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
-              if (enforceLimit && numResultSamples > limit)
-                throw new BadQueryException(s"This query results in more than $limit samples. " +
+              if (enforceLimit && numResultSamples > queryContext.sampleLimit)
+                throw new BadQueryException(s"This query results in more than $queryContext.sampleLimit samples. " +
                   s"Try applying more filters or reduce time range.")
               srv
           }
-          .take(limit)
+          .take(queryContext.sampleLimit)
           .toListL
           .map { r =>
             val numBytes = builder.allContainers.map(_.numBytes).sum
@@ -176,29 +166,28 @@ trait ExecPlan extends QueryCommand {
               // 5MB limit. Configure if necessary later.
               // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
               // is < 2MB
-              qLogger.warn(s"queryId: ${id} result was " +
-                s"large size ${numBytes}. May need to tweak limits. " +
-                s"ExecPlan was: ${printTree()} " +
-                s"Limit was: ${limit}")
+              qLogger.warn(s"queryId: ${queryContext.queryId} result was large size $numBytes. May need to " +
+                s"tweak limits. ExecPlan was: ${printTree()} ; Limit was: ${queryContext.sampleLimit}")
             }
-            qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
             span.mark(s"num-result-samples: $numResultSamples")
             span.mark(s"num-range-vectors: ${r.size}")
             span.finish()
-            QueryResult(id, finalRes._2, r)
+            QueryResult(queryContext.queryId, finalRes._2, r)
           }
       }
       resultTask.onErrorHandle { case ex: Throwable =>
         if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree(false)}", ex)
+          qLogger.error(s"queryId: ${queryContext.queryId} Exception during execution of query: " +
+            s"${printTree(false)}", ex)
         span.fail(ex)
-        QueryError(id, ex)
+        QueryError(queryContext.queryId, ex)
       }
     }.flatten
     .onErrorRecover { case NonFatal(ex) =>
       if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-        qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree(false)}", ex)
-      QueryError(id, ex)
+        qLogger.error(s"queryId: ${queryContext.queryId} Exception during orchestration of query:" +
+          s" ${printTree(false)}", ex)
+      QueryError(queryContext.queryId, ex)
     }
 
     for { res <- step1
@@ -216,8 +205,7 @@ trait ExecPlan extends QueryCommand {
     */
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult
+               (implicit sched: Scheduler): ExecResult
 
   /**
     * Args to use for the ExecPlan for printTree purposes only.
@@ -247,7 +235,7 @@ trait ExecPlan extends QueryCommand {
     val nextLevel = rangeVectorTransformers.size + level
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr : Seq[String]= children.flatMap(_.getPlan(nextLevel + 1))
-    ((transf :+ curNode) ++ childr)
+    (transf :+ curNode) ++ childr
   }
 
   protected def printRangeVectorTransformersForLevel(level: Int = 0) = {
@@ -288,6 +276,7 @@ trait ExecPlan extends QueryCommand {
 
 abstract class LeafExecPlan extends ExecPlan {
   final def children: Seq[ExecPlan] = Nil
+  final def submitTime: Long = queryContext.submitTime
 }
 
 /**
@@ -295,7 +284,7 @@ abstract class LeafExecPlan extends ExecPlan {
   * getResult will get the ScalarRangeVector for the FuncArg
   */
 sealed trait FuncArgs {
-  def getResult (implicit sched: Scheduler, timeout: FiniteDuration) : Observable[ScalarRangeVector]
+  def getResult (implicit sched: Scheduler) : Observable[ScalarRangeVector]
 }
 
 /**
@@ -303,11 +292,12 @@ sealed trait FuncArgs {
   */
 final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParams) extends FuncArgs {
 
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
+  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
     Observable.fromTask(
       execPlan.dispatcher.dispatch(execPlan).onErrorHandle { case ex: Throwable =>
-      qLogger.error(s"queryId: ${execPlan.id} Execution failed for sub-query ${execPlan.printTree()}", ex)
-      QueryError(execPlan.id, ex)
+      qLogger.error(s"queryId: ${execPlan.queryContext.queryId} Execution failed for sub-query" +
+        s" ${execPlan.printTree()}", ex)
+      QueryError(execPlan.queryContext.queryId, ex)
     }.map {
       case QueryResult(_, _, result)  =>  // Result is empty because of NaN so create ScalarFixedDouble with NaN
                                             if (result.isEmpty) {
@@ -329,9 +319,8 @@ final case class ExecPlanFuncArgs(execPlan: ExecPlan, timeStepParams: RangeParam
   * FuncArgs for scalar parameter
   */
 final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
-    Observable.now(
-     new ScalarFixedDouble(timeStepParams, scalar))
+  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+    Observable.now(ScalarFixedDouble(timeStepParams, scalar))
   }
 }
 
@@ -339,9 +328,8 @@ final case class StaticFuncArgs(scalar: Double, timeStepParams: RangeParams) ext
   * FuncArgs for date and time functions
   */
 final case class TimeFuncArgs(timeStepParams: RangeParams) extends FuncArgs {
-  override def getResult(implicit sched: Scheduler, timeout: FiniteDuration): Observable[ScalarRangeVector] = {
-    Observable.now(
-      new TimeScalar(timeStepParams))
+  override def getResult(implicit sched: Scheduler): Observable[ScalarRangeVector] = {
+    Observable.now(TimeScalar(timeStepParams))
   }
 }
 
@@ -352,21 +340,17 @@ abstract class NonLeafExecPlan extends ExecPlan {
     */
   final def dataset: DatasetRef = children.head.dataset
 
-  final def submitTime: Long = children.head.submitTime
-
-  final def limit: Int = children.head.limit
-
-  private var multicast: ConnectableObservable[(QueryResponse, Int)] = _
+  final def submitTime: Long = children.head.queryContext.submitTime
 
   private def dispatchRemotePlan(plan: ExecPlan, span: kamon.trace.Span)
-                                (implicit sched: Scheduler, timeout: FiniteDuration) = {
+                                (implicit sched: Scheduler) = {
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
     Kamon.runWithSpan(span, false) {
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-        QueryError(id, ex)
+        qLogger.error(s"queryId: ${queryContext.queryId} Execution failed for sub-query ${plan.printTree()}", ex)
+        QueryError(queryContext.queryId, ex)
       }
     }
   }
@@ -380,8 +364,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     */
   final def doExecute(source: ChunkSource,
                       queryConfig: QueryConfig)
-                     (implicit sched: Scheduler,
-                      timeout: FiniteDuration): ExecResult = {
+                     (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     parentSpan.mark("create-child-tasks")
     // Create tasks for all results.
@@ -398,8 +381,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case (res @ QueryResult(_, schema, _), i) if schema != ResultSchema.empty =>
         sch = reduceSchemas(sch, res)
         (res, i.toInt)
-      case (e: QueryError, i) =>
-        (e, i.toInt)
+      case (e: QueryError, _) =>
+        throw e.t
     // cache caches results so that multiple subscribers can process
     }.cache
 

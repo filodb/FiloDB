@@ -1,7 +1,8 @@
 package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryContext}
+import filodb.core.query.QueryContext
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
 import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
 
 /**
@@ -44,7 +45,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
           val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs), lookbackMs)
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-          StitchRvsExec(qContext.queryId, stitchDispatcher, Seq(rawEp, downsampleEp))
+          StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
       case _ =>
         // for now send everything else to raw cluster. Metadata queries are TODO

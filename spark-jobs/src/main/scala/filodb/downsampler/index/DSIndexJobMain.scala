@@ -1,17 +1,27 @@
 package filodb.downsampler.index
 
-import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
+import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.DownsamplerSettings
+
 object DSIndexJobMain extends App {
-  import DSIndexJobSettings._
+
+  //Kamon.init()  // kamon init should be first thing in driver jvm
+  val dsSettings = new DownsamplerSettings()
+  val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
+  val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
+
   val migrateUpto: Long = hour() - 1
-  val iu = new IndexJobDriver(migrateUpto - batchLookbackInHours, migrateUpto) //migrate partkeys between these hours
+  //migrate partkeys between these hours
+  val iu = new IndexJobDriver(migrateUpto - dsIndexJobSettings.batchLookbackInHours,
+                              migrateUpto, dsIndexJobSettings.numShards, job)
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
-  iu.shutdown()
+
+  def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
+
 }
 
 /**
@@ -29,32 +39,28 @@ object DSIndexJobMain extends App {
   * @param fromHour from epoch hour - inclusive
   * @param toHour to epoch hour - inclusive
   */
-class IndexJobDriver(fromHour: Long, toHour: Long) extends StrictLogging {
-  import DSIndexJobSettings._
+class IndexJobDriver(fromHour: Long,
+                     toHour: Long,
+                     numShards: Int,
+                     job: DSIndexJob) extends Serializable {
 
-  def run(conf: SparkConf): Unit = {
-    import DSIndexJob._
+  def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
       .appName("FiloDB_DS_IndexUpdater")
       .config(conf)
       .getOrCreate()
 
-    logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
     val startHour = fromHour
     val endHour = toHour
-    val rdd = spark.sparkContext
+    spark.sparkContext
       .makeRDD(0 until numShards)
-      .foreach(updateDSPartKeyIndex(_, startHour, endHour))
-
-    Kamon.counter("index-migration-completed").withoutTags().increment
-
-    logger.info(s"IndexUpdater Driver completed successfully")
-  }
-
-  def shutdown(): Unit = {
-    import DSIndexJob._
-    rawCassandraColStore.shutdown()
-    downsampleCassandraColStore.shutdown()
+      .foreach { shard =>
+        //Kamon.init() // kamon init should be first thing in worker jvm
+        job.updateDSPartKeyIndex(shard, startHour, endHour)
+      }
+    DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
+    spark
   }
 
 }

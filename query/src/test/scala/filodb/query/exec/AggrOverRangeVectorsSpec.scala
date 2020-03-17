@@ -19,7 +19,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   val rand = new Random()
   val error = 0.0000001d
 
-  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                   ColumnInfo("value", ColumnType.DoubleColumn)), 1)
   val histSchema = ResultSchema(MMD.histDataset.schema.infosFromIDs(Seq(0, 3)), 1)
   val histMaxSchema = ResultSchema(MMD.histMaxDS.schema.infosFromIDs(Seq(0, 4, 3)), 1, colIDs = Seq(0, 4, 3))
@@ -282,7 +282,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     val result7 = resultObs7.toListL.runAsync.futureValue
     result7.size shouldEqual 1
 
-    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    val recSchema = SerializedRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                          ColumnInfo("tdig", ColumnType.StringColumn)))
     val builder = SerializedRangeVector.newBuilder()
     val srv = SerializedRangeVector(result7(0), builder, recSchema, "Unit-Test")
@@ -482,8 +482,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.MutableHistogram])
-      h1.add(row2(3).asInstanceOf[bv.MutableHistogram])
+      val h1 = bv.MutableHistogram(row1(3).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(3).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
@@ -512,8 +512,8 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result(0).key shouldEqual noKey
 
     val sums = data1.zip(data2).map { case (row1, row2) =>
-      val h1 = bv.MutableHistogram(row1(4).asInstanceOf[bv.MutableHistogram])
-      h1.add(row2(4).asInstanceOf[bv.MutableHistogram])
+      val h1 = bv.MutableHistogram(row1(4).asInstanceOf[bv.LongHistogram])
+      h1.add(row2(4).asInstanceOf[bv.LongHistogram])
       h1
     }.toList
 
@@ -547,7 +547,7 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result.flatMap(_.rows.map(x => (x.getLong(0), x.getDouble(1))).toList).sameElements(expectedRows) shouldEqual true
 
   }
-  
+
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {
     (it1.hasNext, it2.hasNext) match{
