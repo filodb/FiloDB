@@ -6,7 +6,6 @@ import java.time.format.DateTimeFormatter
 
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.execution.Scheduler
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
@@ -77,10 +76,6 @@ class ChunkCopier(conf: SparkConf) {
 }
 
 object ChunkCopier {
-  // Kamon init should be first thing in driver and workers. Both need to access the lookup
-  // method, which in turn causes this line of code to be executed once.
-  Kamon.init()
-
   class ByteComparator extends java.util.Comparator[Array[Byte]] {
     def compare(a: Array[Byte], b: Array[Byte]): Int = java.util.Arrays.compareUnsigned(a, b)
   }
