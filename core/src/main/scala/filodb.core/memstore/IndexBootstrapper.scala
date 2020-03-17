@@ -75,7 +75,7 @@ class IndexBootstrapper(colStore: ColumnStore) {
       Task {
         val downsamplPartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
         val partId = lookUpOrAssignPartId(downsamplPartKey)
-        index.upsertPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+        index.upsertPartKey(downsamplPartKey, partId, pk.startTime, pk.endTime)()
       }
      }
      .countL
