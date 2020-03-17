@@ -217,7 +217,7 @@ object GdeltTestData {
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
-  val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
+  val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
   val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
@@ -346,7 +346,7 @@ object MachineMetricsData {
   Stream[Seq[Any]] = {
     val scheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
     histBucketScheme = scheme
-    val buckets = new Array[Double](numBuckets)
+    val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
       for { b <- bucketNo until numBuckets } {
         buckets(b) += 1
@@ -357,7 +357,7 @@ object MachineMetricsData {
       Seq(startTs + n * timeStep,
           (1 + n).toLong,
           buckets.sum.toLong,
-          bv.MutableHistogram(scheme, buckets.map(x => x)),
+          bv.LongHistogram(scheme, buckets.map(x => x)),
           "request-latency",
           extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
@@ -380,7 +380,7 @@ object MachineMetricsData {
   // Adds in the max column before h/hist
   def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
-      val hist = row(3).asInstanceOf[bv.MutableHistogram]
+      val hist = row(3).asInstanceOf[bv.LongHistogram]
       // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
       val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
       val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }

@@ -5,6 +5,7 @@ import scala.collection.mutable
 import monix.eval.Task
 import monix.reactive.Observable
 
+import filodb.core.memstore.SchemaMismatch
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -33,7 +34,7 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
   * @param ignoring fields from range vector keys to exclude while performing the join
   * @param include labels specified in group_left/group_right to be included from one side
   */
-final case class BinaryJoinExec(id: String,
+final case class BinaryJoinExec(queryContext: QueryContext,
                                 dispatcher: PlanDispatcher,
                                 lhs: Seq[ExecPlan],
                                 rhs: Seq[ExecPlan],
@@ -152,6 +153,20 @@ final case class BinaryJoinExec(id: String,
         cur.setValues(lhsRow.getLong(0), binFunc.calculate(lhsRow.getDouble(1), rhsRow.getDouble(1)))
         cur
       }
+    }
+  }
+
+  /**
+    * overridden to allow schemas with different vector lengths, colids as long as the columns are same - to handle
+    * binary joins between scalar/rangevectors
+    */
+  override def reduceSchemas(rs: ResultSchema, resp: QueryResult): ResultSchema = {
+    resp match {
+      case QueryResult(_, schema, _) if rs == ResultSchema.empty =>
+        schema     /// First schema, take as is
+      case QueryResult(_, schema, _) =>
+        if (!rs.hasSameColumnsAs(schema)) throw SchemaMismatch(rs.toString, schema.toString)
+        else rs
     }
   }
 }

@@ -23,7 +23,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
     }
   }
 
-  val cols = Array(new ColumnInfo("timestamp", ColumnType.LongColumn),
+  val cols = Array(new ColumnInfo("timestamp", ColumnType.TimestampColumn),
                    new ColumnInfo("value", ColumnType.DoubleColumn))
 
   it("should be able to create and read from SerializedRangeVector") {

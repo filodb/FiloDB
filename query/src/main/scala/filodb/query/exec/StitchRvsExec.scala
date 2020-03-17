@@ -28,7 +28,7 @@ object StitchRvsExec {
         bVectors.foreach { r =>
           if (r.hasNext) {
             val t = r.head.getLong(0)
-            if (mins.size == 0) {
+            if (mins.isEmpty) {
               minTime = t
               mins += r
             }
@@ -57,7 +57,7 @@ object StitchRvsExec {
 /**
   * Use when data for same time series spans multiple shards, or clusters.
   */
-final case class StitchRvsExec(id: String,
+final case class StitchRvsExec(queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(children.nonEmpty)

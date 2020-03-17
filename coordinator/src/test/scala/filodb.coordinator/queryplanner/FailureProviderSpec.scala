@@ -1,14 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import monix.eval.Task
-import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-import scala.concurrent.duration.FiniteDuration
 
 import filodb.core.DatasetRef
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
-import filodb.query.exec.{ExecPlan, PlanDispatcher}
 
 class FailureProviderSpec extends FunSpec with Matchers {
 
@@ -32,12 +28,6 @@ class FailureProviderSpec extends FunSpec with Matchers {
   val raw2 = RawSeries(rangeSelector = intervalSelector, filters = f2, columns = Seq("value"))
   val windowed2 = PeriodicSeriesWithWindowing(raw2, from + 1000, 1000, to, 5000, RangeFunctionId.Rate)
   val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-
-  val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
-  }
 
   val datasetRef = DatasetRef("dataset", Some("cassandra"))
 

@@ -6,7 +6,8 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 
-import filodb.query.{LogicalPlan, QueryContext, QueryResponse}
+import filodb.core.query.QueryContext
+import filodb.query.{LogicalPlan, QueryResponse}
 import filodb.query.exec.ExecPlan
 
 /**

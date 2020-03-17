@@ -15,9 +15,8 @@ import filodb.coordinator.ShardMapper
 import filodb.core.{ErrorResponse, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext}
 import filodb.core.store._
-import filodb.query.QueryContext
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")

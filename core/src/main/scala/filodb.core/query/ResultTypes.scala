@@ -52,9 +52,9 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
 
   def hasSameColumnsAs(other: ResultSchema): Boolean = {
-    // exclude fixedVectorLen
+    // exclude fixedVectorLen & colIDs
     other.columns == columns && other.numRowKeyColumns == numRowKeyColumns &&
-      other.brSchemas == brSchemas && other.colIDs == colIDs
+      other.brSchemas == brSchemas
   }
 }
 
