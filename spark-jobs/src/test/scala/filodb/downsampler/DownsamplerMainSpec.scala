@@ -25,7 +25,7 @@ import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawD
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings, OffHeapMemory}
-import filodb.downsampler.index.{DSIndexJob, DSIndexJobSettings, IndexJobDriver}
+import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
@@ -71,14 +71,13 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   var gaugeLowFreqPartKeyBytes: Array[Byte] = _
 
   val lastSampleTime = 1574373042000L
+  val pkUpdateHour = hour(lastSampleTime)
+
   val downsampler = new Downsampler(settings, batchDownsampler)
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 
-//  //Index migration job, runs for current 2hours for testing. actual job migrates last 6 hour's index updates
-  val currentHour = hour()
-  val job = new DSIndexJob(settings, dsIndexJobSettings)
-  val indexUpdater = new IndexJobDriver(currentHour - 2, currentHour, dsIndexJobSettings.numShards, job)
+  val indexUpdater = new IndexJobDriver(settings, dsIndexJobSettings)
 
   def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
     val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
@@ -139,7 +138,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
     val pk = PartKeyRecord(gaugePartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
   it ("should write low freq gauge data to cassandra") {
@@ -179,7 +178,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
     val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
   it ("should write prom counter data to cassandra") {
@@ -225,7 +224,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
     val pk = PartKeyRecord(counterPartKeyBytes, 1574372801000L, 1574373042000L, Some(1))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
   it ("should write prom histogram data to cassandra") {
@@ -272,7 +271,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
     val pk = PartKeyRecord(histPartKeyBytes, 1574372801000L, 1574373042000L, Some(199))
-    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200).futureValue
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
   it ("should free all offheap memory") {
@@ -289,6 +288,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
+    sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride",
+                      Instant.ofEpochMilli(lastSampleTime).toString())
     indexUpdater.run(sparkConf).close()
   }
 

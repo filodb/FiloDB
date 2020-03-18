@@ -30,8 +30,6 @@ class DSIndexJobSettings(settings: DownsamplerSettings) extends Serializable {
 
   @transient lazy val cassWriteTimeout = dsIndexJobConfig.as[FiniteDuration]("cassandra-write-timeout")
 
-  @transient lazy val migrateRawIndex = dsIndexJobConfig.getBoolean("migrate-full-index")
-
   // Longer lookback-time is needed to account for failures in the job runs.
   // As the updates need to be applied incrementally, migration needs to happen from the failed batch until the
   // latest hour. This is to ensure that subsequent mutations were not overwritten.
