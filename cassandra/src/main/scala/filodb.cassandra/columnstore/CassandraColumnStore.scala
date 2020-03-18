@@ -353,16 +353,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
-
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int,
+                    diskTTLSeconds: Int, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    val updateHour = hour()
     val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
@@ -386,7 +383,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord] = {
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    Observable.fromIterable(0 to pkByUTNumSplits)
+    Observable.fromIterable(0 until pkByUTNumSplits)
               .flatMap { split => pkByUTTable.scanPartKeys(shard, updateHour, split) }
   }
 }

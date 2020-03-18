@@ -48,7 +48,7 @@ trait ChunkSink {
 
   def writePartKeys(ref: DatasetRef, shard: Int,
                     partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
-                    writeToPkUTTable: Boolean = true): Future[Response]
+                    updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response]
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
@@ -157,7 +157,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def writePartKeys(ref: DatasetRef, shard: Int,
                              partKeys: Observable[PartKeyRecord], diskTTLSeconds: Int,
-                             writeToPkUTTable: Boolean = true): Future[Response] = {
+                             updateHour: Long, writeToPkUTTable: Boolean = true): Future[Response] = {
     partKeys.countL.map(c => sinkStats.partKeysWrite(c.toInt)).runAsync.map(_ => Success)
   }
 

@@ -51,7 +51,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
-  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
+
+  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
 
     /*sparkTasksStarted.increment
     val span = Kamon.spanBuilder("per-shard-index-migration-latency")
@@ -62,26 +63,26 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
 
     @volatile var count = 0
     try {
-      if (dsJobsettings.migrateRawIndex) {
+      if (fullIndexMigration) {
         DownsamplerContext.dsLogger.info("migrating complete partkey index")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
           shard = shard.toInt)
         count += updateDSPartkeys(partKeys, shard)
-        DownsamplerContext.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
+        DownsamplerContext.dsLogger.info(s"Complete PartKey index migration successful for shard=$shard count=$count")
       } else {
-        for (epochHour <- fromHour to toHour) {
+        for (epochHour <- fromHour until toHourExcl) {
           val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
             shard = shard.toInt, updateHour = epochHour)
           count += updateDSPartkeys(partKeys, shard)
         }
-        DownsamplerContext.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
-          s" from=$fromHour to=$toHour")
+        DownsamplerContext.dsLogger.info(s"Partial PartKey index migration successful for shard=$shard count=$count" +
+          s" fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       //sparkForeachTasksCompleted.increment()
       //totalPartkeysUpdated.increment(count)
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
-        s"shard=$shard from=$fromHour to=$toHour", e)
+        s"shard=$shard fromHour=$fromHour toHourExcl=$toHourExcl fullIndexMigration=$fullIndexMigration", e)
       //sparkTasksFailed.increment
       throw e
     } finally {
@@ -96,13 +97,14 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{ pkey =>
       count += 1
       DownsamplerContext.dsLogger.debug(s"migrating partition " +
-        s"pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
-        s" start=${pkey.startTime} end=${pkey.endTime}")
+        s"PartKey=${schemas.part.binSchema.stringify(pkey.partKey)}" +
+        s" startTime=${pkey.startTime} endTime=${pkey.endTime}")
       pkey
     }
+    val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
-      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution),
+      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution), updateHour,
       writeToPkUTTable = false), dsSettings.cassWriteTimeout)
     count
   }
