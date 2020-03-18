@@ -15,7 +15,7 @@ import filodb.downsampler.DownsamplerContext
   * Goal: Align chunks when this job is run in multiple DCs so that cross-dc repairs can be done.
   * Non-Goal: Downsampling of non-real time data or data with different epoch.
   *
-  * Strategy is to run this spark job every 6 hours at 8am, 2pm, 8pm, 2am each day.
+  * Strategy is to run this spark job every 6 hours at 8am, 2pm, 8pm, 2am UTC each day.
   *
   * Run at 8am: We query data with ingestionTime from 10pm to 8am.
   *             Then query and downsample data with userTime between 12am to 6am.
