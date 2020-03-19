@@ -73,18 +73,13 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val lastSampleTime = 1574373042000L
   val pkUpdateHour = hour(lastSampleTime)
 
+  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName)
+
   val downsampler = new Downsampler(settings, batchDownsampler)
 
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
 
   val indexUpdater = new IndexJobDriver(settings, dsIndexJobSettings)
-
-  def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
-    val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
-    val partSchema = batchDownsampler.schemas(schemaId)
-    val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
-    (strPairs.filter(p => p._1 == "_metric_").head._2, partSchema.data.name)
-  }
 
   override def beforeAll(): Unit = {
     batchDownsampler.downsampleRefsByRes.values.foreach { ds =>
@@ -274,6 +269,29 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
+  val numShards = dsIndexJobSettings.numShards
+  val bulkPkUpdateHours = {
+    val start = pkUpdateHour / 6 * 6 // 6 is number of hours per downsample chunk
+    start until start + 6
+  }
+  it("should simulate bulk part key records being written for migration") {
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val schemas = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
+    case class PkToWrite(pkr: PartKeyRecord, shard: Int, updateHour: Long)
+    val pks = for { i <- 0 to 10000 } yield {
+      val schema = schemas(i % schemas.size)
+      val partKey = partBuilder.partKeyFromObjects(schema, s"metric$i", seriesTags)
+      val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
+      PkToWrite(PartKeyRecord(bytes, 0L, 1000L, Some(i)), i % numShards, bulkPkUpdateHours(i % bulkPkUpdateHours.size))
+    }
+
+    val rawDataset = Dataset("prometheus", Schemas.promHistogram)
+    pks.groupBy(k => (k.shard, k.updateHour)).foreach { case ((shard, updHour), shardPks) =>
+      rawColStore.writePartKeys(rawDataset.ref, shard, Observable.fromIterable(shardPks).map(_.pkr),
+        259200, updHour).futureValue
+    }
+  }
+
   it ("should free all offheap memory") {
     offheapMem.free()
   }
@@ -281,26 +299,47 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it ("should downsample raw data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString())
+    sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
     downsampler.run(sparkConf).close()
   }
 
   it ("should migrate partKey data into the downsample dataset tables in cassandra using spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
-    sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride",
-                      Instant.ofEpochMilli(lastSampleTime).toString())
+    sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride", Instant.ofEpochMilli(lastSampleTime).toString)
     indexUpdater.run(sparkConf).close()
   }
 
   it ("should recover migrated partKey data and match the downsampled schema") {
-    val metrics = Seq((counterName, Schemas.promCounter.name),
+
+    def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
+      val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
+      val partSchema = batchDownsampler.schemas(schemaId)
+      val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+      (strPairs.find(p => p._1 == "_metric_").get._2, partSchema.data.name)
+    }
+
+    val metrics = Set((counterName, Schemas.promCounter.name),
       (gaugeName, Schemas.dsGauge.name),
       (gaugeLowFreqName, Schemas.dsGauge.name),
       (histName, Schemas.promHistogram.name))
     val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")), 0)
     val tsSchemaMetric = Await.result(partKeys.map(pkMetricSchemaReader).toListL.runAsync, 1 minutes)
-    tsSchemaMetric.sorted shouldEqual metrics
+    tsSchemaMetric.filter(k => metricNames.contains(k._1)).toSet shouldEqual metrics
+  }
+
+  it("should verify bulk part key record migration and validate completeness of PK migration") {
+
+    def pkMetricName(pkr: PartKeyRecord): String = {
+      val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+      strPairs.find(p => p._1 == "_metric_").head._2
+    }
+    val readKeys = (0 until 4).flatMap { shard =>
+      val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
+                                                     shard)
+      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+    }.toSet
+    readKeys shouldEqual (0 to 10000).map(i => s"metric$i").toSet ++ metricNames
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
