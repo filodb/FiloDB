@@ -101,11 +101,15 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
 
   def recoverIndex(): Future[Unit] = {
-    indexUpdatedHour.set(hour() - 1)
     indexBootstrapper.bootstrapIndex(partKeyIndex, shardNum, indexDataset){ _ => createPartitionID() }
       .map { count =>
         logger.info(s"Bootstrapped index for dataset=$indexDataset shard=$shardNum with $count records")
       }.map { _ =>
+        // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
+        // and we'd be missing entries that would be migrated in the last 6 hours.
+        // Hence indexUpdatedHour should be: currentHour - 6
+        val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
+        indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
         startHousekeepingTask()
         startStatsUpdateTask()
       }.runAsync(housekeepingSched)
