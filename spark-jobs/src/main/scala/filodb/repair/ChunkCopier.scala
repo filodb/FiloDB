@@ -42,7 +42,12 @@ class ChunkCopier(conf: SparkConf) {
   val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeStart"))
   val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeEnd"))
 
-  val deleteFromTargetFirst = conf.getBoolean("spark.filodb.chunkcopier.deleteFromTargetFirst", false)
+  // Destructively deletes everything in the target before updating anthing. Is used when chunks aren't aligned.
+  val deleteFirst = conf.getBoolean("spark.filodb.chunkcopier.deleteFirst", false)
+
+  // Disable the copy phase either for fully deleting with no replacement, or for no-op testing.
+  val noCopy = conf.getBoolean("spark.filodb.chunkcopier.noCopy", false)
+
   val diskTimeToLiveSeconds = conf.getTimeAsSeconds("spark.filodb.chunkcopier.diskTimeToLive")
   val splitsPerNode = conf.getInt("spark.filodb.chunkcopier.splitsPerNode", 1)
   val batchSize = conf.getInt("spark.filodb.chunkcopier.batchSize", 10000)
@@ -81,7 +86,7 @@ class ChunkCopier(conf: SparkConf) {
       batchSize,
       targetCassandraColStore,
       targetDatasetRef,
-      -1) // ttl -1 means delete
+      0) // ttl 0 is interpreted as delete
   }
 
   def shutdown(): Unit = {
@@ -132,7 +137,7 @@ object ChunkCopierMain extends App with StrictLogging {
       .config(conf)
       .getOrCreate()
 
-    if (copier.deleteFromTargetFirst) {
+    if (copier.deleteFirst) {
       logger.info("ChunkCopier deleting from target first")
 
       val splits = copier.getTargetScanSplits
@@ -145,14 +150,18 @@ object ChunkCopierMain extends App with StrictLogging {
         .foreachPartition(splitIter => ChunkCopier.lookup(conf).deleteFromTarget(splitIter))
     }
 
-    val splits = copier.getSourceScanSplits
+    if (copier.noCopy) {
+      logger.info("ChunkCopier copy phase disabled")
+    } else {
+      val splits = copier.getSourceScanSplits
 
-    logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
-      s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
+      logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
 
-    spark.sparkContext
-      .makeRDD(splits)
-      .foreachPartition(splitIter => ChunkCopier.lookup(conf).copySourceToTarget(splitIter))
+      spark.sparkContext
+        .makeRDD(splits)
+        .foreachPartition(splitIter => ChunkCopier.lookup(conf).copySourceToTarget(splitIter))
+    }
 
     logger.info(s"ChunkCopier Driver completed successfully")
 

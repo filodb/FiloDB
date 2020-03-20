@@ -219,10 +219,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   /**
     * Copy a range of chunks to a target ColumnStore, for performing disaster recovery or
-    * backfills. This method can also be used to delete chunks, by specifying a negative ttl.
+    * backfills. This method can also be used to delete chunks, by specifying a ttl of zero.
     * If the target is the same as the source, then this effectively deletes from the source.
     *
-    * @param diskTimeToLiveSeconds pass a negative value to delete chunks
+    * @param diskTimeToLiveSeconds pass zero to delete chunks
     */
   // scalastyle:off null method.length
   def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
@@ -244,7 +244,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val futures = new ArrayBuffer[Future[Response]]()
 
     def finishBatch(partition: ByteBuffer): Unit = {
-      if (diskTimeToLiveSeconds < 0) {
+      if (diskTimeToLiveSeconds == 0) {
         futures += targetChunksTable.deleteChunks(partition, chunkInfos)
       } else {
         for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
@@ -284,7 +284,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
         chunkInfos += row.getBytes(3) // info
 
-        if (diskTimeToLiveSeconds < 0) {
+        if (diskTimeToLiveSeconds == 0) {
           futures += targetIndexTable.deleteIndex(row);
         } else {
           futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
