@@ -108,7 +108,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // need to start recovering 6 hours prior to now since last index migration could have run 6 hours ago
         // and we'd be missing entries that would be migrated in the last 6 hours.
         // Hence indexUpdatedHour should be: currentHour - 6
-        val indexJobIntervalInHours = Math.ceil(downsampleStoreConfig.maxChunkTime.toMinutes.toDouble / 60).toInt
+        val indexJobIntervalInHours = (downsampleStoreConfig.maxChunkTime.toMinutes + 59) / 60 // for ceil division
         indexUpdatedHour.set(hour() - indexJobIntervalInHours - 1)
         startHousekeepingTask()
         startStatsUpdateTask()
