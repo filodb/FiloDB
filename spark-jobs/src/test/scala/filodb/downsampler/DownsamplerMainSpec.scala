@@ -282,7 +282,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       val schema = schemas(i % schemas.size)
       val partKey = partBuilder.partKeyFromObjects(schema, s"metric$i", seriesTags)
       val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
-      PkToWrite(PartKeyRecord(bytes, 0L, 1000L, Some(i)), i % numShards, bulkPkUpdateHours(i % bulkPkUpdateHours.size))
+      PkToWrite(PartKeyRecord(bytes, 0L, 1000L, Some(-i)), i % numShards, bulkPkUpdateHours(i % bulkPkUpdateHours.size))
     }
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
