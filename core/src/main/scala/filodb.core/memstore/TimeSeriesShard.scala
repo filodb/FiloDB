@@ -737,7 +737,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     val removedParts = debox.Buffer.empty[Int]
     InMemPartitionIterator2(partsToPurge).foreach { p =>
       if (!p.ingesting) {
-        logger.debug(s"Purging partition with partId=${p.partID} from memory in dataset=$ref shard=$shardNum")
+        logger.debug(s"Purging partition with partId=${p.partID}  ${p.stringPartition} from " +
+          s"memory in dataset=$ref shard=$shardNum")
         removePartition(p)
         removedParts += p.partID
         numDeleted += 1
@@ -946,7 +947,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
       val pk = toPartKeyRecord(p)
       logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
-        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime}")
+        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime} " +
+        s"hash=${pk.hash}")
       pk
     }
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
@@ -1299,7 +1301,8 @@ class TimeSeriesShard(val ref: DatasetRef,
           if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
             logger.warn(s"endTime $endTime was not correct. how?", new IllegalStateException())
           } else {
-            logger.debug(s"Evicting partId=${partitionObj.partID} from dataset=$ref shard=$shardNum")
+            logger.debug(s"Evicting partId=${partitionObj.partID} ${partitionObj.stringPartition} " +
+              s"from dataset=$ref shard=$shardNum")
             // add the evicted partKey to a bloom filter so that we are able to quickly
             // find out if a partId has been assigned to an ingesting partKey before a more expensive lookup.
             evictedPartKeys.synchronized {
