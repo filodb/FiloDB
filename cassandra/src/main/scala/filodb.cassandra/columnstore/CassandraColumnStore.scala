@@ -363,19 +363,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
-      val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
+      // caller needs to supply hash for partKey - cannot be None
+      // Logical & MaxValue needed to make split positive by zeroing sign bit
+      val split = (pk.hash.get & Int.MaxValue) % pkByUTNumSplits
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
         case resp if resp == Success && writeToPkUTTable =>
           pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
-        case resp if resp != Success =>
-          // TODO remove verbose logging after debug
-          logger.debug(s"Skipping write of PK 0x${pk.partKey.map("%02X" format _).mkString} hash ${pk.hash} to " +
-            s"UT Table since resp was $resp and writeToPkUTTable was $writeToPkUTTable")
-          Future.successful(resp)
         case resp =>
-          // TODO remove verbose logging after debug
-          logger.debug(s"Skipping write of PK 0x${pk.partKey.map("%02X" format _).mkString} hash ${pk.hash} to " +
-            s"UT Table since resp was $resp and writeToPkUTTable was $writeToPkUTTable")
           Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
