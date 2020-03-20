@@ -42,6 +42,7 @@ class ChunkCopier(conf: SparkConf) {
   val ingestionTimeStart = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeStart"))
   val ingestionTimeEnd = parseDateTime(conf.get("spark.filodb.chunkcopier.ingestionTimeEnd"))
 
+  val deleteFromTargetFirst = conf.getBoolean("spark.filodb.chunkcopier.deleteFromTargetFirst", false)
   val diskTimeToLiveSeconds = conf.getTimeAsSeconds("spark.filodb.chunkcopier.diskTimeToLive")
   val splitsPerNode = conf.getInt("spark.filodb.chunkcopier.splitsPerNode", 1)
   val batchSize = conf.getInt("spark.filodb.chunkcopier.batchSize", 10000)
@@ -55,9 +56,11 @@ class ChunkCopier(conf: SparkConf) {
   val sourceCassandraColStore = new CassandraColumnStore(sourceConfig, readSched, sourceSession)(writeSched)
   val targetCassandraColStore = new CassandraColumnStore(targetConfig, readSched, targetSession)(writeSched)
 
-  private[repair] def getScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
+  private[repair] def getSourceScanSplits = sourceCassandraColStore.getScanSplits(sourceDatasetRef, splitsPerNode)
 
-  def run(splitIter: Iterator[ScanSplit]): Unit = {
+  private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, splitsPerNode)
+
+  def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
     sourceCassandraColStore.copyChunksByIngestionTimeRange(
       sourceDatasetRef,
       splitIter,
@@ -67,6 +70,18 @@ class ChunkCopier(conf: SparkConf) {
       targetCassandraColStore,
       targetDatasetRef,
       diskTimeToLiveSeconds.toInt)
+  }
+
+  def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
+    targetCassandraColStore.copyChunksByIngestionTimeRange(
+      targetDatasetRef,
+      splitIter,
+      ingestionTimeStart.toEpochMilli(),
+      ingestionTimeEnd.toEpochMilli(),
+      batchSize,
+      targetCassandraColStore,
+      targetDatasetRef,
+      -1) // ttl -1 means delete
   }
 
   def shutdown(): Unit = {
@@ -117,14 +132,27 @@ object ChunkCopierMain extends App with StrictLogging {
       .config(conf)
       .getOrCreate()
 
-    val splits = copier.getScanSplits
+    if (copier.deleteFromTargetFirst) {
+      logger.info("ChunkCopier deleting from target first")
 
-    logger.info(s"Cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+      val splits = copier.getTargetScanSplits
+
+      logger.info(s"Delete phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
+        s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
+
+      spark.sparkContext
+        .makeRDD(splits)
+        .foreachPartition(splitIter => ChunkCopier.lookup(conf).deleteFromTarget(splitIter))
+    }
+
+    val splits = copier.getSourceScanSplits
+
+    logger.info(s"Copy phase cassandra split size: ${splits.size}. We will have this many spark partitions. " +
       s"Tune splitsPerNode which was ${copier.splitsPerNode} if parallelism is low")
 
     spark.sparkContext
       .makeRDD(splits)
-      .foreachPartition(splitIter => ChunkCopier.lookup(conf).run(splitIter))
+      .foreachPartition(splitIter => ChunkCopier.lookup(conf).copySourceToTarget(splitIter))
 
     logger.info(s"ChunkCopier Driver completed successfully")
 
