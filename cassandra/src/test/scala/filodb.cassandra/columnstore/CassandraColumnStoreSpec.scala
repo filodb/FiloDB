@@ -188,7 +188,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       7,         // batchSize
       colStore,  // target
       dataset.ref, // targetDatasetRef is the the source, to delete from it
-      -1) // diskTimeToLiveSeconds is negative, which means delete
+      0) // diskTimeToLiveSeconds is 0, which means delete
 
     chunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
     chunks1 should have size (0)
