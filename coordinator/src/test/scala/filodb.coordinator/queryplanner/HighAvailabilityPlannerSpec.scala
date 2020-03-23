@@ -9,6 +9,8 @@ import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
+import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
@@ -387,5 +389,29 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     child.params.endSecs shouldEqual to
     child.params.stepSecs shouldEqual step
     child.params.processFailure shouldEqual false
+  }
+
+  it("should work with offset") {
+    val t = TimeStepParams(700, 1000, 10000)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, TimeRange(100000, 200000), false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+
+    val lp1 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"}", t)
+    val execPlan1 = engine.materialize(lp1, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan1.isInstanceOf[DistConcatExec] shouldEqual (true) // No routing as failure is before query start time
+
+    val lp2 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 10m", t)
+    val execPlan2 = engine.materialize(lp2, QueryContext(origQueryParams = promQlQueryParams))
+    // Because of offset starts time changes to 100 seconds where there is failure
+    execPlan2.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(100)
+    execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual((10000-600))
+
   }
 }
