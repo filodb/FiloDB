@@ -69,7 +69,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
     lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
     lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
-      periodicSeriesTime.endMs-offsetMillis)
+      periodicSeriesTime.endMs - offsetMillis)
     lazy val lookBackTime = getRawSeriesStartTime(logicalPlan).map(periodicSeriesTime.startMs - _).get
     lazy val routingTime = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
       periodicSeriesTimeWithOffset.endMs - offsetMillis)

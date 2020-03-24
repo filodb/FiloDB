@@ -195,9 +195,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       SeriesKeysByFilters(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
 
-    def toRawSeriesPlan(timeParams: TimeRangeParams, offset: Option[Long] = None): RawSeries = {
+    def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
       RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
-        columnFilters, column.toSeq, offset)
+        columnFilters, column.toSeq, offsetMs)
     }
   }
 

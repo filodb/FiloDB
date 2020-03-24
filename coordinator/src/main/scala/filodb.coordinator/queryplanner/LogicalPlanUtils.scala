@@ -113,5 +113,4 @@ object LogicalPlanUtils {
       case _             => 0
     }
   }
-
 }
