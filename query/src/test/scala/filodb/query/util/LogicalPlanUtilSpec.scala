@@ -14,7 +14,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
   it("should get MetricName from logicalPlan") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
-      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"))
+      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
     val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name_")
@@ -24,7 +24,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
   it("should get LabelName from logicalPlan with filter In") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
-      ColumnFilter("instance", In(Set("Inst-0", "Inst-1")))), Seq("_name_", "instance"))
+      ColumnFilter("instance", In(Set("Inst-0", "Inst-1")))), Seq("_name_", "instance"), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
     val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "instance")
@@ -34,11 +34,11 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
   it("should get MetricName from BinaryJoin LogicalPlan") {
 
     val rawSeriesLhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName1")),
-      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"))
+      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), None)
     val lhs = PeriodicSeries(rawSeriesLhs, 1000, 500, 50000)
 
     val rawSeriesRhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("job", Equals("MetricName2")),
-      ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"))
+      ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"), None)
     val rhs = PeriodicSeries(rawSeriesRhs, 1000, 500, 50000)
 
     val binaryJoin = BinaryJoin(lhs, DIV, OneToOne, rhs)
@@ -50,7 +50,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
   it("should return None if label value is not present in logicalPlan") {
 
     val rawSeries = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName")),
-      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"))
+      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
     val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name")
@@ -60,11 +60,11 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
   it("should concatenate results from lhs and rhs for BinaryJoin LogicalPlan") {
 
     val rawSeriesLhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("_name_", Equals("MetricName1")),
-      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"))
+      ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), None)
     val lhs = PeriodicSeries(rawSeriesLhs, 1000, 500, 50000)
 
     val rawSeriesRhs = RawSeries(IntervalSelector(1000, 3000), Seq(ColumnFilter("job", Equals("MetricName2")),
-      ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"))
+      ColumnFilter("instance", Equals("Inst-1"))), Seq("job", "instance"), None)
     val rhs = PeriodicSeries(rawSeriesRhs, 1000, 500, 50000)
 
     val binaryJoin = BinaryJoin(lhs, DIV, OneToOne, rhs)

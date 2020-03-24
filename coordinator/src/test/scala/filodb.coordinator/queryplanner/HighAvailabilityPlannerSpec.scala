@@ -412,6 +412,5 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     execPlan2.isInstanceOf[PromQlExec] shouldEqual (true)
     execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(100)
     execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual((10000-600))
-
   }
 }

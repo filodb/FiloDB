@@ -271,8 +271,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
+    val offsetMillis: Long = lp.offset.getOrElse(0)
 
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offset.getOrElse(0))
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, offsetMillis)
     if (newStartMs <= lp.endMs) {
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
@@ -287,10 +288,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
-      WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
+      WindowConstants.staleDataLookbackSeconds * 1000, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-        None, None, qContext, Nil, lp.offset)))
+        None, None, qContext, Nil, lp.offsetMs)))
       rawSeries
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -313,6 +314,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // Also if startMs < 500000000000 (before 1985), it is usually a unit test case with synthetic data, so don't fiddle
     // around with those queries
     val earliestRetainedTimestamp = earliestRetainedTimestampFn
+
     if (startMs - windowMs - offsetMs < earliestRetainedTimestamp && startMs > 500000000000L) {
       // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
       // doesnt fully fall into the retention period. Data required for that instant involves
@@ -344,20 +346,23 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries): PlanResult = {
-
     val spreadProvToUse = qContext.spreadOverride.getOrElse(spreadProvider)
-
+    val offsetMillis: Long = lp.offsetMs.getOrElse(0)
     val colName = lp.columns.headOption
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
-    val needsStitch = lp.rangeSelector match {
+    val rangeSelectorWithOffset = lp.rangeSelector match {
+      case IntervalSelector(from, to) => IntervalSelector(from - offsetMillis, to - offsetMillis)
+      case _                          => lp.rangeSelector
+    }
+    val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
-        schemaOpt, colName)
+      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
+        toChunkScanMethod(rangeSelectorWithOffset), schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }

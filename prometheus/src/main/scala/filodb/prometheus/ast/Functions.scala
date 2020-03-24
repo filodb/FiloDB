@@ -112,18 +112,15 @@ trait Functions extends Base with Operators with Vectors {
         val rangeFunctionId = RangeFunctionId.withNameInsensitiveOption(name).get
         if (rangeFunctionId == Timestamp) {
           val instantExpression = seriesParam.asInstanceOf[InstantExpression]
-          val offsetMillis: Long = instantExpression.offset.map(_.millis).getOrElse(0)
 
           PeriodicSeriesWithWindowing(instantExpression.toRawSeriesPlan(timeParams),
-            timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis, 0,
+            timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000, 0,
             rangeFunctionId, otherParams, instantExpression.offset.map(_.millis))
         } else {
           val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
-          val offsetMillis: Long = rangeExpression.offset.map(_.millis).getOrElse(0)
-
           PeriodicSeriesWithWindowing(
             rangeExpression.toSeriesPlan(timeParams, isRoot = false),
-            timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
+            timeParams.start * 1000 , timeParams.step * 1000, timeParams.end * 1000,
             rangeExpression.window.millis,
             rangeFunctionId, otherParams, rangeExpression.offset.map(_.millis))
         }

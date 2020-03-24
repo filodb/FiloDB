@@ -13,6 +13,7 @@ import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, Static
 import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
+import filodb.core.store.TimeRangeChunkScan
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
 import filodb.prometheus.parse.Parser
 import filodb.query._
@@ -309,5 +310,35 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     res.result.isEmpty shouldEqual true
   }
 
+ it("should generate execPlan with offset") {
+  val t = TimeStepParams(700, 1000, 10000)
+  val lp = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 5m", t)
+  val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+  execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+  val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+  multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
+  multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
 
+  multiSchemaExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+  val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+  rvt.offsetMs.get shouldEqual(300000)
+  rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
+  rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
+}
+
+  it("should generate execPlan with offset with window") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("rate(http_requests_total{job = \"app\"}[5m] offset 5m)", t)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+
+    multiSchemaExec.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.offsetMs.get shouldEqual(300000)
+    rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
+    rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
   }
+}

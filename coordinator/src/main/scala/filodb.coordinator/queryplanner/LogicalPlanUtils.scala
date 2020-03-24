@@ -107,4 +107,11 @@ object LogicalPlanUtils {
     }
   }
 
+  def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => lp.offsetMs.getOrElse(0)
+      case _             => 0
+    }
+  }
+
 }

@@ -40,7 +40,7 @@ object PrometheusModel {
         }
         ColumnFilter(m.getName, filter)
       }
-      RawSeries(interval, filters, Nil)
+      RawSeries(interval, filters, Nil, None)
     }
   }
 

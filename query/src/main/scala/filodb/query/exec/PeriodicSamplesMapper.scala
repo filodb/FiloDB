@@ -28,10 +28,13 @@ final case class PeriodicSamplesMapper(start: Long,
                                        functionId: Option[InternalRangeFunction],
                                        queryContext: QueryContext,
                                        funcParams: Seq[FuncArgs] = Nil,
-                                       offset: Option[Long] = None,
+                                       offsetMs: Option[Long] = None,
                                        rawSource: Boolean = true) extends RangeVectorTransformer {
   require(start <= end, s"start $start should be <= end $end")
   require(step > 0, s"step $step should be > 0")
+
+  val startWithOffset = start - offsetMs.getOrElse(0L)
+  val endWithOffset = end - offsetMs.getOrElse(0L)
 
   val isLastFn = functionId.isEmpty || functionId.contains(InternalRangeFunction.LastSampleHistMax) ||
     functionId.contains(InternalRangeFunction.Timestamp)
@@ -40,8 +43,8 @@ final case class PeriodicSamplesMapper(start: Long,
                                   "Need positive window lengths to apply range function")
   else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
-  protected[exec] def args: String =
-    s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, rawSource=$rawSource"
+  protected[exec] def args: String = s"startWithOffset=$startWithOffset, step=$step, endWithOffset=$endWithOffset," +
+    s" window=$window, functionId=$functionId, rawSource=$rawSource offsetMs=$offsetMs"
 
  //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
@@ -71,35 +74,35 @@ final case class PeriodicSamplesMapper(start: Long,
         source.map { rv =>
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+            new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
                                        windowLength, rangeFuncGen().asChunkedH, queryConfig, queryContext, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
-            new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+            new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
                                        windowLength, rangeFuncGen().asChunkedD, queryConfig, queryContext))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), start, step, end, window.getOrElse(0L),
-              rangeFuncGen().asSliding, queryConfig))
+            new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
+              window.getOrElse(0L), rangeFuncGen().asSliding, queryConfig))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
-            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
+            new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, window.getOrElse(0L),
               rangeFuncGen().asSliding, queryConfig))
         }
     }
 
     // Adds offset to timestamp to generate output of offset function, since the time should be according to query
     // time parameters
-    offset.map(o => rvs.map { rv =>
+    offsetMs.map(o => rvs.map { rv =>
       new RangeVector {
         val row = new TransientRow()
 
