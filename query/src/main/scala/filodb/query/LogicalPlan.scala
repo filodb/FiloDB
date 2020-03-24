@@ -267,6 +267,7 @@ final case class ScalarVaryingDoublePlan(vectors: PeriodicSeriesPlan,
   override def startMs: Long = vectors.startMs
   override def stepMs: Long = vectors.stepMs
   override def endMs: Long = vectors.endMs
+  override def isRoutable: Boolean = vectors.isRoutable
 }
 
 /**

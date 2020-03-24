@@ -105,4 +105,13 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
       ep.lp shouldEqual logicalPlan
     }
   }
+
+  it("should direct raw-cluster-only queries to raw planner with scalar vector queries") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan("scalar(vector(1)) * 10",
+      TimeStepParams(now/1000 - 7.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
+  }
 }
