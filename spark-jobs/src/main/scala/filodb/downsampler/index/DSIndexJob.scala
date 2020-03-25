@@ -94,7 +94,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
 
   def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
-    val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{ pkey =>
+    val pkRecords = partKeys.flatMap(toPartKeyRecordWithHash).map{ pkey =>
       count += 1
       DownsamplerContext.dsLogger.debug(s"migrating partition " +
         s"PartKey=${schemas.part.binSchema.stringify(pkey.partKey)}" +
@@ -109,9 +109,12 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     count
   }
 
-  private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+  private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): Observable[PartKeyRecord] = {
     val dsPartKey = RecordBuilder.buildDownsamplePartKey(pkRecord.partKey, schemas)
-    val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
-    PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
+    val pkr = dsPartKey.map { dpk =>
+      val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
+      PartKeyRecord(dpk, pkRecord.startTime, pkRecord.endTime, hash)
+    }
+    Observable.fromIterable(pkr)
   }
 }
