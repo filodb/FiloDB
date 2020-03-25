@@ -8,7 +8,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
-import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
+import com.datastax.driver.core.{ConsistencyLevel, Metadata, Session, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -17,7 +17,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
@@ -29,6 +29,7 @@ import filodb.memory.BinaryRegionLarge
  * ==Configuration==
  * {{{
  *   cassandra {
+ *     session-provider-fqcn = filodb.cassandra.DefaultFiloSessionProvider
  *     hosts = ["1.2.3.4", "1.2.3.5"]
  *     port = 9042
  *     keyspace = "my_cass_keyspace"
@@ -45,11 +46,10 @@ import filodb.memory.BinaryRegionLarge
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
  * @param readEc A Scheduler for reads.  This must be separate from writes to prevent deadlocks.
- * @param filoSessionProvider if provided, a session provider provides a session for the configuration
  * @param sched A Scheduler for writes
  */
 class CassandraColumnStore(val config: Config, val readEc: Scheduler,
-                           val filoSessionProvider: Option[FiloSessionProvider] = None,
+                           val session: Session,
                            val downsampledData: Boolean = false)
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
@@ -294,7 +294,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterConnector.shutdown()
   }
 
-  private def clusterMeta: Metadata = clusterConnector.session.getCluster.getMetadata
+  private def clusterMeta: Metadata = session.getCluster.getMetadata
 
   /**
    * Splits scans of a dataset across multiple token ranges.
@@ -353,25 +353,24 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
-
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int,
+                    diskTTLSeconds: Int, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    val updateHour = hour()
     val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
-      val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
+      // caller needs to supply hash for partKey - cannot be None
+      // Logical & MaxValue needed to make split positive by zeroing sign bit
+      val split = (pk.hash.get & Int.MaxValue) % pkByUTNumSplits
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
-        case resp if resp == Success
-          && writeToPkUTTable => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
-
-        case resp             => Future.successful(resp)
+        case resp if resp == Success && writeToPkUTTable =>
+          pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
+        case resp =>
+          Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
         sinkStats.partKeysWrite(1)
@@ -386,11 +385,16 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord] = {
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    Observable.fromIterable(0 to pkByUTNumSplits)
+    Observable.fromIterable(0 until pkByUTNumSplits)
               .flatMap { split => pkByUTTable.scanPartKeys(shard, updateHour, split) }
   }
 }
 
+/**
+  * FIXME this works only for Murmur3Partitioner because it generates
+  * Long based tokens. If other partitioners are used, this can potentially break.
+  * Correct way is to pass Token objects so CQL stmts can bind tokens with stmt.bind().setPartitionKeyToken(token)
+  */
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
                                     replicas: Set[InetSocketAddress]) extends ScanSplit {
   // NOTE: You need both the host string and the IP address for Spark's locality to work
@@ -400,7 +404,7 @@ case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
 trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def config: Config
-  def filoSessionProvider: Option[FiloSessionProvider]
+  def session: Session
   def readEc: Scheduler
 
   implicit val readSched = readEc
@@ -421,8 +425,8 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
+    def session: Session = CassandraChunkSource.this.session
     def ec: ExecutionContext = readEc
-    val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
 
     val keyspace: String = if (!downsampledData) config.getString("keyspace")
                            else config.getString("downsample-keyspace")
@@ -477,14 +481,14 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
-                                    { dataset: DatasetRef =>
-                                      new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
-  }
+                        { dataset: DatasetRef =>
+                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+}
 
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
-        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector)(readEc) })
+        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {

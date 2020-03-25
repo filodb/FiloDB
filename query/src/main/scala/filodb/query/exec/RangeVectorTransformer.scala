@@ -2,11 +2,14 @@ package filodb.query.exec
 
 import monix.reactive.Observable
 import scala.collection.mutable.ListBuffer
+import scalaxy.loops._
 
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.vectors.{HistogramBuckets, HistogramWithBuckets}
 import filodb.query._
 import filodb.query.{BinaryOperator, InstantFunctionId, MiscellaneousFunctionId, QueryConfig, SortFunctionId}
 import filodb.query.InstantFunctionId.HistogramQuantile
@@ -64,8 +67,7 @@ object RangeVectorTransformer {
   */
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], queryConfig: QueryConfig,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
@@ -191,8 +193,7 @@ private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
 final case class ScalarOperationMapper(operator: BinaryOperator,
                                        scalarOnLhs: Boolean,
                                        funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"operator=$operator, scalarOnLhs=$scalarOnLhs"
+  protected[exec] def args: String = s"operator=$operator, scalarOnLhs=$scalarOnLhs"
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
@@ -256,8 +257,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
 }
 
 final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -294,8 +294,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,
                                       timeStepParams: RangeParams) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function, funcParams=$funcParams"
+  protected[exec] def args: String = s"function=$function, funcParams=$funcParams"
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 
@@ -324,8 +323,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
 }
 
 final case class VectorFunctionMapper() extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"funcParams=$funcParams"
+  protected[exec] def args: String = s"funcParams=$funcParams"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -370,7 +368,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     val resultRv = nonNanTimestamps.map {
       t =>
         val rowList = new ListBuffer[TransientRow]()
-        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+        for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
           if (!t.contains(i * 1000))
             rowList += new TransientRow(i * 1000, 1)
         }
@@ -384,7 +382,101 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
   }
   override def funcParams: Seq[FuncArgs] = Nil
   override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
-    ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   override def canHandleEmptySchemas: Boolean = true
 }
+
+final case class BucketValues(schema: HistogramBuckets,
+                              buckets: debox.Buffer[Array[Double]])
+
+/**
+ * Expands a Histogram RV to the equivalent Prometheus
+ * data model where we have one vector per histogram bucket.  Changes:
+ * - Each bucket converts to a vector with metric name appended with _bucket and extra le= tag
+ *
+ * If the histogram schema changes, there will be output vectors for each different bucket across all schemas.
+ * To simplify conversion, all output vectors will have the same set of timestamps.  If there is no bucket value
+ * for that timestamp (due to schema changes), then a NaN will be added.
+ *
+ * Uses up memory for each bucket of each histogram vector, one vector at a time.  Unfortunately this is memory
+ * intensive.  Due to the semantics of Observables and the lazy nature, we cannot reuse data structures as
+ * vectors may be pulled by the next reader at the same time this observable processes future vectors.
+ */
+final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVectorTransformer {
+  import RangeVectorTransformer._
+
+  protected[exec] def args: String = s"HistToPromSeriesMapper(options=${sch.options})"
+
+  def funcParams: Seq[FuncArgs] = Nil
+
+  // NOTE: apply() is only called for explicit instantiation of conversion function.  So this will error out if
+  //       the data source is not histogram.
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema,
+            paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
+    source.flatMap { rv =>
+      Observable.fromIterable(expandVector(rv))
+    }
+  }
+
+  def expandVector(rv: RangeVector): Seq[RangeVector] = {
+    // Data structures to hold bucket values for each possible bucket.
+    val timestamps = debox.Buffer.empty[Long]
+    val buckets    = debox.Map.empty[Double, debox.Buffer[Double]]
+    var curScheme: HistogramBuckets = HistogramBuckets.emptyBuckets
+    var emptyBuckets = debox.Set.empty[Double]
+
+    rv.rows.foreach { row =>
+      val hist = row.getHistogram(1).asInstanceOf[HistogramWithBuckets]
+
+      if (hist.buckets != curScheme) {
+        addNewBuckets(hist.buckets, buckets, timestamps.length)  // add new buckets, backfilling timestamps with NaN
+        curScheme = hist.buckets
+        emptyBuckets = buckets.keysSet -- curScheme.bucketSet   // All the buckets that need NaN filled going forward
+      }
+
+      timestamps += row.getLong(0)
+      for { b <- 0 until hist.numBuckets optimized } {
+        buckets(hist.bucketTop(b)) += hist.bucketValue(b)
+      }
+      emptyBuckets.foreach { b => buckets(b) += Double.NaN }
+    }
+
+    // Now create new RangeVectors for each bucket
+    // NOTE: debox.Map methods sometimes has issues giving consistent results instead of duplicates.
+    buckets.mapToArray { case (le, bucketValues) =>
+      promBucketRV(rv.key, le, timestamps, bucketValues)
+    }.toSeq
+  }
+
+  override def schema(source: ResultSchema): ResultSchema =
+    if (valueColumnType(source) != ColumnType.HistogramColumn) source else
+    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+
+  private def addNewBuckets(newScheme: HistogramBuckets,
+                            buckets: debox.Map[Double, debox.Buffer[Double]],
+                            elemsToPad: Int): Unit = {
+    val bucketsToAdd = newScheme.bucketSet -- buckets.keysSet
+    bucketsToAdd.foreach { buc =>
+      buckets(buc) = debox.Buffer.fill(elemsToPad)(Double.NaN)
+    }
+  }
+
+  val LeUtf8 = ZeroCopyUTF8String("le")
+
+  // Create a Prometheus-compatible single bucket range vector
+  private def promBucketRV(origKey: RangeVectorKey, le: Double,
+                           ts: debox.Buffer[Long], values: debox.Buffer[Double]): RangeVector = {
+    // create new range vector key, appending _bucket to the metric name
+    val labels2 = origKey.labelValues.map { case (k, v) =>
+      if (k == sch.options.metricUTF8) (k, ZeroCopyUTF8String(v.toString + "_bucket")) else (k, v)
+    }
+    val lab3 = labels2.updated(LeUtf8, ZeroCopyUTF8String(if (le == Double.PositiveInfinity) "+Inf" else le.toString))
+    BufferRangeVector(CustomRangeVectorKey(lab3, origKey.sourceShards), ts, values)
+  }
+}
+

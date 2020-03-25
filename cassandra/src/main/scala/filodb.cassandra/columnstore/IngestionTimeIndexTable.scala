@@ -19,7 +19,9 @@ import filodb.core.store.ChunkSinkStats
  * using TimeSeriesChunksTable. This is because the chunks are likely to be fetched from
  * Cassandra due to locality when using TimeSeriesChunksTable, and the chunks table is smaller.
  */
-sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
+sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
+                                     val connector: FiloCassandraConnector,
+                                     writeConsistencyLevel: ConsistencyLevel)
                                     (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import scala.collection.JavaConverters._
 
@@ -36,9 +38,26 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
                      |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val allCql = session.prepare(
-      s"SELECT ingestion_time, start_time, info FROM $tableString " +
-      s" WHERE partition = ?")
+  private lazy val writeIndexCql = session.prepare(
+    s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
+    s"VALUES (?, ?, ?, ?) USING TTL ?")
+    .setConsistencyLevel(writeConsistencyLevel)
+
+  private lazy val allCql = session.prepare(
+    s"SELECT ingestion_time, start_time, info FROM $tableString " +
+    s"WHERE partition = ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val scanCql1 = session.prepare(
+    s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
+    s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
+    s"ALLOW FILTERING")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val scanCql2 = session.prepare(
+    s"SELECT partition FROM $tableString " +
+    s"WHERE TOKEN(partition) >= ? AND TOKEN(partition) < ? AND ingestion_time >= ? AND ingestion_time <= ? " +
+    s"ALLOW FILTERING")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
@@ -63,35 +82,39 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef, val connector: Fil
   def scanRowsByIngestionTimeNoAsync(tokens: Seq[(String, String)],
                                      ingestionTimeStart: Long,
                                      ingestionTimeEnd: Long): Iterator[Row] = {
-    def cql(start: String, end: String): String =
-      s"SELECT partition, ingestion_time, start_time, info FROM $tableString " +
-      s"WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
-      s"AND ingestion_time >= $ingestionTimeStart AND ingestion_time <= $ingestionTimeEnd " +
-      s"ALLOW FILTERING"
 
     tokens.iterator.flatMap { case (start, end) =>
-      session.execute(cql(start, end)).iterator.asScala
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val stmt = scanCql1.bind(start.toLong: java.lang.Long,
+                               end.toLong: java.lang.Long,
+                               ingestionTimeStart: java.lang.Long,
+                               ingestionTimeEnd: java.lang.Long)
+      session.execute(stmt).iterator.asScala
     }
   }
 
   def scanPartKeysByIngestionTime(tokens: Seq[(String, String)],
                                   ingestionTimeStart: Long,
                                   ingestionTimeEnd: Long): Observable[ByteBuffer] = {
-    def cql(start: String, end: String): String =
-      s"SELECT partition FROM $tableString WHERE TOKEN(partition) >= $start AND TOKEN(partition) < $end " +
-        s"AND ingestion_time >= $ingestionTimeStart AND ingestion_time <= $ingestionTimeEnd " +
-        s"ALLOW FILTERING"
     val it = tokens.iterator.flatMap { case (start, end) =>
-      session.execute(cql(start, end)).iterator.asScala
+      /*
+       * FIXME conversion of tokens to Long works only for Murmur3Partitioner because it generates
+       * Long based tokens. If other partitioners are used, this can potentially break.
+       * Correct way is to pass Token objects around and bind tokens with stmt.bind().setPartitionKeyToken(token)
+       */
+      val stmt = scanCql2.bind(start.toLong: java.lang.Long,
+                               end.toLong: java.lang.Long,
+                               ingestionTimeStart: java.lang.Long,
+                               ingestionTimeEnd: java.lang.Long)
+      session.execute(stmt).iterator.asScala
         .map { row => row.getBytes("partition") }
     }
     Observable.fromIterator(it).handleObservableErrors
   }
-
-  lazy val writeIndexCql = session.prepare(
-    s"INSERT INTO $tableString (partition, ingestion_time, start_time, info) " +
-    "VALUES (?, ?, ?, ?) USING TTL ?")
-    .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
    * Writes new records to the ingestion table.

@@ -3,6 +3,7 @@ package filodb.core.query
 import java.time.{LocalDateTime, YearMonth, ZoneOffset}
 
 import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
 import kamon.Kamon
 import org.joda.time.DateTime
 
@@ -123,16 +124,16 @@ final case class ScalarVaryingDouble(private val timeValueMap: Map[Long, Double]
   override def numRowsInt: Int = timeValueMap.size
 }
 
-final case class RangeParams(start: Long, step: Long, end: Long)
+final case class RangeParams(startSecs: Long, stepSecs: Long, endSecs: Long)
 
 trait ScalarSingleValue extends ScalarRangeVector {
   def rangeParams: RangeParams
   var numRowsInt : Int = 0
 
   override def rows: Iterator[RowReader] = {
-    Iterator.from(0, rangeParams.step.toInt).takeWhile(_ <= rangeParams.end - rangeParams.start).map { i =>
+    Iterator.from(0, rangeParams.stepSecs.toInt).takeWhile(_ <= rangeParams.endSecs - rangeParams.startSecs).map { i =>
       numRowsInt += 1
-      val t = i + rangeParams.start
+      val t = i + rangeParams.startSecs
       new TransientRow(t * 1000, getValue(t * 1000))
     }
   }
@@ -197,8 +198,8 @@ final case class DayOfMonthScalar(rangeParams: RangeParams) extends ScalarSingle
   */
 final case class DayOfWeekScalar(rangeParams: RangeParams) extends ScalarSingleValue {
   override def getValue(time: Long): Double = {
-    val dayOfWeek = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC).getDayOfWeek
-    if (dayOfWeek == 7) 0 else dayOfWeek.getValue
+    val dayOfWeek = LocalDateTime.ofEpochSecond(time / 1000, 0, ZoneOffset.UTC).getDayOfWeek.getValue
+    if (dayOfWeek == 7) 0 else dayOfWeek
   }
 }
 
@@ -353,3 +354,20 @@ object SerializedRangeVector extends StrictLogging {
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,
                                            rows: Iterator[RowReader]) extends RangeVector
+
+final case class BufferRangeVector(key: RangeVectorKey,
+                                   timestamps: Buffer[Long],
+                                   values: Buffer[Double]) extends RangeVector {
+  require(timestamps.length == values.length, s"${timestamps.length} ts != ${values.length} values")
+
+  def rows: Iterator[RowReader] = new Iterator[RowReader] {
+    val row = new TransientRow()
+    var n = 0
+    def hasNext: Boolean = n < timestamps.length
+    def next: RowReader = {
+      row.setValues(timestamps(n), values(n))
+      n += 1
+      row
+    }
+  }
+}

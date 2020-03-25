@@ -217,7 +217,7 @@ object GdeltTestData {
 object MachineMetricsData {
   import scala.util.Random.nextInt
 
-  val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "count:long")
+  val columns = Seq("timestamp:ts", "min:double", "avg:double", "max:double", "count:long")
   val dummyContext = Map("test" -> "test")
 
   def singleSeriesData(initTs: Long = System.currentTimeMillis,
@@ -338,13 +338,15 @@ object MachineMetricsData {
   val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 
   val histDataset = Dataset("histogram", Seq("metric:string", "tags:map"),
-                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"))
+                            Seq("timestamp:ts", "count:long", "sum:long", "h:hist:counter=false"),
+                            DatasetOptions.DefaultOptions.copy(metricColumn = "metric"))
 
   var histBucketScheme: bv.HistogramBuckets = _
   def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
   Stream[Seq[Any]] = {
-    histBucketScheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
-    val buckets = new Array[Double](numBuckets)
+    val scheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
+    histBucketScheme = scheme
+    val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
       for { b <- bucketNo until numBuckets } {
         buckets(b) += 1
@@ -355,10 +357,16 @@ object MachineMetricsData {
       Seq(startTs + n * timeStep,
           (1 + n).toLong,
           buckets.sum.toLong,
-          bv.MutableHistogram(histBucketScheme, buckets.map(x => x)),
+          bv.LongHistogram(scheme, buckets.map(x => x)),
           "request-latency",
-          extraTags ++ Map("__name__".utf8 -> "http_requests_total".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
+          extraTags ++ Map("_ws_".utf8 -> "demo".utf8, "_ns_".utf8 -> "testapp".utf8, "dc".utf8 -> s"${n % numSeries}".utf8))
     }
+  }
+
+  // Data usable with prom-histogram schema
+  def linearPromHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  Stream[Seq[Any]] = linearHistSeries(startTs, numSeries, timeStep, numBuckets).map { d =>
+    d.updated(1, d(1).asInstanceOf[Long].toDouble).updated(2, d(2).asInstanceOf[Long].toDouble)
   }
 
   // dataset2 + histDataset
@@ -372,7 +380,7 @@ object MachineMetricsData {
   // Adds in the max column before h/hist
   def histMax(histStream: Stream[Seq[Any]]): Stream[Seq[Any]] =
     histStream.map { row =>
-      val hist = row(3).asInstanceOf[bv.MutableHistogram]
+      val hist = row(3).asInstanceOf[bv.LongHistogram]
       // Set max to a fixed ratio of the "last bucket" top value, ie the last bucket with an actual increase
       val highestBucketVal = hist.bucketValue(hist.numBuckets - 1)
       val lastBucketNum = ((hist.numBuckets - 2) to 0 by -1).filter { b => hist.bucketValue(b) == highestBucketVal }

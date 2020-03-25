@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task
@@ -23,9 +22,9 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
-  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
-  val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val tvSchemaTask = Task.now(tvSchema)
 
@@ -33,8 +32,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
+                         (implicit sched: Scheduler): Task[QueryResponse] = ???
   }
 
   val sampleNodeCpu: Array[RangeVector] = Array(
@@ -114,7 +112,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.MUL,
@@ -149,7 +147,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeRole.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.MUL,
@@ -189,7 +187,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
@@ -233,7 +231,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samplesRhs2 = scala.util.Random.shuffle(sampleNodeVar.toList) // they may come out of order
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.MUL,
@@ -268,7 +266,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
     val resultObs4 = RangeVectorAggregator.mapReduce(agg, true, mapped, rv=>rv.key)
     val samplesRhs = resultObs4.toListL.runAsync.futureValue
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan),
       new Array[ExecPlan](1),
       BinaryOperator.DIV,
@@ -348,7 +346,7 @@ class BinaryJoinGroupingSpec extends FunSpec with Matchers with ScalaFutures {
       }
     )
 
-    val execPlan = BinaryJoinExec("someID", dummyDispatcher,
+    val execPlan = BinaryJoinExec(QueryContext(), dummyDispatcher,
       Array(dummyPlan), // cannot be empty as some compose's rely on the schema
       new Array[ExecPlan](1), // empty since we test compose, not execute or doExecute
       BinaryOperator.GTR,

@@ -16,7 +16,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
-import filodb.memory.format.vectors.MutableHistogram
+import filodb.memory.format.vectors.LongHistogram
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   implicit val s = monix.execution.Scheduler.Implicits.global
@@ -121,7 +121,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val hists = memStore.scanRows(histDataset, Seq(3), FilteredPartitionScan(split, Seq(filter)))
                         .map(_.getHistogram(0))
     hists.zipWithIndex.foreach { case (h, i) =>
-      h shouldEqual data(1 + 10*i)(3).asInstanceOf[MutableHistogram]
+      h shouldEqual data(1 + 10*i)(3).asInstanceOf[LongHistogram]
     }
   }
 

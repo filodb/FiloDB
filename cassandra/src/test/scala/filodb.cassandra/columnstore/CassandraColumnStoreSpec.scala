@@ -1,30 +1,31 @@
 package filodb.cassandra.columnstore
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration._
-
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
+
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration._
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 
+import filodb.cassandra.DefaultFiloSessionProvider
+import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord}
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.store.{ChunkSet, ChunkSetInfo}
-import filodb.core.store.ColumnStoreSpec
-import filodb.cassandra.metastore.CassandraMetaStore
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
 
-  lazy val colStore = new CassandraColumnStore(config, s)
-  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
+  lazy val session = new DefaultFiloSessionProvider(config.getConfig("cassandra")).session
+  lazy val colStore = new CassandraColumnStore(config, s, session)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"), session)
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
@@ -42,6 +43,29 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       split.tokens.head._1 should not equal (split.tokens.head._2)
       split.replicas.size should equal (1)
     }
+  }
+
+  "PartKey Reads and Writes" should "work" in {
+    val dataset = Dataset("prometheus", Schemas.gauge).ref
+
+    colStore.initialize(dataset, 1).futureValue
+    colStore.truncate(dataset, 1).futureValue
+
+    val pks = (10000 to 30000).map(_.toString.getBytes)
+                              .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
+
+    val updateHour = 10
+    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
+      .futureValue shouldEqual Success
+
+    val expectedKeys = pks.map(pk => new String(pk.partKey).toInt)
+
+    val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runAsync.futureValue.toSet
+    readData.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+
+    val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
+    readData2.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+
   }
 
   "copyChunksByIngestionTimeRange" should "actually work" in {
@@ -157,7 +181,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")
                                              .withFallback(config)
-  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s)
+  val compressSession = new DefaultFiloSessionProvider(configWithChunkCompress.getConfig("cassandra")).session
+  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s, compressSession)
 
   "lz4-chunk-compress" should "write and read compressed chunks successfully" in {
     whenReady(lz4ColStore.write(dataset.ref, chunkSetStream(names take 3))) { response =>

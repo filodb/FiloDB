@@ -1,7 +1,8 @@
 package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryContext}
+import filodb.core.query.QueryContext
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
 import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
 
 /**
@@ -27,8 +28,9 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestampFn
         // FIXME need to incorporate offset here - needs to be addressed in HA Planning too - punt to separate PR
-        val lookbackMs = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
-        if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
+        lazy val lookbackMs = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
+        if (!logicalPlan.isRoutable) rawClusterPlanner.materialize(logicalPlan, qContext)
+        else if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
         else if (p.startMs - lookbackMs >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
         else {
           // Split the query between raw and downsample planners
@@ -43,7 +45,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
 
           val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs), lookbackMs)
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
-          StitchRvsExec(qContext.queryId, stitchDispatcher, Seq(rawEp, downsampleEp))
+          StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
       case _ =>
         // for now send everything else to raw cluster. Metadata queries are TODO

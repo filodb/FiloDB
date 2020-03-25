@@ -17,6 +17,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
+import filodb.core.query.QueryContext
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -99,16 +100,16 @@ final class QueryActor(memStore: MemStore,
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    Kamon.currentSpan().tag("query-id", q.id)
-    q.execute(memStore, queryConfig)(queryScheduler, queryConfig.askTimeout)
-      .foreach   { res =>
+    Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+    q.execute(memStore, queryConfig)(queryScheduler)
+      .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
            queryErrors.increment()
-           logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
+           logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
            e.t match {
              case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
              case t: Throwable =>
@@ -116,8 +117,8 @@ final class QueryActor(memStore: MemStore,
        }
      }(queryScheduler).recover { case ex =>
        // Unhandled exception in query, should be rare
-       logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
-       replyTo ! QueryError(q.id, ex)
+       logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+       replyTo ! QueryError(q.queryContext.queryId, ex)
      }(queryScheduler)
   }
 

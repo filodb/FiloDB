@@ -226,7 +226,7 @@ class ShardDownsamplerSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     }
 
     val expectedSums = data.grouped(6).toSeq.map { dataRows =>
-      dataRows.map(_(3).asInstanceOf[bv.MutableHistogram])
+      dataRows.map(_(3).asInstanceOf[bv.LongHistogram])
               .foldLeft(emptyAggHist) { case (agg, h) => agg.add(h); agg }
     }
 
