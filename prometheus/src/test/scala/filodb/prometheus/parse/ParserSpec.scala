@@ -187,7 +187,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
     parseSuccessfully("sum_over_time(foo)")
-
+    parseSuccessfully("sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}")
 
     parseError("sum(other_metric) by (foo)(some_metric)")
     parseError("sum without(==)(some_metric)")
