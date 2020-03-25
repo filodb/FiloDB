@@ -96,8 +96,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     @volatile var count = 0
     val pkRecords = partKeys.flatMap(toPartKeyRecordWithHash).map{ pkey =>
       count += 1
-      DownsamplerContext.dsLogger.debug(s"migrating partition " +
-        s"PartKey=${schemas.part.binSchema.stringify(pkey.partKey)}" +
+      DownsamplerContext.dsLogger.debug(s"Migrating partition " +
+        s"partKey=${schemas.part.binSchema.stringify(pkey.partKey)}" +
         s" startTime=${pkey.startTime} endTime=${pkey.endTime}")
       pkey
     }
@@ -114,6 +114,11 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
     val pkr = dsPartKey.map { dpk =>
       val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
       PartKeyRecord(dpk, pkRecord.startTime, pkRecord.endTime, hash)
+    }
+    if (pkr.isEmpty) {
+      DownsamplerContext.dsLogger.debug(s"Skipping partition without downsample schema " +
+        s"partKey=${schemas.part.binSchema.stringify(pkRecord.partKey)}" +
+        s" startTime=${pkRecord.startTime} endTime=${pkRecord.endTime}")
     }
     Observable.fromIterable(pkr)
   }

@@ -66,7 +66,7 @@ final case class AssignShardConfig(address: String, shardList: Seq[Int])
 final case class UnassignShardConfig(shardList: Seq[Int])
 
 object StoreConfig {
-  // NOTE: there are no defaults for flush interval and shard memory, those should fbe explicitly calculated
+  // NOTE: there are no defaults for flush interval and shard memory, those should be explicitly calculated
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours

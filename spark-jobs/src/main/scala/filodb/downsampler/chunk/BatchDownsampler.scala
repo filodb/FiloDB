@@ -225,7 +225,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         downsamplePartSpan.finish()
       case None =>
         numPartitionsNoDownsampleSchema.increment()
-        DownsamplerContext.dsLogger.debug(s"Encountered partition " +
+        DownsamplerContext.dsLogger.debug(s"Skipping downsampling of partition " +
           s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
     }
   }
