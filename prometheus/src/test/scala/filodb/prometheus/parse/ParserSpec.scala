@@ -187,7 +187,13 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("count_values(\"value\",some_metric)")
     parseSuccessfully("sum without(and, by, avg, count, alert, annotations)(some_metric)")
     parseSuccessfully("sum_over_time(foo)")
-    parseSuccessfully("sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}")
+    parseSuccessfully("sum:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("count:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("avg:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("min:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("max:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("stddev:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
+    parseSuccessfully("stdvar:some_metric:dataset:1m{_ws_=\"some_workspace\", _ns_=\"some_namespace\"}")
 
     parseError("sum(other_metric) by (foo)(some_metric)")
     parseError("sum without(==)(some_metric)")
@@ -367,7 +373,8 @@ class ParserSpec extends FunSpec with Matchers {
       "absent(http_requests_total{host=\"api-server\"})" -> "ApplyAbsentFunction(PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),List(ColumnFilter(host,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),RangeParams(1524855988,1000,1524855988),List())",
       "count_values(\"freq\", http_requests_total)" ->
         "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),List(\"freq\"),List(),List())",
-      "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,0,Timestamp,List(),None)"
+      "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,0,Timestamp,List(),None)",
+      "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List()),1524855988000,1000000,1524855988000,None)"
     )
 
     val qts: Long = 1524855988L
