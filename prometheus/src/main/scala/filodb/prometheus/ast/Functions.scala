@@ -34,26 +34,32 @@ trait Functions extends Base with Operators with Vectors {
       // get the parameter spec of the function from RangeFunctionID
       val paramSpec = functionId.get.paramSpec
 
-      // if the length of the args in param spec is NOT similar to the args in the i/p query, then the i/p query is INCORRECT
+      // if the length of the args in param spec != to the args in
+      // the i/p query, then the i/p query is INCORRECT,
       // throw invalid no. of args exception.
       if (paramSpec.length != allParams.length)
-        throw new IllegalArgumentException(s"Expected ${paramSpec.length} $errWrongArgumentCount $funcName, got ${allParams.size}")
+        throw new IllegalArgumentException(s"Expected ${paramSpec.length} " +
+          s"$errWrongArgumentCount $funcName, got ${allParams.size}")
 
-      // if length of param spec and all params is same, then check the type of each argument and check the order of the arguments.
+      // if length of param spec and all params is same,
+      // then check the type of each argument and check the order of the arguments.
       else {
         paramSpec.zipWithIndex.foreach {
           case (specType, index) => specType match {
             case RangeVectorParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[RangeExpression])
-                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+                  s"got ${allParams(index).getClass.getSimpleName}")
 
             case InstantVectorParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[InstantExpression])
-                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+                  s"got ${allParams(index).getClass.getSimpleName}")
 
             case ScalarParam(errorMsg) =>
               if (!allParams(index).isInstanceOf[ScalarExpression])
-                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+                  s"got ${allParams(index).getClass.getSimpleName}")
 
             case ScalarRangeParam(min, max, errorMsg) =>
               val paramObj = allParams(index)
@@ -61,7 +67,8 @@ trait Functions extends Base with Operators with Vectors {
               // If the obj is Scalar Expression, validate the value of the obj to be between 0 and 1.
               // If the obj is not Scalar Expression, then throw exception.
               if (!paramObj.isInstanceOf[ScalarExpression])
-                throw new IllegalArgumentException(s"$errorMsg $funcName, got ${allParams(index).getClass.getSimpleName}")
+                throw new IllegalArgumentException(s"$errorMsg $funcName, " +
+                  s"got ${allParams(index).getClass.getSimpleName}")
 
               else {
                 val paramValue = paramObj.asInstanceOf[ScalarExpression].toScalar

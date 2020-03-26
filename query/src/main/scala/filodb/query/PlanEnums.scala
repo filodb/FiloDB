@@ -54,7 +54,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object CountOverTime extends RangeFunctionId("count_over_time", Seq(RangeVectorParam()))
   case object Delta extends RangeFunctionId("delta", Seq(RangeVectorParam()))
   case object Deriv extends RangeFunctionId("deriv", Seq(RangeVectorParam()))
-  case object HoltWinters extends RangeFunctionId("holt_winters", Seq(RangeVectorParam(), ScalarRangeParam(0, 1, "Invalid Smoothing factor. Expected: 0 < sf < 1, got:"), ScalarRangeParam(0, 1, "Invalid Trend factor. Expected: 0 < tf < 1, got:")))
+  case object HoltWinters extends RangeFunctionId("holt_winters", Seq(RangeVectorParam(),
+    ScalarRangeParam(0, 1, "Invalid Smoothing factor. Expected: 0 < sf < 1, got:"), ScalarRangeParam(0, 1, "Invalid Trend factor. Expected: 0 < tf < 1, got:")))
   case object ZScore extends RangeFunctionId("z_score", Seq(RangeVectorParam()))
   case object Idelta extends RangeFunctionId("idelta", Seq(RangeVectorParam()))
   case object Increase extends RangeFunctionId("increase", Seq(RangeVectorParam()))
