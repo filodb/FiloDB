@@ -21,7 +21,8 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
                                                                .withoutTags()
   @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
-  @transient lazy private val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
+  @transient lazy private val numPartKeysSkipped = Kamon.counter("num-partkeys-skipped").withoutTags()
+  @transient lazy private val numPartkeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
 
   @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
@@ -79,7 +80,6 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
           s" fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       sparkForeachTasksCompleted.increment()
-      totalPartkeysUpdated.increment(count)
       span.finish()
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
@@ -103,6 +103,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       partKeys = pkRecords,
       diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution), updateHour,
       writeToPkUTTable = false), dsSettings.cassWriteTimeout)
+    numPartkeysMigrated.increment(count)
     count
   }
 
@@ -113,6 +114,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       PartKeyRecord(dpk, pkRecord.startTime, pkRecord.endTime, hash)
     }
     if (pkr.isEmpty) {
+      numPartKeysSkipped.increment()
       DownsamplerContext.dsLogger.debug(s"Skipping partition without downsample schema " +
         s"partKey=${schemas.part.binSchema.stringify(pkRecord.partKey)}" +
         s" startTime=${pkRecord.startTime} endTime=${pkRecord.endTime}")
