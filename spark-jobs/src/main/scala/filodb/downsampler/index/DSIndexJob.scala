@@ -56,14 +56,13 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
 
     sparkTasksStarted.increment
-    val span = Kamon.spanBuilder("per-shard-index-migration-latency")
-      .asChildOf(Kamon.currentSpan())
-      .tag("shard", shard)
-      .start
     val rawDataSource = rawCassandraColStore
-
     @volatile var count = 0
     try {
+      val span = Kamon.spanBuilder("per-shard-index-migration-latency")
+        .asChildOf(Kamon.currentSpan())
+        .tag("shard", shard)
+        .start
       if (fullIndexMigration) {
         DownsamplerContext.dsLogger.info("migrating complete partkey index")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
@@ -81,15 +80,12 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       }
       sparkForeachTasksCompleted.increment()
       totalPartkeysUpdated.increment(count)
+      span.finish()
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
         s"shard=$shard fromHour=$fromHour toHourExcl=$toHourExcl fullIndexMigration=$fullIndexMigration", e)
       sparkTasksFailed.increment
       throw e
-    } finally {
-      span.finish()
-//      rawCassandraColStore.shutdown()
-//      downsampleCassandraColStore.shutdown()
     }
   }
 
