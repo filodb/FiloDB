@@ -74,8 +74,10 @@ class IndexBootstrapper(colStore: ColumnStore) {
     }.mapAsync(parallelism) { pk =>
       Task {
         val downsamplPartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
-        val partId = lookUpOrAssignPartId(downsamplPartKey)
-        index.upsertPartKey(downsamplPartKey, partId, pk.startTime, pk.endTime)()
+        downsamplPartKey.foreach { dpk =>
+          val partId = lookUpOrAssignPartId(dpk)
+          index.upsertPartKey(dpk, partId, pk.startTime, pk.endTime)()
+        }
       }
      }
      .countL
