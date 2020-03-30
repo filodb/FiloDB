@@ -52,6 +52,8 @@ object DownsamplerMain extends App {
 
 class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
 
+  @transient lazy private val jobCompleted = Kamon.counter("chunk-migration-completed").withoutTags()
+
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
   // Otherwise, config values below were not being sent over.
@@ -118,6 +120,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       }
 
     DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
+    jobCompleted.increment()
     spark
   }
 
