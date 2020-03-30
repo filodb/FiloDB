@@ -133,7 +133,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         val schema = schemas(rawSchemaId)
         if (schema != Schemas.UnknownSchema) {
           val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
-          if (isEligibleForDownsample(pkPairs)) {
+          if (settings.isEligibleForDownsample(pkPairs)) {
             try {
               downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
@@ -143,6 +143,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               numPartitionsFailed.increment()
             }
           } else {
+            DownsamplerContext.dsLogger.debug(s"Skipping blacklisted partition $pkPairs")
             numPartitionsBlacklisted.increment()
           }
         } else {
@@ -356,19 +357,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     numDownsampledChunksWritten.increment(numChunks)
     batchWriteSpan.finish()
     numChunks
-  }
-
-  /**
-    * Two conditions should satisfy for eligibility:
-    * (a) If whitelist is nonEmpty partKey should match a filter in the whitelist.
-    * (b) It should not match any filter in blacklist
-    */
-  private def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
-    if (settings.whitelist.nonEmpty && !settings.whitelist.exists(w => w.forall(pkPairs.contains))) {
-      false
-    } else {
-      settings.blacklist.forall(w => !w.forall(pkPairs.contains))
-    }
   }
 
 }
