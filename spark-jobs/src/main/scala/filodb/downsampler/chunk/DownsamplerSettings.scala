@@ -68,5 +68,18 @@ class DownsamplerSettings(conf: Config = ConfigFactory.empty()) extends Serializ
 
   @transient lazy val blacklist = downsamplerConfig.as[Seq[Map[String, String]]]("blacklist-filters").map(_.toSeq)
 
+  /**
+    * Two conditions should satisfy for eligibility:
+    * (a) If whitelist is nonEmpty partKey should match a filter in the whitelist.
+    * (b) It should not match any filter in blacklist
+    */
+  def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
+    if (whitelist.nonEmpty && !whitelist.exists(w => w.forall(pkPairs.contains))) {
+      false
+    } else {
+      blacklist.forall(w => !w.forall(pkPairs.contains))
+    }
+  }
+
 }
 
