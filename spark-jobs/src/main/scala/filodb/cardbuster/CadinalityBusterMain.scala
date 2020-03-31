@@ -13,7 +13,6 @@ object CardinalityBusterMain extends App {
   val dsSettings = new DownsamplerSettings()
   val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
 
-  //migrate partkeys between these hours
   val iu = new CardinalityBuster(dsSettings, dsIndexJobSettings)
   val sparkConf = new SparkConf(loadDefaults = true)
   iu.run(sparkConf)
@@ -26,7 +25,6 @@ object BusterContext extends StrictLogging {
 
 class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
 
-  // scalastyle:off method.length
   def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
       .appName("FiloDB_Cardinality_Buster")
@@ -38,7 +36,7 @@ class CardinalityBuster(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSI
     BusterContext.log.info(s"This is the Cardinality Buster. Starting job. inDownsampleTables=$inDownsampleTables ")
 
     val numShards = dsIndexJobSettings.numShards
-    val busterForShard = new PerShardCardinalityBuster(dsSettings, dsIndexJobSettings, inDownsampleTables)
+    val busterForShard = new PerShardCardinalityBuster(dsSettings, inDownsampleTables)
 
     spark.sparkContext
       .makeRDD(0 until numShards)
