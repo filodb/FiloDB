@@ -236,15 +236,19 @@ object DoubleVectorDataReader64 extends DoubleVectorDataReader {
       s"length=${length(acc, vector)}")
     var addr = vector + OffsetData + start * 8
     val untilAddr = vector + OffsetData + end * 8 + 8   // one past the end
-    var sum: Double = 0d
+    var sum: Double = Double.NaN
     if (ignoreNaN) {
       while (addr < untilAddr) {
         val nextDbl = acc.getDouble(addr)
         // There are many possible values of NaN.  Use a function to ignore them reliably.
-        if (!java.lang.Double.isNaN(nextDbl)) sum += nextDbl
+        if (!java.lang.Double.isNaN(nextDbl)) {
+          if (sum.isNaN) sum = 0d
+          sum += nextDbl
+        }
         addr += 8
       }
     } else {
+      sum = 0d
       while (addr < untilAddr) {
         sum += acc.getDouble(addr)
         addr += 8

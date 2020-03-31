@@ -1,60 +1,108 @@
 package filodb.downsampler.index
 
-import com.typesafe.scalalogging.StrictLogging
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+
 import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
-object DSIndexJobMain extends App {
-  import DSIndexJobSettings._
-  val migrateUpto: Long = hour() - 1
-  val iu = new IndexJobDriver(migrateUpto - batchLookbackInHours, migrateUpto) //migrate partkeys between these hours
-  val sparkConf = new SparkConf(loadDefaults = true)
-  iu.run(sparkConf)
-  iu.shutdown()
-}
+import filodb.downsampler.DownsamplerContext
+import filodb.downsampler.chunk.DownsamplerSettings
 
 /**
-  * Migrate index updates from Raw dataset to Downsampled dataset.
-  * Updates get applied only to the dataset with highest ttl.
   *
-  * Updates are applied sequentially between the provided hours inclusive. As the updates are incremental, if a job run
-  * fails and successive runs complete successfully, migration still needs to happen from the failed batch upto the
-  * latest hour. This is to ensure that subsequent mutations were not overwritten. Hence job will be submitted once to
-  * fix the failed cases.
+  * Goal: Migrate Part keys into downsample cassandra tables.
   *
-  * For e.g if there was a failure 12 hours ago. Job will be submitted to run once with 12 hours as lookback time to
-  * fix the indexes before resuming the regular schedule.
+  * Strategy is to run this spark job every 6 hours at 7:15am, 1:15pm, 7:15pm, 1:15am UTC each day.
   *
-  * @param fromHour from epoch hour - inclusive
-  * @param toHour to epoch hour - inclusive
+  * Run at 7:15am: Will migrate all entries added for update hours 12am, 1am ... and 5am.
+  * Run at 1:15pm: Will migrate all entries added for update hours 6am, 7am ... and 11am.
+  * Run at 7:15pm: Will migrate all entries added for update hours 12pm, 1pm ... and 5pm.
+  * Run at 1:15am: Will migrate all entries added for update hours 6pm, 7pm ... and 11pm.
+  *
+  * Job behavior can be overridden/controlled in two ways:
+  * 1. If `spark.filodb.downsampler.index.doFullMigration` is set to true, full migration is done
+  * 2. If `spark.filodb.downsampler.index.timeInPeriodOverride` is set to an ISO timestamp, index migration
+  *    for that period will be done. For example: setting to `2020-03-13T15:44:56` will cause migration to
+  *    be run for hours 12pm, 1pm ... and 5pm on 2020-03-13
+  *
   */
-class IndexJobDriver(fromHour: Long, toHour: Long) extends StrictLogging {
-  import DSIndexJobSettings._
+object DSIndexJobMain extends App {
 
-  def run(conf: SparkConf): Unit = {
-    import DSIndexJob._
+  Kamon.init()  // kamon init should be first thing in driver jvm
+  val dsSettings = new DownsamplerSettings()
+  val dsIndexJobSettings = new DSIndexJobSettings(dsSettings)
+
+  //migrate partkeys between these hours
+  val iu = new IndexJobDriver(dsSettings, dsIndexJobSettings)
+  val sparkConf = new SparkConf(loadDefaults = true)
+  iu.run(sparkConf)
+
+}
+
+class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSIndexJobSettings) extends Serializable {
+
+  @transient lazy private val jobCompleted = Kamon.counter("index-migration-completed").withoutTags()
+
+  // scalastyle:off method.length
+  def run(conf: SparkConf): SparkSession = {
     val spark = SparkSession.builder()
-      .appName("FiloDB_DS_IndexUpdater")
+      .appName("FiloDB_Index_Downsampler")
       .config(conf)
       .getOrCreate()
 
-    logger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
+    def hour(millis: Long) = millis / 1000 / 60 / 60
+
+    val timeInMigrationPeriod: Long = spark.sparkContext.getConf
+      .getOption("spark.filodb.downsampler.index.timeInPeriodOverride") match {
+      // by default assume a time in the previous downsample period
+      case None => System.currentTimeMillis() - dsSettings.downsampleChunkDuration
+      // examples: 2019-10-20T12:34:56Z  or  2019-10-20T12:34:56-08:00
+      case Some(str) => Instant.from(DateTimeFormatter.ISO_OFFSET_DATE_TIME.parse(str)).toEpochMilli()
+    }
+
+    val hourInMigrationPeriod = hour(timeInMigrationPeriod)
+    val jobIntervalInHours = dsIndexJobSettings.batchLookbackInHours
+    val fromHour = hourInMigrationPeriod / jobIntervalInHours * jobIntervalInHours
+
+    // Index migration cannot be rerun just for specific hours, since there could have been
+    // subsequent updates. Perform migration or all hours until last downsample period's hour.
+    val currentHour = hour(System.currentTimeMillis())
+    val toHourExclDefault  = currentHour / jobIntervalInHours * jobIntervalInHours
+
+    // this override should almost never used by operators - only for unit testing
+    val toHourExcl = spark.sparkContext.getConf
+      .getLong("spark.filodb.downsampler.index.toHourExclOverride", toHourExclDefault)
+
+    // This is required in the following scenarios
+    // 1. Initial refresh of partkey index to downsampler cluster
+    // 2. For fixing corrupt downsampler index
+    val doFullMigration = spark.sparkContext.getConf
+      .getBoolean("spark.filodb.downsampler.index.doFullMigration", false)
+
+    val job = new DSIndexJob(dsSettings, dsIndexJobSettings)
+
+    DownsamplerContext.dsLogger.info(s"This is the Downsampling Index Migration driver. Starting job... " +
+      s"fromHour=$fromHour " +
+      s"toHourExcl=$toHourExcl " +
+      s"timeInMigrationPeriod=$timeInMigrationPeriod " +
+      s"doFullMigration=$doFullMigration")
+
+    val numShards = dsIndexJobSettings.numShards
+
+    DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
     val startHour = fromHour
-    val endHour = toHour
-    val rdd = spark.sparkContext
+    val endHourExcl = toHourExcl
+    spark.sparkContext
       .makeRDD(0 until numShards)
-      .foreach(updateDSPartKeyIndex(_, startHour, endHour))
-
-    Kamon.counter("index-migration-completed").withoutTags().increment
-
-    logger.info(s"IndexUpdater Driver completed successfully")
-  }
-
-  def shutdown(): Unit = {
-    import DSIndexJob._
-    rawCassandraColStore.shutdown()
-    downsampleCassandraColStore.shutdown()
+      .foreach { shard =>
+        Kamon.init() // kamon init should be first thing in worker jvm
+        job.updateDSPartKeyIndex(shard, startHour, endHourExcl, doFullMigration)
+      }
+    DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")
+    jobCompleted.increment()
+    spark
   }
 
 }

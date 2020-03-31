@@ -1,13 +1,11 @@
 package filodb.query.exec
 
-import scala.concurrent.duration.FiniteDuration
-
 import kamon.Kamon
 import monix.execution.Scheduler
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QueryContext}
 import filodb.core.store._
 import filodb.query.Query.qLogger
 import filodb.query.QueryConfig
@@ -27,9 +25,7 @@ final case class UnknownSchemaQueryErr(id: Int) extends
   * @param colName optional column name to select for querying.  If not supplied, the default valueColumn from
   *               data schema definition is used.  For downsampled gauges, column is automatically chosen.
   */
-final case class MultiSchemaPartitionsExec(id: String,
-                                           submitTime: Long,
-                                           limit: Int,
+final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                            dispatcher: PlanDispatcher,
                                            dataset: DatasetRef,
                                            shard: Int,
@@ -48,6 +44,10 @@ final case class MultiSchemaPartitionsExec(id: String,
     Kamon.currentSpan().mark("filtered-partition-scan")
     val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
     Kamon.currentSpan().mark("lookup-partitions-done")
+
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis)
+      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
 
     // Find the schema if one wasn't supplied
     val schemas = source.schemas(dataset).get
@@ -68,7 +68,7 @@ final case class MultiSchemaPartitionsExec(id: String,
             val colIDs1 = getColumnIDs(sch, colName.toSeq, rangeVectorTransformers)
             val colIDs  = addIDsForHistMax(sch, colIDs1)
 
-            val newPlan = SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
+            val newPlan = SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                                   Some(sch), Some(lookupRes),
                                                   schema.isDefined, colIDs)
             qLogger.debug(s"Discovered schema ${sch.name} and created inner plan $newPlan")
@@ -76,7 +76,7 @@ final case class MultiSchemaPartitionsExec(id: String,
             newPlan
           }.getOrElse {
             qLogger.debug(s"No time series found for filters $filters... employing empty plan")
-            SelectRawPartitionsExec(id, submitTime, limit, dispatcher, dataset,
+            SelectRawPartitionsExec(queryContext, dispatcher, dataset,
                                     None, Some(lookupRes),
                                     schema.isDefined, Nil)
           }
@@ -84,10 +84,9 @@ final case class MultiSchemaPartitionsExec(id: String,
 
   def doExecute(source: ChunkSource,
                 queryConfig: QueryConfig)
-               (implicit sched: Scheduler,
-                timeout: FiniteDuration): ExecResult = {
+               (implicit sched: Scheduler): ExecResult = {
     finalPlan = finalizePlan(source)
-    finalPlan.doExecute(source, queryConfig)(sched, timeout)
+    finalPlan.doExecute(source, queryConfig)(sched)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

@@ -1,40 +1,38 @@
 package filodb.coordinator.queryplanner
 
 import scala.concurrent.duration._
-
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.core.DatasetRef
+import filodb.core.query.QueryContext
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryConfig, QueryContext}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryConfig}
 import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {
 
-  class MockExecPlan(val name: String, val lp: LogicalPlan, val qContext: QueryContext) extends ExecPlan {
-    override def id: String = ???
+  class MockExecPlan(val name: String, val lp: LogicalPlan) extends ExecPlan {
+    override def queryContext: QueryContext = QueryContext()
     override def children: Seq[ExecPlan] = ???
     override def submitTime: Long = ???
-    override def limit: Int = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
     override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
-                          (implicit sched: Scheduler, timeout: FiniteDuration): ExecResult = ???
+                          (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???
   }
 
   val rawPlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-      new MockExecPlan("raw", logicalPlan, qContext)
+      new MockExecPlan("raw", logicalPlan)
     }
   }
 
   val downsamplePlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-      new MockExecPlan("downsample", logicalPlan, qContext)
+      new MockExecPlan("downsample", logicalPlan)
     }
   }
 
@@ -106,5 +104,14 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
       ep.name shouldEqual "raw"
       ep.lp shouldEqual logicalPlan
     }
+  }
+
+  it("should direct raw-cluster-only queries to raw planner for scalar vector queries") {
+    val logicalPlan = Parser.queryRangeToLogicalPlan("scalar(vector(1)) * 10",
+      TimeStepParams(now/1000 - 7.minutes.toSeconds, 1.minute.toSeconds, now/1000 - 1.minutes.toSeconds))
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
+    ep.name shouldEqual "raw"
+    ep.lp shouldEqual logicalPlan
   }
 }

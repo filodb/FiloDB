@@ -10,7 +10,7 @@ import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 
 class ResultTypesSpec extends FunSpec with Matchers with ScalaFutures {
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val resultSchema = ResultSchema(columns, 1)
   val ignoreKey = CustomRangeVectorKey(

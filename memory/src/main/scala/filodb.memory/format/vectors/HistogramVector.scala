@@ -66,6 +66,12 @@ object BinaryHistogram extends StrictLogging {
       case HistFormat_Custom_Delta =>
         val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
         LongHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_Geometric_XOR =>
+        val bucketDef = HistogramBuckets.geometric(buf.byteArray, bucketDefOffset, false)
+        MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
+      case HistFormat_Custom_XOR =>
+        val bucketDef = HistogramBuckets.custom(buf.byteArray, bucketDefOffset - 2)
+        MutableHistogram.fromPacked(bucketDef, valuesByteSlice).getOrElse(Histogram.empty)
       case x =>
         logger.debug(s"Unrecognizable histogram format code $x, returning empty histogram")
         Histogram.empty
@@ -97,6 +103,8 @@ object BinaryHistogram extends StrictLogging {
   val HistFormat_Geometric_Delta = 0x03.toByte
   val HistFormat_Geometric1_Delta = 0x04.toByte
   val HistFormat_Custom_Delta = 0x05.toByte
+  val HistFormat_Geometric_XOR = 0x08.toByte    // Double values XOR compressed
+  val HistFormat_Custom_XOR = 0x0a.toByte
 
   def isValidFormatCode(code: Byte): Boolean =
     (code == HistFormat_Null) || (code == HistFormat_Geometric1_Delta) || (code == HistFormat_Geometric_Delta) ||
@@ -127,7 +135,7 @@ object BinaryHistogram extends StrictLogging {
     writeDelta(buckets, values, histBuf)
 
   /**
-   * Encodes binary histogram with geometric bucket definition and data which is strictly increasing and positive.
+   * Encodes binary histogram with integral data which is strictly nondecreasing and positive.
    * All histograms after ingestion are expected to be increasing.
    * Delta encoding is applied for compression.
    * @param buf the buffer to write the histogram to.  Highly recommended this be an ExpandableArrayBuffer or equiv.
@@ -136,10 +144,9 @@ object BinaryHistogram extends StrictLogging {
    */
   def writeDelta(buckets: HistogramBuckets, values: Array[Long], buf: MutableDirectBuffer): Int = {
     require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
-    val formatCode = buckets match {
+    val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else  buckets match {
       case g: GeometricBuckets if g.minusOne => HistFormat_Geometric1_Delta
       case g: GeometricBuckets               => HistFormat_Geometric_Delta
-      case c: CustomBuckets if c.numBuckets == 0 => HistFormat_Null
       case c: CustomBuckets                  => HistFormat_Custom_Delta
     }
 
@@ -148,6 +155,30 @@ object BinaryHistogram extends StrictLogging {
                    else {
                      val valuesIndex = buckets.serialize(buf, 3)
                      NibblePack.packDelta(values, buf, valuesIndex)
+                   }
+    require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
+    buf.putShort(0, (finalPos - 2).toShort)
+    finalPos
+  }
+
+  /**
+   * Encodes binary histogram with double data, XOR compressed with NibblePack.
+   * @param buf the buffer to write the histogram to.  Highly recommended this be an ExpandableArrayBuffer or equiv.
+   *            so it can grow.
+   * @return the number of bytes written, including the length prefix
+   */
+  def writeDoubles(buckets: HistogramBuckets, values: Array[Double], buf: MutableDirectBuffer): Int = {
+    require(buckets.numBuckets == values.size, s"Values array size of ${values.size} != ${buckets.numBuckets}")
+    val formatCode = if (buckets.numBuckets == 0) HistFormat_Null else buckets match {
+      case g: GeometricBuckets               => HistFormat_Geometric_XOR
+      case c: CustomBuckets                  => HistFormat_Custom_XOR
+    }
+
+    buf.putByte(2, formatCode)
+    val finalPos = if (formatCode == HistFormat_Null) { 3 }
+                   else {
+                     val valuesIndex = buckets.serialize(buf, 3)
+                     NibblePack.packDoubles(values, buf, valuesIndex)
                    }
     require(finalPos <= 65535, s"Histogram data is too large: $finalPos bytes needed")
     buf.putShort(0, (finalPos - 2).toShort)

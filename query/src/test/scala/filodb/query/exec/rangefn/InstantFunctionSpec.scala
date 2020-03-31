@@ -237,7 +237,7 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
       // Calculating the quantile is quite complex... sigh
       val _max = row(3).asInstanceOf[Double]
       if ((i % 8) == 0) (_max * 0.9) else {
-        val _hist = row(4).asInstanceOf[bv.MutableHistogram]
+        val _hist = row(4).asInstanceOf[bv.LongHistogram]
         val rank = 0.9 * _hist.bucketValue(_hist.numBuckets - 1)
         val ratio = (rank - _hist.bucketValue((i-1) % 8)) / (_hist.bucketValue(i%8) - _hist.bucketValue((i-1) % 8))
         _hist.bucketTop((i-1) % 8) + ratio * (_max -  _hist.bucketTop((i-1) % 8))
