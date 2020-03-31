@@ -86,7 +86,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     DownsamplerContext.dsLogger.info(s"This is the Downsampling Index Migration driver. Starting job... " +
       s"fromHour=$fromHour " +
       s"toHourExcl=$toHourExcl " +
-      s"timeInMigrationPeriod=$timeInMigrationPeriod " +
+      s"timeInMigrationPeriod=${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)} " +
       s"doFullMigration=$doFullMigration")
 
     val numShards = dsIndexJobSettings.numShards

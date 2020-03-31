@@ -45,7 +45,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     }
   }
 
-  "PartKey Reads and Writes" should "work" in {
+  "PartKey Reads, Writes and Deletes" should "work" in {
     val dataset = Dataset("prometheus", Schemas.gauge).ref
 
     colStore.initialize(dataset, 1).futureValue
@@ -66,6 +66,12 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
     readData2.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
 
+    val numDeleted = colStore.deletePartKeys(dataset, 0,
+      Observable.fromIterable(readData2.map(_.partKey))).futureValue
+    numDeleted shouldEqual readData2.size
+
+    val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue
+    readData3.isEmpty shouldEqual true
   }
 
   "copyChunksByIngestionTimeRange" should "actually work" in {
