@@ -4,7 +4,8 @@ import com.typesafe.scalalogging.StrictLogging
 import org.agrona.DirectBuffer
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema}
+import filodb.core.binaryrecord2.RecordSchema.schemaID
+import filodb.core.metadata.{Column, DatasetOptions, PartitionSchema, Schema, Schemas}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn, MapColumn, StringColumn}
 import filodb.core.query.ColumnInfo
 import filodb.memory._
@@ -686,6 +687,27 @@ object RecordBuilder {
                                             case _        => shardKeyColValue
                                            }
       case _                            => shardKeyColValue
+    }
+  }
+
+  /**
+    * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
+    * than raw schema (e.g. Guages)
+    */
+  final def updateSchema(partKeyBase: Any, partKeyOffset: Long, schema: Schema): Unit = {
+    UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, schema.schemaHash.toShort)
+  }
+
+  /**
+    * Build a partkey from the source partkey and change the downsample schema.
+    * Useful during downsampling as dataschema may differ.
+    */
+  final def buildDownsamplePartKey(pkBytes: Array[Byte], schemas: Schemas): Option[Array[Byte]] = {
+    val rawSchema = schemas(schemaID(pkBytes, UnsafeUtils.arayOffset))
+    rawSchema.downsample.map { downSch =>
+      val dsPkeyBytes = pkBytes.clone
+      updateSchema(dsPkeyBytes, UnsafeUtils.arayOffset, downSch)
+      dsPkeyBytes
     }
   }
 }

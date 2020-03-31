@@ -293,15 +293,26 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     case name ~ params => Function(name.str, params)
   }
 
-  lazy val aggregateExpression: PackratParser[AggregateExpression] =
-    aggregateOperator ~ functionParams.? ~ aggregateGrouping.? ~ functionParams.? ^^ {
-      case fn ~ params ~ ag ~ ls => AggregateExpression(
-        fn, params.getOrElse(Seq.empty), ag, ls.getOrElse(Seq.empty)
+  // For queries with aggregateGrouping before metric name
+  // Example: sum without (sum_label) (some_metric)
+  lazy val aggregateExpression1: PackratParser[AggregateExpression] =
+    aggregateOperator ~ aggregateGrouping.?  ~ functionParams ~ functionParams.? ^^ {
+      case fn ~ ag ~ params ~  ls => AggregateExpression(
+        fn, params, ag, ls.getOrElse(Seq.empty)
+      )
+    }
+
+  // For queries with aggregateGrouping after metric name
+  // Example: sum (some_metric) without (some_label)
+  lazy val aggregateExpression2: PackratParser[AggregateExpression] =
+    aggregateOperator ~ functionParams ~ aggregateGrouping.? ~ functionParams.? ^^ {
+      case fn ~ params ~ ag  ~  ls => AggregateExpression(
+        fn, params, ag, ls.getOrElse(Seq.empty)
       )
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | aggregateExpression |
+    binaryExpression | aggregateExpression2 | aggregateExpression1 |
       function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
 
 }

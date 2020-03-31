@@ -67,8 +67,7 @@ object RangeVectorTransformer {
   */
 final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], queryConfig: QueryConfig,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
@@ -194,8 +193,7 @@ private class HD2DoubleInstantFuncIterator(rows: Iterator[RowReader],
 final case class ScalarOperationMapper(operator: BinaryOperator,
                                        scalarOnLhs: Boolean,
                                        funcParams: Seq[FuncArgs]) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"operator=$operator, scalarOnLhs=$scalarOnLhs"
+  protected[exec] def args: String = s"operator=$operator, scalarOnLhs=$scalarOnLhs"
 
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
@@ -259,8 +257,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
 }
 
 final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function"
+  protected[exec] def args: String = s"function=$function"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -297,8 +294,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
 
 final case class ScalarFunctionMapper(function: ScalarFunctionId,
                                       timeStepParams: RangeParams) extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"function=$function, funcParams=$funcParams"
+  protected[exec] def args: String = s"function=$function, funcParams=$funcParams"
 
   def scalarImpl(source: Observable[RangeVector]): Observable[RangeVector] = {
 
@@ -327,8 +323,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
 }
 
 final case class VectorFunctionMapper() extends RangeVectorTransformer {
-  protected[exec] def args: String =
-    s"funcParams=$funcParams"
+  protected[exec] def args: String = s"funcParams=$funcParams"
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
@@ -373,7 +368,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
     val resultRv = nonNanTimestamps.map {
       t =>
         val rowList = new ListBuffer[TransientRow]()
-        for (i <- rangeParams.start to rangeParams.end by rangeParams.step) {
+        for (i <- rangeParams.startSecs to rangeParams.endSecs by rangeParams.stepSecs) {
           if (!t.contains(i * 1000))
             rowList += new TransientRow(i * 1000, 1)
         }
@@ -387,7 +382,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
   }
   override def funcParams: Seq[FuncArgs] = Nil
   override def schema(source: ResultSchema): ResultSchema = ResultSchema(Seq(ColumnInfo("timestamp",
-    ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ColumnType.TimestampColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   override def canHandleEmptySchemas: Boolean = true
 }
@@ -459,7 +454,8 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
 
   override def schema(source: ResultSchema): ResultSchema =
     if (valueColumnType(source) != ColumnType.HistogramColumn) source else
-    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn)), 1)
+    ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+      ColumnInfo("value", ColumnType.DoubleColumn)), 1)
 
   private def addNewBuckets(newScheme: HistogramBuckets,
                             buckets: debox.Map[Double, debox.Buffer[Double]],

@@ -11,12 +11,12 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.{query, TestData}
+import filodb.core.{TestData, query}
 import filodb.core.MetricsTestData._
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, SerializedRangeVector}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, SerializedRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -75,8 +75,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
   val dummyDispatcher = new PlanDispatcher {
     override def dispatch(plan: ExecPlan)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Task[QueryResponse] = ???
+                         (implicit sched: Scheduler): Task[QueryResponse] = ???
   }
 
   it ("should read the job names from timeseriesindex matching the columnfilters") {
@@ -84,7 +83,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("_metric_", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = LabelValuesExec("someQueryId", now, limit, dummyDispatcher,
+    val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
@@ -105,7 +104,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
+    val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
@@ -119,7 +118,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = PartKeysExec("someQueryId", now, limit, dummyDispatcher,
+    val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
@@ -139,7 +138,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     //Reducing limit results in truncated metadata response
-    val execPlan = PartKeysExec("someQueryId", now, limit - 1, dummyDispatcher,
+    val execPlan = PartKeysExec(QueryContext(sampleLimit = limit-1), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue

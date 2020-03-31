@@ -5,6 +5,8 @@ import monix.eval.Task
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.metadata.Schemas
 import filodb.core.store.{ColumnStore, PartKeyRecord}
 
 class IndexBootstrapper(colStore: ColumnStore) {
@@ -45,20 +47,23 @@ class IndexBootstrapper(colStore: ColumnStore) {
   }
 
   /**
-    * Refresh index
-    * @param fromHour
-    * @param toHour
-    * @param parallelism
-    * @param lookUpOrAssignPartId
-    * @return
+    * Refresh index with real-time data rom colStore's raw dataset
+    * @param fromHour fromHour inclusive
+    * @param toHour toHour inclusive
+    * @param parallelism number of threads to use to concurrently load the index
+    * @param lookUpOrAssignPartId function to invoke to assign (or lookup) partId to the partKey
+    *
+    * @return number of records refreshed
     */
-  def refreshIndex(index: PartKeyLuceneIndex,
+  def refreshWithDownsamplePartKeys(
+                   index: PartKeyLuceneIndex,
                    shardNum: Int,
                    ref: DatasetRef,
                    fromHour: Long,
                    toHour: Long,
+                   schemas: Schemas,
                    parallelism: Int = Runtime.getRuntime.availableProcessors())
-                  (lookUpOrAssignPartId: PartKeyRecord => Int): Task[Long] = {
+                   (lookUpOrAssignPartId: Array[Byte] => Int): Task[Long] = {
     val tracer = Kamon.spanBuilder("downsample-store-refresh-index-latency")
       .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
@@ -68,15 +73,17 @@ class IndexBootstrapper(colStore: ColumnStore) {
       colStore.getPartKeysByUpdateHour(ref, shardNum, hour)
     }.mapAsync(parallelism) { pk =>
       Task {
-        val partId = lookUpOrAssignPartId(pk)
-        index.upsertPartKey(pk.partKey, partId, pk.startTime, pk.endTime)()
+        val downsamplPartKey = RecordBuilder.buildDownsamplePartKey(pk.partKey, schemas)
+        downsamplPartKey.foreach { dpk =>
+          val partId = lookUpOrAssignPartId(dpk)
+          index.upsertPartKey(dpk, partId, pk.startTime, pk.endTime)()
+        }
       }
      }
      .countL
      .map { count =>
        index.refreshReadersBlocking()
        tracer.finish()
-
        count
      }
   }

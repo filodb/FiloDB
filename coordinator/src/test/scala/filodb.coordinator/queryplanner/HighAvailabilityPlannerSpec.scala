@@ -4,11 +4,10 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.coordinator.ShardMapper
 import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
 import filodb.query._
 import filodb.query.exec._
@@ -41,7 +40,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
 
-  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty,"sum(heap_usage)", 100, 1, 1000, None)
 
   val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
 
@@ -115,7 +114,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("", from/1000, 1, to/1000, None)
+    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "", from/1000, 1, to/1000, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -240,7 +239,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -295,7 +294,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -328,7 +327,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -367,7 +366,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {

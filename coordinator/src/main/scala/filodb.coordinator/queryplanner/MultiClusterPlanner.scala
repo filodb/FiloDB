@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
-import filodb.query.{LogicalPlan, QueryContext}
+import filodb.core.query.QueryContext
+import filodb.query.LogicalPlan
 import filodb.query.exec.ExecPlan
 
 /**
