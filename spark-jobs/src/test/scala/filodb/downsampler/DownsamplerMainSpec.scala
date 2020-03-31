@@ -6,10 +6,10 @@ import java.time.Instant
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigException, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -710,6 +710,21 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
       List((1574372982000L, 88.0), (1574373042000L, 24.0))
+  }
+
+  it ("should fail when cardinality buster is not configured with any delete filters") {
+
+    // This test case is important to ensure that a run with missing configuration will not do unintended deletes
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    val settings2 = new DownsamplerSettings(conf)
+    val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
+    val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)
+    val caught = intercept[SparkException] {
+      cardBuster.run(sparkConf).close()
+    }
+    caught.getCause.asInstanceOf[ConfigException.Missing].getMessage
+      .contains("No configuration setting found for key 'cardbuster'") shouldEqual true
   }
 
   it ("should be able to bust cardinality in raw and downsample tables with spark job") {
