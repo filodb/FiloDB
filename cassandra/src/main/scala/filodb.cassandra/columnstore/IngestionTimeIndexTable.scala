@@ -160,8 +160,10 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
   }
 
   /**
-    * Deletes a single record, specified by a row from the scanRowsByIngestionTimeNoAsync method.
-    * Is used to delete records which are incorrect or inconsistent.
+    * Deletes a single record, specified by a row from the scanRowsByIngestionTimeNoAsync
+    * method.  Is used to delete records which are incorrect or inconsistent. The row object
+    * passed in contains the fields which uniquely identify the row to delete -- it doesn't
+    * specify the row entirely.
     */
   def deleteIndex(row: Row): Future[Response] = {
     connector.execStmtWithRetries(deleteIndexCql.bind(
