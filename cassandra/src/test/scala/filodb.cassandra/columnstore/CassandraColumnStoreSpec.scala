@@ -68,7 +68,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   }
 
-  "copyChunksByIngestionTimeRange" should "actually work" in {
+  "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {
     val dataset = Dataset("source", Schemas.gauge)
     val targetDataset = Dataset("target", Schemas.gauge)
 
@@ -135,7 +135,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
-    colStore.copyChunksByIngestionTimeRange(
+    colStore.copyOrDeleteChunksByIngestionTimeRange(
       dataset.ref,
       colStore.getScanSplits(dataset.ref).iterator,
       startTimeMillis, // ingestionTimeStart
@@ -180,7 +180,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     // Now delete from the source.
 
-    colStore.copyChunksByIngestionTimeRange(
+    colStore.copyOrDeleteChunksByIngestionTimeRange(
       dataset.ref,
       colStore.getScanSplits(dataset.ref).iterator,
       startTimeMillis, // ingestionTimeStart

@@ -66,7 +66,7 @@ class ChunkCopier(conf: SparkConf) {
   private[repair] def getTargetScanSplits = targetCassandraColStore.getScanSplits(targetDatasetRef, splitsPerNode)
 
   def copySourceToTarget(splitIter: Iterator[ScanSplit]): Unit = {
-    sourceCassandraColStore.copyChunksByIngestionTimeRange(
+    sourceCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
       sourceDatasetRef,
       splitIter,
       ingestionTimeStart.toEpochMilli(),
@@ -78,7 +78,7 @@ class ChunkCopier(conf: SparkConf) {
   }
 
   def deleteFromTarget(splitIter: Iterator[ScanSplit]): Unit = {
-    targetCassandraColStore.copyChunksByIngestionTimeRange(
+    targetCassandraColStore.copyOrDeleteChunksByIngestionTimeRange(
       targetDatasetRef,
       splitIter,
       ingestionTimeStart.toEpochMilli(),

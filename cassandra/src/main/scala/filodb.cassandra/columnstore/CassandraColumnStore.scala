@@ -225,14 +225,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     * @param diskTimeToLiveSeconds pass zero to delete chunks
     */
   // scalastyle:off null method.length
-  def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
-                                     splits: Iterator[ScanSplit],
-                                     ingestionTimeStart: Long,
-                                     ingestionTimeEnd: Long,
-                                     batchSize: Int,
-                                     target: CassandraColumnStore,
-                                     targetDatasetRef: DatasetRef,
-                                     diskTimeToLiveSeconds: Int): Unit =
+  def copyOrDeleteChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                             splits: Iterator[ScanSplit],
+                                             ingestionTimeStart: Long,
+                                             ingestionTimeEnd: Long,
+                                             batchSize: Int,
+                                             target: CassandraColumnStore,
+                                             targetDatasetRef: DatasetRef,
+                                             diskTimeToLiveSeconds: Int): Unit =
   {
     val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
