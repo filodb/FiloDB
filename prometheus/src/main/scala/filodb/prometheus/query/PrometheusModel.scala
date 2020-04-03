@@ -12,7 +12,7 @@ import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 object PrometheusModel {
   import com.softwaremill.quicklens._
   val conf = GlobalConfig.defaultsFromUrl
-  val queryConfig= conf.getConfig("filodb.query")
+  val queryConfig = conf.getConfig("filodb.query")
 
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output

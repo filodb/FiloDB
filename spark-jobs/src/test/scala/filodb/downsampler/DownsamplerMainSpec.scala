@@ -54,10 +54,15 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val rawDataStoreConfig = StoreConfig(ConfigFactory.parseString( """
                   |flush-interval = 1h
                   |shard-mem-size = 1MB
+                  |ingestion-buffer-mem-size = 30MB
                 """.stripMargin))
 
-  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram),
+  val offheapMem = new OffHeapMemory(Seq(Schemas.gauge, Schemas.promCounter, Schemas.promHistogram, Schemas.untyped),
                                      Map.empty, 100, rawDataStoreConfig)
+
+  val untypedName = "my_untyped"
+  var untypedPartKeyBytes: Array[Byte] = _
+
   val gaugeName = "my_gauge"
   var gaugePartKeyBytes: Array[Byte] = _
 
@@ -73,7 +78,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val lastSampleTime = 1574373042000L
   val pkUpdateHour = hour(lastSampleTime)
 
-  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName)
+  val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName, untypedName)
 
   val downsampler = new Downsampler(settings, batchDownsampler)
 
@@ -92,6 +97,48 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   override def afterAll(): Unit = {
     offheapMem.free()
+  }
+
+  it ("should write untyped data to cassandra") {
+
+    val rawDataset = Dataset("prometheus", Schemas.untyped)
+
+    val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
+    val partKey = partBuilder.partKeyFromObjects(Schemas.untyped, untypedName, seriesTags)
+
+    val part = new TimeSeriesPartition(0, Schemas.untyped, partKey,
+      0, offheapMem.bufferPools(Schemas.untyped.schemaHash), batchDownsampler.shardStats,
+      offheapMem.nativeMemoryManager, 1)
+
+    untypedPartKeyBytes = part.partKeyBytes
+
+    val rawSamples = Stream(
+      Seq(1574372801000L, 3d, untypedName, seriesTags),
+      Seq(1574372802000L, 5d, untypedName, seriesTags),
+
+      Seq(1574372861000L, 9d, untypedName, seriesTags),
+      Seq(1574372862000L, 11d, untypedName, seriesTags),
+
+      Seq(1574372921000L, 13d, untypedName, seriesTags),
+      Seq(1574372922000L, 15d, untypedName, seriesTags),
+
+      Seq(1574372981000L, 17d, untypedName, seriesTags),
+      Seq(1574372982000L, 15d, untypedName, seriesTags),
+
+      Seq(1574373041000L, 13d, untypedName, seriesTags),
+      Seq(1574373042000L, 11d, untypedName, seriesTags)
+    )
+
+    MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
+      val rr = new BinaryRecordRowReader(Schemas.untyped.ingestionSchema, base, offset)
+      part.ingest( lastSampleTime, rr, offheapMem.blockMemFactory)
+    }
+    part.switchBuffers(offheapMem.blockMemFactory, true)
+    val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
+
+    rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
+    val pk = PartKeyRecord(untypedPartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
+    rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
   it ("should write gauge data to cassandra") {
@@ -307,6 +354,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride", Instant.ofEpochMilli(lastSampleTime).toString)
+    sparkConf.set("spark.filodb.downsampler.index.toHourExclOverride", (pkUpdateHour + 6 + 1).toString)
     indexUpdater.run(sparkConf).close()
   }
 
@@ -339,12 +387,14 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
                                                      shard)
       Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
     }.toSet
-    readKeys shouldEqual (0 to 10000).map(i => s"metric$i").toSet ++ metricNames
+
+    // readKeys should not contain untyped part key - we dont downsample untyped
+    readKeys shouldEqual (0 to 10000).map(i => s"metric$i").toSet ++ (metricNames.toSet - untypedName)
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
-    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas)
+    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas).get
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -374,7 +424,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
     val dsGaugeLowFreqPartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugeLowFreqPartKeyBytes,
-                                                                          batchDownsampler.schemas)
+                                                                          batchDownsampler.schemas).get
     val downsampledPartData1 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(1, "min")),
       0,
@@ -484,7 +534,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 5-min downsampled data") {
-    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas)
+    val dsGaugePartKeyBytes = RecordBuilder.buildDownsamplePartKey(gaugePartKeyBytes, batchDownsampler.schemas).get
     val downsampledPartData2 = downsampleColStore.readRawPartitions(
       batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
       0,
@@ -611,6 +661,31 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       res.result.foreach(_.rows.nonEmpty shouldEqual true)
     }
 
+  }
+
+  it("should bring up DownsampledTimeSeriesShard and NOT be able to read untyped data using SelectRawPartitionsExec") {
+
+    val downsampleTSStore = new DownsampledTimeSeriesStore(downsampleColStore, rawColStore,
+      settings.filodbConfig)
+
+    downsampleTSStore.setup(batchDownsampler.rawDatasetRef, settings.filodbSettings.schemas,
+      0, rawDataStoreConfig, settings.rawDatasetIngestionConfig.downsampleConfig)
+
+    downsampleTSStore.recoverIndex(batchDownsampler.rawDatasetRef, 0).futureValue
+
+    val colFilters = seriesTags.map { case (t, v) => ColumnFilter(t.toString, Equals(v.toString)) }.toSeq
+
+      val queryFilters = colFilters :+ ColumnFilter("_metric_", Equals(untypedName))
+      val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
+        batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
+
+      val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
+      val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
+      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+        .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
+      queryScheduler.shutdown()
+
+      res.result.size shouldEqual 0
   }
 
   it("should bring up DownsampledTimeSeriesShard and be able to read specific columns " +

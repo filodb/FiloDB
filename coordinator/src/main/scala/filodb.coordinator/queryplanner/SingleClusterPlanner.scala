@@ -41,7 +41,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private val shardColumns = dsOptions.shardKeyColumns.sorted
 
   private val conf = GlobalConfig.defaultsFromUrl
-  private val queryConfig= conf.getConfig("filodb.query")
+  private val queryConfig = conf.getConfig("filodb.query")
 
   import SingleClusterPlanner._
 
