@@ -1,8 +1,10 @@
 package filodb.coordinator.queryplanner
 
+import filodb.core.GlobalConfig
 import filodb.query._
 
 object LogicalPlanUtils {
+  private val conf = GlobalConfig.defaultsFromUrl
 
   /**
     * Check whether all child logical plans have same start and end time
@@ -82,8 +84,7 @@ object LogicalPlanUtils {
                                                   lookBackTime: Long): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
-        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs - lookBackTime,
-          timeRange.endMs))
+        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs, timeRange.endMs))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
       case p: ApplyInstantFunctionRaw =>
@@ -110,6 +111,15 @@ object LogicalPlanUtils {
   def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
       case lp: RawSeries => lp.offsetMs.getOrElse(0)
+      case _             => 0
+    }
+  }
+
+  def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
+    val staleDataLookbackMillis = conf.getConfig("filodb.query").
+      getDuration("stale-sample-after").toMillis
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
       case _             => 0
     }
   }

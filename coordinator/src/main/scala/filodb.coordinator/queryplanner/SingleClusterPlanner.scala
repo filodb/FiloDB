@@ -8,7 +8,7 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{DatasetRef, SpreadProvider}
+import filodb.core.{DatasetRef, GlobalConfig, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, RangeParams}
@@ -39,6 +39,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private val dsOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
+
+  private val conf = GlobalConfig.defaultsFromUrl
+  private val queryConfig= conf.getConfig("filodb.query")
 
   import SingleClusterPlanner._
 
@@ -271,13 +274,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val rawSource = lp.series.isRaw
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
-    val offsetMillis: Long = lp.offset.getOrElse(0)
 
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, offsetMillis)
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offset, rawSource)))
+        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offsetMs, rawSource)))
       series
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -288,7 +290,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
-      WindowConstants.staleDataLookbackSeconds * 1000, lp.offsetMs.getOrElse(0))
+      WindowConstants.staleDataLookbackMillis, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
         None, None, qContext, Nil, lp.offsetMs)))
@@ -314,7 +316,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // Also if startMs < 500000000000 (before 1985), it is usually a unit test case with synthetic data, so don't fiddle
     // around with those queries
     val earliestRetainedTimestamp = earliestRetainedTimestampFn
-
     if (startMs - windowMs - offsetMs < earliestRetainedTimestamp && startMs > 500000000000L) {
       // We calculate below number of steps/instants to drop. We drop instant if data required for that instant
       // doesnt fully fall into the retention period. Data required for that instant involves
@@ -352,7 +353,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
     val rangeSelectorWithOffset = lp.rangeSelector match {
-      case IntervalSelector(from, to) => IntervalSelector(from - offsetMillis, to - offsetMillis)
+      case IntervalSelector(from, to) => IntervalSelector(from - offsetMillis - lp.lookbackMs.getOrElse(
+                                         queryConfig.getDuration("stale-sample-after").toMillis),
+                                         to - offsetMillis)
       case _                          => lp.rangeSelector
     }
     val needsStitch = rangeSelectorWithOffset match {

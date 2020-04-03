@@ -67,7 +67,7 @@ trait Functions extends Base with Operators with Vectors {
           // Special FiloDB functions to extract things like chunk metadata
         } else if (filoFunctionIdOpt.isDefined) {
           // No lookback needed as we are looking at chunk metadata only, not raw samples
-          val rangeSelector = timeParamToSelector(timeParams, 0)
+          val rangeSelector = timeParamToSelector(timeParams)
           val (filters, column) = seriesParam match {
             case i: InstantExpression => (i.columnFilters, i.column)
             case r: RangeExpression   => (r.columnFilters, r.column)

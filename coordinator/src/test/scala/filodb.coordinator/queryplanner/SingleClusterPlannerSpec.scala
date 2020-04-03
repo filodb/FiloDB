@@ -273,7 +273,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     psm1.start shouldEqual (nowSeconds * 1000
                             - 3.days.toMillis // retention
                             + 1.minute.toMillis // step
-                            + WindowConstants.staleDataLookbackSeconds * 1000) // default window
+                            + WindowConstants.staleDataLookbackMillis) // default window
 
     // Case 2: no offset, some window
     val logicalPlan2 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m])""",

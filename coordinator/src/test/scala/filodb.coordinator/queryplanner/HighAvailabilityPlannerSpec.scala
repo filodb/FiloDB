@@ -112,8 +112,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
     val to = 2000000
     val from = 1000000
-    val intervalSelector = IntervalSelector(from - 50000 , to) // Lookback of 50000
-    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val intervalSelector = IntervalSelector(from, to) // Lookback of 50000
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(50000))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
     val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "", from/1000, 1, to/1000, None)
