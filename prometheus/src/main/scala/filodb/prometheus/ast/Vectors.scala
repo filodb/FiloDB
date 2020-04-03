@@ -179,7 +179,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
-      // start timestamp. Prometheus goes back un to 5 minutes to get sample before declaring as stale
+      // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
       val ps = PeriodicSeries(
         RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
           offset.map(_.millis)),
