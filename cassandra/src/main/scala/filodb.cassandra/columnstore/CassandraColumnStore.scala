@@ -248,7 +248,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         futures += targetChunksTable.deleteChunks(partition, chunkInfos)
       } else {
         for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-          futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+          futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
         }
       }
 
@@ -287,7 +287,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         if (diskTimeToLiveSeconds == 0) {
           futures += targetIndexTable.deleteIndex(row);
         } else {
-          futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+          futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
         }
 
         if (chunkInfos.size >= batchSize) {
