@@ -30,15 +30,25 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
        |    PRIMARY KEY (partKey)
        |) WITH compression = {'chunk_length_in_kb': '16', 'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val writePartitionCql =
-    session.prepare(
-      s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?) USING TTL ?")
+  private lazy val writePartitionCql = session.prepare(
+      s"INSERT INTO ${tableString} (partKey, startTime, endTime) " +
+      s"VALUES (?, ?, ?) USING TTL ?")
       .setConsistencyLevel(writeConsistencyLevel)
 
-  lazy val writePartitionCqlNoTtl =
-    session.prepare(
-      s"INSERT INTO ${tableString} (partKey, startTime, endTime) VALUES (?, ?, ?)")
+  private lazy val writePartitionCqlNoTtl = session.prepare(
+      s"INSERT INTO ${tableString} (partKey, startTime, endTime) " +
+        s"VALUES (?, ?, ?)")
       .setConsistencyLevel(writeConsistencyLevel)
+
+  private lazy val scanCql = session.prepare(
+    s"SELECT * FROM $tableString " +
+    s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
+
+  private lazy val deleteCql = session.prepare(
+    s"DELETE FROM $tableString " +
+    s"WHERE partKey = ?"
+  )
 
   def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Int): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {
@@ -50,8 +60,6 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     }
   }
 
-  lazy val scanCql = session.prepare(s"SELECT * FROM $tableString " +
-                                      s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
   def scanPartKeys(tokens: Seq[(String, String)], shard: Int): Observable[PartKeyRecord] = {
     val res: Observable[Iterator[PartKeyRecord]] = Observable.fromIterable(tokens)
       .mapAsync { range =>
@@ -65,6 +73,12 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       pk <- Observable.fromIterator(pkRecs)
     } yield pk
   }
+
+  def deletePartKey(pk: Array[Byte], shard: Int): Future[Response] = {
+    val  stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
+    connector.execStmtWithRetries(stmt)
+  }
+
 }
 
 object PartitionKeysTable {

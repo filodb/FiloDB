@@ -47,7 +47,8 @@ trait Histogram extends Ordered[Histogram] {
     bucketNo
   }
 
-  final def topBucketValue: Double = bucketValue(numBuckets - 1)
+  final def topBucketValue: Double =
+    if (numBuckets <= 0) Double.NaN else bucketValue(numBuckets - 1)
 
   /**
    * Calculates histogram quantile based on bucket values using Prometheus scheme (increasing/LE)
@@ -184,7 +185,7 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
   final def bucketValue(no: Int): Double = values(no)
   final def serialize(intoBuf: Option[MutableDirectBuffer] = None): MutableDirectBuffer = {
     val buf = intoBuf.getOrElse(BinaryHistogram.histBuf)
-    BinaryHistogram.writeDelta(buckets, values.map(_.toLong), buf)
+    BinaryHistogram.writeDoubles(buckets, values, buf)
     buf
   }
 
@@ -264,6 +265,12 @@ final case class MutableHistogram(buckets: HistogramBuckets, values: Array[Doubl
 object MutableHistogram {
   def empty(buckets: HistogramBuckets): MutableHistogram =
     MutableHistogram(buckets, Array.fill(buckets.numBuckets)(Double.NaN))
+
+  def fromPacked(bucketDef: HistogramBuckets, packedValues: DirectBuffer): Option[MutableHistogram] = {
+    val values = new Array[Double](bucketDef.numBuckets)
+    val res = NibblePack.unpackDoubleXOR(packedValues, values)
+    if (res == NibblePack.Ok) Some(MutableHistogram(bucketDef, values)) else None
+  }
 
   def apply(h: Histogram): MutableHistogram = h match {
     case hb: HistogramWithBuckets => MutableHistogram(hb.buckets, hb.valueArray)

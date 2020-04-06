@@ -24,9 +24,9 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   val rand = new Random()
   val error = 0.00000001d
 
-  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val tvSchema = ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn)), 1)
-  val schema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val schema = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
   val tvSchemaTask = Task.now(tvSchema)
 

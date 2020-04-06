@@ -694,21 +694,20 @@ object RecordBuilder {
     * mutate dataschema of the partitionKey for downsampling, only when downsample dataschema is different
     * than raw schema (e.g. Guages)
     */
-  final def updateDownsampleSchema(partKeyBase: Any, partKeyOffset: Long, schemas: Schemas): Unit = {
-    val rawSchema = schemas(schemaID(partKeyBase, partKeyOffset))
-    val downsampleSchema = rawSchema.downsample.get
-    if (rawSchema != downsampleSchema) {
-      UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, downsampleSchema.schemaHash.toShort)
-    }
+  final def updateSchema(partKeyBase: Any, partKeyOffset: Long, schema: Schema): Unit = {
+    UnsafeUtils.setShort(partKeyBase, partKeyOffset + 4, schema.schemaHash.toShort)
   }
 
   /**
     * Build a partkey from the source partkey and change the downsample schema.
     * Useful during downsampling as dataschema may differ.
     */
-  final def buildDownsamplePartKey(pkByte: Array[Byte], schemas: Schemas): Array[Byte] = {
-    val dsPkeyByte = pkByte.clone
-    updateDownsampleSchema(dsPkeyByte, UnsafeUtils.arayOffset, schemas)
-    dsPkeyByte
+  final def buildDownsamplePartKey(pkBytes: Array[Byte], schemas: Schemas): Option[Array[Byte]] = {
+    val rawSchema = schemas(schemaID(pkBytes, UnsafeUtils.arayOffset))
+    rawSchema.downsample.map { downSch =>
+      val dsPkeyBytes = pkBytes.clone
+      updateSchema(dsPkeyBytes, UnsafeUtils.arayOffset, downSch)
+      dsPkeyBytes
+    }
   }
 }

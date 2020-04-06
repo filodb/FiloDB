@@ -154,7 +154,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
-    result.resultSchema.columns.map(_.colType) shouldEqual Seq(LongColumn, LongColumn)
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, LongColumn)
     result.result.size shouldEqual 1
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getLong(1))).toList
     dataRead shouldEqual mmdTuples.filter(_(5) == "Series 1").map(r => (r(0), r(4))).take(5)
@@ -226,7 +226,7 @@ class MultiSchemaPartitionsExecSpec extends FunSpec with Matchers with ScalaFutu
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
-    result.resultSchema.columns.map(_.colType) shouldEqual Seq(LongColumn, DoubleColumn)
+    result.resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     result.result.size shouldEqual 1
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual (start to end by step)

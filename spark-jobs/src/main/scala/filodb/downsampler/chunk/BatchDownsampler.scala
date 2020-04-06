@@ -41,6 +41,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   @transient lazy val numPartitionsEncountered = Kamon.counter("num-partitions-encountered").withoutTags()
   @transient lazy val numPartitionsBlacklisted = Kamon.counter("num-partitions-blacklisted").withoutTags()
   @transient lazy val numPartitionsCompleted = Kamon.counter("num-partitions-completed").withoutTags()
+  @transient lazy val numPartitionsNoDownsampleSchema = Kamon.counter("num-partitions-no-downsample-schema")
+                                                             .withoutTags()
   @transient lazy val numPartitionsFailed = Kamon.counter("num-partitions-failed").withoutTags()
   @transient lazy val numPartitionsSkipped = Kamon.counter("num-partitions-skipped").withoutTags()
   @transient lazy val numRawChunksSkipped = Kamon.counter("num-raw-chunks-skipped").withoutTags()
@@ -67,7 +69,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
   /**
     * Downsample Schemas
     */
-  @transient lazy private val dsSchemas = settings.rawSchemaNames.map { s => schemas.schemas(s).downsample.get}
+  @transient lazy private val dsSchemas = settings.rawSchemaNames.flatMap { s => schemas.schemas(s).downsample }
 
   /**
     * Chunk Downsamplers by Raw Schema Id
@@ -120,7 +122,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     }
     val pagedPartsToFree = ArrayBuffer[PagedReadablePartition]()
     val downsampledPartsToFree = ArrayBuffer[TimeSeriesPartition]()
-    val offHeapMem = new OffHeapMemory(rawSchemas.map(_.downsample.get),
+    val offHeapMem = new OffHeapMemory(rawSchemas.flatMap(_.downsample),
       kamonTags, maxMetaSize, settings.downsampleStoreConfig)
     var numDsChunks = 0
     val dsRecordBuilder = new RecordBuilder(MemFactory.onHeapFactory)
@@ -131,7 +133,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         val schema = schemas(rawSchemaId)
         if (schema != Schemas.UnknownSchema) {
           val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
-          if (isEligibleForDownsample(pkPairs)) {
+          if (settings.isEligibleForDownsample(pkPairs)) {
             try {
               downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
                 downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
@@ -141,6 +143,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
               numPartitionsFailed.increment()
             }
           } else {
+            DownsamplerContext.dsLogger.debug(s"Skipping blacklisted partition $pkPairs")
             numPartitionsBlacklisted.increment()
           }
         } else {
@@ -199,8 +202,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                                                    rawReadablePart.partKeyOffset,
                                                    offHeapMem.nativeMemoryManager)
 
-        //update dataschema of the partitionKey, only if the downsample schema is different than raw schema
-        RecordBuilder.updateDownsampleSchema(UnsafeUtils.ZeroPointer, partKeyPtr, schemas)
+        // update schema of the partition key to downsample schema
+        RecordBuilder.updateSchema(UnsafeUtils.ZeroPointer, partKeyPtr, downsampleSchema)
 
         val downsampledParts = settings.downsampleResolutions.map { res =>
           val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
@@ -222,7 +225,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         }
         downsamplePartSpan.finish()
       case None =>
-        DownsamplerContext.dsLogger.warn(s"Encountered partition " +
+        numPartitionsNoDownsampleSchema.increment()
+        DownsamplerContext.dsLogger.debug(s"Skipping downsampling of partition " +
           s"${rawPartSchema.partKeySchema.stringify(rawPart.partitionKey)} which does not have a downsample schema")
     }
   }
@@ -353,19 +357,6 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     numDownsampledChunksWritten.increment(numChunks)
     batchWriteSpan.finish()
     numChunks
-  }
-
-  /**
-    * Two conditions should satisfy for eligibility:
-    * (a) If whitelist is nonEmpty partKey should match a filter in the whitelist.
-    * (b) It should not match any filter in blacklist
-    */
-  private def isEligibleForDownsample(pkPairs: Seq[(String, String)]): Boolean = {
-    if (settings.whitelist.nonEmpty && !settings.whitelist.exists(w => w.forall(pkPairs.contains))) {
-      false
-    } else {
-      settings.blacklist.forall(w => !w.forall(pkPairs.contains))
-    }
   }
 
 }

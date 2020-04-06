@@ -24,7 +24,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
   val eightBTimes = eightBucketData.map(_(0).asInstanceOf[Long])
   val eightBHists = eightBucketData.map(_(3).asInstanceOf[HistogramWithBuckets])
   val rows = eightBTimes.zip(eightBHists).map { case (t, h) => new TransientHistRow(t, h) }
-  val sourceSchema = new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val sourceSchema = new ResultSchema(Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                           ColumnInfo("value", ColumnType.HistogramColumn)), 1)
 
   it("should convert single schema histogram to appropriate Prom bucket time series") {
@@ -33,7 +33,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)
     val sourceObs = Observable.now(rv)
 
-    mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
     val destObs = mapper.apply(sourceObs, queryConfig, 1000, sourceSchema, Nil)
@@ -68,7 +68,7 @@ class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures
     val mapper = HistToPromSeriesMapper(MMD.histDataset.schema.partition)
     val sourceObs = Observable.now(rv)
 
-    mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+    mapper.schema(sourceSchema).columns shouldEqual Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
                                                         ColumnInfo("value", ColumnType.DoubleColumn))
 
     val destObs = mapper.apply(sourceObs, queryConfig, 1000, sourceSchema, Nil)

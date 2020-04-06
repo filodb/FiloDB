@@ -21,7 +21,7 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
                                  params: RangeParams,
                                  value: Double) extends LeafExecPlan {
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo("value", ColumnType.DoubleColumn))
 
   /**

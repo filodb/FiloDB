@@ -104,7 +104,7 @@ object PromQlExec extends StrictLogging {
   import io.circe.generic.auto._
   import net.ceedubs.ficus.Ficus._
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
    ColumnInfo("value", ColumnType.DoubleColumn))
   val recSchema = SerializedRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)

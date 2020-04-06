@@ -21,7 +21,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import TestData._
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   implicit val s = monix.execution.Scheduler.Implicits.global
 

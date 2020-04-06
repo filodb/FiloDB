@@ -15,7 +15,7 @@ import filodb.downsampler.DownsamplerContext
   * Goal: Align chunks when this job is run in multiple DCs so that cross-dc repairs can be done.
   * Non-Goal: Downsampling of non-real time data or data with different epoch.
   *
-  * Strategy is to run this spark job every 6 hours at 8am, 2pm, 8pm, 2am each day.
+  * Strategy is to run this spark job every 6 hours at 8am, 2pm, 8pm, 2am UTC each day.
   *
   * Run at 8am: We query data with ingestionTime from 10pm to 8am.
   *             Then query and downsample data with userTime between 12am to 6am.
@@ -41,6 +41,7 @@ import filodb.downsampler.DownsamplerContext
   */
 object DownsamplerMain extends App {
 
+  Kamon.init()  // kamon init should be first thing in driver jvm
   val settings = new DownsamplerSettings()
   val batchDownsampler = new BatchDownsampler(settings)
 
@@ -50,6 +51,8 @@ object DownsamplerMain extends App {
 }
 
 class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsampler) extends Serializable {
+
+  @transient lazy private val jobCompleted = Kamon.counter("chunk-migration-completed").withoutTags()
 
   // Gotcha!! Need separate function (Cannot be within body of a class)
   // to create a closure for spark to serialize and move to executors.
@@ -98,6 +101,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
+        Kamon.init() // kamon init should be first thing in worker jvm
         import filodb.core.Iterators._
         val rawDataSource = batchDownsampler.rawCassandraColStore
         val batchReadSpan = Kamon.spanBuilder("cassandra-raw-data-read-latency").start()
@@ -111,10 +115,12 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
+        Kamon.init() // kamon init should be first thing in worker jvm
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }
 
     DownsamplerContext.dsLogger.info(s"Downsampling Driver completed successfully")
+    jobCompleted.increment()
     spark
   }
 

@@ -155,11 +155,11 @@ class SumOverTimeChunkedFunctionD extends SumOverTimeChunkedFunction() with Chun
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    // NaN values are ignored by default in the sum method
-    if (sum.isNaN) {
-      sum = 0d
-    }
-    sum += doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
+
+    //Takes care of computing sum in all seq types : combination of NaN & not NaN & all numbers.
+    val chunkSum = doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
+    if(!JLDouble.isNaN(chunkSum) && JLDouble.isNaN(sum)) sum = 0d
+    sum += chunkSum
   }
 }
 
@@ -408,15 +408,15 @@ class AvgOverTimeFunction(var sum: Double = Double.NaN, var count: Int = 0) exte
   }
 }
 
-abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var count: Double = 0)
+abstract class AvgOverTimeChunkedFunction(var sum: Double = Double.NaN, var count: Int = 0)
   extends ChunkedRangeFunction[TransientRow] {
   override final def reset(): Unit = {
-    sum = Double.NaN;
-    count = 0d
+    sum = Double.NaN
+    count = 0
   }
 
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    sampleToEmit.setValues(endTimestamp, if (count > 0) sum/count else if (sum.isNaN()) sum else 0d)
+    sampleToEmit.setValues(endTimestamp, if (count > 0) sum / count else if (sum.isNaN()) sum else 0d)
   }
 }
 
@@ -426,10 +426,11 @@ class AvgOverTimeChunkedFunctionD extends AvgOverTimeChunkedFunction() with Chun
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
-    if (sum.isNaN) {
-      sum = 0d
-    }
-    sum += doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
+
+    // Takes care of computing sum in all seq types : combination of NaN & not NaN & all numbers.
+    val chunkSum = doubleReader.sum(doubleVectAcc, doubleVect, startRowNum, endRowNum)
+    if(!JLDouble.isNaN(chunkSum) && JLDouble.isNaN(sum)) sum = 0d
+    sum += chunkSum
     count += doubleReader.count(doubleVectAcc, doubleVect, startRowNum, endRowNum)
   }
 }
@@ -493,45 +494,64 @@ class StdVarOverTimeFunction(var sum: Double = 0d,
   }
 }
 
-abstract class VarOverTimeChunkedFunctionD(var sum: Double = 0d,
+abstract class VarOverTimeChunkedFunctionD(var sum: Double = Double.NaN,
                                            var count: Int = 0,
-                                           var squaredSum: Double = 0d) extends ChunkedDoubleRangeFunction {
-  override final def reset(): Unit = { sum = 0d; count = 0; squaredSum = 0d }
+                                           var squaredSum: Double = Double.NaN,
+                                           var lastSample: Double = Double.NaN) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = { sum = Double.NaN; count = 0; squaredSum = Double.NaN }
   final def addTimeDoubleChunks(doubleVectAcc: MemoryReader,
                                 doubleVect: BinaryVector.BinaryVectorPtr,
                                 doubleReader: bv.DoubleVectorDataReader,
                                 startRowNum: Int,
                                 endRowNum: Int): Unit = {
+    // Takes care of computing sum in all seq types : combination of NaN & not NaN & all numbers.
     val it = doubleReader.iterate(doubleVectAcc, doubleVect, startRowNum)
-    var _sum = 0d
-    var _sqSum = 0d
     var elemNo = startRowNum
+    var chunkSum = Double.NaN
+    var chunkSquaredSum = Double.NaN
+    var chunkCount = 0
     while (elemNo <= endRowNum) {
       val nextValue = it.next
       if (!JLDouble.isNaN(nextValue)) {
-        _sum += nextValue
-        _sqSum += nextValue * nextValue
-        elemNo += 1
+        if (chunkSum.isNaN()) chunkSum = 0d
+        if (chunkSquaredSum.isNaN()) chunkSquaredSum = 0d
+        if (elemNo == endRowNum) lastSample = nextValue
+        chunkSum += nextValue
+        chunkSquaredSum += nextValue * nextValue
+        chunkCount +=1
       }
+      elemNo += 1
     }
-    count += (endRowNum - startRowNum + 1)
-    sum += _sum
-    squaredSum += _sqSum
+    if(!JLDouble.isNaN(chunkSum) && JLDouble.isNaN(sum)) sum = 0d
+    sum += chunkSum
+    if(!JLDouble.isNaN(chunkSquaredSum) && JLDouble.isNaN(squaredSum)) squaredSum = 0d
+    squaredSum += chunkSquaredSum
+    count += chunkCount
   }
 }
 
 class StdDevOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    val avg = if (count > 0) sum/count else 0d
-    val stdDev = Math.sqrt(squaredSum/count - avg*avg)
+    var stdDev = Double.NaN
+    if (count > 0) {
+      val avg = sum / count
+      stdDev = Math.sqrt((squaredSum / count) - (avg * avg))
+    }
+    else if (sum.isNaN()) stdDev = sum
+    else stdDev = 0d
     sampleToEmit.setValues(endTimestamp, stdDev)
   }
 }
 
 class StdVarOverTimeChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    val avg = if (count > 0) sum/count else 0d
-    val stdVar = squaredSum/count - avg*avg
+    var stdVar = Double.NaN
+    if (count > 0) {
+      val avg = sum / count
+      stdVar = (squaredSum / count) - (avg * avg)
+    }
+    else if (sum.isNaN()) stdVar = sum
+    else stdVar = 0d
     sampleToEmit.setValues(endTimestamp, stdVar)
   }
 }
@@ -931,46 +951,16 @@ class PredictLinearChunkedFunctionL(funcParams: Seq[Any]) extends PredictLinearC
   * It represents the distance between the raw score and the population mean in units of the standard deviation.
   * Refer https://en.wikipedia.org/wiki/Standard_score#Calculation to understand how to calculate
   **/
-
-abstract class ZScoreChunkedFunction(var stdOverTimeChunkedFunction: StdDevOverTimeChunkedFunctionD = null,
-                                     var avgOverTimeChunkedFunction: AvgOverTimeChunkedFunctionD = null,
-                                     var lastSampleChunkedFunction: LastSampleChunkedFunctionWithNanD = null)
-  extends ChunkedRangeFunction[TransientRow] {
-
-  override final def reset(): Unit = { stdOverTimeChunkedFunction = new StdDevOverTimeChunkedFunctionD()
-                                       avgOverTimeChunkedFunction = new AvgOverTimeChunkedFunctionD()
-                                       lastSampleChunkedFunction = new LastSampleChunkedFunctionWithNanD() }
-
+class ZScoreChunkedFunctionD extends VarOverTimeChunkedFunctionD() {
   final def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
-    val stdDevTransientRow, avgTransientRow, lastSampleTransientRow = new TransientRow()
-    stdOverTimeChunkedFunction.apply(endTimestamp, stdDevTransientRow)
-    avgOverTimeChunkedFunction.apply(endTimestamp, avgTransientRow)
-    lastSampleChunkedFunction.apply(endTimestamp, lastSampleTransientRow)
-    val stdDev = stdDevTransientRow.value
-    val avg = avgTransientRow.value
-    val lastSample = lastSampleTransientRow.value
-    val zscore = (lastSample - avg)/stdDev
+    var zscore = Double.NaN
+    if (count > 0) {
+      val avg = sum / count
+      val stdDev = Math.sqrt(squaredSum / count - avg*avg)
+      zscore = (lastSample - avg) / stdDev
+    }
+    else if (sum.isNaN()) zscore = sum
+    else zscore = 0d
     sampleToEmit.setValues(endTimestamp, zscore)
-  }
-}
-
-class ZScoreChunkedFunctionD() extends ZScoreChunkedFunction()
-  with ChunkedRangeFunction[TransientRow] {
-
-  override final def addChunks(tsVectorAcc: MemoryReader, tsVector: BinaryVector.BinaryVectorPtr,
-                               tsReader: bv.LongVectorDataReader, valueVectorAcc: MemoryReader,
-                               valueVector: BinaryVector.BinaryVectorPtr, valueReader: VectorDataReader,
-                               startTime: Long, endTime: Long, info: ChunkSetInfoReader,
-                               queryConfig: QueryConfig): Unit = {
-
-    val startRowNum = tsReader.binarySearch(tsVectorAcc, tsVector, startTime) & 0x7fffffff
-    val endRowNum = Math.min(tsReader.ceilingIndex(tsVectorAcc, tsVector, endTime), info.numRows - 1)
-    stdOverTimeChunkedFunction.addTimeDoubleChunks(valueVectorAcc, valueVector, valueReader.asDoubleReader,
-                                                   startRowNum, endRowNum)
-    avgOverTimeChunkedFunction.addTimeDoubleChunks(valueVectorAcc, valueVector, valueReader.asDoubleReader,
-                                                   startRowNum, endRowNum)
-    lastSampleChunkedFunction.addChunks(tsVectorAcc, tsVector, tsReader, valueVectorAcc, valueVector, valueReader,
-                                        startTime, endTime, info, queryConfig)
-
   }
 }

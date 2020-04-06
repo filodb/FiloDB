@@ -1,25 +1,24 @@
 package filodb.cassandra.columnstore
 
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration._
-
 import java.lang.ref.Reference
 import java.nio.ByteBuffer
+
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration._
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 
+import filodb.cassandra.DefaultFiloSessionProvider
+import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.core._
 import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.metadata.{Dataset, Schemas}
+import filodb.core.store.{ChunkSet, ChunkSetInfo, ColumnStoreSpec, PartKeyRecord}
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.format.UnsafeUtils
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.store.{ChunkSet, ChunkSetInfo}
-import filodb.core.store.ColumnStoreSpec
-import filodb.cassandra.DefaultFiloSessionProvider
-import filodb.cassandra.metastore.CassandraMetaStore
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import NamesTestData._
@@ -46,7 +45,36 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     }
   }
 
-  "copyChunksByIngestionTimeRange" should "actually work" in {
+  "PartKey Reads, Writes and Deletes" should "work" in {
+    val dataset = Dataset("prometheus", Schemas.gauge).ref
+
+    colStore.initialize(dataset, 1).futureValue
+    colStore.truncate(dataset, 1).futureValue
+
+    val pks = (10000 to 30000).map(_.toString.getBytes)
+                              .zipWithIndex.map { case (pk, i) => PartKeyRecord(pk, 5, 10, Some(i))}.toSet
+
+    val updateHour = 10
+    colStore.writePartKeys(dataset, 0, Observable.fromIterable(pks), 1.hour.toSeconds.toInt, 10, true )
+      .futureValue shouldEqual Success
+
+    val expectedKeys = pks.map(pk => new String(pk.partKey).toInt)
+
+    val readData = colStore.getPartKeysByUpdateHour(dataset, 0, updateHour).toListL.runAsync.futureValue.toSet
+    readData.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+
+    val readData2 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue.toSet
+    readData2.map(pk => new String(pk.partKey).toInt) shouldEqual expectedKeys
+
+    val numDeleted = colStore.deletePartKeys(dataset, 0,
+      Observable.fromIterable(readData2.map(_.partKey))).futureValue
+    numDeleted shouldEqual readData2.size
+
+    val readData3 = colStore.scanPartKeys(dataset, 0).toListL.runAsync.futureValue
+    readData3.isEmpty shouldEqual true
+  }
+
+  "copyOrDeleteChunksByIngestionTimeRange" should "actually work" in {
     val dataset = Dataset("source", Schemas.gauge)
     val targetDataset = Dataset("target", Schemas.gauge)
 
@@ -113,7 +141,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     var chunks2 = colStore.getOrCreateChunkTable(targetDataset.ref).readAllChunksNoAsync(part2Bytes).all()
     chunks2 should have size (0)
 
-    colStore.copyChunksByIngestionTimeRange(
+    colStore.copyOrDeleteChunksByIngestionTimeRange(
       dataset.ref,
       colStore.getScanSplits(dataset.ref).iterator,
       startTimeMillis, // ingestionTimeStart
@@ -151,10 +179,32 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
     val expectIndex2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
     expectIndex2 should have size (11)
 
-    val index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    var index1 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part1Bytes).all()
     checkRows(expectIndex1, index1)
-    val index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    var index2 = colStore.getOrCreateIngestionTimeIndexTable(targetDataset.ref).readAllRowsNoAsync(part2Bytes).all()
     checkRows(expectIndex2, index2)
+
+    // Now delete from the source.
+
+    colStore.copyOrDeleteChunksByIngestionTimeRange(
+      dataset.ref,
+      colStore.getScanSplits(dataset.ref).iterator,
+      startTimeMillis, // ingestionTimeStart
+      timeMillis,      // ingestionTimeEnd
+      7,         // batchSize
+      colStore,  // target
+      dataset.ref, // targetDatasetRef is the the source, to delete from it
+      0) // diskTimeToLiveSeconds is 0, which means delete
+
+    chunks1 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part1Bytes).all()
+    chunks1 should have size (0)
+    chunks2 = colStore.getOrCreateChunkTable(dataset.ref).readAllChunksNoAsync(part2Bytes).all()
+    chunks2 should have size (0)
+
+    index1 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part1Bytes).all()
+    index1 should have size (0)
+    index2 = colStore.getOrCreateIngestionTimeIndexTable(dataset.ref).readAllRowsNoAsync(part2Bytes).all()
+    index2 should have size (0)
   }
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")

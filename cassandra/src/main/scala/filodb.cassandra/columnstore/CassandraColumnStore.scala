@@ -219,17 +219,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   /**
     * Copy a range of chunks to a target ColumnStore, for performing disaster recovery or
-    * backfills.
+    * backfills. This method can also be used to delete chunks, by specifying a ttl of zero.
+    * If the target is the same as the source, then this effectively deletes from the source.
+    *
+    * @param diskTimeToLiveSeconds pass zero to delete chunks
     */
   // scalastyle:off null method.length
-  def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
-                                     splits: Iterator[ScanSplit],
-                                     ingestionTimeStart: Long,
-                                     ingestionTimeEnd: Long,
-                                     batchSize: Int,
-                                     target: CassandraColumnStore,
-                                     targetDatasetRef: DatasetRef,
-                                     diskTimeToLiveSeconds: Int): Unit =
+  def copyOrDeleteChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                             splits: Iterator[ScanSplit],
+                                             ingestionTimeStart: Long,
+                                             ingestionTimeEnd: Long,
+                                             batchSize: Int,
+                                             target: CassandraColumnStore,
+                                             targetDatasetRef: DatasetRef,
+                                             diskTimeToLiveSeconds: Int): Unit =
   {
     val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
@@ -241,8 +244,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val futures = new ArrayBuffer[Future[Response]]()
 
     def finishBatch(partition: ByteBuffer): Unit = {
-      for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-        futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
+      if (diskTimeToLiveSeconds == 0) {
+        futures += targetChunksTable.deleteChunks(partition, chunkInfos)
+      } else {
+        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
+          futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+        }
       }
 
       chunkInfos.clear()
@@ -276,7 +283,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         }
 
         chunkInfos += row.getBytes(3) // info
-        futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
+
+        if (diskTimeToLiveSeconds == 0) {
+          futures += targetIndexTable.deleteIndex(row);
+        } else {
+          futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+        }
 
         if (chunkInfos.size >= batchSize) {
           finishBatch(partition)
@@ -353,25 +365,24 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
   }
 
-  private def hour(millis: Long = System.currentTimeMillis()) = millis / 1000 / 60 / 60
-
   def writePartKeys(ref: DatasetRef,
                     shard: Int,
                     partKeys: Observable[PartKeyRecord],
-                    diskTTLSeconds: Int,
+                    diskTTLSeconds: Int, updateHour: Long,
                     writeToPkUTTable: Boolean = true): Future[Response] = {
     val pkTable = getOrCreatePartitionKeysTable(ref, shard)
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    val updateHour = hour()
     val span = Kamon.spanBuilder("write-part-keys").asChildOf(Kamon.currentSpan()).start()
     val ret = partKeys.mapAsync(writeParallelism) { pk =>
       val ttl = if (pk.endTime == Long.MaxValue) -1 else diskTTLSeconds
-      val split = pk.hash.get % pkByUTNumSplits // caller needs to supply hash for partKey - cannot be None
+      // caller needs to supply hash for partKey - cannot be None
+      // Logical & MaxValue needed to make split positive by zeroing sign bit
+      val split = (pk.hash.get & Int.MaxValue) % pkByUTNumSplits
       val writePkFut = pkTable.writePartKey(pk, ttl).flatMap {
-        case resp if resp == Success
-          && writeToPkUTTable => pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
-
-        case resp             => Future.successful(resp)
+        case resp if resp == Success && writeToPkUTTable =>
+          pkByUTTable.writePartKey(shard, updateHour, split, pk, pkByUTTtlSeconds)
+        case resp =>
+          Future.successful(resp)
       }
       Task.fromFuture(writePkFut).map{ resp =>
         sinkStats.partKeysWrite(1)
@@ -382,15 +393,29 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     ret
   }
 
+  def deletePartKeys(ref: DatasetRef,
+                     shard: Int,
+                     pks: Observable[Array[Byte]]): Future[Long] = {
+    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+    pks.mapAsync(writeParallelism) { pk =>
+      Task.fromFuture(pkTable.deletePartKey(pk, shard))
+    }.countL.runAsync
+  }
+
   def getPartKeysByUpdateHour(ref: DatasetRef,
                               shard: Int,
                               updateHour: Long): Observable[PartKeyRecord] = {
     val pkByUTTable = getOrCreatePartitionKeysByUpdateTimeTable(ref)
-    Observable.fromIterable(0 to pkByUTNumSplits)
+    Observable.fromIterable(0 until pkByUTNumSplits)
               .flatMap { split => pkByUTTable.scanPartKeys(shard, updateHour, split) }
   }
 }
 
+/**
+  * FIXME this works only for Murmur3Partitioner because it generates
+  * Long based tokens. If other partitioners are used, this can potentially break.
+  * Correct way is to pass Token objects so CQL stmts can bind tokens with stmt.bind().setPartitionKeyToken(token)
+  */
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
                                     replicas: Set[InetSocketAddress]) extends ScanSplit {
   // NOTE: You need both the host string and the IP address for Spark's locality to work
@@ -477,14 +502,14 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
 
   def getOrCreateIngestionTimeIndexTable(dataset: DatasetRef): IngestionTimeIndexTable = {
     indexTableCache.getOrElseUpdate(dataset,
-                                    { dataset: DatasetRef =>
-                                      new IngestionTimeIndexTable(dataset, clusterConnector)(readEc) })
-  }
+                        { dataset: DatasetRef =>
+                          new IngestionTimeIndexTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+}
 
   def getOrCreatePartitionKeysByUpdateTimeTable(dataset: DatasetRef): PartitionKeysByUpdateTimeTable = {
     partKeysByUTTableCache.getOrElseUpdate(dataset,
       { dataset: DatasetRef =>
-        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector)(readEc) })
+        new PartitionKeysByUpdateTimeTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreatePartitionKeysTable(dataset: DatasetRef, shard: Int): PartitionKeysTable = {

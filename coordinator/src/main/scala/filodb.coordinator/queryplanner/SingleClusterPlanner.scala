@@ -272,25 +272,41 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
-    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs, lp.window, lp.offset.getOrElse(0))
-    val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
-    series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-      lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offset, rawSource)))
-    series
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offset.getOrElse(0))
+    if (newStartMs <= lp.endMs) {
+      val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
+      series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
+        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offset, rawSource)))
+      series
+    } else { // query is outside retention period, simply return empty result
+      PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
+    }
   }
 
   private def materializePeriodicSeries(qContext: QueryContext,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
-    val newStartMs = boundStartInstant(lp.startMs, lp.stepMs, lp.endMs,
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
       WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
-    rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-      None, None, qContext, Nil, lp.offset)))
-    rawSeries
+    if (newStartMs <= lp.endMs) {
+      rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
+        None, None, qContext, Nil, lp.offset)))
+      rawSeries
+    } else { // query is outside retention period, simply return empty result
+      PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
+    }
   }
 
-  private def boundStartInstant(startMs: Long, stepMs: Long, endMs: Long,
-                                windowMs: Long, offsetMs: Long): Long = {
+  /**
+    * Calculates the earliest startTime possible given the query's start/window/step/offset.
+    * This is used to bound the startTime of queries so we dont create possibility of aggregating
+    * partially expired data and return incomplete results.
+    *
+    * @return new startTime to be used for query in ms. If original startTime is within retention
+    *         period, returns it as is.
+    */
+  private def boundToStartTimeToEarliestRetained(startMs: Long, stepMs: Long,
+                                        windowMs: Long, offsetMs: Long): Long = {
     // In case query is earlier than earliestRetainedTimestamp then we need to drop the first few instants
     // to prevent inaccurate results being served. Inaccuracy creeps in because data can be in memory for which
     // equivalent data may not be in cassandra. Aggregations cannot be guaranteed to be complete.

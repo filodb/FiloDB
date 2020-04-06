@@ -6,10 +6,11 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.{FunctionalSpreadProvider, StaticSpreadProvider}
-import filodb.core.{MetricsTestData, SpreadChange}
+import filodb.core.{GlobalScheduler, MetricsTestData, SpreadChange}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
 import filodb.prometheus.ast.{TimeStepParams, WindowConstants}
@@ -17,7 +18,7 @@ import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
-class SingleClusterPlannerSpec extends FunSpec with Matchers {
+class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
   implicit val system = ActorSystem()
   private val node = TestProbe().ref
@@ -257,10 +258,9 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
   }
 
   it("should bound queries until retention period and drop instants outside retention period") {
-     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-       earliestRetainedTimestampFn = System.currentTimeMillis - 3.days.toMillis)
-
     val nowSeconds = System.currentTimeMillis() / 1000
+     val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
+       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis)
 
     // Case 1: no offset or window
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
@@ -286,8 +286,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
       + 1.minute.toMillis // step
       + 20.minutes.toMillis) // window
 
-
-    // Case 2: offset and some window
+    // Case 3: offset and some window
     val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
       TimeStepParams(nowSeconds - 4.days.toSeconds, 1.minute.toSeconds, nowSeconds))
 
@@ -300,6 +299,15 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers {
       + 20.minutes.toMillis  // window
       + 15.minutes.toMillis) // offset
 
+    // Case 4: outside retention
+    val logicalPlan4 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
+      TimeStepParams(nowSeconds - 10.days.toSeconds, 1.minute.toSeconds, nowSeconds - 5.days.toSeconds))
+    val ep4 = planner.materialize(logicalPlan4, QueryContext())
+    ep4.isInstanceOf[EmptyResultExec] shouldEqual true
+    import GlobalScheduler._
+    val res = ep4.dispatcher.dispatch(ep4).runAsync.futureValue.asInstanceOf[QueryResult]
+    res.result.isEmpty shouldEqual true
   }
 
-}
+
+  }

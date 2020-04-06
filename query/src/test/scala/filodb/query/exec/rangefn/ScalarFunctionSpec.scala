@@ -148,4 +148,19 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
       }
     }
   }
+  it("should generate DayOfWeek scalar") {
+    val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(1583682900, 100, 1583683400), ScalarFunctionId.DayOfWeek)
+    implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
+    import monix.execution.Scheduler.Implicits.global
+    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val result = resp match {
+      case QueryResult(id, _, response) => {
+        val rv = response(0)
+        rv.isInstanceOf[DayOfWeekScalar] shouldEqual(true)
+        val res = rv.rows.map(x=>(x.getLong(0), x.getDouble(1))).toList
+        List((1583682900000L,0.0), (1583683000000L,0.0), (1583683100000L,0.0), (1583683200000L,0.0),
+          (1583683300000L,0.0), (1583683400000L,0.0)).sameElements(res) shouldEqual(true)
+      }
+    }
+  }
 }

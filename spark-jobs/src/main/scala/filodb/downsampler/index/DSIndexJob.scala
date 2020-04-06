@@ -7,7 +7,7 @@ import monix.reactive.Observable
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, Instance}
-import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.metadata.Schemas
 import filodb.core.store.PartKeyRecord
 import filodb.downsampler.DownsamplerContext
@@ -21,9 +21,11 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
   @transient lazy private val sparkForeachTasksCompleted = Kamon.counter("spark-foreach-tasks-completed")
                                                                .withoutTags()
   @transient lazy private val sparkTasksFailed = Kamon.counter("spark-tasks-failed").withoutTags()
-  @transient lazy private val totalPartkeysUpdated = Kamon.counter("total-partkeys-updated").withoutTags()
+  @transient lazy private val numPartKeysNoDownsampleSchema = Kamon.counter("num-partkeys-no-downsample").withoutTags()
+  @transient lazy private val numPartKeysMigrated = Kamon.counter("num-partkeys-migrated").withoutTags()
+  @transient lazy private val numPartKeysBlacklisted = Kamon.counter("num-partkeys-blacklisted").withoutTags()
 
-  private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
+  @transient lazy private[downsampler] val schemas = Schemas.fromConfig(dsSettings.filodbConfig).get
 
   /**
     * Datasets to which we write downsampled data. Keyed by Downsample resolution.
@@ -52,65 +54,73 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       dsSettings.rawDatasetIngestionConfig.downsampleConfig.resolutions.last
   @transient lazy private val dsDatasetRef = downsampleRefsByRes(highestDSResolution)
 
-  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHour: Long): Unit = {
-
+  def updateDSPartKeyIndex(shard: Int, fromHour: Long, toHourExcl: Long, fullIndexMigration: Boolean): Unit = {
     sparkTasksStarted.increment
-    val span = Kamon.spanBuilder("per-shard-index-migration-latency")
-      .asChildOf(Kamon.currentSpan())
-      .tag("shard", shard)
-      .start
     val rawDataSource = rawCassandraColStore
-
     @volatile var count = 0
     try {
-      if (dsJobsettings.migrateRawIndex) {
+      val span = Kamon.spanBuilder("per-shard-index-migration-latency")
+        .asChildOf(Kamon.currentSpan())
+        .tag("shard", shard)
+        .start
+      if (fullIndexMigration) {
         DownsamplerContext.dsLogger.info("migrating complete partkey index")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
           shard = shard.toInt)
-        count += updateDSPartkeys(partKeys, shard)
-        DownsamplerContext.dsLogger.info(s"Complete Partkey index migration successful for shard=$shard count=$count")
+        count += migrateWithDownsamplePartKeys(partKeys, shard)
+        DownsamplerContext.dsLogger.info(s"Complete PartKey index migration successful for shard=$shard count=$count")
       } else {
-        for (epochHour <- fromHour to toHour) {
+        for (epochHour <- fromHour until toHourExcl) {
           val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
             shard = shard.toInt, updateHour = epochHour)
-          count += updateDSPartkeys(partKeys, shard)
+          count += migrateWithDownsamplePartKeys(partKeys, shard)
         }
-        DownsamplerContext.dsLogger.info(s"Partial Partkey index migration successful for shard=$shard count=$count" +
-          s" from=$fromHour to=$toHour")
+        DownsamplerContext.dsLogger.info(s"Partial PartKey index migration successful for shard=$shard count=$count" +
+          s" fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       sparkForeachTasksCompleted.increment()
-      totalPartkeysUpdated.increment(count)
+      span.finish()
     } catch { case e: Exception =>
       DownsamplerContext.dsLogger.error(s"Exception in task count=$count " +
-        s"shard=$shard from=$fromHour to=$toHour", e)
+        s"shard=$shard fromHour=$fromHour toHourExcl=$toHourExcl fullIndexMigration=$fullIndexMigration", e)
       sparkTasksFailed.increment
       throw e
-    } finally {
-      span.finish()
-//      rawCassandraColStore.shutdown()
-//      downsampleCassandraColStore.shutdown()
     }
   }
 
-  def updateDSPartkeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
+  def migrateWithDownsamplePartKeys(partKeys: Observable[PartKeyRecord], shard: Int): Int = {
     @volatile var count = 0
-    val pkRecords = partKeys.map(toPartKeyRecordWithHash).map{ pkey =>
-      count += 1
-      DownsamplerContext.dsLogger.debug(s"migrating partition " +
-        s"pkstring=${schemas.part.binSchema.stringify(pkey.partKey)}" +
-        s" start=${pkey.startTime} end=${pkey.endTime}")
-      pkey
-    }
+    val pkRecords = partKeys.filter { pk =>
+      val rawSchemaId = RecordSchema.schemaID(pk.partKey, UnsafeUtils.arayOffset)
+      val schema = schemas(rawSchemaId)
+      val pkPairs = schema.partKeySchema.toStringPairs(pk.partKey, UnsafeUtils.arayOffset)
+      val blacklisted = !dsSettings.isEligibleForDownsample(pkPairs)
+      val hasDownsampleSchema = schema.downsample.isDefined
+      if (blacklisted) numPartKeysBlacklisted.increment()
+      if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
+      DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
+        s"startTime=${pk.startTime} endTime=${pk.endTime} blacklisted=$blacklisted " +
+        s"hasDownsampleSchema=$hasDownsampleSchema")
+      val eligible = hasDownsampleSchema && !blacklisted
+      if (eligible) count += 1
+      eligible
+    }.map(toDownsamplePkrWithHash)
+    val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     Await.result(dsDatasource.writePartKeys(ref = dsDatasetRef, shard = shard.toInt,
       partKeys = pkRecords,
-      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution),
+      diskTTLSeconds = dsSettings.ttlByResolution(highestDSResolution), updateHour,
       writeToPkUTTable = false), dsSettings.cassWriteTimeout)
+    numPartKeysMigrated.increment(count)
     count
   }
 
-  private def toPartKeyRecordWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
+  /**
+    * Builds a new PartKeyRecord with downsample schema.
+    * This method will throw an exception if schema of part key does not have downsample schema
+    */
+  private def toDownsamplePkrWithHash(pkRecord: PartKeyRecord): PartKeyRecord = {
     val dsPartKey = RecordBuilder.buildDownsamplePartKey(pkRecord.partKey, schemas)
     val hash = Option(schemas.part.binSchema.partitionHash(dsPartKey, UnsafeUtils.arayOffset))
-    PartKeyRecord(dsPartKey, pkRecord.startTime, pkRecord.endTime, hash)
+    PartKeyRecord(dsPartKey.get, pkRecord.startTime, pkRecord.endTime, hash)
   }
 }
