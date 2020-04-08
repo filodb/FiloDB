@@ -3,8 +3,8 @@ package filodb.query.exec
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.{ResultSchema, TransientRow}
+import filodb.query.exec.InternalRangeFunction.{Last, Rate}
 import filodb.query.exec.rangefn.{RangeFunction, RawDataWindowingSpec}
-import filodb.query.RangeFunctionId.Last
 
 /**
  * Tests both the SlidingWindowIterator and the ChunkedWindowIterator
@@ -245,7 +245,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val rv = timeValueRV(samples)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
-        Some(InternalRangeFunction.Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+        Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
     chunkedIt.foreach { v =>
       windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
     }
@@ -263,7 +263,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     )
     val rv = timeValueRV(samples)
 
-    val windowResults = Seq(
+    val windowResults: Seq[(Long, Double)] = Seq(
       1540846755000L->237,
       1540846770000L->237,
       1540846785000L->237,
@@ -275,7 +275,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
       1540846875000L->237,
       1540846890000L->237,
       1540846905000L->237,
-      1540846920000L->237, // note that value 237 becomes stale at this point. No samples with 237 anymore.
+      1540846920000L->237,// note that value 237 becomes stale at this point. No samples with 237 anymore.
       1540850355000L->330,
       1540850370000L->330,
       1540850385000L->330,
@@ -291,7 +291,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
 
     val chunkedWinIt = new ChunkedWindowIteratorD(rv, 1540845090000L,
       15000, 1540855905000L, 180000,
-      RangeFunction(MetricsTestData.timeseriesDataset,
+      RangeFunction(tsResSchema,
         Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }

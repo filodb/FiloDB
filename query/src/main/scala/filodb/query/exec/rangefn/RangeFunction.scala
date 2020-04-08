@@ -254,8 +254,8 @@ object RangeFunction {
       case Some(QuantileOverTime) => Seq("avg")
       case Some(MinOverTime)      => Seq("min")
       case Some(MaxOverTime)      => Seq("max")
-      case other                  => Seq(schema.data.valueColName)
       case Some(Last)             => Seq("avg")
+      case other                  => Seq(schema.data.valueColName)
     }
   }
 
@@ -318,8 +318,8 @@ object RangeFunction {
       case Some(Changes)          => () => new ChangesChunkedFunctionL
       case Some(QuantileOverTime) => () => new QuantileOverTimeChunkedFunctionL(funcParams)
       case Some(PredictLinear)    => () => new PredictLinearChunkedFunctionL(funcParams)
+      case Some(Last)             => () => new LastSampleChunkedFunctionL
       case _                      => iteratingFunction(func, funcParams)
-      case Some(Last)           => () => new LastSampleChunkedFunctionL
     }
   }
 
@@ -372,7 +372,6 @@ object RangeFunction {
                                  () => new LastSampleChunkedFunctionHMax(schema.colIDs(2))
     case Some(SumAndMaxOverTime) => require(schema.columns(2).name == "max")
                                  () => new SumAndMaxOverTimeFuncHD(schema.colIDs(2))
-    case Some(Last) if maxCol.isDefined => () => new LastSampleChunkedFunctionHMax(maxCol.get)
     case Some(Last)           => () => new LastSampleChunkedFunctionH
     case Some(SumOverTime)    => () => new SumOverTimeChunkedFunctionH
     case Some(Rate)           => () => new HistRateFunction
@@ -446,7 +445,7 @@ extends ChunkedRangeFunction[R] {
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
-      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp)
+      if (ts >= startTime && ts > timestamp)
         updateValue(ts, valueVectorAcc, valueVector, valueReader, endRowNum)
     }
   }
@@ -502,7 +501,7 @@ class LastSampleChunkedFunctionHMax(maxColID: Int,
     //   3) timestamp is greater than current timestamp (for multiple chunk scenarios)
     if (endRowNum >= 0) {
       val ts = tsReader(tsVectorAcc, tsVector, endRowNum)
-      if ((endTime - ts) <= queryConfig.staleSampleAfterMs && ts > timestamp) {
+      if (ts >= startTime && ts > timestamp) {
         val maxvectAcc = info.vectorAccessor(maxColID)
         val maxVectOff = info.vectorAddress(maxColID)
         timestamp = ts
