@@ -317,13 +317,8 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
     val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
 
-    val columnFilter = Seq(ColumnFilter("_metric_", Filter.Equals("http_request_duration")),
-      ColumnFilter("_ns_", Filter.Equals("myService")))
-
-    val raw = RawSeries(rangeSelector = intervalSelector, filters = columnFilter, columns = Seq("value"))
-    val windowed = PeriodicSeriesWithWindowing(raw, from, 1000, to, 5000, RangeFunctionId.Rate)
-
-    val logicalPlan1 = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("__name__"))
+    val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
+      TimeStepParams(1000, 20, 2000))
     
     val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -334,7 +329,10 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].by shouldEqual List("_metric_")
     }
 
-    val logicalPlan2 = Aggregate(AggregationOperator.Sum, windowed, Nil, Nil, Seq("__name__", "instance"))
+    val logicalPlan2 = Parser.queryRangeToLogicalPlan(
+      """sum(foo{_ns_="bar", _ws_="test"})
+        |without (__name__, instance)""".stripMargin,
+      TimeStepParams(1000, 20, 2000))
 
     // materialized exec plan
     val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
@@ -355,23 +353,20 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
 
       val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
 
-      val columnFilter = Seq(ColumnFilter("_metric_", Filter.Equals("http_request_duration")),
-        ColumnFilter("_ns_", Filter.Equals("myService")))
-
-      val raw = RawSeries(rangeSelector = intervalSelector, filters = columnFilter, columns = Seq("value"))
-      val windowed = PeriodicSeriesWithWindowing(raw, from, 1000, to, 5000, RangeFunctionId.Rate)
-      val summed = Aggregate(AggregationOperator.Sum, windowed, Nil)
-
-
-      val logicalPlan2 = BinaryJoin(summed, BinaryOperator.DIV, Cardinality.OneToOne, summed, Nil, Seq("__name__"))
-      val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
+      val logicalPlan1 = Parser.queryRangeToLogicalPlan(
+        """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__)
+          | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
+        TimeStepParams(1000, 20, 2000))
+      val execPlan2 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
 
       execPlan2.isInstanceOf[BinaryJoinExec] shouldEqual true
       execPlan2.asInstanceOf[BinaryJoinExec].ignoring shouldEqual Seq("_metric_")
 
-      val logicalPlan3 = BinaryJoin(summed, BinaryOperator.DIV, Cardinality.ManyToOne, summed, Nil, Nil,
-        Seq("_metric_"))
-      val execPlan3 = engine.materialize(logicalPlan3, QueryContext(origQueryParams = promQlQueryParams))
+      val logicalPlan2 = Parser.queryRangeToLogicalPlan(
+        """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
+          | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
+        TimeStepParams(1000, 20, 2000))
+      val execPlan3 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
 
       execPlan3.isInstanceOf[BinaryJoinExec] shouldEqual true
       execPlan3.asInstanceOf[BinaryJoinExec].include shouldEqual Seq("_metric_")
