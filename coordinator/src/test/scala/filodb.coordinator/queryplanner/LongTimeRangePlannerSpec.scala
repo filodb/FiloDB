@@ -146,7 +146,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     rawLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
 
     downsampleLp.startMs shouldEqual logicalPlan.startMs
-    downsampleLp.endMs shouldEqual rawStart - step
+    downsampleLp.endMs shouldEqual rawStart - (step * 1000)
     downsampleLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
   }
 }

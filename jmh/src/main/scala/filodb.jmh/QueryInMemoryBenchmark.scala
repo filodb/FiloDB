@@ -79,6 +79,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
   coordinator ! command
 
+  val queryConfig = new QueryConfig(cluster.settings.allConfig.getConfig("filodb.query"))
+
   import monix.execution.Scheduler.Implicits.global
 
   // Manually pump in data ourselves so we know when it's done.
@@ -104,7 +106,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   println(s"Ingestion ended")
 
   // Stuff for directly executing queries ourselves
-  val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0)
+  val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
+    queryConfig)
 
   /**
    * ## ========  Queries ===========
@@ -175,7 +178,6 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Pick the children nodes, not the DistConcatExec.  Thus we can run in a single thread this way
   val execPlan = engine.materialize(logicalPlan, qContext).children.head
   val querySched = Scheduler.singleThread(s"benchmark-query")
-  val queryConfig = new QueryConfig(cluster.settings.allConfig.getConfig("filodb.query"))
 
   // NOTE: cannot really be compared with above because this is query witin one shard only!!  However running the
   // query single threaded makes it easier to figure out where the performance hit is.
