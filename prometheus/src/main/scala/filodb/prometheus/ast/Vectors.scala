@@ -14,7 +14,7 @@ object Vectors {
 
 
 object WindowConstants {
-  val conf = GlobalConfig.defaultsFromUrl
+  val conf = GlobalConfig.systemConfig
   val staleDataLookbackMillis = conf.getConfig("filodb.query").
                                   getDuration("stale-sample-after").toMillis
 }

@@ -28,7 +28,10 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   val dsRef = dataset.ref
   val schemas = Schemas(dataset.schema)
 
-  val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
+  val config = ConfigFactory.load("application_test.conf")
+  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+
+  val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
   val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 

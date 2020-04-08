@@ -8,7 +8,7 @@ import filodb.core.query.QueryContext
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan, QueryConfig}
+import filodb.query.{LogicalPlan, PeriodicSeries, PeriodicSeriesPlan, QueryConfig}
 import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {
@@ -113,5 +113,40 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     val ep = longTermPlanner.materialize(logicalPlan, QueryContext()).asInstanceOf[MockExecPlan]
     ep.name shouldEqual "raw"
     ep.lp shouldEqual logicalPlan
+  }
+
+  it("should direct overlapping offset queries to both raw & downsample planner and stitch") {
+
+    val start = now/1000 - 30.minutes.toSeconds
+    val step = 1.minute.toSeconds
+    val end = now/1000 - 2.minutes.toSeconds
+    val logicalPlan = Parser.queryRangeToLogicalPlan("foo offset 5m",
+      TimeStepParams(start, step, end))
+      .asInstanceOf[PeriodicSeriesPlan]
+
+    val ep = longTermPlanner.materialize(logicalPlan, QueryContext())
+    val stitchExec = ep.asInstanceOf[StitchRvsExec]
+    stitchExec.children.size shouldEqual 2
+
+    val rawEp = stitchExec.children.head.asInstanceOf[MockExecPlan]
+    val downsampleEp = stitchExec.children.last.asInstanceOf[MockExecPlan]
+
+    rawEp.name shouldEqual "raw"
+    downsampleEp.name shouldEqual "downsample"
+    val rawLp = rawEp.lp.asInstanceOf[PeriodicSeriesPlan]
+    val downsampleLp = downsampleEp.lp.asInstanceOf[PeriodicSeriesPlan]
+
+    // find first instant with range available within raw data
+    val rawStart = ((start*1000) to (end*1000) by (step*1000)).find { instant =>
+      instant - 5.minutes.toMillis > earliestRawTime // subtract offset
+    }.get
+
+    rawLp.startMs shouldEqual rawStart
+    rawLp.endMs shouldEqual logicalPlan.endMs
+    rawLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
+
+    downsampleLp.startMs shouldEqual logicalPlan.startMs
+    downsampleLp.endMs shouldEqual rawStart - step
+    downsampleLp.asInstanceOf[PeriodicSeries].offsetMs.get shouldEqual(300000)
   }
 }

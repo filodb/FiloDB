@@ -8,7 +8,7 @@ import kamon.Kamon
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
-import filodb.core.{DatasetRef, GlobalConfig, SpreadProvider}
+import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, QueryContext, RangeParams}
@@ -34,14 +34,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
+                           queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider())
                                 extends QueryPlanner with StrictLogging {
 
   private val dsOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
-
-  private val conf = GlobalConfig.defaultsFromUrl
-  private val queryConfig = conf.getConfig("filodb.query")
 
   import SingleClusterPlanner._
 
@@ -353,10 +351,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
     val rangeSelectorWithOffset = lp.rangeSelector match {
-      case IntervalSelector(from, to) => IntervalSelector(from - offsetMillis - lp.lookbackMs.getOrElse(
-                                         queryConfig.getDuration("stale-sample-after").toMillis),
-                                         to - offsetMillis)
-      case _                          => lp.rangeSelector
+      case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
+                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
+      case _                              => lp.rangeSelector
     }
     val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)

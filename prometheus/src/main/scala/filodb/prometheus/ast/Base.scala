@@ -45,9 +45,9 @@ trait Base {
    */
   def timeParamToSelector(timeParam: TimeRangeParams): RangeSelector =
     timeParam match {
-      case TimeStepParams(start, step, end) => IntervalSelector(start * 1000, end * 1000)
-      case InMemoryParam(_)                 => InMemoryChunksSelector
-      case WriteBuffersParam(_)             => WriteBufferSelector
+      case TimeStepParams(startSecs , stepSecs , endSecs) => IntervalSelector(startSecs  * 1000, endSecs  * 1000)
+      case InMemoryParam(_)                               => InMemoryChunksSelector
+      case WriteBuffersParam(_)                           => WriteBufferSelector
     }
 
   /**

@@ -33,7 +33,10 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
+  private val config = ConfigFactory.load("application_test.conf")
+  private val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+
+  private val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
   /*
   This is the PromQL
@@ -158,7 +161,8 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     // Custom SingleClusterPlanner with different dataset with different metric name
     val datasetOpts = dataset.options.copy(metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job"))
     val dataset2 = dataset.modify(_.schema.partition.options).setTo(datasetOpts)
-    val engine2 = new SingleClusterPlanner(dataset2.ref, Schemas(dataset2.schema), mapperRef, 0)
+    val engine2 = new SingleClusterPlanner(dataset2.ref, Schemas(dataset2.schema), mapperRef,
+      0, queryConfig)
 
     // materialized exec plan
     val execPlan = engine2.materialize(raw2, QueryContext(origQueryParams = promQlQueryParams))
@@ -261,7 +265,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
   it("should bound queries until retention period and drop instants outside retention period") {
     val nowSeconds = System.currentTimeMillis() / 1000
      val planner = new SingleClusterPlanner(dsRef, schemas, mapperRef,
-       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis)
+       earliestRetainedTimestampFn = nowSeconds * 1000 - 3.days.toMillis, queryConfig)
 
     // Case 1: no offset or window
     val logicalPlan1 = Parser.queryRangeToLogicalPlan("""foo{job="bar"}""",
@@ -286,6 +290,7 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       - 3.days.toMillis // retention
       + 1.minute.toMillis // step
       + 20.minutes.toMillis) // window
+    psm2.end shouldEqual nowSeconds * 1000
 
     // Case 3: offset and some window
     val logicalPlan3 = Parser.queryRangeToLogicalPlan("""rate(foo{job="bar"}[20m] offset 15m)""",
@@ -310,25 +315,39 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     res.result.isEmpty shouldEqual true
   }
 
- it("should generate execPlan with offset") {
-  val t = TimeStepParams(700, 1000, 10000)
-  val lp = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 5m", t)
-  val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-  execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
-  val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-  multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
-  multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+   it("should generate execPlan with offset") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 5m", t)
+     val periodicSeries = lp.asInstanceOf[PeriodicSeries]
+     periodicSeries.startMs shouldEqual 700000
+     periodicSeries.endMs shouldEqual 10000000
+     periodicSeries.stepMs shouldEqual 1000000
 
-  multiSchemaExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
-  val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
-  rvt.offsetMs.get shouldEqual(300000)
-  rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
-  rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
-}
+     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+
+    multiSchemaExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt.offsetMs.get shouldEqual 300000
+    rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
+    rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
+    rvt.start shouldEqual 700000 // start and end should be same as query TimeStepParams
+    rvt.end shouldEqual 10000000
+    rvt.step shouldEqual 1000000
+  }
 
   it("should generate execPlan with offset with window") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("rate(http_requests_total{job = \"app\"}[5m] offset 5m)", t)
+
+    val periodicSeriesPlan = lp.asInstanceOf[PeriodicSeriesWithWindowing]
+    periodicSeriesPlan.startMs shouldEqual 700000
+    periodicSeriesPlan.endMs shouldEqual 10000000
+    periodicSeriesPlan.stepMs shouldEqual 1000000
+
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
@@ -340,5 +359,8 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     rvt.offsetMs.get shouldEqual(300000)
     rvt.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
     rvt.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
+    rvt.start shouldEqual 700000
+    rvt.end shouldEqual 10000000
+    rvt.step shouldEqual 1000000
   }
 }

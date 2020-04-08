@@ -1,10 +1,9 @@
 package filodb.coordinator.queryplanner
 
-import filodb.core.GlobalConfig
+import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 
 object LogicalPlanUtils {
-  private val conf = GlobalConfig.defaultsFromUrl
 
   /**
     * Check whether all child logical plans have same start and end time
@@ -116,8 +115,7 @@ object LogicalPlanUtils {
   }
 
   def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
-    val staleDataLookbackMillis = conf.getConfig("filodb.query").
-      getDuration("stale-sample-after").toMillis
+    val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
     LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
       case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
       case _             => 0

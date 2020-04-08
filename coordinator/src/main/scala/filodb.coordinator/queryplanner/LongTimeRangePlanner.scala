@@ -42,11 +42,11 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
-                                                      TimeRange(startWithOffsetMs, lastDownsampleInstant),
+                                                      TimeRange(p.startMs, lastDownsampleInstant),
                                                       lookbackMs)
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
 
-          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, endWithOffsetMs), lookbackMs)
+          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs), lookbackMs)
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }

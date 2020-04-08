@@ -31,6 +31,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   private val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
   private val queryEngineConfig = ConfigFactory.parseString(queryEngineConfigString)
+
+  private val config = ConfigFactory.load("application_test.conf")
+  private val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
   /*
   This is the PromQL
 
@@ -42,9 +45,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty,"sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
+  val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
   it("should not generate PromQlExec plan when local overlapping failure is smaller") {
     val to = 10000
@@ -408,9 +411,11 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val lp2 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 10m", t)
     val execPlan2 = engine.materialize(lp2, QueryContext(origQueryParams = promQlQueryParams))
-    // Because of offset starts time changes to 100 seconds where there is failure
+    // Because of offset starts time would be (700 - 600) = 100 seconds where there is failure
+    // So PromQlExec is generated instead of local DistConcatExec. PromQlExec will have original query and start time
+    // Start time with offset will be calculated by buddy pod
     execPlan2.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(100)
-    execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual((10000-600))
+    execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(700)
+    execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual(10000)
   }
 }

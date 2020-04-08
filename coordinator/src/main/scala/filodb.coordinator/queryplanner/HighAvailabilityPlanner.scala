@@ -33,21 +33,26 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   private def routeExecPlanMapper(routes: Seq[Route], rootLogicalPlan: LogicalPlan,
                                   qContext: QueryContext, lookBackTime: Long): ExecPlan = {
 
+    val offsetMs = LogicalPlanUtils.getOffsetMillis(rootLogicalPlan)
     val execPlans: Seq[ExecPlan] = routes.map { route =>
       route match {
         case route: LocalRoute => if (route.timeRange.isEmpty)
           localPlanner.materialize(rootLogicalPlan, qContext)
-        else
+        else {
+          val timeRange = route.asInstanceOf[LocalRoute].timeRange.get
+          // Routes are created according to offset but logical plan should have time without offset.
+          // Offset logic is handled in ExecPlan
           localPlanner.materialize(
-            copyWithUpdatedTimeRange(rootLogicalPlan, route.asInstanceOf[LocalRoute].timeRange.get, lookBackTime),
-            qContext)
+            copyWithUpdatedTimeRange(rootLogicalPlan, TimeRange(timeRange.startMs + offsetMs,
+              timeRange.endMs + offsetMs) , lookBackTime), qContext)
+        }
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           val routingConfig = queryEngineConfig.getConfig("routing")
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlParams = PromQlQueryParams(routingConfig, queryParams.promQl,
-            timeRange.startMs / 1000, queryParams.stepSecs, timeRange.endMs / 1000,
+            (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
           PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
