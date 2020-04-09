@@ -136,7 +136,7 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
-  private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
+  private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan

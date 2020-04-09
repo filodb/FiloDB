@@ -180,7 +180,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
             timeout, args.shards.map(_.map(_.toInt)), args.spread)
           parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
-            getQueryRange(args), options)
+            getQueryRange(args), true, options)
 
         case Some("labelValues") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelNames.nonEmpty, "--host, --dataset and --labelName must be defined")
@@ -256,8 +256,9 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
 
   def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
                                    timeParams: TimeRangeParams,
+                                   fetchStartEndTimes: Boolean,
                                    options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams, fetchStartEndTimes)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
