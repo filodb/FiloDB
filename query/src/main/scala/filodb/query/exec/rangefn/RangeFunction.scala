@@ -333,7 +333,7 @@ object RangeFunction {
                             funcParams: Seq[FuncArgs] = Nil): RangeFunctionGenerator = {
     func match {
       case None                   => () => new LastSampleChunkedFunctionD
-      case Some(Last)    => () => new LastSampleChunkedFunctionD
+      case Some(Last)             => () => new LastSampleChunkedFunctionD
       case Some(Rate)     if config.has("faster-rate") => () => new ChunkedRateFunction
       case Some(Increase) if config.has("faster-rate") => () => new ChunkedIncreaseFunction
       case Some(Delta)    if config.has("faster-rate") => () => new ChunkedDeltaFunction
