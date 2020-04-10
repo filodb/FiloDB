@@ -49,6 +49,7 @@ sealed abstract class RangeFunctionId(override val entryName: String, val paramS
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
+  case object Last extends RangeFunctionId("last",Seq(RangeVectorParam()))
   case object AvgOverTime extends RangeFunctionId("avg_over_time", Seq(RangeVectorParam()))
   case object Changes extends RangeFunctionId("changes", Seq(RangeVectorParam()))
   case object CountOverTime extends RangeFunctionId("count_over_time", Seq(RangeVectorParam()))
@@ -204,8 +205,3 @@ object AbsentFunctionId extends Enum[AbsentFunctionId] {
 
   case object Absent extends AbsentFunctionId("absent")
 }
-
-
-//scalastyle:on
-
-
