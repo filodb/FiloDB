@@ -944,17 +944,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
-    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
-      val pk = toPartKeyRecord(p)
-      logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
-        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime} " +
-        s"hash=${pk.hash}")
-      pk
-    }
+    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
                            Observable.fromIterator(partKeyRecords),
-                           storeConfig.diskTTLSeconds, updateHour).map { case resp =>
+                           storeConfig.diskTTLSeconds, updateHour).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")
@@ -998,7 +992,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
-                                     dirtyParts: debox.Buffer[Int]) = {
+                                     dirtyParts: debox.Buffer[Int]): Unit = {
     // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
     // causing the iterator to be consumed synchronously in some cases. It doesnt
     // seem to be consistent environment to environment.
