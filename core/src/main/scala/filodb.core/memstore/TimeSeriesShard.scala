@@ -281,6 +281,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         assert(numBytes == partition.schema.data.blockMetaSize)
         val chunkID = UnsafeUtils.getLong(metaAddr + 4)
         partition.removeChunksAt(chunkID)
+        logger.debug(s"Reclaiming chunk chunkID=$chunkID from partID=$partID ${partition.stringPartition}")
       }
     }
   }
