@@ -119,7 +119,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private def parseBucketValue(value: String): Option[Double] =
-      if (value == "+Inf") Some(Double.PositiveInfinity) else Try(value.toDouble).toOption
+      if (value.toLowerCase == "+inf") Some(Double.PositiveInfinity) else Try(value.toDouble).toOption
 
     /**
      * Converts LabelMatches to ColumnFilters.  Along the way:
