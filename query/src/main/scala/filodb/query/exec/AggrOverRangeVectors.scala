@@ -68,7 +68,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
         else Map.empty
       CustomRangeVectorKey(groupBy)
     }
-
+val res =
     // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
     if (without.isEmpty && by.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
       sourceSchema.fixedVectorLen.filter(_ <= queryConfig.fastReduceMaxWindows).map { numWindows =>
@@ -79,6 +79,8 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
     } else {
       RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
     }
+
+    res
   }
 
   override def schema(source: ResultSchema): ResultSchema = {
@@ -133,6 +135,8 @@ object RangeVectorAggregator extends StrictLogging {
       val groupedResult = mapReduceInternal(rvs, rowAgg, skipMapPhase, grouping)
       groupedResult.map { case (rvk, aggHolder) =>
         val rowIterator = aggHolder.map(_.toRowReader)
+        logger.debug("mapReduce skipMapPhase:" + skipMapPhase)
+        logger.debug("mapReduce Creating IteratorBackedRangeVector for key:" + rvk )
         IteratorBackedRangeVector(rvk, rowIterator)
       }
     }
@@ -152,18 +156,27 @@ object RangeVectorAggregator extends StrictLogging {
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
                      grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
-    logger.trace(s"mapReduceInternal on ${rvs.size} RangeVectors...")
+    logger.debug(s"mapReduceInternal on ${rvs.size} RangeVectors...")
     var acc = rowAgg.zero
     val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
         val itsAndKeys = rvs.map { rv => (rv.rows, rv.key) }
+        logger.debug("itsAndKeys keys are:" + itsAndKeys.map(_._2) + "skipMapPhase:" + skipMapPhase)
+        logger.debug("itsAndKeys labelValues are:" + itsAndKeys.map(_._2.labelValues) + "skipMapPhase:" + skipMapPhase)
         def hasNext: Boolean = itsAndKeys.forall(_._1.hasNext)
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
           itsAndKeys.foreach { case (rowIter, rvk) =>
-            val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
-            acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
+            logger.debug("rvk labelValues:" + rvk.labelValues + "skipMapPhase:" + skipMapPhase)
+            logger.debug("rvk :" + rvk + "skipMapPhase:" + skipMapPhase)
+           // if ( rowIter.hasNext) {
+              val n = rowIter.next()
+              logger.debug("rowIter.next() getLong: " + (n.getLong(0)))
+              logger.debug("rowIter.next() getDouble: " + (n.getDouble(1)))
+              val mapped = if (skipMapPhase) n else rowAgg.map(rvk, n, mapInto)
+              acc = if (skipMapPhase) rowAgg.reduceAggregate(acc, mapped) else rowAgg.reduceMappedRow(acc, mapped)
+            //}
           }
           acc
         }

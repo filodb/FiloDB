@@ -25,6 +25,7 @@ object CountRowAggregator extends RowAggregator {
     mapInto
   }
   def reduceAggregate(acc: CountHolder, aggRes: RowReader): CountHolder = {
+    println("aggRes.getDouble(1):" + aggRes.getDouble(1) + "aggRes.getLong(0):" + aggRes.getLong(0))
     if (acc.count.isNaN && aggRes.getDouble(1) > 0) acc.count = 0d;
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN)

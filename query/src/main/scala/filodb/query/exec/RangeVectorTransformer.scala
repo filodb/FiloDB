@@ -1,9 +1,10 @@
 package filodb.query.exec
 
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
+
 import scala.collection.mutable.ListBuffer
 import scalaxy.loops._
-
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
@@ -256,7 +257,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
   }
 }
 
-final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
+final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer with StrictLogging{
   protected[exec] def args: String = s"function=$function"
 
   def apply(source: Observable[RangeVector],
@@ -273,14 +274,23 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
       }
 
       val resultRv = source.toListL.map { rvs =>
-        rvs.map { rv =>
+        val t = rvs.map { rv =>
           new RangeVector {
             override def key: RangeVectorKey = rv.key
 
             override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
           }
-        }.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
+        }
+//        println("size of t:" + t.size)
+//        val keys = t.map(_.key)
+//        println("keys before sort:" + keys)
+//        println("size of rows:" + t.map(_.rows.size))
+        println("doing t.sort")
+       // println(" rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)" +  t.map(_.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)))
+         // t.filter(_.rows.size > 0).
+            t.sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
         }(ordering)
+        t
 
       }.map(Observable.fromIterable)
 
