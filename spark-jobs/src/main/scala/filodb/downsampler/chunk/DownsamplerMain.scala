@@ -92,8 +92,6 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       s"ingestionTimeEnd=${java.time.Instant.ofEpochMilli(ingestionTimeEnd)} " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
-    DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
-      s"\"spark.filodb.downsampler.userTimeOverride\": \"${java.time.Instant.ofEpochMilli(userTimeInPeriod)}\"")
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)

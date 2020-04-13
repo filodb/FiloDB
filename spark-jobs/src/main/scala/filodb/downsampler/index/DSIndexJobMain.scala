@@ -88,10 +88,6 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
       s"toHourExcl=$toHourExcl " +
       s"timeInMigrationPeriod=${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)} " +
       s"doFullMigration=$doFullMigration")
-    DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
-      s"\"spark.filodb.downsampler.index.timeInPeriodOverride\": " +
-      s"\"${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)}\"")
-
 
     val numShards = dsIndexJobSettings.numShards
 
