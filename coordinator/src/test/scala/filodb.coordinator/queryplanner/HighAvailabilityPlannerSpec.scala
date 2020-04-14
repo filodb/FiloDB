@@ -28,12 +28,13 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
-  private val queryEngineConfig = ConfigFactory.parseString(queryEngineConfigString)
+  private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
-  private val config = ConfigFactory.load("application_test.conf")
-  private val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
+    withFallback(routingConfig)
+  private val queryConfig = new QueryConfig(config)
   /*
   This is the PromQL
 
@@ -67,7 +68,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -103,7 +104,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -129,7 +130,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -178,7 +179,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -202,7 +203,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -226,7 +227,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -255,7 +256,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     }
     //900K to 1020K and 1020+60 k to 2000K
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -309,7 +310,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -342,7 +343,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -381,7 +382,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -403,7 +404,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val lp1 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"}", t)
     val execPlan1 = engine.materialize(lp1, QueryContext(origQueryParams = promQlQueryParams))

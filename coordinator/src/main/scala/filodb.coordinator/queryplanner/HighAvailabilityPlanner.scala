@@ -1,11 +1,10 @@
 package filodb.coordinator.queryplanner
 
-import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryContext}
-import filodb.query.LogicalPlan
+import filodb.query.{LogicalPlan, QueryConfig}
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
 /**
@@ -17,12 +16,12 @@ import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchR
   * @param dsRef dataset
   * @param localPlanner the planner to generate plans for local pod
   * @param failureProvider the provider that helps route plan execution to HA cluster
-  * @param queryEngineConfig config that determines query engine behavior
+  * @param queryConfig config that determines query engine behavior
   */
 class HighAvailabilityPlanner(dsRef: DatasetRef,
                               localPlanner: QueryPlanner,
                               failureProvider: FailureProvider,
-                              queryEngineConfig: Config = ConfigFactory.empty) extends QueryPlanner with StrictLogging {
+                              queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
 
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
@@ -49,9 +48,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-          val routingConfig = queryEngineConfig.getConfig("routing")
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val promQlParams = PromQlQueryParams(routingConfig, queryParams.promQl,
+          val promQlParams = PromQlQueryParams(queryConfig.routingConfig, queryParams.promQl,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
             queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
@@ -76,9 +74,11 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
       periodicSeriesTime.endMs - offsetMillis)
     lazy val lookBackTime = getLookBackMillis(logicalPlan)
-    lazy val routingTime = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
-      periodicSeriesTimeWithOffset.endMs - offsetMillis)
-    lazy val failures = failureProvider.getFailures(dsRef, routingTime).sortBy(_.timeRange.startMs)
+    // Time at which raw data would be retrieved which is used to get failures.
+    // It should have time with offset and lookback as we need raw data at time including offset and lookback.
+    lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTime,
+      periodicSeriesTimeWithOffset.endMs)
+    lazy val failures = failureProvider.getFailures(dsRef, queryTimeRange).sortBy(_.timeRange.startMs)
 
     val tsdbQueryParams = qContext.origQueryParams
     if (!logicalPlan.isRoutable ||

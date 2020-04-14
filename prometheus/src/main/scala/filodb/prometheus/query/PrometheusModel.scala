@@ -43,7 +43,7 @@ object PrometheusModel {
         }
         ColumnFilter(m.getName, filter)
       }
-      RawSeries(interval, filters, Nil, Some(queryConfig.getDuration("stale-sample-after").toMillis), None)
+      RawSeries(interval, filters, Nil, None, None)
     }
   }
 
