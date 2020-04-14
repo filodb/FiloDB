@@ -149,12 +149,15 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
     * Writes a single record, exactly as-is from the scanRowsByIngestionTimeNoAsync. Is
     * used to copy records from one column store to another.
     */
-  def writeIndex(row: Row, diskTimeToLiveSeconds: Int): Future[Response] = {
+  def writeIndex(row: Row, stats: ChunkSinkStats, diskTimeToLiveSeconds: Int): Future[Response] = {
+    val info = row.getBytes(3)
+    stats.addIndexWriteStats(info.remaining())
+
     connector.execStmtWithRetries(writeIndexCql.bind(
       row.getBytes(0),                // partition
       row.getLong(1): java.lang.Long, // ingestion_time
       row.getLong(2): java.lang.Long, // start_time
-      row.getBytes(3),                // info
+      info,
       diskTimeToLiveSeconds: java.lang.Integer)
     )
   }

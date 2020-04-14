@@ -315,15 +315,15 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     res.result.isEmpty shouldEqual true
   }
 
-   it("should generate execPlan with offset") {
+  it("should generate execPlan with offset") {
     val t = TimeStepParams(700, 1000, 10000)
     val lp = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 5m", t)
-     val periodicSeries = lp.asInstanceOf[PeriodicSeries]
-     periodicSeries.startMs shouldEqual 700000
-     periodicSeries.endMs shouldEqual 10000000
-     periodicSeries.stepMs shouldEqual 1000000
+    val periodicSeries = lp.asInstanceOf[PeriodicSeries]
+    periodicSeries.startMs shouldEqual 700000
+    periodicSeries.endMs shouldEqual 10000000
+    periodicSeries.stepMs shouldEqual 1000000
 
-     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
     multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
@@ -363,4 +363,65 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     rvt.end shouldEqual 10000000
     rvt.step shouldEqual 1000000
   }
+
+  it ("should replace __name__ with _metric_ in by and without") {
+    val dataset = MetricsTestData.timeseriesDatasetWithMetric
+    val dsRef = dataset.ref
+    val schemas = Schemas(dataset.schema)
+
+    val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+
+    val logicalPlan1 = Parser.queryRangeToLogicalPlan("""sum(foo{_ns_="bar", _ws_="test"}) by (__name__)""",
+      TimeStepParams(1000, 20, 2000))
+    
+    val execPlan1 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan1.isInstanceOf[ReduceAggregateExec] shouldEqual true
+    execPlan1.children.foreach { l1 =>
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].by shouldEqual List("_metric_")
+    }
+
+    val logicalPlan2 = Parser.queryRangeToLogicalPlan(
+      """sum(foo{_ns_="bar", _ws_="test"})
+        |without (__name__, instance)""".stripMargin,
+      TimeStepParams(1000, 20, 2000))
+
+    // materialized exec plan
+    val execPlan2 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
+
+    execPlan2.isInstanceOf[ReduceAggregateExec] shouldEqual true
+    execPlan2.children.foreach { l1 =>
+      l1.isInstanceOf[MultiSchemaPartitionsExec] shouldEqual true
+      l1.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
+      l1.rangeVectorTransformers(1).asInstanceOf[AggregateMapReduce].without shouldEqual List("_metric_", "instance")
+    }
+  }
+
+  it ("should replace __name__ with _metric_ in ignoring and group_left/group_right") {
+      val dataset = MetricsTestData.timeseriesDatasetWithMetric
+      val dsRef = dataset.ref
+      val schemas = Schemas(dataset.schema)
+
+      val engine = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
+
+      val logicalPlan1 = Parser.queryRangeToLogicalPlan(
+        """sum(foo{_ns_="bar1", _ws_="test"}) + ignoring(__name__)
+          | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
+        TimeStepParams(1000, 20, 2000))
+      val execPlan2 = engine.materialize(logicalPlan1, QueryContext(origQueryParams = promQlQueryParams))
+
+      execPlan2.isInstanceOf[BinaryJoinExec] shouldEqual true
+      execPlan2.asInstanceOf[BinaryJoinExec].ignoring shouldEqual Seq("_metric_")
+
+      val logicalPlan2 = Parser.queryRangeToLogicalPlan(
+        """sum(foo{_ns_="bar1", _ws_="test"}) + group_left(__name__)
+          | sum(foo{_ns_="bar2", _ws_="test"})""".stripMargin,
+        TimeStepParams(1000, 20, 2000))
+      val execPlan3 = engine.materialize(logicalPlan2, QueryContext(origQueryParams = promQlQueryParams))
+
+      execPlan3.isInstanceOf[BinaryJoinExec] shouldEqual true
+      execPlan3.asInstanceOf[BinaryJoinExec].include shouldEqual Seq("_metric_")
+    }
 }

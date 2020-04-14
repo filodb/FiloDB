@@ -101,12 +101,21 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     */
   def writeChunks(partKeyBytes: ByteBuffer,
                   row: Row,
+                  stats: ChunkSinkStats,
                   diskTimeToLiveSeconds: Int): Future[Response] = {
+
+    val info = row.getBytes(1)
+    val chunks = row.getList(2, classOf[ByteBuffer])
+
+    val chunkBytes = chunks.asScala.map(buf => buf.remaining()).reduce(_ + _)
+
+    stats.addChunkWriteStats(chunks.size(), chunkBytes, ChunkSetInfo.getNumRows(info))
+
     connector.execStmtWithRetries(writeChunksCql.bind(
       partKeyBytes,                        // partition
       row.getLong(0): java.lang.Long,      // chunkid
-      row.getBytes(1),                     // info
-      row.getList(2, classOf[ByteBuffer]), // chunks
+      info,
+      chunks,
       diskTimeToLiveSeconds: java.lang.Integer)
     )
   }

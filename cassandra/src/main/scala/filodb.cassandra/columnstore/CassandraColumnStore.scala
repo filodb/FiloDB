@@ -248,7 +248,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         futures += targetChunksTable.deleteChunks(partition, chunkInfos)
       } else {
         for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-          futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+          futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
         }
       }
 
@@ -287,7 +287,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         if (diskTimeToLiveSeconds == 0) {
           futures += targetIndexTable.deleteIndex(row);
         } else {
-          futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+          futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
         }
 
         if (chunkInfos.size >= batchSize) {
@@ -391,6 +391,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runAsync
     ret.onComplete(_ => span.finish())
     ret
+  }
+
+  def deletePartKeys(ref: DatasetRef,
+                     shard: Int,
+                     pks: Observable[Array[Byte]]): Future[Long] = {
+    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+    pks.mapAsync(writeParallelism) { pk =>
+      Task.fromFuture(pkTable.deletePartKey(pk, shard))
+    }.countL.runAsync
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,

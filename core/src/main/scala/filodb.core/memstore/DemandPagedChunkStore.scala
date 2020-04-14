@@ -90,6 +90,8 @@ extends RawToPartitionMaker with StrictLogging {
           val infoAddr = metaAddr + 4   // Important: don't point at partID
           val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
+          logger.debug(s"Populating paged chunk into memory chunkId=$chunkID inserted=$inserted " +
+            s"partId=${tsPart.partID} shard=${tsShard.shardNum} ${tsPart.stringPartition}")
           if (!inserted) {
             logger.info(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
               s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +

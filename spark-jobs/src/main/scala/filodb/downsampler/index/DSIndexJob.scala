@@ -98,7 +98,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       val hasDownsampleSchema = schema.downsample.isDefined
       if (blacklisted) numPartKeysBlacklisted.increment()
       if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
-      DownsamplerContext.dsLogger.info(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
+      DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
         s"startTime=${pk.startTime} endTime=${pk.endTime} blacklisted=$blacklisted " +
         s"hasDownsampleSchema=$hasDownsampleSchema")
       val eligible = hasDownsampleSchema && !blacklisted
