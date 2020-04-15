@@ -11,8 +11,8 @@ import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.{TestData, query}
 import filodb.core.MetricsTestData._
+import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
@@ -36,9 +36,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService"))
   )
 
-  val typeLabel = "_type_" -> "prom-counter"
   val expectedLabelValues = partKeyLabelValues.map { case (metric, tags) =>
-    tags + typeLabel + ("_metric_" -> metric)
+    tags + ("_metric_" -> metric)
   }
 
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
@@ -92,7 +91,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next().asInstanceOf[BinaryRecordRowReader]
-        rv.asInstanceOf[query.SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
+        rv.asInstanceOf[SerializedRangeVector].schema.toStringPairs(record.recordBase, record.recordOffset)
       }
     }
     result shouldEqual jobQueryResult1
@@ -126,7 +125,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
         response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
-          .schema.toStringPairs(row.getBlobBase(0),
+          .schema.brSchema(0).toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
     }
@@ -145,8 +144,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[query.SerializedRangeVector]
-          .schema.toStringPairs(row.getBlobBase(0),
+        response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
+          .schema.brSchema(0).toStringPairs(row.getBlobBase(0),
           row.getBlobOffset(0)).toMap).toList
       }
     }
