@@ -664,8 +664,8 @@ class TimeSeriesShard(val ref: DatasetRef,
                           startTime: Long,
                           limit: Int): Iterator[PartKeyWithTimes] = {
     if (fetchStartEndTimes) {
-      partKeyIndex.partKeyRecordFromFilters(filter, startTime, endTime).iterator.map { pk =>
-        PartKeyWithTimes(pk.partKey.bytes, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
+      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
+        PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
       }
     } else {
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)

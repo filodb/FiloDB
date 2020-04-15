@@ -65,7 +65,7 @@ object PartKeyLuceneIndex {
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
-final case class PartKeyLuceneIndexRecord(partKey: BytesRef, startTime: Long, endTime: Long)
+final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
 
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
@@ -481,9 +481,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     collector.result
   }
 
-  def partKeyRecordFromFilters(columnFilters: Seq[ColumnFilter],
-                         startTime: Long,
-                         endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
+  def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
+                                startTime: Long,
+                                endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
     val collector = new PartKeyRecordCollector()
     searchFromFilters(columnFilters, startTime, endTime, collector)
     collector.records
@@ -736,7 +736,10 @@ class PartKeyRecordCollector extends SimpleCollector {
 
   override def collect(doc: Int): Unit = {
     if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
-      records += PartKeyLuceneIndexRecord(partKeyDv.binaryValue(), startTimeDv.longValue(), endTimeDv.longValue())
+      val pkBytesRef = partKeyDv.binaryValue()
+      // Gotcha! make copy of array because lucene reuses bytesRef for next result
+      val pkBytes = util.Arrays.copyOfRange(pkBytesRef.bytes, pkBytesRef.offset, pkBytesRef.offset + pkBytesRef.length)
+      records += PartKeyLuceneIndexRecord(pkBytes, startTimeDv.longValue(), endTimeDv.longValue())
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")
     }
