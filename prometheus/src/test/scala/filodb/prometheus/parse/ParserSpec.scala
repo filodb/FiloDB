@@ -377,7 +377,8 @@ class ParserSpec extends FunSpec with Matchers {
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
      //"bool 3" -> "",
-      "4 == bool(2)" -> ""
+      "4 == bool (2)" -> "",
+      "4 == bool 2" -> ""
 //      "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855688000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000000,1524855988000,None),false)",
 //      "time()" -> "ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988))",
 //      "hour()" -> "ScalarTimeBasedPlan(Hour,RangeParams(1524855988,1000,1524855988))",
