@@ -326,8 +326,8 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.children(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
     val multiSchemaExec = execPlan.children(0).asInstanceOf[MultiSchemaPartitionsExec]
-    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
-    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000) // (700 - 300 - 300) * 1000
+    multiSchemaExec.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000) // (10000 - 300) * 1000
 
     multiSchemaExec.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
     val rvt = multiSchemaExec.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
@@ -424,4 +424,48 @@ class SingleClusterPlannerSpec extends FunSpec with Matchers with ScalaFutures {
       execPlan3.isInstanceOf[BinaryJoinExec] shouldEqual true
       execPlan3.asInstanceOf[BinaryJoinExec].include shouldEqual Seq("_metric_")
     }
+
+  it("should generate execPlan for binary join with offset") {
+    val t = TimeStepParams(700, 1000, 10000)
+    val lp = Parser.queryRangeToLogicalPlan("rate(http_requests_total{job = \"app\"}[5m] offset 5m) / " +
+      "rate(http_requests_total{job = \"app\"}[5m])", t)
+
+    val periodicSeriesPlan = lp.asInstanceOf[BinaryJoin]
+    periodicSeriesPlan.startMs shouldEqual 700000
+    periodicSeriesPlan.endMs shouldEqual 10000000
+    periodicSeriesPlan.stepMs shouldEqual 1000000
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual(true)
+    val binaryJoin = execPlan.asInstanceOf[BinaryJoinExec]
+
+    binaryJoin.lhs(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec1 = binaryJoin.lhs(0).asInstanceOf[MultiSchemaPartitionsExec]
+    multiSchemaExec1.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(100000)
+    multiSchemaExec1.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(9700000)
+
+    multiSchemaExec1.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt1 = multiSchemaExec1.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    rvt1.offsetMs.get shouldEqual(300000)
+    rvt1.startWithOffset shouldEqual(400000) // (700 - 300) * 1000
+    rvt1.endWithOffset shouldEqual (9700000) // (10000 - 300) * 1000
+    rvt1.start shouldEqual 700000
+    rvt1.end shouldEqual 10000000
+    rvt1.step shouldEqual 1000000
+
+    binaryJoin.rhs(0).isInstanceOf[MultiSchemaPartitionsExec] shouldEqual(true)
+    val multiSchemaExec2 = binaryJoin.rhs(0).asInstanceOf[MultiSchemaPartitionsExec]
+    multiSchemaExec2.chunkMethod.asInstanceOf[TimeRangeChunkScan].startTime shouldEqual(400000) // (700 - 300) * 1000
+    multiSchemaExec2.chunkMethod.asInstanceOf[TimeRangeChunkScan].endTime shouldEqual(10000000)
+
+    multiSchemaExec2.rangeVectorTransformers.head.isInstanceOf[PeriodicSamplesMapper] shouldEqual(true)
+    val rvt2 = multiSchemaExec2.rangeVectorTransformers(0).asInstanceOf[PeriodicSamplesMapper]
+    // No offset in rhs
+    rvt2.offsetMs.isEmpty shouldEqual true
+    rvt2.startWithOffset shouldEqual(700000)
+    rvt2.endWithOffset shouldEqual (10000000)
+    rvt2.start shouldEqual 700000
+    rvt2.end shouldEqual 10000000
+    rvt2.step shouldEqual 1000000
+  }
 }
