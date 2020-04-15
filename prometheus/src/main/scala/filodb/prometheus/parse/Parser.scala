@@ -149,7 +149,12 @@ trait Numeric extends Unit with Operator {
       case p1 ~ lhs ~ op ~ rhs ~ p2 => ArithmeticExpression(lhs, op, rhs)
     }
 
-  lazy val numericalExpression: PackratParser[ScalarExpression] = arithmeticExpression | scalar
+  lazy val booleanExpression: PackratParser[BooleanExpression] =
+    "(".? ~ scalar ~ comparisionOp ~ scalar ~ ")".? ^^ {
+      case p1 ~ lhs ~ op ~ rhs ~ p2 => BooleanExpression(lhs, op, rhs)
+    }
+
+  lazy val numericalExpression: PackratParser[ScalarExpression] = arithmeticExpression | booleanExpression | scalar
 
 }
 
@@ -312,7 +317,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | aggregateExpression2 | aggregateExpression1 |
+    booleanExpression | aggregateExpression2 | aggregateExpression1 |
       function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
 
 }
@@ -364,6 +369,7 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
+    println("exprs:" + expression)
     val expressionWithPrecedence = expression match {
       case binaryExpression: BinaryExpression => assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
                                                     binaryExpression.vectorMatch, binaryExpression.rhs)

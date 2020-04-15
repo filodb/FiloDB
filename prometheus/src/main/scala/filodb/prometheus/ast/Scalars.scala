@@ -1,6 +1,9 @@
 package filodb.prometheus.ast
 
 
+//import filodb.query.ComparisonOperator
+
+
 trait Scalars extends Operators with Base {
 
   sealed trait ScalarExpression extends Expression {
@@ -19,6 +22,16 @@ trait Scalars extends Operators with Base {
         case Mod => lhs.toScalar % rhs.toScalar
         case Add => lhs.toScalar + rhs.toScalar
         case Sub => lhs.toScalar - rhs.toScalar
+      }
+    }
+  }
+
+  case class BooleanExpression(lhs: Scalar, op: Comparision, rhs: Scalar)
+    extends ScalarExpression {
+    override def toScalar: Double = {
+      op match {
+        case Eq(true) => if (lhs == rhs) 1.0 else 0.0
+        case _  => throw new IllegalArgumentException("to do")
       }
     }
   }
