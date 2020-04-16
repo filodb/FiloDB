@@ -36,8 +36,9 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService"))
   )
 
+  val addlLabels = Map("_type_" -> "prom-counter", "_startTime_" -> "-1", "_endTime_" -> "-1")
   val expectedLabelValues = partKeyLabelValues.map { case (metric, tags) =>
-    tags + ("_metric_" -> metric)
+    tags + ("_metric_" -> metric) ++ addlLabels
   }
 
   val jobQueryResult1 = ArrayBuffer(("job", "myCoolService"))
@@ -122,13 +123,14 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
     val result = resp match {
-      case QueryResult(id, _, response) => {
+      case QueryResult(id, _, response) =>
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
-          .schema.brSchema(0).toStringPairs(row.getBlobBase(0),
-          row.getBlobOffset(0)).toMap).toList
+        response(0).rows.map { row =>
+          val r = row.asInstanceOf[BinaryRecordRowReader]
+          response(0).asInstanceOf[SerializedRangeVector]
+            .schema.toStringPairs(r.recordBase, r.recordOffset).toMap
+        }.toList
       }
-    }
     result shouldEqual expectedLabelValues
   }
 
@@ -144,9 +146,11 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
-        response(0).rows.map (row => response(0).asInstanceOf[SerializedRangeVector]
-          .schema.brSchema(0).toStringPairs(row.getBlobBase(0),
-          row.getBlobOffset(0)).toMap).toList
+        response(0).rows.map { row =>
+          val r = row.asInstanceOf[BinaryRecordRowReader]
+          response(0).asInstanceOf[SerializedRangeVector]
+            .schema.toStringPairs(r.recordBase, r.recordOffset).toMap
+        }.toList
       }
     }
     result shouldEqual List(expectedLabelValues(0))

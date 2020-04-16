@@ -120,8 +120,8 @@ final case class PartKeysExec(queryContext: QueryContext,
     }
     Kamon.currentSpan().mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn),
-      ColumnInfo("StartTime", ColumnType.LongColumn),
-      ColumnInfo("EndTime", ColumnType.LongColumn)), 3,
+      ColumnInfo("_startTime_", ColumnType.LongColumn),
+      ColumnInfo("_endTime_", ColumnType.LongColumn)), 3,
                                Map(0 -> partSchema.binSchema))
     ExecResult(rvs, Task.eval(sch))
   }
