@@ -263,7 +263,7 @@ final class SerializedRangeVector(val key: RangeVectorKey,
 
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
-    containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRowsInt)
+    containers.toIterator.flatMap(_.iterate(schema)).slice(startRecordNo, startRecordNo + numRowsInt)
 
   /**
     * Pretty prints all the elements into strings using record schema
@@ -271,19 +271,17 @@ final class SerializedRangeVector(val key: RangeVectorKey,
   override def prettyPrint(formatTime: Boolean = true): String = {
     val curTime = System.currentTimeMillis
     key.toString + "\n\t" +
-      rows.map {
-        case reader =>
-          val firstCol = if (formatTime && schema.isTimeSeries) {
-            val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
-          } else {
-            schema.columnTypes(0) match {
-              case BinaryRecordColumn => schema.stringify(reader.getBlobBase(0),
-                reader.getBlobOffset(0))
-              case _ => reader.getAny(0).toString
-            }
+      rows.map { reader =>
+        val firstCol = if (formatTime && schema.isTimeSeries) {
+          val timeStamp = reader.getLong(0)
+          s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
+        } else {
+          schema.columnTypes.head match {
+            case BinaryRecordColumn => schema.brSchema(0).stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+            case _ => reader.getAny(0).toString
           }
-          (firstCol +: (1 until schema.numColumns).map(reader.getAny(_).toString)).mkString("\t")
+        }
+        (firstCol +: (1 until schema.numColumns).map(reader.getAny(_).toString)).mkString("\t")
       }.mkString("\n\t") + "\n"
   }
 }
