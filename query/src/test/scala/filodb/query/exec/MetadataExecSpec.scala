@@ -36,7 +36,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     ("http_resp_time", Map("instance"->"someHost:8787", "job"->"myCoolService"))
   )
 
-  val addlLabels = Map("_type_" -> "prom-counter", "_startTime_" -> "-1", "_endTime_" -> "-1")
+  val addlLabels = Map("_type_" -> "prom-counter", "_firstSampleTime_" -> "-1", "_lastSampleTime_" -> "-1")
   val expectedLabelValues = partKeyLabelValues.map { case (metric, tags) =>
     tags + ("_metric_" -> metric) ++ addlLabels
   }

@@ -90,7 +90,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   def partKeysWithFilters(filter: Seq[ColumnFilter],
-                          fetchStartEndTimes: Boolean,
+                          fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
                           limit: Int): Iterator[PartKeyWithTimes] = {
