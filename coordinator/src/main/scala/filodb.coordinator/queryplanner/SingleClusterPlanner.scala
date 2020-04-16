@@ -256,7 +256,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
           val reduceDispatcher = nodePlans.head.dispatcher
           ReduceAggregateExec(qContext, reduceDispatcher, nodePlans, lp.operator, lp.params)
         }.toList
-
       } else toReduceLevel1.plans
 
     val reduceDispatcher = pickDispatcher(toReduceLevel2)

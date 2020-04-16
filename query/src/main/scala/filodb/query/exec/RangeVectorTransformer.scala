@@ -259,7 +259,6 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
 final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
 
-
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,

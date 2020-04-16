@@ -20,12 +20,12 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
 
   val testKey1 = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-10"),
-      ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("original-destination-value")))
+    Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-1"),
+      ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("destination-value-1")))
 
   val testKey2 = CustomRangeVectorKey(
-    Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-20"),
-      ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("original-destination-value")))
+    Map(ZeroCopyUTF8String("src") -> ZeroCopyUTF8String("source-value-2"),
+      ZeroCopyUTF8String("dst") -> ZeroCopyUTF8String("destination-value-2")))
 
   val testSample: Array[RangeVector] = Array(
     new RangeVector {
