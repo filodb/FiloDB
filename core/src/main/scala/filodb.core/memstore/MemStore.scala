@@ -168,8 +168,8 @@ trait MemStore extends ChunkSource {
     * on the given shard on this node.
     * @return an Iterator for the TimeSeriesPartition
     */
-  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          end: Long, start: Long, limit: Int): Iterator[PartKey]
+  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter], fetchStartEndTimes: Boolean,
+                          end: Long, start: Long, limit: Int): Iterator[PartKeyWithTimes]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

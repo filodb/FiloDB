@@ -193,8 +193,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
       }.getOrElse(ps)
     }
 
-    def toMetadataPlan(timeParams: TimeRangeParams): SeriesKeysByFilters = {
-      SeriesKeysByFilters(columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+    def toMetadataPlan(timeParams: TimeRangeParams, fetchStartEndTimes: Boolean): SeriesKeysByFilters = {
+      SeriesKeysByFilters(columnFilters, fetchStartEndTimes, timeParams.start * 1000, timeParams.end * 1000)
     }
 
     def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {

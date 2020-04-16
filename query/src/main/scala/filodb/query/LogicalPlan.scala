@@ -80,6 +80,7 @@ case class LabelValues(labelNames: Seq[String],
                        lookbackTimeMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
+                               fetchStartEndTimes: Boolean,
                                startMs: Long,
                                endMs: Long) extends MetadataQueryPlan
 
