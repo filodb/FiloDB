@@ -349,10 +349,10 @@ object Parser extends Expression {
   }
 
   def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams,
-                                 fetchStartEndTimes: Boolean = false): LogicalPlan = {
+                                 fetchFirstLastSampleTimes: Boolean = false): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
-      case p: InstantExpression => p.toMetadataPlan(timeParams, fetchStartEndTimes)
+      case p: InstantExpression => p.toMetadataPlan(timeParams, fetchFirstLastSampleTimes)
       case _ => throw new UnsupportedOperationException()
     }
   }

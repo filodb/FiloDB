@@ -63,8 +63,8 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val seqMapConsumer = new SeqMapConsumer()
     val tsPartData = metadata.next()
     timeseriesDataset.partKeySchema.consumeMapItems(tsPartData.base, tsPartData.offset, 0, seqMapConsumer)
-    tsPartData.startTime shouldEqual -1 // since fetchStartEndTimes is false
-    tsPartData.endTime shouldEqual -1 // since fetchStartEndTimes is false
+    tsPartData.startTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
+    tsPartData.endTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
     seqMapConsumer.pairs shouldEqual jobQueryResult2
   }
 

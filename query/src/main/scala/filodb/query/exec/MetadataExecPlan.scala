@@ -101,7 +101,7 @@ final case class PartKeysExec(queryContext: QueryContext,
                               shard: Int,
                               partSchema: PartitionSchema,
                               filters: Seq[ColumnFilter],
-                              fetchStartEndTimes: Boolean,
+                              fetchFirstLastSampleTimes: Boolean,
                               start: Long,
                               end: Long) extends LeafExecPlan {
 
@@ -113,15 +113,15 @@ final case class PartKeysExec(queryContext: QueryContext,
     val rvs = source match {
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
-          fetchStartEndTimes, end, start, queryContext.sampleLimit)
+          fetchFirstLastSampleTimes, end, start, queryContext.sampleLimit)
         Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), PartKeyRowReader(response)))
       case other =>
         Observable.empty
     }
     Kamon.currentSpan().mark("creating-resultschema")
     val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn),
-      ColumnInfo("StartTime", ColumnType.LongColumn),
-      ColumnInfo("EndTime", ColumnType.LongColumn)), 3,
+      ColumnInfo("_firstSampleTime_", ColumnType.LongColumn),
+      ColumnInfo("_lastSampleTime_", ColumnType.LongColumn)), 3,
                                Map(0 -> partSchema.binSchema))
     ExecResult(rvs, Task.eval(sch))
   }

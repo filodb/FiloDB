@@ -256,9 +256,9 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
 
   def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
                                    timeParams: TimeRangeParams,
-                                   fetchStartEndTimes: Boolean,
+                                   fetchFirstLastSampleTimes: Boolean,
                                    options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams, fetchStartEndTimes)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams, fetchFirstLastSampleTimes)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 

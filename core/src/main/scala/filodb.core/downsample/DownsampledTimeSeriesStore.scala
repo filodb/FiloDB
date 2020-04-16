@@ -80,9 +80,10 @@ extends MemStore with StrictLogging {
     = getShard(dataset, shard)
         .map(_.labelValuesWithFilters(filters, labelNames, end, start, limit)).getOrElse(Iterator.empty)
 
-  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter], fetchStartEndTimes: Boolean,
-                             end: Long, start: Long, limit: Int): Iterator[PartKeyWithTimes] =
-    getShard(dataset, shard).map(_.partKeysWithFilters(filters, fetchStartEndTimes,
+  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                          fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
+                          limit: Int): Iterator[PartKeyWithTimes] =
+    getShard(dataset, shard).map(_.partKeysWithFilters(filters, fetchFirstLastSampleTimes,
                                                        end, start, limit)).getOrElse(Iterator.empty)
 
   def lookupPartitions(ref: DatasetRef,

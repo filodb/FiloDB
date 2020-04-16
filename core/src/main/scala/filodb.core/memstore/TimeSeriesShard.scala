@@ -660,11 +660,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This method is to apply column filters and fetch matching time series partition keys.
     */
   def partKeysWithFilters(filter: Seq[ColumnFilter],
-                          fetchStartEndTimes: Boolean,
+                          fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
                           limit: Int): Iterator[PartKeyWithTimes] = {
-    if (fetchStartEndTimes) {
+    if (fetchFirstLastSampleTimes) {
       partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
         PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
       }
