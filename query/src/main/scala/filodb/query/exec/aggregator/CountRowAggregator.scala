@@ -47,6 +47,6 @@ object CountRowAggregator {
 
   // For histograms, we skip counting if histogram is empty or has no buckets
   val hist = new CountRowAggregator {
-    def isNull(item: RowReader): Boolean = item.getHistogram(1).numBuckets == 0
+    def isNull(item: RowReader): Boolean = item.getHistogram(1)isEmpty
   }
 }
