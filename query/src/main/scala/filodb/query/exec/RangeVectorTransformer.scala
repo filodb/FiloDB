@@ -259,6 +259,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
 final case class SortFunctionMapper(function: SortFunctionId) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
 
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
@@ -272,8 +273,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
         case _ => throw new UnsupportedOperationException(s"$function not supported.")
       }
 
-      val recSchema =
-        SerializedRangeVector.toSchema(sourceSchema.columns, sourceSchema.brSchemas)
+      val recSchema = SerializedRangeVector.toSchema(sourceSchema.columns, sourceSchema.brSchemas)
       val builder = SerializedRangeVector.newBuilder()
 
       val resultRv = source.toListL.map { rvs =>
