@@ -372,15 +372,12 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
   private var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
-
-    println("Beginig next cur:" + cur + "prev" + prev)
     // swap prev an cur
     val temp = prev
     prev = cur
     cur = temp
     // place value in cur and return
     cur.copyFrom(iter.next())
-    println("Ending next cur:" + cur + "prev" + prev)
     cur
   }
 }

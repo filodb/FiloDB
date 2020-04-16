@@ -272,27 +272,20 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
         case _ => throw new UnsupportedOperationException(s"$function not supported.")
       }
 
+      val recSchema =
+        SerializedRangeVector.toSchema(sourceSchema.columns, sourceSchema.brSchemas)
+      val builder = SerializedRangeVector.newBuilder()
+
       val resultRv = source.toListL.map { rvs =>
-        val buf = rvs.map { rv =>
-          new RangeVector {
-            override def key: RangeVectorKey = rv.key
-
-            override def rows: Iterator[RowReader] = new BufferableIterator(rv.rows).buffered
-          }
-        }
-        println("hasNext before calling head:" + buf.map((_.rows.asInstanceOf[BufferedIterator[RowReader]].hasNext)))
-        println("t head:" + buf.map(_.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)))
-        println("hasNext after calling head:" + buf.map((_.rows.asInstanceOf[BufferedIterator[RowReader]].hasNext)))
-
-//          .sortBy { rv => rv.rows.asInstanceOf[BufferedIterator[RowReader]].head.getDouble(1)
-//        }(ordering)
-        buf
+         rvs.map(SerializedRangeVector(_, builder, recSchema, "sortExecPlan")).
+           sortBy { rv => if (rv.rows.hasNext) rv.rows.next().getDouble(1) else Double.NaN
+        }(ordering)
 
       }.map(Observable.fromIterable)
 
       Observable.fromTask(resultRv).flatten
     } else {
-      source
+      throw new UnsupportedOperationException("Sort not supported for histogram")
     }
   }
   override def funcParams: Seq[FuncArgs] = Nil

@@ -33,54 +33,57 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def rows: Iterator[RowReader] = Seq(
         new TransientRow(1L, 1d)).iterator
-        //new TransientRow(2L, 2d)).iterator
     },
     new RangeVector {
       override def key: RangeVectorKey = testKey2
 
       override def rows: Iterator[RowReader] = Seq(
         new TransientRow(1L, 5d)).iterator
-      // new TransientRow(2L, 5d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 3d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 2d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey2
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 4d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey2
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 6d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq(
+        new TransientRow(1L, 0d)).iterator
+    },
+    new RangeVector {
+      override def key: RangeVectorKey = testKey1
+
+      override def rows: Iterator[RowReader] = Seq.empty[RowReader].iterator
     }
-    //,
-//    new RangeVector {
-//      override def key: RangeVectorKey = testKey1
-//
-//      override def rows: Iterator[RowReader] = Seq(
-//        new TransientRow(1L, 3d)).iterator
-//    },
-//    new RangeVector {
-//      override def key: RangeVectorKey = testKey1
-//
-//      override def rows: Iterator[RowReader] = Seq(
-//        new TransientRow(1L, 2d)).iterator
-//    },
-//    new RangeVector {
-//      override def key: RangeVectorKey = testKey2
-//
-//      override def rows: Iterator[RowReader] = Seq(
-//        new TransientRow(1L, 4d)).iterator
-//    },
-//    new RangeVector {
-//      override def key: RangeVectorKey = testKey2
-//
-//      override def rows: Iterator[RowReader] = Seq(
-//        new TransientRow(1L, 6d)).iterator
-//    },
-//    new RangeVector {
-//      override def key: RangeVectorKey = testKey1
-//
-//      override def rows: Iterator[RowReader] = Seq(
-//        new TransientRow(1L, 0d)).iterator
-//    }
-  )
+    )
+
+  val emptySample: Array[RangeVector] = Array.empty[RangeVector]
 
   it("should sort instant vectors in ascending order") {
     val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
     val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
-    resultRows.shouldEqual(List(1.0, 5.0))
-    //resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+    resultRows.shouldEqual(List(0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
   }
 
   it("should sort instant vectors in descending order") {
@@ -88,5 +91,12 @@ class SortFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val resultObs = sortFunctionMapper(Observable.fromIterable(testSample), queryConfig, 1000, resultSchema, Nil)
     val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
     resultRows.shouldEqual(List(6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0))
+  }
+
+  it("should return empty rangeVector when sorting empty sample") {
+    val sortFunctionMapper = exec.SortFunctionMapper(SortFunctionId.Sort)
+    val resultObs = sortFunctionMapper(Observable.fromIterable(emptySample), queryConfig, 1000, resultSchema, Nil)
+    val resultRows = resultObs.toListL.runAsync.futureValue.flatMap(_.rows.map(_.getDouble(1)).toList)
+    resultRows.isEmpty shouldEqual(true)
   }
 }
