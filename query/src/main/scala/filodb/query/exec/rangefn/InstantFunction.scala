@@ -369,7 +369,8 @@ final case class HistogramBucketImpl() extends HistToDoubleIFunction {
     val bucket = scalarParams(0)
     if (bucket == Double.PositiveInfinity) {
       // Just get the top bucket if bucket scheme has +Inf at top, or return NaN
-      if (value.bucketTop(value.numBuckets - 1) == Double.PositiveInfinity) value.topBucketValue else Double.NaN
+      if (value.bucketTop(value.numBuckets - 1) == Double.PositiveInfinity) value.topBucketValue
+      else throw new IllegalArgumentException(s"+Inf bucket not in the last position!")
     } else {
       for { b <- 0 until value.numBuckets optimized } {
         // This comparison does not work for +Inf
