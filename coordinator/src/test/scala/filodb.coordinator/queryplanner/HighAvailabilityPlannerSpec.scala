@@ -9,6 +9,8 @@ import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext}
 import filodb.core.store.TimeRangeChunkScan
+import filodb.prometheus.ast.TimeStepParams
+import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
@@ -26,9 +28,13 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val queryEngineConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
 
-  private val queryEngineConfig = ConfigFactory.parseString(queryEngineConfigString)
+  private val routingConfig = ConfigFactory.parseString(routingConfigString)
+
+  private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
+    withFallback(routingConfig)
+  private val queryConfig = new QueryConfig(config)
   /*
   This is the PromQL
 
@@ -40,9 +46,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty,"sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
 
-  val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0)
+  val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
   it("should not generate PromQlExec plan when local overlapping failure is smaller") {
     val to = 10000
@@ -62,7 +68,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -98,7 +104,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -110,8 +116,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   it("should generate RemotExecPlan with RawSeries time according to lookBack") {
     val to = 2000000
     val from = 1000000
-    val intervalSelector = IntervalSelector(from - 50000 , to) // Lookback of 50000
-    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
+    val intervalSelector = IntervalSelector(from, to) // Lookback of 50000
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(50000))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
     val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "", from/1000, 1, to/1000, None)
@@ -124,7 +130,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -173,7 +179,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -197,7 +203,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -221,7 +227,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -250,7 +256,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     }
     //900K to 1020K and 1020+60 k to 2000K
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -304,7 +310,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -337,7 +343,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -376,7 +382,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
       }
     }
 
-    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryEngineConfig)
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -387,5 +393,30 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     child.params.endSecs shouldEqual to
     child.params.stepSecs shouldEqual step
     child.params.processFailure shouldEqual false
+  }
+
+  it("should work with offset") {
+    val t = TimeStepParams(700, 1000, 10000)
+
+    val failureProvider = new FailureProvider {
+      override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
+        Seq(FailureTimeRange("local", datasetRef, TimeRange(100000, 200000), false))
+      }
+    }
+
+    val engine = new HighAvailabilityPlanner(dsRef, localPlanner, failureProvider, queryConfig)
+
+    val lp1 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"}", t)
+    val execPlan1 = engine.materialize(lp1, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan1.isInstanceOf[DistConcatExec] shouldEqual (true) // No routing as failure is before query start time
+
+    val lp2 = Parser.queryRangeToLogicalPlan("http_requests_total{job = \"app\"} offset 10m", t)
+    val execPlan2 = engine.materialize(lp2, QueryContext(origQueryParams = promQlQueryParams))
+    // Because of offset starts time would be (700 - 600) = 100 seconds where there is failure
+    // So PromQlExec is generated instead of local DistConcatExec. PromQlExec will have original query and start time
+    // Start time with offset will be calculated by buddy pod
+    execPlan2.isInstanceOf[PromQlExec] shouldEqual (true)
+    execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(700)
+    execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual(10000)
   }
 }

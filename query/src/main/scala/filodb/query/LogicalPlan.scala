@@ -69,7 +69,9 @@ case class IntervalSelector(from: Long, to: Long) extends RangeSelector
   */
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
-                     columns: Seq[String]) extends RawSeriesLikePlan {
+                     columns: Seq[String],
+                     lookbackMs: Option[Long] = None,
+                     offsetMs: Option[Long] = None) extends RawSeriesLikePlan {
   override def isRaw: Boolean = true
 }
 
@@ -112,7 +114,7 @@ case class PeriodicSeries(rawSeries: RawSeriesLikePlan,
                           startMs: Long,
                           stepMs: Long,
                           endMs: Long,
-                          offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                          offsetMs: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(rawSeries)
 }
 
@@ -130,7 +132,8 @@ case class PeriodicSeriesWithWindowing(series: RawSeriesLikePlan,
                                        window: Long,
                                        function: RangeFunctionId,
                                        functionArgs: Seq[FunctionArgsPlan] = Nil,
-                                       offset: Option[Long] = None) extends PeriodicSeriesPlan with NonLeafLogicalPlan {
+                                       offsetMs: Option[Long] = None) extends PeriodicSeriesPlan
+  with NonLeafLogicalPlan {
   override def children: Seq[LogicalPlan] = Seq(series)
 }
 

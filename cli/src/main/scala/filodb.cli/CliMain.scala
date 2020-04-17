@@ -9,6 +9,7 @@ import scala.util.Try
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
+import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.scalactic._
 
@@ -273,7 +274,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                       timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(systemConfig.getConfig("routing"), query,timeParams.start, timeParams.step,
+    // Routing is not supported with CLI
+    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(ConfigFactory.empty, query,timeParams.start, timeParams.step,
       timeParams.end))
   }
 

@@ -2,7 +2,7 @@ package filodb.prometheus.ast
 
 import scala.util.Try
 
-import filodb.core.query
+import filodb.core.{query, GlobalConfig}
 import filodb.core.query.{ColumnFilter, RangeParams}
 import filodb.query._
 
@@ -14,7 +14,9 @@ object Vectors {
 
 
 object WindowConstants {
-  val staleDataLookbackSeconds = 5 * 60 // 5 minutes
+  val conf = GlobalConfig.systemConfig
+  val staleDataLookbackMillis = conf.getConfig("filodb.query").
+                                  getDuration("stale-sample-after").toMillis
 }
 
 trait Vectors extends Scalars with TimeUnits with Base {
@@ -176,14 +178,12 @@ trait Vectors extends Scalars with TimeUnits with Base {
     private[prometheus] val (columnFilters, column, bucketOpt) = labelMatchesToFilters(mergeNameToLabels)
 
     def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
-      val offsetMillis : Long = offset.map(_.millis).getOrElse(0)
-
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
-      // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
+      // start timestamp. Prometheus goes back up to 5 minutes to get sample before declaring as stale
       val ps = PeriodicSeries(
-        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000, offsetMillis),
-          columnFilters, column.toSeq),
-        timeParams.start * 1000 - offsetMillis, timeParams.step * 1000, timeParams.end * 1000 - offsetMillis,
+        RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+          offset.map(_.millis)),
+        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
         offset.map(_.millis)
       )
       bucketOpt.map { bOpt =>
@@ -197,9 +197,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       SeriesKeysByFilters(columnFilters, fetchFirstLastSampleTimes, timeParams.start * 1000, timeParams.end * 1000)
     }
 
-    def toRawSeriesPlan(timeParams: TimeRangeParams): RawSeries = {
-      RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000, offsetMillis),
-        columnFilters, column.toSeq)
+    def toRawSeriesPlan(timeParams: TimeRangeParams, offsetMs: Option[Long] = None): RawSeries = {
+      RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(staleDataLookbackMillis),
+        offsetMs)
     }
   }
 
@@ -222,8 +222,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
-      val rs = RawSeries(timeParamToSelector(timeParams, window.millis, offset.map(_.millis).getOrElse(0)),
-                         columnFilters, column.toSeq)
+      val rs = RawSeries(timeParamToSelector(timeParams), columnFilters, column.toSeq, Some(window.millis),
+        offset.map(_.millis))
       bucketOpt.map { bOpt =>
         // It's a fixed value, the range params don't matter at all
         val param = ScalarFixedDoublePlan(bOpt, RangeParams(0, Long.MaxValue, 60000L))
