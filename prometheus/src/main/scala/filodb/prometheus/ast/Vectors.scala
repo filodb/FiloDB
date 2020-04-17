@@ -94,6 +94,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
   sealed trait Vector extends Expression {
     def metricName: Option[String]
     def labelSelection: Seq[LabelMatch]
+    val regexColumnName: String = "::(?=[^::]+$)" //regex pattern to extract ::columnName at the end
 
     // Convert metricName{labels} -> {labels, __name__="metricName"} so it's uniform
     lazy val mergeNameToLabels: Seq[LabelMatch] = {
@@ -113,7 +114,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     // Returns (trimmedMetricName, column) after stripping ::columnName
     private def extractStripColumn(metricName: String): (String, Option[String]) = {
-      val parts = metricName.split("::", 2)
+      val parts = metricName.split(regexColumnName)
       if (parts.size > 1) {
         require(parts(1).nonEmpty, "cannot use empty column name")
         (parts(0), Some(parts(1)))
