@@ -1,9 +1,5 @@
 package filodb.prometheus.ast
 
-
-//import filodb.query.ComparisonOperator
-
-
 trait Scalars extends Operators with Base {
 
   sealed trait ScalarExpression extends Expression {

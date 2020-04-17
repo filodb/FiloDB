@@ -10,7 +10,8 @@ import filodb.query.exec.ExecPlan
   *
   * This is TBD.
   */
-class MultiClusterPlanner extends QueryPlanner
+class MultiClusterPlanner extends QueryPlanner {
+
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     ???
   }
