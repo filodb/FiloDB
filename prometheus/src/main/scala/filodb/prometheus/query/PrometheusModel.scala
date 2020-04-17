@@ -2,6 +2,7 @@ package filodb.prometheus.query
 
 import remote.RemoteStorage._
 
+import filodb.core.GlobalConfig
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector}
@@ -10,6 +11,8 @@ import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
 object PrometheusModel {
   import com.softwaremill.quicklens._
+  val conf = GlobalConfig.defaultsFromUrl
+  val queryConfig = conf.getConfig("filodb.query")
 
   /**
    * If the result contains Histograms, automatically convert them to Prometheus vector-per-bucket output
@@ -40,7 +43,7 @@ object PrometheusModel {
         }
         ColumnFilter(m.getName, filter)
       }
-      RawSeries(interval, filters, Nil)
+      RawSeries(interval, filters, Nil, None, None)
     }
   }
 

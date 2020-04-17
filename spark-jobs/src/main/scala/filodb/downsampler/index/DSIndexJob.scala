@@ -64,19 +64,20 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
         .tag("shard", shard)
         .start
       if (fullIndexMigration) {
-        DownsamplerContext.dsLogger.info("migrating complete partkey index")
+        DownsamplerContext.dsLogger.info(s"Starting Full PartKey Migration for shard=$shard")
         val partKeys = rawDataSource.scanPartKeys(ref = rawDatasetRef,
           shard = shard.toInt)
         count += migrateWithDownsamplePartKeys(partKeys, shard)
-        DownsamplerContext.dsLogger.info(s"Complete PartKey index migration successful for shard=$shard count=$count")
+        DownsamplerContext.dsLogger.info(s"Successfully Completed Full PartKey Migration for shard=$shard count=$count")
       } else {
+        DownsamplerContext.dsLogger.info(s"Starting Partial PartKey Migration for shard=$shard")
         for (epochHour <- fromHour until toHourExcl) {
           val partKeys = rawDataSource.getPartKeysByUpdateHour(ref = rawDatasetRef,
             shard = shard.toInt, updateHour = epochHour)
           count += migrateWithDownsamplePartKeys(partKeys, shard)
         }
-        DownsamplerContext.dsLogger.info(s"Partial PartKey index migration successful for shard=$shard count=$count" +
-          s" fromHour=$fromHour toHourExcl=$toHourExcl")
+        DownsamplerContext.dsLogger.info(s"Successfully Completed Full PartKey Migration for shard=$shard " +
+          s"count=$count fromHour=$fromHour toHourExcl=$toHourExcl")
       }
       sparkForeachTasksCompleted.increment()
       span.finish()
@@ -99,7 +100,7 @@ class DSIndexJob(dsSettings: DownsamplerSettings,
       if (blacklisted) numPartKeysBlacklisted.increment()
       if (!hasDownsampleSchema) numPartKeysNoDownsampleSchema.increment()
       DownsamplerContext.dsLogger.debug(s"Migrating partition partKey=$pkPairs schema=${schema.name} " +
-        s"startTime=${pk.startTime} endTime=${pk.endTime} blacklisted=$blacklisted " +
+        s"startTime=${pk.startTime} endTime=${pk.endTime} blacklisted=$blacklisted shard=$shard " +
         s"hasDownsampleSchema=$hasDownsampleSchema")
       val eligible = hasDownsampleSchema && !blacklisted
       if (eligible) count += 1
