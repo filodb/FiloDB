@@ -373,7 +373,6 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
   }
 
-
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "http_requests_total + time()" -> "ScalarVectorBinaryOperation(ADD,ScalarTimeBasedPlan(Time,RangeParams(1524855988,1000,1524855988)),PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),false)",
@@ -396,6 +395,8 @@ class ParserSpec extends FunSpec with Matchers {
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(5.0),List(),List())",
       "topk(5, http_requests_total::foo)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(foo),Some(300000),None),1524855988000,1000000,1524855988000,None),List(5.0),List(),List())",
+      "topk(5, http_requests_total::foo::bar)" ->
+        "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total::foo))),List(bar),Some(300000),None),1524855988000,1000000,1524855988000,None),List(5.0),List(),List())",
       "stdvar(http_requests_total)" ->
         "Aggregate(Stdvar,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(),List(),List())",
       "stddev(http_requests_total)" ->
@@ -416,6 +417,8 @@ class ParserSpec extends FunSpec with Matchers {
         "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None)",
       "http_requests_total::sum{job=\"prometheus\"}[5m]" ->
         "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(sum),Some(300000),None)",
+      "http_requests_total::foo::sum{job=\"prometheus\"}[5m]" ->
+        "RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total::foo))),List(sum),Some(300000),None)",
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),Some(300000)),1524855988000,1000000,1524855988000,Some(300000))",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
