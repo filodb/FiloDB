@@ -28,6 +28,7 @@ trait Scalars extends Operators with Base {
 
   case class BooleanExpression(lhs: Scalar, op: Comparision, rhs: Scalar)
     extends ScalarExpression {
+    require(op.isBool, "comparisons between scalars must use BOOL modifier")
     override def toScalar: Double = {
       op match {
         case Eq(true) => if (lhs == rhs) 1.0 else 0.0

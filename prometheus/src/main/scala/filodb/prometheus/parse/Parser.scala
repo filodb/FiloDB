@@ -28,7 +28,6 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
   protected val AND = Keyword("AND")
   protected val OR = Keyword("OR")
   protected val UNLESS = Keyword("UNLESS")
-  protected val BOOL = Keyword("BOOl")
 
   case class Keyword(key: String)
 
@@ -144,8 +143,6 @@ trait Numeric extends Unit with Operator {
     case s => Scalar(java.lang.Double.parseDouble(s))
   }
 
-lazy val boolScalar : PackratParser[Scalar] = BOOL ~
-  "(" ~> scalar <~ ")"
 
   lazy val arithmeticExpression: PackratParser[ArithmeticExpression] =
     "(".? ~ scalar ~ arithmeticOp ~ scalar ~ ")".? ^^ {
@@ -153,8 +150,8 @@ lazy val boolScalar : PackratParser[Scalar] = BOOL ~
     }
 
   lazy val booleanExpression: PackratParser[BooleanExpression] =
-    "(".? ~ scalar ~ comparisionOp ~ scalar ~ ")".? ^^ {
-      case p1 ~ lhs ~ op ~ rhs ~ p2 => BooleanExpression(lhs, op, rhs)
+    "(".? ~ scalar ~ comparisionOp ~ "(".? ~ scalar ~ ")".? ~ ")".? ^^ {
+      case p1 ~ lhs ~ op ~ p3 ~ rhs ~ p4 ~ p2 => BooleanExpression(lhs, op, rhs)
     }
 
   lazy val numericalExpression: PackratParser[ScalarExpression] = arithmeticExpression | booleanExpression | scalar
@@ -320,8 +317,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | booleanExpression | aggregateExpression2 | aggregateExpression1 |
-      function  | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
+    binaryExpression | aggregateExpression2 | aggregateExpression1 |
+      function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
 
 }
 
