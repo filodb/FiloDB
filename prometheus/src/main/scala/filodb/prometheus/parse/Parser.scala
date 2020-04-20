@@ -370,7 +370,6 @@ object Parser extends Expression {
 
   def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
-    println("exprs:" + expression)
     val expressionWithPrecedence = expression match {
       case binaryExpression: BinaryExpression => assignPrecedence(binaryExpression.lhs, binaryExpression.operator,
                                                     binaryExpression.vectorMatch, binaryExpression.rhs)

@@ -332,4 +332,24 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
+
+  it("should generate ScalarOperationMapper exec plan for query 1 < bool(2) + http_requests_total") {
+    val lp = Parser.queryToLogicalPlan("1 < bool(2) + http_requests_total{job = \"app\"}", 1000)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
+        |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+        |--FA1~StaticFuncArgs(1.0,RangeParams(1000,1000,1000))
+        |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
+        |-T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+        |--FA1~StaticFuncArgs(1.0,RangeParams(1000,1000,1000))
+        |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1110105620])
+        |""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
 }

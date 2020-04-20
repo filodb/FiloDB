@@ -14,14 +14,14 @@ class ScalarExpressionSpec extends FunSpec with Matchers with Scalars {
   }
 
   it("should parse and evaluate Scalar Boolean Expression") {
-    val query = "1 == bool(2)"
+    val query = "1 == bool 2"
     val expression = Parser.parseQuery(query)
     expression.isInstanceOf[BooleanExpression] shouldEqual(true)
     expression.asInstanceOf[BooleanExpression].toScalar shouldEqual(0)
   }
 
   it("should parse and evaluate Scalar Boolean Expression with <") {
-    val query = "1 < bool(2)"
+    val query = "1 < bool(4)"
     val expression = Parser.parseQuery(query)
     expression.isInstanceOf[BooleanExpression] shouldEqual(true)
     expression.asInstanceOf[BooleanExpression].toScalar shouldEqual(1)

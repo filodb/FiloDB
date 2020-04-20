@@ -33,7 +33,7 @@ trait Scalars extends Operators with Base {
         case Gte(true)      => if (lhs.toScalar >= rhs.toScalar) 1.0 else 0.0
         case Lt(true)       => if (lhs.toScalar < rhs.toScalar)  1.0 else 0.0
         case Lte(true)      => if (lhs.toScalar <= rhs.toScalar) 1.0 else 0.0
-        case _              => throw new IllegalArgumentException(s"$op not supported")
+        case _              => throw new IllegalArgumentException(s"$op is invalid")
       }
     }
   }

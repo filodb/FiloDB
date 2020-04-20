@@ -205,7 +205,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     vectors
   }
 
-  private def   materializeBinaryJoin(qContext: QueryContext,
+  private def materializeBinaryJoin(qContext: QueryContext,
                                     lp: BinaryJoin): PlanResult = {
     val lhs = walkLogicalPlanTree(lp.lhs, qContext)
     val stitchedLhs = if (lhs.needsStitch) Seq(StitchRvsExec(qContext, pickDispatcher(lhs.plans), lhs.plans))
