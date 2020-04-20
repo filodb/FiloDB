@@ -9,6 +9,7 @@ import scala.util.Try
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
+import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.scalactic._
 
@@ -180,7 +181,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
             timeout, args.shards.map(_.map(_.toInt)), args.spread)
           parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
-            getQueryRange(args), options)
+            getQueryRange(args), true, options)
 
         case Some("labelValues") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelNames.nonEmpty, "--host, --dataset and --labelName must be defined")
@@ -256,8 +257,9 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
 
   def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
                                    timeParams: TimeRangeParams,
+                                   fetchFirstLastSampleTimes: Boolean,
                                    options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams, fetchFirstLastSampleTimes)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
@@ -272,7 +274,8 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
                       timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
-    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(systemConfig.getConfig("routing"), query,timeParams.start, timeParams.step,
+    // Routing is not supported with CLI
+    executeQuery2(client, dataset, logicalPlan, options, PromQlQueryParams(ConfigFactory.empty, query,timeParams.start, timeParams.step,
       timeParams.end))
   }
 

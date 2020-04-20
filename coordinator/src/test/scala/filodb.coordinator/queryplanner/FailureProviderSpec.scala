@@ -148,15 +148,19 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
     //Query time is 100 to 5000
     val routes = QueryFailureRoutingStrategy.plan(failureTimeRangeNonOverlapping, TimeRange(100, 5000), 50 , 20)
-    println("routes:" + routes)
     routes(0).equals(expectedResult(0)) shouldEqual true
     routes(1).equals(expectedResult(1)) shouldEqual true
     routes.sameElements(expectedResult) shouldEqual (true)
   }
 
   it("should update time in logical plan when lookBack is present") {
-    val expectedRaw = RawSeries(rangeSelector = IntervalSelector(19900, 30000), filters = f1, columns = Seq("value"))
-    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 100)
+    val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(100))
+    val windowed = PeriodicSeriesWithWindowing(raw, from, 1000, to, 5000, RangeFunctionId.Rate)
+    val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
+
+    val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"),
+      Some(100), None)
+    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed, TimeRange(20000, 30000), 100)
 
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)

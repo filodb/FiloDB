@@ -223,8 +223,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
         case req: TimeRangeChunkScan      =>  if (partition.numChunks > 0) {
                                                 val memStartTime = partition.earliestTime
                                                 if (req.startTime < memStartTime && partStartTime < memStartTime) {
+                                                  val toODP = TimeRangeChunkScan(req.startTime, memStartTime - 1)
+                                                  logger.debug(s"Decided to ODP time range $toODP for " +
+                                                    s"partID=${partition.partID} memStartTime=$memStartTime " +
+                                                    s"shard=$shardNum ${partition.stringPartition}")
                                                   // do not include earliestTime, otherwise will pull in first chunk
-                                                  Some(TimeRangeChunkScan(req.startTime, memStartTime - 1))
+                                                  Some(toODP)
                                                 }
                                                 else None
                                               } else Some(req) // if no chunks ingested yet, read everything from disk

@@ -498,6 +498,23 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result2(0).key shouldEqual noKey
   }
 
+  it("should count histogram RVs") {
+    val (data1, rv1) = histogramRV(numSamples = 5)
+    val (data2, rv2) = histogramRV(numSamples = 5)
+    val samples: Array[RangeVector] = Array(rv1, rv2)
+
+    val agg1 = RowAggregator(AggregationOperator.Count, Nil, histSchema)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+
+    val counts = data1.map(_ => 2).toList
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual counts
+  }
+
   it("should sum and compute max of histogram & max RVs") {
     val (data1, rv1) = MMD.histMaxRV(100000L, numSamples = 5)
     val (data2, rv2) = MMD.histMaxRV(100000L, numSamples = 5)

@@ -34,6 +34,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
+                           queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider())
                                 extends QueryPlanner with StrictLogging {
 
@@ -287,11 +288,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offset.getOrElse(0))
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offset, rawSource)))
+        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offsetMs, rawSource)))
       series
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -302,10 +303,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
-      WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
+      WindowConstants.staleDataLookbackMillis, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-        None, None, qContext, Nil, lp.offset)))
+        None, None, qContext, Nil, lp.offsetMs)))
       rawSeries
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -359,20 +360,24 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries): PlanResult = {
-
     val spreadProvToUse = qContext.spreadOverride.getOrElse(spreadProvider)
-
+    val offsetMillis: Long = lp.offsetMs.getOrElse(0)
     val colName = lp.columns.headOption
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
-    val needsStitch = lp.rangeSelector match {
+    val rangeSelectorWithOffset = lp.rangeSelector match {
+      case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
+                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
+      case _                              => lp.rangeSelector
+    }
+    val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
-        schemaOpt, colName)
+      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
+        toChunkScanMethod(rangeSelectorWithOffset), schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -412,7 +417,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters, lp.startMs, lp.endMs)
+      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
+                   lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
