@@ -275,6 +275,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
       val recSchema = SerializedRangeVector.toSchema(sourceSchema.columns, sourceSchema.brSchemas)
       val builder = SerializedRangeVector.newBuilder()
 
+      // Create SerializedRangeVector so that sorting does not consume rows iterator
       val resultRv = source.toListL.map { rvs =>
          rvs.map(SerializedRangeVector(_, builder, recSchema, "sortExecPlan")).
            sortBy { rv => if (rv.rows.hasNext) rv.rows.next().getDouble(1) else Double.NaN
