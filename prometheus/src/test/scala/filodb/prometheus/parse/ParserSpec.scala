@@ -373,10 +373,6 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("timestamp(some_metric)")
     parseError("timestamp(some_metric[5m])") // reason : Expected instant vector, got range vector
     parseError("timestamp(some_metric, hello)") // reason : Expected only 1 arg, got 2
-
-    parseSuccessfully("4 == bool 2")
-    parseSuccessfully("4 == bool (2)")
-    parseError("1 == 2") // reason: comparisons between scalars must use BOOL modifier
   }
 
 

@@ -20,14 +20,14 @@ class ScalarExpressionSpec extends FunSpec with Matchers with Scalars {
     expression.asInstanceOf[BooleanExpression].toScalar shouldEqual(0)
   }
 
-  it("should parse and evaluate Scalar Boolean Expression with <") {
+  it("should parse and evaluate Scalar Boolean Expression which yields 1 when true") {
     val query = "1 < bool(4)"
     val expression = Parser.parseQuery(query)
     expression.isInstanceOf[BooleanExpression] shouldEqual(true)
     expression.asInstanceOf[BooleanExpression].toScalar shouldEqual(1)
   }
 
-  it("should validate invalidate queries") {
+  it("should validate invalid queries") {
    the[IllegalArgumentException] thrownBy {
      Parser.parseQuery("1 < 2")
    } should have message "requirement failed: comparisons between scalars must use BOOL modifier"
