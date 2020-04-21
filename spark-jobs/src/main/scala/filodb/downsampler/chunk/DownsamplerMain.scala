@@ -20,13 +20,13 @@ import filodb.downsampler.DownsamplerContext
   * Run at 8am: We query data with ingestionTime from 10pm to 8am.
   *             Then query and downsample data with userTime between 12am to 6am.
   *             Downsampled chunk would have an ingestionTime of 12am.
-  * Run at 2pm: We query data with ingestionTime from 8am to 2pm.
+  * Run at 2pm: We query data with ingestionTime from 4am to 2pm.
   *             Then query and downsample data with userTime between 6am to 12pm.
   *             Downsampled chunk would have an ingestionTime of 6am.
   * Run at 8pm: We query data with ingestionTime from 10am to 8pm.
   *             Then query and downsample data with userTime between 12pm to 6pm.
   *             Downsampled chunk would have an ingestionTime of 12pm.
-  * Run at 2am: We query data with ingestionTime from 8pm to 2am.
+  * Run at 2am: We query data with ingestionTime from 4pm to 2am.
   *             Then query and downsample data with userTime between 6pm to 12am.
   *             Downsampled chunk would have an ingestionTime of 6pm.
   *
@@ -92,6 +92,8 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
       s"ingestionTimeEnd=${java.time.Instant.ofEpochMilli(ingestionTimeEnd)} " +
       s"userTimeStart=${java.time.Instant.ofEpochMilli(userTimeStart)} " +
       s"userTimeEndExclusive=${java.time.Instant.ofEpochMilli(userTimeEndExclusive)}")
+    DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
+      s""""spark.filodb.downsampler.userTimeOverride": "${java.time.Instant.ofEpochMilli(userTimeInPeriod)}"""")
 
     val splits = batchDownsampler.rawCassandraColStore.getScanSplits(batchDownsampler.rawDatasetRef,
                                                                      settings.splitsPerNode)

@@ -67,7 +67,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     val fromHour = hourInMigrationPeriod / jobIntervalInHours * jobIntervalInHours
 
     // Index migration cannot be rerun just for specific hours, since there could have been
-    // subsequent updates. Perform migration or all hours until last downsample period's hour.
+    // subsequent updates. Perform migration for all hours until last downsample period's hour.
     val currentHour = hour(System.currentTimeMillis())
     val toHourExclDefault  = currentHour / jobIntervalInHours * jobIntervalInHours
 
@@ -86,8 +86,11 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     DownsamplerContext.dsLogger.info(s"This is the Downsampling Index Migration driver. Starting job... " +
       s"fromHour=$fromHour " +
       s"toHourExcl=$toHourExcl " +
-      s"timeInMigrationPeriod=$timeInMigrationPeriod " +
+      s"timeInMigrationPeriod=${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)} " +
       s"doFullMigration=$doFullMigration")
+    DownsamplerContext.dsLogger.info(s"To rerun this job add the following spark config: " +
+      s""""spark.filodb.downsampler.index.timeInPeriodOverride": """ +
+      s""""${java.time.Instant.ofEpochMilli(timeInMigrationPeriod)}""""")
 
     val numShards = dsIndexJobSettings.numShards
 
