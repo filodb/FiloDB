@@ -194,7 +194,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
-      case lp: ScalarBinaryOperation       => materializeScalarScalarBinaryOperation(qContext, lp)
+      case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
@@ -530,7 +530,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }
 
-  private def materializeScalarScalarBinaryOperation(qContext: QueryContext, lp: ScalarBinaryOperation):
+  private def materializeScalarBinaryOperation(qContext: QueryContext, lp: ScalarBinaryOperation):
   PlanResult = {
     val scalarFixedDoubleExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lp.lhs, lp.rhs, lp.operator)
     PlanResult(Seq(scalarFixedDoubleExec), false)
