@@ -143,18 +143,7 @@ trait Numeric extends Unit with Operator {
     case s => Scalar(java.lang.Double.parseDouble(s))
   }
 
-
-  lazy val arithmeticExpression: PackratParser[ArithmeticExpression] =
-    "(".? ~ scalar ~ arithmeticOp ~ scalar ~ ")".? ^^ {
-      case p1 ~ lhs ~ op ~ rhs ~ p2 => ArithmeticExpression(lhs, op, rhs)
-    }
-
-  lazy val booleanExpression: PackratParser[BooleanExpression] =
-    "(".? ~ scalar ~ comparisionOp ~ "(".? ~ scalar ~ ")".? ~ ")".? ^^ {
-      case p1 ~ lhs ~ op ~ p3 ~ rhs ~ p4 ~ p2 => BooleanExpression(lhs, op, rhs)
-    }
-
-  lazy val numericalExpression: PackratParser[ScalarExpression] = arithmeticExpression | booleanExpression | scalar
+  lazy val numericalExpression: PackratParser[ScalarExpression] = scalar
 
 }
 

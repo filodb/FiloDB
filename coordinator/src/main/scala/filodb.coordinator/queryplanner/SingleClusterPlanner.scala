@@ -172,6 +172,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     *
     * @return ExecPlans that answer the logical plan provided
     */
+  // scalastyle:off cyclomatic.complexity
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
     logicalPlan match {
@@ -193,9 +194,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => materializeScalarScalarBinaryOperation(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   private def materializeScalarVectorBinOp(qContext: QueryContext,
                                            lp: ScalarVectorBinaryOperation): PlanResult = {
@@ -524,6 +527,12 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   private def materializeFixedScalar(qContext: QueryContext,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
     val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dsRef, lp.timeStepParams, lp.scalar)
+    PlanResult(Seq(scalarFixedDoubleExec), false)
+  }
+
+  private def materializeScalarScalarBinaryOperation(qContext: QueryContext, lp: ScalarBinaryOperation):
+  PlanResult = {
+    val scalarFixedDoubleExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lp.lhs, lp.rhs, lp.operator)
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }
 

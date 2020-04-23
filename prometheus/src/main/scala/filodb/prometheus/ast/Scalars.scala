@@ -22,20 +22,4 @@ trait Scalars extends Operators with Base {
     }
   }
 
-  case class BooleanExpression(lhs: Scalar, op: Comparision, rhs: Scalar)
-    extends ScalarExpression {
-    require(op.isBool, "comparisons between scalars must use BOOL modifier")
-    override def toScalar: Double = {
-      op match {
-        case Eq(true)       => if (lhs.toScalar == rhs.toScalar) 1.0 else 0.0
-        case NotEqual(true) => if (lhs.toScalar != rhs.toScalar) 1.0 else 0.0
-        case Gt(true)       => if (lhs.toScalar > rhs.toScalar)  1.0 else 0.0
-        case Gte(true)      => if (lhs.toScalar >= rhs.toScalar) 1.0 else 0.0
-        case Lt(true)       => if (lhs.toScalar < rhs.toScalar)  1.0 else 0.0
-        case Lte(true)      => if (lhs.toScalar <= rhs.toScalar) 1.0 else 0.0
-        case _              => throw new IllegalArgumentException(s"$op is invalid")
-      }
-    }
-  }
-
 }
