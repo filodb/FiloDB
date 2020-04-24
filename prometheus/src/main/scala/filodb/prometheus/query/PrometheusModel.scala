@@ -147,7 +147,7 @@ object PrometheusModel {
     }
   }
 
-  def addVerboseLabelPairs(rvk: RangeVectorKey) = {
+  def addVerboseLabelPairs(rvk: RangeVectorKey): Map[String, String] = {
     Map("_shards_" -> rvk.sourceShards.mkString(","),
       "_partIds_" -> rvk.partIds.mkString(","),
       "_type_" -> rvk.schemaNames.mkString(","))
