@@ -20,6 +20,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
       def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
       def sourceShards: Seq[Int] = Nil
       def partIds: Seq[Int] = Nil
+      def schemaNames: Seq[String] = Nil
     }
   }
 

@@ -104,7 +104,8 @@ object PrometheusModel {
   def toPromResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
                 (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
-                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                                  "_partIds_" -> srv.key.partIds.mkString(","),
+                                  "_type_" -> srv.key.schemaNames.mkString(","))
                 else Map.empty)
     val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
