@@ -24,6 +24,7 @@ trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Map[UTF8Str, UTF8Str]
   def sourceShards: Seq[Int]
   def partIds: Seq[Int]
+  def schemaNames: Seq[String]
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
 
@@ -45,9 +46,12 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partKeyCols: Seq[ColumnInfo],
                                          sourceShard: Int,
                                          groupNum: Int,
-                                         partId: Int) extends RangeVectorKey {
+                                         partId: Int,
+                                         schemaName: String) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
   override def partIds: Seq[Int] = Seq(partId)
+  override def schemaNames: Seq[String] = Seq(schemaName)
+
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
@@ -66,7 +70,8 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
 
 final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str],
                                       sourceShards: Seq[Int] = Nil,
-                                      partIds: Seq[Int] = Nil)
+                                      partIds: Seq[Int] = Nil,
+                                      schemaNames: Seq[String] = Nil)
   extends RangeVectorKey {
 }
 

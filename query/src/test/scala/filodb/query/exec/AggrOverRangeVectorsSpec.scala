@@ -544,9 +544,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it ("should work for countValues") {
-    val expectedLabels = List(Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8),
-      Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8))
-    val expectedRows = List((2,1.0), (1,1.0), (2,2.0), (1,1.0))
+    val expectedLabels = List(Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8),
+      Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8))
+    val expectedRows = List((2,2.0), (1,1.0), (2,1.0), (1,1.0))
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L,5.1), (2L, 5.6d))),
       toRv(Seq((1L, 2), (2L, 4.4d))),

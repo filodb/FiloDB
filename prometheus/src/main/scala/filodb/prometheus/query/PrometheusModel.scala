@@ -5,7 +5,7 @@ import remote.RemoteStorage._
 import filodb.core.GlobalConfig
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
-import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector}
+import filodb.core.query.{ColumnFilter, ColumnInfo, Filter, RangeVector, RangeVectorKey}
 import filodb.query.{QueryResult => FiloQueryResult, _}
 import filodb.query.exec.{ExecPlan, HistToPromSeriesMapper}
 
@@ -103,8 +103,7 @@ object PrometheusModel {
     */
   def toPromResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-                (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
-                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
     val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
@@ -128,8 +127,7 @@ object PrometheusModel {
 
   def toHistResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-                (if (verbose) Map("_shards_" -> srv.key.sourceShards.mkString(","),
-                                  "_partIds_" -> srv.key.partIds.mkString(","))
+                (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
     val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
       case (t, h) if h.numBuckets > 0 =>
@@ -147,6 +145,12 @@ object PrometheusModel {
         Result(tags, None, samples.headOption)
       case QueryResultType.Scalar => ???
     }
+  }
+
+  def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {
+    Map("_shards_" -> rvk.sourceShards.mkString(","),
+      "_partIds_" -> rvk.partIds.mkString(","),
+      "_type_" -> rvk.schemaNames.mkString(","))
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {
