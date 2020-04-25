@@ -92,6 +92,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("foo * bar")
     parseSuccessfully("foo == 1")
     parseSuccessfully("foo == bool 1")
+    parseSuccessfully("foo > bool bar")
     parseSuccessfully("scalar(foo) > bool scalar(bar)")
     parseSuccessfully("2.5 / bar")
     parseSuccessfully("foo and bar")

@@ -530,10 +530,21 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     PlanResult(Seq(scalarFixedDoubleExec), false)
   }
 
-  private def materializeScalarBinaryOperation(qContext: QueryContext, lp: ScalarBinaryOperation):
-  PlanResult = {
-    val scalarFixedDoubleExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lp.lhs, lp.rhs, lp.operator)
-    PlanResult(Seq(scalarFixedDoubleExec), false)
+  private def materializeScalarBinaryOperation(qContext: QueryContext,
+                                               lp: ScalarBinaryOperation): PlanResult = {
+    val lhs = if (lp.lhs.isRight) {
+      // Materialize as lhs is a logical plan
+      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
+      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.lhs.left.get)
+
+    val rhs = if (lp.rhs.isRight) {
+      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
+      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.rhs.left.get)
+
+    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lhs, rhs, lp.operator)
+    PlanResult(Seq(scalarBinaryExec), false)
   }
 
 }

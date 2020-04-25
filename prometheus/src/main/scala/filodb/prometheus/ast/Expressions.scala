@@ -28,11 +28,33 @@ trait Expressions extends Aggregates with Functions {
     if (vectorMatch.isDefined) {
       vectorMatch.get.validate(operator, lhs, rhs)
     }
+
+    // Checks whether expression returns fixed scalar value
+    def hasScalarResult(expression: Expression): Boolean = {
+      expression match {
+        case scalarExpression: ScalarExpression => true
+        case binaryExpression: BinaryExpression => hasScalarResult(binaryExpression.lhs) &&
+                                                   hasScalarResult(binaryExpression.rhs)
+        case _                                  => false
+      }
+    }
     // scalastyle:off method.length
     override def toSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
-      if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
-        ScalarBinaryOperation(operator.getPlanOperator, lhs.asInstanceOf[ScalarExpression].toScalar,
-          rhs.asInstanceOf[ScalarExpression].toScalar, RangeParams(timeParams.start, timeParams.step, timeParams.end))
+      if (hasScalarResult(lhs) && hasScalarResult(rhs)) {
+        val rangeParams = RangeParams(timeParams.start, timeParams.step, timeParams.end)
+
+        (lhs, rhs) match {
+          // 3 + 4
+          case (lh: ScalarExpression, rh: ScalarExpression) =>
+            ScalarBinaryOperation(operator.getPlanOperator, Left(lh.toScalar), Left(rh.toScalar), rangeParams)
+          // (2 + 3) + 5
+          case (lh: BinaryExpression, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+            Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), Left(rh.toScalar), rangeParams)
+          // (2 + 3) + (5 - 6)
+          case (lh: BinaryExpression, rh: BinaryExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+            Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]),
+            Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
+        }
       } else {
 
         (lhs, rhs) match {

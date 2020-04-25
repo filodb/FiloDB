@@ -197,19 +197,6 @@ case class ScalarVectorBinaryOperation(operator: BinaryOperator,
 }
 
 /**
-  * Apply Binary operation between two fixed scalars
-  */
-case class ScalarBinaryOperation(operator: BinaryOperator,
-                                 lhs: Double,
-                                 rhs: Double,
-                                 rangeParams: RangeParams) extends ScalarPlan {
-  override def startMs: Long = rangeParams.startSecs * 1000
-  override def stepMs: Long = rangeParams.stepSecs * 1000
-  override def endMs: Long = rangeParams.endSecs * 1000
-  override def isRoutable: Boolean = false
-}
-
-/**
   * Apply Instant Vector Function to a collection of periodic RangeVectors,
   * returning another set of periodic vectors
   */
@@ -321,6 +308,19 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
   override def stepMs: Long = scalars.stepMs
   override def endMs: Long = scalars.endMs
   override def isRoutable: Boolean = scalars.isRoutable
+}
+
+/**
+  * Apply Binary operation between two fixed scalars
+  */
+case class ScalarBinaryOperation(operator: BinaryOperator,
+                                 lhs: Either[Double, ScalarBinaryOperation],
+                                 rhs: Either[Double, ScalarBinaryOperation],
+                                 rangeParams: RangeParams) extends ScalarPlan {
+  override def startMs: Long = rangeParams.startSecs * 1000
+  override def stepMs: Long = rangeParams.stepSecs * 1000
+  override def endMs: Long = rangeParams.endSecs * 1000
+  override def isRoutable: Boolean = false
 }
 
 /**
