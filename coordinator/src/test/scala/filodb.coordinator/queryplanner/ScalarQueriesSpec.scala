@@ -335,8 +335,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarBinaryOperationExec plan for query 1 + 3") {
     val lp = Parser.queryToLogicalPlan("1 + 3", 1000)
-
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -347,8 +345,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarBinaryOperationExec plan for query 1 < bool(3)") {
     val lp = Parser.queryToLogicalPlan("1 < bool(3)", 1000)
-
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -360,7 +356,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
   it("should generate ScalarOperationMapper exec plan for query 1 < bool(2) + http_requests_total") {
     val lp = Parser.queryToLogicalPlan("1 < bool(2) + http_requests_total{job = \"app\"}", 1000)
 
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -385,7 +380,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("scalar(node_info{job = \"app\"}) > " +
       "bool(http_requests_total{job = \"app\"})", 1000)
 
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -418,7 +412,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
     val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
       "http_requests_total{job = \"app\"}", 1000)
 
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -437,7 +430,6 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool 3 + 4") {
     val lp = Parser.queryToLogicalPlan("(1 + 2) < bool 3 + 4", 1000)
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
@@ -450,13 +442,36 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
 
   it("should generate ScalarBinaryOperationExec plan for query 1 + 2 - 3") {
     val lp = Parser.queryToLogicalPlan("1 + 2 - 3", 1000)
-    // materialized exec plan
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
     execPlan.printTree()
     val expected =
       """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator=SUB,
         |lhs=Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
         |rhs=Left(3.0)) on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query 1 + 2 <bool 3 + 4") {
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = LSS_BOOL,
+        |lhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(3.0), rhs=Left(4.0)))
+        |on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool (3 + 4)") {
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = LSS_BOOL,
+        |lhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(3.0), rhs=Left(4.0)))
+        |on InProcessPlanDispatcher""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
 }
