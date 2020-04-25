@@ -103,7 +103,7 @@ object PrometheusModel {
     */
   def toPromResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-                (if (verbose) addVerboseLabelPairs(srv.key)
+                (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
     val samples = srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
       Sampl(r.getLong(0) / 1000, r.getDouble(1))
@@ -127,7 +127,7 @@ object PrometheusModel {
 
   def toHistResult(srv: RangeVector, verbose: Boolean, typ: QueryResultType): Result = {
     val tags = srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)} ++
-                (if (verbose) addVerboseLabelPairs(srv.key)
+                (if (verbose) makeVerboseLabels(srv.key)
                 else Map.empty)
     val samples = srv.rows.map { r => (r.getLong(0), r.getHistogram(1)) }.collect {
       case (t, h) if h.numBuckets > 0 =>
@@ -147,7 +147,7 @@ object PrometheusModel {
     }
   }
 
-  def addVerboseLabelPairs(rvk: RangeVectorKey): Map[String, String] = {
+  def makeVerboseLabels(rvk: RangeVectorKey): Map[String, String] = {
     Map("_shards_" -> rvk.sourceShards.mkString(","),
       "_partIds_" -> rvk.partIds.mkString(","),
       "_type_" -> rvk.schemaNames.mkString(","))
