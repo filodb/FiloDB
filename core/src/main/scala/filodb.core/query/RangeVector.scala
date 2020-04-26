@@ -143,8 +143,7 @@ trait ScalarSingleValue extends ScalarRangeVector {
   * ScalarRangeVector which has one value for all time's
   */
 final case class ScalarFixedDouble(rangeParams: RangeParams, value: Double) extends ScalarSingleValue {
-  def getValue(time: Long): Double = getValue
-  def getValue: Double = value
+  def getValue(time: Long): Double = value
 }
 
 /**

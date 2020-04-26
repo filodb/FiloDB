@@ -50,6 +50,9 @@ trait Expressions extends Aggregates with Functions {
           // (2 + 3) + 5
           case (lh: BinaryExpression, rh: ScalarExpression) => ScalarBinaryOperation(operator.getPlanOperator,
             Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), Left(rh.toScalar), rangeParams)
+          // 2 + (3 * 5)
+          case (lh: ScalarExpression, rh: BinaryExpression) => ScalarBinaryOperation(operator.getPlanOperator,
+            Left(lh.toScalar), Right(rh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]), rangeParams)
           // (2 + 3) + (5 - 6)
           case (lh: BinaryExpression, rh: BinaryExpression) => ScalarBinaryOperation(operator.getPlanOperator,
             Right(lh.toSeriesPlan(timeParams).asInstanceOf[ScalarBinaryOperation]),
@@ -58,33 +61,39 @@ trait Expressions extends Aggregates with Functions {
       } else {
 
         (lhs, rhs) match {
+          // scalar(http_requests) + scalar(node_info)
           case (lh: Function, rh: Function) if lh.isScalarFunction() && rh.isScalarFunction() =>
             val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
             val seriesPlanRhs = rh.toSeriesPlan(timeParams)
             ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, true)
 
+          // 2 + http_requests
           case (lh: ScalarExpression, rh: PeriodicSeries) =>
             val scalar = ScalarFixedDoublePlan(lh.toScalar,
               RangeParams(timeParams.start, timeParams.step, timeParams.end))
             val seriesPlan = rh.toSeriesPlan(timeParams)
             ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
 
+          // http_requests + 2
           case (lh: PeriodicSeries, rh: ScalarExpression) =>
             val scalar = ScalarFixedDoublePlan(rh.toScalar, RangeParams(timeParams.start, timeParams.step,
               timeParams.end))
             val seriesPlan = lh.toSeriesPlan(timeParams)
             ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
 
+          // scalar(http_requests) + node_info
           case (lh: Function, rh: PeriodicSeries) if lh.isScalarFunction() =>
             val scalar = lh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
             val seriesPlanRhs = rh.toSeriesPlan(timeParams)
             ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanRhs, scalarIsLhs = true)
 
+          // node_info + scalar(http_requests)
           case (lh: PeriodicSeries, rh: Function) if rh.isScalarFunction =>
             val scalar = rh.toSeriesPlan(timeParams).asInstanceOf[ScalarPlan]
             val seriesPlanlhs = lh.toSeriesPlan(timeParams)
             ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlanlhs, scalarIsLhs = false)
 
+          // node_info + http_requests
           case (lh: PeriodicSeries, rh: PeriodicSeries) =>
             val seriesPlanLhs = lh.toSeriesPlan(timeParams)
             val seriesPlanRhs = rh.toSeriesPlan(timeParams)

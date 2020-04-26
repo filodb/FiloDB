@@ -13,7 +13,7 @@ import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
   * Exec Plans for scalar binary operations which can execute locally without being dispatched
-  * Query example: 1 + 2, 1 < bool(2)
+  * Query example: 1 + 2, 1 < bool(2), (1 + 2) < bool 3 + 4
   */
 case class ScalarBinaryOperationExec(queryContext: QueryContext,
                                      dataset: DatasetRef,
