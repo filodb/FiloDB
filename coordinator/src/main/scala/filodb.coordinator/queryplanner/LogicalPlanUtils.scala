@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 
 object LogicalPlanUtils {
@@ -82,8 +83,7 @@ object LogicalPlanUtils {
                                                   lookBackTime: Long): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
-        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs - lookBackTime,
-          timeRange.endMs))
+        case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs, timeRange.endMs))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
       case p: ApplyInstantFunctionRaw =>
@@ -107,4 +107,18 @@ object LogicalPlanUtils {
     }
   }
 
+  def getOffsetMillis(logicalPlan: LogicalPlan): Long = {
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => lp.offsetMs.getOrElse(0)
+      case _             => 0
+    }
+  }
+
+  def getLookBackMillis(logicalPlan: LogicalPlan): Long = {
+    val staleDataLookbackMillis = WindowConstants.staleDataLookbackMillis
+    LogicalPlan.findLeafLogicalPlans(logicalPlan).head match {
+      case lp: RawSeries => lp.lookbackMs.getOrElse(staleDataLookbackMillis)
+      case _             => 0
+    }
+  }
 }

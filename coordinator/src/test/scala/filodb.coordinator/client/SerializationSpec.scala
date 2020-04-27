@@ -35,6 +35,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   import QueryCommands._
 
   val serialization = SerializationExtension(system)
+  val config = ConfigFactory.load("application_test.conf")
+  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
   private def roundTrip(thing: AnyRef): AnyRef = {
     val serializer = serialization.findSerializerFor(thing)
@@ -124,7 +126,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     // scalastyle:off null
     val rvKey = new PartitionRangeVectorKey(null, defaultPartKey, dataset1.partKeySchema,
-                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100)
+                                            Seq(ColumnInfo("string", ColumnType.StringColumn)), 1, 5, 100, dataset1.name)
 
     val rowbuf = tuples.map { t =>
       new SeqRowReader(Seq[Any](t._1, t._2))
@@ -162,6 +164,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         result.result(i).rows.map(_.getDouble(1)).toSeq
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
       roundTripResult.result(i).key.sourceShards shouldEqual result.result(i).key.sourceShards
+      roundTripResult.result(i).key.schemaNames shouldEqual result.result(i).key.schemaNames
     }
   }
 
@@ -172,7 +175,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val mapper = new ShardMapper(1)
     mapper.registerNode(Seq(0), node0)
     def mapperRef: ShardMapper = mapper
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
     val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
       ColumnFilter("job", Filter.Equals("myService")),
       ColumnFilter("le", Filter.Equals("0.3")),
@@ -211,7 +214,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       s"""sum(rate(http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}[20s])) by (handler)""",
@@ -240,7 +243,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
 
     // with column filters having shardcolumns
     val logicalPlan1 = Parser.metadataQueryToLogicalPlan(
@@ -320,7 +323,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
     val qParams = TimeStepParams(from, 10, to)
-    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0)
+    val engine = new SingleClusterPlanner(dataset.ref, Schemas.global, mapperRef, 0, queryConfig)
 
     val logicalPlan = Parser.queryRangeToLogicalPlan(
       s"""http_request_duration_seconds_bucket{job="prometheus",$shardKeyStr}""",

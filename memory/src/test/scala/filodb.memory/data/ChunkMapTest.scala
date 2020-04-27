@@ -209,6 +209,40 @@ class ChunkMapTest extends NativeVectorTest with ScalaFutures {
     map.chunkmapFree()
   }
 
+  it("should remove floor") {
+    val map = new ChunkMap(memFactory, 12)
+    val elems = makeElems((0 to 30 by 3).map(_.toLong))
+    elems.foreach { elem =>
+      map.chunkmapDoPut(elem)
+    }
+    map.chunkmapSize shouldEqual elems.length
+
+    map.chunkmapDoRemoveFloor(0L) shouldEqual 1
+    map.chunkmapSize shouldEqual 10
+    map.chunkmapDoRemoveFloor(0L) shouldEqual 0
+    map.chunkmapSize shouldEqual 10
+
+    map.chunkmapDoRemoveFloor(6L) shouldEqual 2
+    map.chunkmapSize shouldEqual 8
+
+    map.chunkmapDoRemoveFloor(16L) shouldEqual 3
+    map.chunkmapSize shouldEqual 5
+
+    // With internal wraparound...
+    map.chunkmapDoPut(makeElementWithID(33))
+    map.chunkmapDoPut(makeElementWithID(36))
+    map.chunkmapDoPut(makeElementWithID(39))
+    map.chunkmapSize shouldEqual 8
+    map.chunkmapDoRemoveFloor(36L) shouldEqual 7
+    map.chunkmapSize shouldEqual 1
+
+    // All gone.
+    map.chunkmapDoRemoveFloor(40L) shouldEqual 1
+    map.chunkmapSize shouldEqual 0
+
+    map.chunkmapFree()
+  }
+
   import scala.concurrent.ExecutionContext.Implicits.global
 
   it("should handle concurrent inserts in various places") {

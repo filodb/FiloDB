@@ -5,6 +5,7 @@ import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -64,6 +65,7 @@ object PartKeyLuceneIndex {
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
+final case class PartKeyLuceneIndexRecord(partKey: Array[Byte], startTime: Long, endTime: Long)
 
 class PartKeyLuceneIndex(ref: DatasetRef,
                          schema: PartitionSchema,
@@ -474,6 +476,23 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
                          endTime: Long): debox.Buffer[Int] = {
+    val collector = new PartIdCollector() // passing zero for unlimited results
+    searchFromFilters(columnFilters, startTime, endTime, collector)
+    collector.result
+  }
+
+  def partKeyRecordsFromFilters(columnFilters: Seq[ColumnFilter],
+                                startTime: Long,
+                                endTime: Long): Seq[PartKeyLuceneIndexRecord] = {
+    val collector = new PartKeyRecordCollector()
+    searchFromFilters(columnFilters, startTime, endTime, collector)
+    collector.records
+  }
+
+  private def searchFromFilters(columnFilters: Seq[ColumnFilter],
+                         startTime: Long,
+                         endTime: Long,
+                         collector: Collector): Unit = {
     val partKeySpan = Kamon.spanBuilder("index-partition-lookup-latency")
       .tag("dataset", ref.dataset)
       .tag("shard", shardNum)
@@ -488,10 +507,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
     val query = booleanQuery.build()
     logger.debug(s"Querying dataset=$ref shard=$shardNum partKeyIndex with: $query")
-    val collector = new PartIdCollector() // passing zero for unlimited results
     withNewSearcher(s => s.search(query, collector))
     partKeySpan.finish()
-    collector.result
   }
 
   def partIdFromPartKeySlow(partKeyBase: Any,
@@ -528,7 +545,6 @@ class PartKeyLuceneIndex(ref: DatasetRef,
     partKeySpan.finish()
     chosenPartId
   }
-
 }
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
@@ -698,6 +714,32 @@ class PartIdStartTimeCollector extends SimpleCollector {
       val partId = partIdDv.longValue().toInt
       val startTime = startTimeDv.longValue()
       startTimes(partId) = startTime
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")
+    }
+  }
+}
+
+class PartKeyRecordCollector extends SimpleCollector {
+  val records = new ArrayBuffer[PartKeyLuceneIndexRecord]
+  private var partKeyDv: BinaryDocValues = _
+  private var startTimeDv: NumericDocValues = _
+  private var endTimeDv: NumericDocValues = _
+
+  override def needsScores(): Boolean = false
+
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
+    endTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.END_TIME)
+  }
+
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc) && startTimeDv.advanceExact(doc) && endTimeDv.advanceExact(doc)) {
+      val pkBytesRef = partKeyDv.binaryValue()
+      // Gotcha! make copy of array because lucene reuses bytesRef for next result
+      val pkBytes = util.Arrays.copyOfRange(pkBytesRef.bytes, pkBytesRef.offset, pkBytesRef.offset + pkBytesRef.length)
+      records += PartKeyLuceneIndexRecord(pkBytes, startTimeDv.longValue(), endTimeDv.longValue())
     } else {
       throw new IllegalStateException("This shouldn't happen since every document should have partIdDv and startTimeDv")
     }

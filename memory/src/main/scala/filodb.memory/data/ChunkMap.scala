@@ -566,6 +566,36 @@ class ChunkMap(val memFactory: MemFactory, var capacity: Int) {
     size -= 1
   }
 
+  /**
+   * Removes all elements for the given key and lower. Caller must hold exclusive lock.
+   * @param key the highest key to remove
+   * @return amount removed
+   */
+  final def chunkmapDoRemoveFloor(key: Long): Int = {
+    if (size <= 0) {
+      return 0
+    }
+
+    val newFirst = {
+      // Check if matches the first key, or else search for it.
+      if (key == chunkmapKeyRetrieve(arrayGet(first))) {
+        first + 1
+      } else {
+        val ix = doBinarySearch(key)
+        if (ix < 0) {
+          ix & 0x7fffffff
+        } else {
+          ix + 1
+        }
+      }
+    }
+
+    val amt = newFirst - first
+    first = realIndex(newFirst)
+    size -= amt;
+    amt
+  }
+
   final def chunkmapFree(): Unit = {
     try {
       chunkmapAcquireExclusive()

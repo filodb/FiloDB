@@ -18,6 +18,11 @@ trait Histogram extends Ordered[Histogram] {
   def numBuckets: Int
 
   /**
+   * An empty histogram is one with no buckets
+   */
+  def isEmpty: Boolean = numBuckets == 0
+
+  /**
    * Gets the bucket definition for number no.  Observations for values <= this bucket, so it represents
    * an upper limit.
    */

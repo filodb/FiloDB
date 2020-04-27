@@ -367,9 +367,17 @@ final case class HistogramBucketImpl() extends HistToDoubleIFunction {
   final def apply(value: Histogram, scalarParams: Seq[Double]): Double = {
     require(scalarParams.length == 1, "Bucket/le required for histogram bucket")
     val bucket = scalarParams(0)
-    for { b <- 0 until value.numBuckets optimized } {
-      if (Math.abs(value.bucketTop(b) - bucket) <= 1E-10) return value.bucketValue(b)
+    if (bucket == Double.PositiveInfinity) {
+      // Just get the top bucket if bucket scheme has +Inf at top, or return NaN
+      if (value.bucketTop(value.numBuckets - 1) == Double.PositiveInfinity) value.topBucketValue
+      else throw new IllegalArgumentException(s"+Inf bucket not in the last position!")
+    } else {
+      for { b <- 0 until value.numBuckets optimized } {
+        // This comparison does not work for +Inf
+        if (Math.abs(value.bucketTop(b) - bucket) <= 1E-10) return value.bucketValue(b)
+      }
+      Double.NaN
+
     }
-    Double.NaN
   }
 }

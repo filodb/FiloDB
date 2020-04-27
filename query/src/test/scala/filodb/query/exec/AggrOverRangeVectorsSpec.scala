@@ -498,6 +498,23 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
     result2(0).key shouldEqual noKey
   }
 
+  it("should count histogram RVs") {
+    val (data1, rv1) = histogramRV(numSamples = 5)
+    val (data2, rv2) = histogramRV(numSamples = 5)
+    val samples: Array[RangeVector] = Array(rv1, rv2)
+
+    val agg1 = RowAggregator(AggregationOperator.Count, Nil, histSchema)
+    val resultObs1 = RangeVectorAggregator.mapReduce(agg1, false, Observable.fromIterable(samples), noGrouping)
+    val resultObs = RangeVectorAggregator.mapReduce(agg1, true, resultObs1, rv=>rv.key)
+
+    val result = resultObs.toListL.runAsync.futureValue
+    result.size shouldEqual 1
+    result(0).key shouldEqual noKey
+
+    val counts = data1.map(_ => 2).toList
+    result(0).rows.map(_.getDouble(1)).toList shouldEqual counts
+  }
+
   it("should sum and compute max of histogram & max RVs") {
     val (data1, rv1) = MMD.histMaxRV(100000L, numSamples = 5)
     val (data2, rv2) = MMD.histMaxRV(100000L, numSamples = 5)
@@ -527,9 +544,9 @@ class AggrOverRangeVectorsSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it ("should work for countValues") {
-    val expectedLabels = List(Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8),
-      Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8))
-    val expectedRows = List((2,1.0), (1,1.0), (2,2.0), (1,1.0))
+    val expectedLabels = List(Map("freq".utf8 -> "5.6".utf8), Map("freq".utf8 -> "5.1".utf8),
+      Map(("freq").utf8 -> "4.4".utf8), Map("freq".utf8 -> "2.0".utf8))
+    val expectedRows = List((2,2.0), (1,1.0), (2,1.0), (1,1.0))
     val samples: Array[RangeVector] = Array(
       toRv(Seq((1L,5.1), (2L, 5.6d))),
       toRv(Seq((1L, 2), (2L, 4.4d))),

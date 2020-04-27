@@ -49,8 +49,10 @@ object SelectRawPartitionsExec extends  {
     }
   }
 
-  def newXFormersForHistMax(schema: Schema, transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
-    histMaxColumn(schema, schema.data.columns.map(_.id)).map { maxColID =>
+  def newXFormersForHistMax(schema: Schema,
+                            colIDs: Seq[Types.ColumnId],
+                            transformers: Seq[RangeVectorTransformer]): Seq[RangeVectorTransformer] = {
+    histMaxColumn(schema, colIDs).map { maxColID =>
       // Histogram with max column present.  Check for range functions and change if needed
       val origFunc = findFirstRangeFunction(transformers)
       val newFunc = RangeFunction.histMaxRangeFunction(origFunc)

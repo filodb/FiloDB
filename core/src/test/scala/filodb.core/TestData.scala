@@ -342,9 +342,14 @@ object MachineMetricsData {
                             DatasetOptions.DefaultOptions.copy(metricColumn = "metric"))
 
   var histBucketScheme: bv.HistogramBuckets = _
-  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8):
+  def linearHistSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000, numBuckets: Int = 8,
+                       infBucket: Boolean = false):
   Stream[Seq[Any]] = {
-    val scheme = bv.GeometricBuckets(2.0, 2.0, numBuckets)
+    val scheme = if (infBucket) {
+                   // Custom geometric buckets, with top bucket being +Inf
+                   val buckets = (0 to numBuckets - 2).map(n => Math.pow(2.0, n + 1)) ++ Seq(Double.PositiveInfinity)
+                   bv.CustomBuckets(buckets.toArray)
+                 } else bv.GeometricBuckets(2.0, 2.0, numBuckets)
     histBucketScheme = scheme
     val buckets = new Array[Long](numBuckets)
     def updateBuckets(bucketNo: Int): Unit = {
@@ -401,9 +406,9 @@ object MachineMetricsData {
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
   def histogramRV(startTS: Long, pubFreq: Long = 10000L, numSamples: Int = 100, numBuckets: Int = 8,
-                  ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
+                  infBucket: Boolean = false, ds: Dataset = histDataset, pool: WriteBufferPool = histBufferPool):
   (Stream[Seq[Any]], RawDataRangeVector) = {
-    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets).take(numSamples)
+    val histData = linearHistSeries(startTS, 1, pubFreq.toInt, numBuckets, infBucket).take(numSamples)
     val container = records(ds, histData).records
     val part = TimeSeriesPartitionSpec.makePart(0, ds, partKey=histPartKey, bufferPool=pool)
     container.iterate(ds.ingestionSchema).foreach { row => part.ingest(0, row, histIngestBH, 1.hour.toMillis) }
@@ -466,6 +471,13 @@ object MetricsTestData {
                                   DatasetOptions(Seq("__name__", "job"), "__name__")).get
   val timeseriesSchema = timeseriesDataset.schema
   val timeseriesSchemas = Schemas(timeseriesSchema)
+
+  val timeseriesDatasetWithMetric = Dataset.make("timeseries",
+    Seq("tags:map"),
+    Seq("timestamp:ts", "value:double:detectDrops=true"),
+    Seq.empty,
+    None,
+    DatasetOptions(Seq("_metric_", "_ns_"), "_metric_")).get
 
   val downsampleDataset = Dataset.make("tsdbdata",
     Seq("tags:map"),
