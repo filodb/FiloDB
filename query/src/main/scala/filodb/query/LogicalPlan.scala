@@ -311,6 +311,19 @@ final case class VectorPlan(scalars: ScalarPlan) extends PeriodicSeriesPlan with
 }
 
 /**
+  * Apply Binary operation between two fixed scalars
+  */
+case class ScalarBinaryOperation(operator: BinaryOperator,
+                                 lhs: Either[Double, ScalarBinaryOperation],
+                                 rhs: Either[Double, ScalarBinaryOperation],
+                                 rangeParams: RangeParams) extends ScalarPlan {
+  override def startMs: Long = rangeParams.startSecs * 1000
+  override def stepMs: Long = rangeParams.stepSecs * 1000
+  override def endMs: Long = rangeParams.endSecs * 1000
+  override def isRoutable: Boolean = false
+}
+
+/**
   * Apply Absent Function to a collection of RangeVectors
   */
 case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,

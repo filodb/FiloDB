@@ -332,4 +332,146 @@ class ScalarQueriesSpec extends FunSpec with Matchers {
         |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#79055924])""".stripMargin
     maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
   }
+
+  it("should generate ScalarBinaryOperationExec plan for query 1 + 3") {
+    val lp = Parser.queryToLogicalPlan("1 + 3", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = ADD, lhs = Left(1.0),
+        |rhs = Left(3.0)) on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query 1 < bool(3)") {
+    val lp = Parser.queryToLogicalPlan("1 < bool(3)", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator=LSS_BOOL, lhs=Left(1.0), rhs=Left(3.0)) on
+        |InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarOperationMapper exec plan for query 1 < bool(2) + http_requests_total") {
+    val lp = Parser.queryToLogicalPlan("1 < bool(2) + http_requests_total{job = \"app\"}", 1000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
+        |-T~ScalarOperationMapper(operator=LSS_BOOL, scalarOnLhs=true)
+        |--FA1~StaticFuncArgs(1.0,RangeParams(1000,1000,1000))
+        |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+        |---FA1~StaticFuncArgs(2.0,RangeParams(1000,1000,1000))
+        |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
+        |-T~ScalarOperationMapper(operator=LSS_BOOL, scalarOnLhs=true)
+        |--FA1~StaticFuncArgs(1.0,RangeParams(1000,1000,1000))
+        |--T~ScalarOperationMapper(operator=ADD, scalarOnLhs=true)
+        |---FA1~StaticFuncArgs(2.0,RangeParams(1000,1000,1000))
+        |---T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-1098511474])
+        |""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarOperationMapper exec plan for query scalar(node_info) > bool(http_requests_total)") {
+    val lp = Parser.queryToLogicalPlan("scalar(node_info{job = \"app\"}) > " +
+      "bool(http_requests_total{job = \"app\"})", 1000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |-T~ScalarOperationMapper(operator=GTR_BOOL, scalarOnLhs=true)
+        |--FA1~
+        |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |-T~ScalarOperationMapper(operator=GTR_BOOL, scalarOnLhs=true)
+        |--FA1~
+        |--T~ScalarFunctionMapper(function=Scalar, funcParams=List())
+        |---E~DistConcatExec() on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |----T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |-----E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |--T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |---E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-879546200])
+        |""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate BinaryJoinExec for query node_info > bool http_requests_total") {
+    val lp = Parser.queryToLogicalPlan("node_info{job = \"app\"} > bool" +
+      "http_requests_total{job = \"app\"}", 1000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~BinaryJoinExec(binaryOp=GTR_BOOL, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349])
+        |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=15, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349])
+        |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=31, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(node_info))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349])
+        |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=5, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349])
+        |-T~PeriodicSamplesMapper(start=1000000, step=1000000, end=1000000, window=None, functionId=None, rawSource=true, offsetMs=None)
+        |--E~MultiSchemaPartitionsExec(dataset=timeseries, shard=21, chunkMethod=TimeRangeChunkScan(700000,1000000), filters=List(ColumnFilter(job,Equals(app)), ColumnFilter(__name__,Equals(http_requests_total))), colName=None) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#1392317349])
+        |""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool 3 + 4") {
+    val lp = Parser.queryToLogicalPlan("(1 + 2) < bool 3 + 4", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = LSS_BOOL,
+        |lhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(3.0), rhs=Left(4.0)))
+        |on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query 1 + 2 - 3") {
+    val lp = Parser.queryToLogicalPlan("1 + 2 - 3", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator=SUB,
+        |lhs=Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs=Left(3.0)) on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query 1 + 2 <bool 3 + 4") {
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = LSS_BOOL,
+        |lhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(3.0), rhs=Left(4.0)))
+        |on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
+
+  it("should generate ScalarBinaryOperationExec plan for query (1 + 2) < bool (3 + 4)") {
+    val lp = Parser.queryToLogicalPlan("1 + 2 <bool 3 + 4", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    val expected =
+      """E~ScalarBinaryOperationExec(params = RangeParams(1000,1000,1000), operator = LSS_BOOL,
+        |lhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(1.0), rhs=Left(2.0)),
+        |rhs = Right(params = RangeParams(1000,1000,1000), operator=ADD, lhs=Left(3.0), rhs=Left(4.0)))
+        |on InProcessPlanDispatcher""".stripMargin
+    maskDispatcher(execPlan.printTree()) shouldEqual (maskDispatcher(expected))
+  }
 }

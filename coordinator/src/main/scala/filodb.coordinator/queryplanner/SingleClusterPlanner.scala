@@ -172,6 +172,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     *
     * @return ExecPlans that answer the logical plan provided
     */
+  // scalastyle:off cyclomatic.complexity
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
     logicalPlan match {
@@ -193,9 +194,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   private def materializeScalarVectorBinOp(qContext: QueryContext,
                                            lp: ScalarVectorBinaryOperation): PlanResult = {
@@ -525,6 +528,23 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
     val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dsRef, lp.timeStepParams, lp.scalar)
     PlanResult(Seq(scalarFixedDoubleExec), false)
+  }
+
+  private def materializeScalarBinaryOperation(qContext: QueryContext,
+                                               lp: ScalarBinaryOperation): PlanResult = {
+    val lhs = if (lp.lhs.isRight) {
+      // Materialize as lhs is a logical plan
+      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
+      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.lhs.left.get)
+
+    val rhs = if (lp.rhs.isRight) {
+      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
+      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.rhs.left.get)
+
+    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lhs, rhs, lp.operator)
+    PlanResult(Seq(scalarBinaryExec), false)
   }
 
 }

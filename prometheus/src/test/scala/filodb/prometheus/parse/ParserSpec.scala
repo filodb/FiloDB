@@ -46,6 +46,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("1 >= bool 1")
     parseSuccessfully("1 < bool 1")
     parseSuccessfully("1 <= bool 1")
+    parseSuccessfully("4 == bool (2)")
+    parseSuccessfully("4 == bool(2)")
     parseSuccessfully("+1 + -2 * 1")
     parseSuccessfully("1 < bool 2 - 1 * 2")
     parseSuccessfully("1 + 2/(3*1)")
@@ -76,7 +78,7 @@ class ParserSpec extends FunSpec with Matchers {
 
     parseError("(")
     parseError("1 and 1")
-    parseError("1 == 1")
+    parseError("1 == 1")  // reason: comparisons between scalars must use BOOL modifier
     parseError("1 or 1")
     parseError("1 unless 1")
     parseError("1 !~ 1")
@@ -90,6 +92,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("foo * bar")
     parseSuccessfully("foo == 1")
     parseSuccessfully("foo == bool 1")
+    parseSuccessfully("foo > bool bar")
+    parseSuccessfully("scalar(foo) > bool scalar(bar)")
     parseSuccessfully("2.5 / bar")
     parseSuccessfully("foo and bar")
     parseSuccessfully("foo or bar")
@@ -128,6 +132,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("foo and bool 10")
     parseError("foo + bool 10")
     parseError("foo + bool bar")
+    parseError("bool(1) < 2")
 
     parseSuccessfully("foo")
     parseSuccessfully("foo offset 5m")
@@ -504,7 +509,8 @@ class ParserSpec extends FunSpec with Matchers {
       "count_values(\"freq\", http_requests_total)" ->
         "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None),List(\"freq\"),List(),List())",
       "timestamp(http_requests_total)" -> "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(__name__,Equals(http_requests_total))),List(),Some(300000),None),1524855988000,1000000,1524855988000,0,Timestamp,List(),None)",
-      "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)"
+      "sum:some_metric:dataset:1m{_ws_=\"demo\", _ns_=\"test\"}" -> "PeriodicSeries(RawSeries(IntervalSelector(1524855988000,1524855988000),List(ColumnFilter(_ws_,Equals(demo)), ColumnFilter(_ns_,Equals(test)), ColumnFilter(__name__,Equals(sum:some_metric:dataset:1m))),List(),Some(300000),None),1524855988000,1000000,1524855988000,None)",
+      "1 + 2 * 3" -> "ScalarBinaryOperation(ADD,Left(1.0),Right(ScalarBinaryOperation(MUL,Left(2.0),Left(3.0),RangeParams(1524855988,1000,1524855988))),RangeParams(1524855988,1000,1524855988))"
     )
 
     val qts: Long = 1524855988L
