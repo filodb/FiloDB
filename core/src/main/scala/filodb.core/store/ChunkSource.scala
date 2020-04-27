@@ -151,7 +151,7 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                                                   partition.partKeyOffset, numGroups)
       val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
                                             schema.partKeySchema, partCols, partition.shard,
-                                            subgroup, partition.partID)
+                                            subgroup, partition.partID, schema.name)
       RawDataRangeVector(key, partition, lookupRes.chunkMethod, ids)
     }
   }

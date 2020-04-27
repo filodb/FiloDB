@@ -43,6 +43,10 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
 
+  private lazy val deleteIndexCql = session.prepare(
+    s"DELETE FROM $tableString WHERE partition=? AND ingestion_time=? AND start_time=?")
+    .setConsistencyLevel(writeConsistencyLevel)
+
   private lazy val allCql = session.prepare(
     s"SELECT ingestion_time, start_time, info FROM $tableString " +
     s"WHERE partition = ?")
@@ -142,16 +146,33 @@ sealed class IngestionTimeIndexTable(val dataset: DatasetRef,
   }
 
   /**
-    * Writes a single record, exactly as-is from the scanInfosByIngestionTime method. Is
+    * Writes a single record, exactly as-is from the scanRowsByIngestionTimeNoAsync. Is
     * used to copy records from one column store to another.
     */
-  def writeIndex(row: Row, diskTimeToLiveSeconds: Int): Future[Response] = {
+  def writeIndex(row: Row, stats: ChunkSinkStats, diskTimeToLiveSeconds: Int): Future[Response] = {
+    val info = row.getBytes(3)
+    stats.addIndexWriteStats(info.remaining())
+
     connector.execStmtWithRetries(writeIndexCql.bind(
       row.getBytes(0),                // partition
       row.getLong(1): java.lang.Long, // ingestion_time
       row.getLong(2): java.lang.Long, // start_time
-      row.getBytes(3),                // info
+      info,
       diskTimeToLiveSeconds: java.lang.Integer)
+    )
+  }
+
+  /**
+    * Deletes a single record, specified by a row from the scanRowsByIngestionTimeNoAsync
+    * method.  Is used to delete records which are incorrect or inconsistent. The row object
+    * passed in contains the fields which uniquely identify the row to delete -- it doesn't
+    * specify the row entirely.
+    */
+  def deleteIndex(row: Row): Future[Response] = {
+    connector.execStmtWithRetries(deleteIndexCql.bind(
+      row.getBytes(0),                // partition
+      row.getLong(1): java.lang.Long, // ingestion_time
+      row.getLong(2): java.lang.Long) // start_time
     )
   }
 }

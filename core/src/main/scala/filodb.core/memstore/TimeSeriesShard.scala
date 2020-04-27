@@ -159,6 +159,7 @@ object TimeSeriesShard {
 }
 
 private[core] final case class PartKey(base: Any, offset: Long)
+private[core] final case class PartKeyWithTimes(base: Any, offset: Long, startTime: Long, endTime: Long)
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
   def skippedPartIDs: Buffer[Int]
@@ -281,6 +282,8 @@ class TimeSeriesShard(val ref: DatasetRef,
         assert(numBytes == partition.schema.data.blockMetaSize)
         val chunkID = UnsafeUtils.getLong(metaAddr + 4)
         partition.removeChunksAt(chunkID)
+        logger.debug(s"Reclaiming chunk chunkID=$chunkID from shard=$shardNum " +
+          s"partID=$partID ${partition.stringPartition}")
       }
     }
   }
@@ -657,26 +660,33 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This method is to apply column filters and fetch matching time series partition keys.
     */
   def partKeysWithFilters(filter: Seq[ColumnFilter],
+                          fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[PartKey] = {
-    val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    val inMem = InMemPartitionIterator2(partIds)
-    val inMemPartKeys = inMem.map { p => PartKey(p.partKeyBase, p.partKeyOffset) }
-    val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partKeyFromPartId)
-    (inMemPartKeys ++ skippedPartKeys).take(limit)
+                          limit: Int): Iterator[PartKeyWithTimes] = {
+    if (fetchFirstLastSampleTimes) {
+      partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
+        PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
+      }
+    } else {
+      val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+      val inMem = InMemPartitionIterator2(partIds)
+      val inMemPartKeys = inMem.map { p => PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1) }
+      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partKeyFromPartId)
+      (inMemPartKeys ++ skippedPartKeys).take(limit)
+    }
   }
 
   /**
     * retrieve partKey for a given PartId
     */
-  private def partKeyFromPartId(partId: Int): PartKey = {
+  private def partKeyFromPartId(partId: Int): PartKeyWithTimes = {
     val nextPart = partitions.get(partId)
     if (nextPart != UnsafeUtils.ZeroPointer)
-      PartKey(nextPart.partKeyBase, nextPart.partKeyOffset)
+      PartKeyWithTimes(nextPart.partKeyBase, nextPart.partKeyOffset, -1, -1)
     else { //retrieving PartKey from lucene index
       val partKeyByteBuf = partKeyIndex.partKeyFromPartId(partId)
-      if (partKeyByteBuf.isDefined) PartKey(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset)
+      if (partKeyByteBuf.isDefined) PartKeyWithTimes(partKeyByteBuf.get.bytes, UnsafeUtils.arayOffset, -1, -1)
       else throw new IllegalStateException("This is not an expected behavior." +
         " PartId should always have a corresponding PartKey!")
     }
@@ -944,17 +954,11 @@ class TimeSeriesShard(val ref: DatasetRef,
   // scalastyle:off method.length
   private def writeDirtyPartKeys(flushGroup: FlushGroup): Future[Response] = {
     assertThreadName(IOSchedName)
-    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map { p =>
-      val pk = toPartKeyRecord(p)
-      logger.debug(s"Adding entry into partKeys table partId=${p.partID} in dataset=$ref " +
-        s"shard=$shardNum partKey[${p.stringPartition}] with startTime=${pk.startTime} endTime=${pk.endTime} " +
-        s"hash=${pk.hash}")
-      pk
-    }
+    val partKeyRecords = InMemPartitionIterator2(flushGroup.dirtyPartsToFlush).map(toPartKeyRecord)
     val updateHour = System.currentTimeMillis() / 1000 / 60 / 60
     colStore.writePartKeys(ref, shardNum,
                            Observable.fromIterator(partKeyRecords),
-                           storeConfig.diskTTLSeconds, updateHour).map { case resp =>
+                           storeConfig.diskTTLSeconds, updateHour).map { resp =>
       if (flushGroup.dirtyPartsToFlush.length > 0) {
         logger.info(s"Finished flush of partKeys numPartKeys=${flushGroup.dirtyPartsToFlush.length}" +
           s" resp=$resp for dataset=$ref shard=$shardNum")
@@ -998,7 +1002,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      partFlushChunks: Iterator[ChunkSet],
-                                     dirtyParts: debox.Buffer[Int]) = {
+                                     dirtyParts: debox.Buffer[Int]): Unit = {
     // TODO re-enable following assertion. Am noticing that monix uses TrampolineExecutionContext
     // causing the iterator to be consumed synchronously in some cases. It doesnt
     // seem to be consistent environment to environment.

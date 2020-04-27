@@ -476,23 +476,32 @@ TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats,
 }
 
 
-final case class PartKeyRowReader(records: Iterator[PartKey]) extends Iterator[RowReader] {
-  var currVal: PartKey = _
+final case class PartKeyRowReader(records: Iterator[PartKeyWithTimes]) extends Iterator[RowReader] {
+  var currVal: PartKeyWithTimes = _
 
   private val rowReader = new RowReader {
     def notNull(columnNo: Int): Boolean = true
     def getBoolean(columnNo: Int): Boolean = ???
     def getInt(columnNo: Int): Int = ???
-    def getLong(columnNo: Int): Long = ???
+    def getLong(columnNo: Int): Long = {
+      columnNo match {
+        case 1 => currVal.startTime
+        case 2 => currVal.endTime
+        case _ => throw new IllegalArgumentException(s"Bad column $columnNo")
+      }
+    }
     def getDouble(columnNo: Int): Double = ???
     def getFloat(columnNo: Int): Float = ???
     def getString(columnNo: Int): String = ???
     def getAny(columnNo: Int): Any = ???
 
-    def getBlobBase(columnNo: Int): Any = currVal.base
-    def getBlobOffset(columnNo: Int): Long = currVal.offset
+    def getBlobBase(columnNo: Int): Any = if (columnNo == 0) currVal.base
+                                          else throw new IllegalArgumentException(s"Bad column $columnNo")
+    def getBlobOffset(columnNo: Int): Long = if (columnNo == 0) currVal.offset
+                                             else throw new IllegalArgumentException(s"Bad column $columnNo")
     def getBlobNumBytes(columnNo: Int): Int =
-      BinaryRegionLarge.numBytes(currVal.base, currVal.offset) + BinaryRegionLarge.lenBytes
+      if (columnNo == 0) BinaryRegionLarge.numBytes(currVal.base, currVal.offset) + BinaryRegionLarge.lenBytes
+      else throw new IllegalArgumentException(s"Bad column $columnNo")
   }
 
   override def hasNext: Boolean = records.hasNext

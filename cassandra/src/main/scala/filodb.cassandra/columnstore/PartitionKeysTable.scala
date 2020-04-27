@@ -45,6 +45,11 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
     s"WHERE TOKEN(partKey) >= ? AND TOKEN(partKey) < ?")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
+  private lazy val deleteCql = session.prepare(
+    s"DELETE FROM $tableString " +
+    s"WHERE partKey = ?"
+  )
+
   def writePartKey(pk: PartKeyRecord, diskTimeToLiveSeconds: Int): Future[Response] = {
     if (diskTimeToLiveSeconds <= 0) {
       connector.execStmtWithRetries(writePartitionCqlNoTtl.bind(
@@ -68,6 +73,12 @@ sealed class PartitionKeysTable(val dataset: DatasetRef,
       pk <- Observable.fromIterator(pkRecs)
     } yield pk
   }
+
+  def deletePartKey(pk: Array[Byte], shard: Int): Future[Response] = {
+    val  stmt = deleteCql.bind().setBytes(0, toBuffer(pk)).setConsistencyLevel(writeConsistencyLevel)
+    connector.execStmtWithRetries(stmt)
+  }
+
 }
 
 object PartitionKeysTable {

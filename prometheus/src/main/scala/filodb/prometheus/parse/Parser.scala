@@ -143,13 +143,7 @@ trait Numeric extends Unit with Operator {
     case s => Scalar(java.lang.Double.parseDouble(s))
   }
 
-
-  lazy val arithmeticExpression: PackratParser[ArithmeticExpression] =
-    "(".? ~ scalar ~ arithmeticOp ~ scalar ~ ")".? ^^ {
-      case p1 ~ lhs ~ op ~ rhs ~ p2 => ArithmeticExpression(lhs, op, rhs)
-    }
-
-  lazy val numericalExpression: PackratParser[ScalarExpression] = arithmeticExpression | scalar
+  lazy val numericalExpression: PackratParser[ScalarExpression] = scalar
 
 }
 
@@ -348,10 +342,11 @@ object Parser extends Expression {
     }
   }
 
-  def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
+  def metadataQueryToLogicalPlan(query: String, timeParams: TimeRangeParams,
+                                 fetchFirstLastSampleTimes: Boolean = false): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
-      case p: InstantExpression => p.toMetadataPlan(timeParams)
+      case p: InstantExpression => p.toMetadataPlan(timeParams, fetchFirstLastSampleTimes)
       case _ => throw new UnsupportedOperationException()
     }
   }

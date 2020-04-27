@@ -50,6 +50,7 @@ final case class ResultSchema(columns: Seq[ColumnInfo], numRowKeyColumns: Int,
   // True if main col is Histogram and extra column is a Double
   def isHistDouble: Boolean = columns.length == 3 &&
                               columns(1).colType == HistogramColumn && columns(2).colType == DoubleColumn
+  def isHistogram: Boolean = columns.length == 2 && columns(1).colType == HistogramColumn
 
   def hasSameColumnsAs(other: ResultSchema): Boolean = {
     // exclude fixedVectorLen & colIDs

@@ -34,6 +34,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            schemas: Schemas,
                            shardMapperFunc: => ShardMapper,
                            earliestRetainedTimestampFn: => Long,
+                           queryConfig: QueryConfig,
                            spreadProvider: SpreadProvider = StaticSpreadProvider())
                                 extends QueryPlanner with StrictLogging {
 
@@ -153,10 +154,25 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
 
   /**
+    * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
+    * if it is not the prometheus standard
+    */
+  private def renameLabels(labels: Seq[String]): Seq[String] =
+    if (dsOptions.metricColumn != PromMetricLabel) {
+      labels map {
+        case PromMetricLabel     => dsOptions.metricColumn
+        case other: String       => other
+      }
+    } else {
+      labels
+    }
+
+  /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
     *
     * @return ExecPlans that answer the logical plan provided
     */
+  // scalastyle:off cyclomatic.complexity
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   qContext: QueryContext): PlanResult = {
     logicalPlan match {
@@ -178,9 +194,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       case lp: VectorPlan                  => materializeVectorPlan(qContext, lp)
       case lp: ScalarFixedDoublePlan       => materializeFixedScalar(qContext, lp)
       case lp: ApplyAbsentFunction         => materializeAbsentFunction(qContext, lp)
+      case lp: ScalarBinaryOperation       => materializeScalarBinaryOperation(qContext, lp)
       case _                               => throw new BadQueryException("Invalid logical plan")
     }
   }
+  // scalastyle:on cyclomatic.complexity
 
   private def materializeScalarVectorBinOp(qContext: QueryContext,
                                            lp: ScalarVectorBinaryOperation): PlanResult = {
@@ -207,10 +225,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        lp.on, lp.ignoring, dsOptions.metricColumn))
+        renameLabels(lp.on), renameLabels(lp.ignoring), dsOptions.metricColumn))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        lp.on, lp.ignoring, lp.include, dsOptions.metricColumn))
+        renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn))
     PlanResult(joined, false)
   }
 
@@ -230,7 +248,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
     toReduceLevel1.plans.foreach {
-      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by))
+      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, renameLabels(lp.without),
+        renameLabels(lp.by)))
     }
 
     val toReduceLevel2 =
@@ -272,11 +291,11 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val execRangeFn = InternalRangeFunction.lpToInternalFunc(lp.function)
     val paramsExec = materializeFunctionArgs(lp.functionArgs, qContext)
 
-    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offset.getOrElse(0))
+    val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs, lp.window, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       val window = if (execRangeFn == InternalRangeFunction.Timestamp) None else Some(lp.window)
       series.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs,
-        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offset, rawSource)))
+        lp.endMs, window, Some(execRangeFn), qContext, paramsExec, lp.offsetMs, rawSource)))
       series
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -287,10 +306,10 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                         lp: PeriodicSeries): PlanResult = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, qContext)
     val newStartMs = boundToStartTimeToEarliestRetained(lp.startMs, lp.stepMs,
-      WindowConstants.staleDataLookbackSeconds * 1000, lp.offset.getOrElse(0))
+      WindowConstants.staleDataLookbackMillis, lp.offsetMs.getOrElse(0))
     if (newStartMs <= lp.endMs) {
       rawSeries.plans.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(newStartMs, lp.stepMs, lp.endMs,
-        None, None, qContext, Nil, lp.offset)))
+        None, None, qContext, Nil, lp.offsetMs)))
       rawSeries
     } else { // query is outside retention period, simply return empty result
       PlanResult(Seq(EmptyResultExec(qContext, dsRef)))
@@ -344,20 +363,24 @@ class SingleClusterPlanner(dsRef: DatasetRef,
 
   private def materializeRawSeries(qContext: QueryContext,
                                    lp: RawSeries): PlanResult = {
-
     val spreadProvToUse = qContext.spreadOverride.getOrElse(spreadProvider)
-
+    val offsetMillis: Long = lp.offsetMs.getOrElse(0)
     val colName = lp.columns.headOption
     val (renamedFilters, schemaOpt) = extractSchemaFilter(renameMetricFilter(lp.filters))
     val spreadChanges = spreadProvToUse.spreadFunc(renamedFilters)
-    val needsStitch = lp.rangeSelector match {
+    val rangeSelectorWithOffset = lp.rangeSelector match {
+      case IntervalSelector(fromMs, toMs) => IntervalSelector(fromMs - offsetMillis - lp.lookbackMs.getOrElse(
+                                             queryConfig.staleSampleAfterMs), toMs - offsetMillis)
+      case _                              => lp.rangeSelector
+    }
+    val needsStitch = rangeSelectorWithOffset match {
       case IntervalSelector(from, to) => spreadChanges.exists(c => c.time >= from && c.time <= to)
       case _                          => false
     }
     val execPlans = shardsFromFilters(renamedFilters, qContext).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters, toChunkScanMethod(lp.rangeSelector),
-        schemaOpt, colName)
+      MultiSchemaPartitionsExec(qContext, dispatcher, dsRef, shard, renamedFilters,
+        toChunkScanMethod(rangeSelectorWithOffset), schemaOpt, colName)
     }
     PlanResult(execPlans, needsStitch)
   }
@@ -397,7 +420,8 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
     val metaExec = shardsToHit.map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters, lp.startMs, lp.endMs)
+      PartKeysExec(qContext, dispatcher, dsRef, shard, schemas.part, renamedFilters,
+                   lp.fetchFirstLastSampleTimes, lp.startMs, lp.endMs)
     }
     PlanResult(metaExec, false)
   }
@@ -504,6 +528,23 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                                      lp: ScalarFixedDoublePlan): PlanResult = {
     val scalarFixedDoubleExec = ScalarFixedDoubleExec(qContext, dsRef, lp.timeStepParams, lp.scalar)
     PlanResult(Seq(scalarFixedDoubleExec), false)
+  }
+
+  private def materializeScalarBinaryOperation(qContext: QueryContext,
+                                               lp: ScalarBinaryOperation): PlanResult = {
+    val lhs = if (lp.lhs.isRight) {
+      // Materialize as lhs is a logical plan
+      val lhsExec = walkLogicalPlanTree(lp.lhs.right.get, qContext)
+      Right(lhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.lhs.left.get)
+
+    val rhs = if (lp.rhs.isRight) {
+      val rhsExec = walkLogicalPlanTree(lp.rhs.right.get, qContext)
+      Right(rhsExec.plans.map(_.asInstanceOf[ScalarBinaryOperationExec]).head)
+    } else Left(lp.rhs.left.get)
+
+    val scalarBinaryExec = ScalarBinaryOperationExec(qContext, dsRef, lp.rangeParams, lhs, rhs, lp.operator)
+    PlanResult(Seq(scalarBinaryExec), false)
   }
 
 }
