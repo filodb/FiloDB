@@ -22,6 +22,7 @@ object LogicalPlanUtil {
         case lp: SeriesKeysByFilters   => getLabelValueFromFilters(lp.filters, labelName)
         case lp: ScalarTimeBasedPlan   => Nil // Plan does not have labels
         case lp: ScalarFixedDoublePlan => Nil
+        case lp: ScalarBinaryOperation => Nil
         case _                         => throw new BadQueryException("Invalid logical plan")
       }
     }
