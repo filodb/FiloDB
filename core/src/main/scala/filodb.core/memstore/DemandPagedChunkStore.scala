@@ -94,9 +94,8 @@ extends RawToPartitionMaker with StrictLogging {
             logger.debug(s"Populating paged chunk into memory chunkId=$chunkID inserted=$inserted " +
               s"partId=${tsPart.partID} shard=${tsShard.shardNum} ${tsPart.stringPartition}")
             if (!inserted) {
-              logger
-                .error(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
-                  s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
+              logger.error(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has " +
+                  s"chunk $chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
                   s"${ChunkSetInfo.getEndTime(infoBytes)}) partition currentEarliestTime=${tsPart.earliestTime}")
             }
           }
