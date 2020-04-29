@@ -206,7 +206,9 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
     funcParams.head match {
     case s: StaticFuncArgs   => evaluate(source, ScalarFixedDouble(s.timeStepParams, s.scalar))
     case t: TimeFuncArgs     => evaluate(source, TimeScalar(t.timeStepParams))
-    case e: ExecPlanFuncArgs => paramResponse.head.map(param => evaluate(source, param)).flatten
+    case e: ExecPlanFuncArgs => if (paramResponse.size > 1)
+                                 throw new UnsupportedOperationException("Multiple ExecPlanFunArgs not supported yet")
+                                paramResponse.head.map(param => evaluate(source, param)).flatten
    }
   }
 
