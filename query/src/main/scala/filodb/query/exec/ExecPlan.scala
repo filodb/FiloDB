@@ -152,7 +152,7 @@ trait ExecPlan extends QueryCommand {
               numResultSamples += srv.numRowsInt
               // fail the query instead of limiting range vectors and returning incomplete/inaccurate results
               if (enforceLimit && numResultSamples > queryContext.sampleLimit)
-                throw new BadQueryException(s"This query results in more than $queryContext.sampleLimit samples. " +
+                throw new BadQueryException(s"This query results in more than ${queryContext.sampleLimit} samples. " +
                   s"Try applying more filters or reduce time range.")
               srv
           }
