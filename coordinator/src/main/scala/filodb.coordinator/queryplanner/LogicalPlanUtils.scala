@@ -121,4 +121,15 @@ object LogicalPlanUtils {
       case _             => 0
     }
   }
+
+  def getMetricName(logicalPlan: LogicalPlan): Seq[String] = {
+    val leafPlans = LogicalPlan.findLeafLogicalPlans(logicalPlan)
+    leafPlans.map {
+      _ match {
+        case lp: RawSeries => lp.filters.filter(_.column.equals("__name__")).map(_.filter.valuesStrings.head.toString).
+          head
+        case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
+      }
+    }
+  }
 }

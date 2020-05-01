@@ -54,7 +54,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   /**
     * Picks one dispatcher randomly from child exec plans passed in as parameter
     */
-  private def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+   def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
     val childTargets = children.map(_.dispatcher)
     // Above list can contain duplicate dispatchers, and we don't make them distinct.
     // Those with more shards must be weighed higher
@@ -230,6 +230,17 @@ class SingleClusterPlanner(dsRef: DatasetRef,
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
         renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn))
     PlanResult(joined, false)
+  }
+
+  def materializeBinaryJoinWithChildExec(qContext: QueryContext, lp: BinaryJoin, lhsExec: ExecPlan,
+                                         rhsExec: ExecPlan, lhsLocal: Boolean): ExecPlan = {
+    val targetActor = if (lhsLocal) pickDispatcher(Seq(lhsExec))  else pickDispatcher(Seq(rhsExec))
+    if (lp.operator.isInstanceOf[SetOperator])
+      exec.SetOperatorExec(qContext, targetActor, Seq(lhsExec), Seq(rhsExec), lp.operator,
+        renameLabels(lp.on), renameLabels(lp.ignoring), dsOptions.metricColumn)
+    else
+      BinaryJoinExec(qContext, targetActor, Seq(lhsExec), Seq(rhsExec), lp.operator, lp.cardinality,
+        renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn)
   }
 
   private def materializeAggregate(qContext: QueryContext,
