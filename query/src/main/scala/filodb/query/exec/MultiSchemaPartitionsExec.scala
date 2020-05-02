@@ -8,7 +8,6 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.query.Query.qLogger
-import filodb.query.QueryConfig
 
 final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
@@ -84,11 +83,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     finalPlan = finalizePlan(source, querySession)
-    finalPlan.doExecute(source, queryConfig, querySession)(sched)
+    finalPlan.doExecute(source, querySession)(sched)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

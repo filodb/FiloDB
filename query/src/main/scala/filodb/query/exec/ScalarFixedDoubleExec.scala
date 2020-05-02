@@ -9,7 +9,7 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryConfig, QueryResponse, QueryResult}
+import filodb.query.{QueryResponse, QueryResult}
 
 
 /**
@@ -29,7 +29,7 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+  override def doExecute(source: ChunkSource,
                          querySession: QuerySession)
                         (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
@@ -44,7 +44,6 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
 
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
@@ -64,7 +63,8 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
           .start()
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, querySession.queryConfig, queryContext.sampleLimit, acc._2,
+            paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
           span.finish()
           QueryResult(queryContext.queryId, resultSchema, _)

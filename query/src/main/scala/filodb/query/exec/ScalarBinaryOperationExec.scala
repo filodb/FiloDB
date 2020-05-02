@@ -8,7 +8,7 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.query.{BinaryOperator, QueryConfig, QueryResponse, QueryResult}
+import filodb.query.{BinaryOperator, QueryResponse, QueryResult}
 import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
@@ -47,7 +47,7 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+  override def doExecute(source: ChunkSource,
                          querySession: QuerySession)
                         (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarBinaryOperationExec since it represents" +
@@ -55,7 +55,6 @@ case class ScalarBinaryOperationExec(queryContext: QueryContext,
   }
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")

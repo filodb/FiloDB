@@ -8,9 +8,9 @@ import monix.reactive.Observable
 import filodb.core.DatasetRef
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.Schemas
-import filodb.core.query.QuerySession
+import filodb.core.query.{EmptyQueryConfig, QueryConfig, QuerySession}
 import filodb.core.store._
-import filodb.query.{EmptyQueryConfig, QueryConfig, QueryResponse}
+import filodb.query.QueryResponse
 
 /**
   * Dispatcher which will make a No-Op style call to ExecPlan#excecute().
@@ -31,8 +31,8 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
     // kamon uses thread-locals.
     Kamon.runWithSpan(Kamon.currentSpan(), false) {
       // translate implicit ExecutionContext to monix.Scheduler
-      val querySession = QuerySession(plan.queryContext, None)
-      plan.execute(source, queryConfig, querySession)
+      val querySession = QuerySession(plan.queryContext, queryConfig)
+      plan.execute(source, querySession)
     }
   }
 

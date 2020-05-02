@@ -1,16 +1,17 @@
 package filodb.query.exec.rangefn
 
-import scala.util.Random
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.query.{QueryContext, RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
-import filodb.core.store.AllChunkScan
+
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.query._
+import filodb.core.store.AllChunkScan
 import filodb.memory._
 import filodb.memory.format.{TupleRowReader, vectors => bv}
-import filodb.query.QueryConfig
 import filodb.query.exec._
 
 /**

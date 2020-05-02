@@ -9,7 +9,6 @@ import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.Column
 import filodb.core.query._
 import filodb.core.store._
-import filodb.query.QueryConfig
 
 object SelectChunkInfosExec {
   import Column.ColumnType._
@@ -42,7 +41,6 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
   import SelectChunkInfosExec._
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)

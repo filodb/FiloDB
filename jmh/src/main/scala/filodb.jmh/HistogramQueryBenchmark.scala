@@ -19,12 +19,11 @@ import filodb.core.{MachineMetricsData, MetricsTestData, SpreadChange, TestData}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.{QueryContext, QuerySession}
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.SeqRowReader
 import filodb.prometheus.parse.Parser
-import filodb.query.QueryConfig
 
 //scalastyle:off regex
 /**
@@ -113,7 +112,8 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def histSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      hExecPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      hExecPlan.execute(memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -125,7 +125,8 @@ class HistogramQueryBenchmark {
   @OperationsPerInvocation(500)
   def promSchemaQuantileQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      pExecPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      pExecPlan.execute(memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

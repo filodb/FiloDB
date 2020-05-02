@@ -6,7 +6,7 @@ import filodb.core.MetricsTestData
 import filodb.core.query.Filter.{Equals, NotEqualsRegex}
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
-import filodb.query.{QueryConfig, exec}
+import filodb.query.exec
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures

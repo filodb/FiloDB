@@ -10,7 +10,7 @@ import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, PeriodicSeries, PeriodicSeriesPlan, QueryConfig}
+import filodb.query.{LogicalPlan, PeriodicSeries, PeriodicSeriesPlan}
 import filodb.query.exec._
 
 class LongTimeRangePlannerSpec extends FunSpec with Matchers {
@@ -21,8 +21,7 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     override def submitTime: Long = ???
     override def dataset: DatasetRef = ???
     override def dispatcher: PlanDispatcher = ???
-    override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
-                           querySession: QuerySession)
+    override def doExecute(source: ChunkSource, querySession: QuerySession)
                           (implicit sched: Scheduler): ExecResult = ???
     override protected def args: String = ???
   }

@@ -2,11 +2,10 @@ package filodb.query.exec.rangefn
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Schema
-import filodb.core.query.{MutableRowReader, ResultSchema, TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.core.query._
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{vectors => bv, _}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.query.QueryConfig
 import filodb.query.exec._
 
 /**

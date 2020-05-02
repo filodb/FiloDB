@@ -11,7 +11,6 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.ZeroCopyUTF8String
-import filodb.query.QueryConfig
 
 class HistogramQuantileMapperSpec extends FunSpec with Matchers with ScalaFutures {
 

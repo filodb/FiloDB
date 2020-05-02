@@ -1,7 +1,6 @@
 package filodb.core.query
 
 import java.util.UUID
-import java.util.concurrent.locks.Lock
 
 import com.typesafe.config.Config
 
@@ -60,8 +59,14 @@ object QueryContext {
 }
 
 case class QuerySession(qContext: QueryContext,
-                        var reclaimLock: Option[Lock] = None)
+                        queryConfig: QueryConfig,
+                        queryState: QueryState = QueryState())
 
 object QuerySession {
-  def forTestingOnly: QuerySession = QuerySession(QueryContext(), None)
+  def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }
+
+/**
+  * Add query state like locks. They can be vars if necessary
+  */
+case class QueryState()

@@ -25,7 +25,7 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector] = {
+                        querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap {
         case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex

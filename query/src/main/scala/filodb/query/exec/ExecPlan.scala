@@ -93,7 +93,6 @@ trait ExecPlan extends QueryCommand {
     */
   // scalastyle:off method.length
   def execute(source: ChunkSource,
-              queryConfig: QueryConfig,
               querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
@@ -112,7 +111,7 @@ trait ExecPlan extends QueryCommand {
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
-        doExecute(source, queryConfig, querySession)
+        doExecute(source, querySession)
       }
     }
 
@@ -134,7 +133,8 @@ trait ExecPlan extends QueryCommand {
         val finalRes = allTransformers.foldLeft((res.rvs, resSchema)) { (acc, transf) =>
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, querySession.queryConfig, queryContext.sampleLimit, acc._2,
+            paramRangeVector), transf.schema(acc._2))
         }
         val recSchema = SerializedRangeVector.toSchema(finalRes._2.columns, finalRes._2.brSchemas)
         val builder = SerializedRangeVector.newBuilder()
@@ -206,7 +206,6 @@ trait ExecPlan extends QueryCommand {
     * Note that this should not include any operations done in the transformers.
     */
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult
 
@@ -366,7 +365,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * from the non-empty results.
     */
   final def doExecute(source: ChunkSource,
-                      queryConfig: QueryConfig,
                       querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
@@ -394,7 +392,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
       case (QueryResult(_, schema, _), _) => schema
     }.firstOptionL.map(_.getOrElse(ResultSchema.empty))
     parentSpan.mark("output-compose")
-    val outputRvs = compose(processedTasks, outputSchema, queryConfig)
+    val outputRvs = compose(processedTasks, outputSchema, querySession)
     parentSpan.mark("return-results")
     ExecResult(outputRvs, outputSchema)
   }
@@ -426,6 +424,6 @@ abstract class NonLeafExecPlan extends ExecPlan {
     */
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector]
+                        querySession: QuerySession): Observable[RangeVector]
 
 }

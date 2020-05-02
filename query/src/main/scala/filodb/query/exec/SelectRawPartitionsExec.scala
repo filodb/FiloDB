@@ -10,7 +10,7 @@ import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
 import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
 import filodb.core.store._
-import filodb.query.{Query, QueryConfig}
+import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
 
@@ -122,7 +122,6 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")

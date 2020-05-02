@@ -4,11 +4,11 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
+import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.exec.RangeVectorAggregator
 import filodb.query.exec.aggregator.RowAggregator
-import filodb.query.{exec, AggregationOperator, QueryConfig, SortFunctionId}
+import filodb.query.{exec, AggregationOperator, SortFunctionId}
 
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable

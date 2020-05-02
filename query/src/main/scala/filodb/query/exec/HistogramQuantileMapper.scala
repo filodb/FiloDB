@@ -7,7 +7,6 @@ import scalaxy.loops._
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.Histogram
-import filodb.query.QueryConfig
 
 object HistogramQuantileMapper {
   import ZeroCopyUTF8String._

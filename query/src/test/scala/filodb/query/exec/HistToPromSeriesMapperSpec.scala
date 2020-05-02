@@ -10,7 +10,6 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.memory.format.{ZeroCopyUTF8String => ZCUTF8}
 import filodb.memory.format.vectors.HistogramWithBuckets
-import filodb.query.QueryConfig
 
 class HistToPromSeriesMapperSpec extends FunSpec with Matchers with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
