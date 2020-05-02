@@ -28,9 +28,6 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis())
 
-final case class QuerySession(qContext: QueryContext,
-                              var reclaimLock: Option[Lock] = None)
-
 object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
     QueryContext(spreadOverride = constSpread, sampleLimit = sampleLimit)
@@ -60,4 +57,11 @@ object QueryContext {
 
     simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
   }
+}
+
+case class QuerySession(qContext: QueryContext,
+                        var reclaimLock: Option[Lock] = None)
+
+object QuerySession {
+  def forTestingOnly: QuerySession = QuerySession(QueryContext(), None)
 }

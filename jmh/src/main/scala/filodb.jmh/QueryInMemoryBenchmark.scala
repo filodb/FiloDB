@@ -19,7 +19,7 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
@@ -187,7 +187,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedRawQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      execPlan.execute(cluster.memStore, queryConfig)(querySched)
+      execPlan.execute(cluster.memStore, queryConfig, QuerySession.forTestingOnly)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -203,7 +203,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      minEP.execute(cluster.memStore, queryConfig)(querySched)
+      minEP.execute(cluster.memStore, queryConfig, QuerySession.forTestingOnly)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -219,7 +219,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      sumRateEP.execute(cluster.memStore, queryConfig)(querySched)
+      sumRateEP.execute(cluster.memStore, queryConfig, QuerySession.forTestingOnly)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

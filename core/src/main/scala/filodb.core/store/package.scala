@@ -6,7 +6,7 @@ import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
-import filodb.core.query.QuerySession
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.memory.format.{RowReader, UnsafeUtils}
 
 package object store {
@@ -147,7 +147,7 @@ package object store {
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan,
-                 querySession: QuerySession): Iterator[RowReader] =
+                 querySession: QuerySession = QuerySession(QueryContext(), None)): Iterator[RowReader] =
       source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod, querySession)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))

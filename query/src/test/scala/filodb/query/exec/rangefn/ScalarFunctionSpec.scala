@@ -121,7 +121,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(10, 10, 100), ScalarFunctionId.Time)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -136,7 +136,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(1565627710, 10, 1565627790), ScalarFunctionId.Hour)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -152,7 +152,7 @@ class ScalarFunctionSpec extends FunSpec with Matchers with ScalaFutures {
     val execPlan = TimeScalarGeneratorExec(QueryContext(), timeseriesDataset.ref, RangeParams(1583682900, 100, 1583683400), ScalarFunctionId.DayOfWeek)
     implicit val timeout: FiniteDuration = FiniteDuration(5, TimeUnit.SECONDS)
     import monix.execution.Scheduler.Implicits.global
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)

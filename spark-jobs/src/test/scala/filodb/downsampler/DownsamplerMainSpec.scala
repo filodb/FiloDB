@@ -22,7 +22,7 @@ import filodb.core.downsample.DownsampledTimeSeriesStore
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawDataRangeVector}
+import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, QuerySession, RawDataRangeVector}
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings, OffHeapMemory}
@@ -654,7 +654,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
       val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+      val res = exec.execute(downsampleTSStore, queryConfig, QuerySession.forTestingOnly)(queryScheduler)
         .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
@@ -682,7 +682,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
       val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+      val res = exec.execute(downsampleTSStore, queryConfig, QuerySession.forTestingOnly)(queryScheduler)
         .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
@@ -704,7 +704,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       colName = Option("sum"))
     val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-    val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+    val res = exec.execute(downsampleTSStore, queryConfig, QuerySession.forTestingOnly)(queryScheduler)
       .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1

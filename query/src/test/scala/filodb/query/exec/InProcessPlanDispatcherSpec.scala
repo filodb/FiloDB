@@ -5,18 +5,20 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -166,6 +168,6 @@ case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfi
   // run locally withing any check.
   override def dispatch(plan: ExecPlan)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
-    plan.execute(memStore, queryConfig)
+    plan.execute(memStore, queryConfig, QuerySession.forTestingOnly)
   }
 }

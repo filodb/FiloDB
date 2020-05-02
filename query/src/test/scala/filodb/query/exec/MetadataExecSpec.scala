@@ -16,7 +16,7 @@ import filodb.core.TestData
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, QueryContext, SerializedRangeVector}
+import filodb.core.query.{ColumnFilter, Filter, QueryContext, QuerySession, SerializedRangeVector}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -86,7 +86,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, filters, Seq("job"), 10)
 
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         val rv = response(0)
@@ -107,7 +107,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     resp match {
       case QueryResult(_, _, results) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
@@ -121,7 +121,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec(QueryContext(), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) =>
         response.size shouldEqual 1
@@ -142,7 +142,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val execPlan = PartKeysExec(QueryContext(sampleLimit = limit-1), dummyDispatcher,
       timeseriesDataset.ref, 0, Schemas.promCounter.partition, filters, false, now-5000, now)
 
-    val resp = execPlan.execute(memStore, queryConfig).runAsync.futureValue
+    val resp = execPlan.execute(memStore, queryConfig, QuerySession.forTestingOnly).runAsync.futureValue
     val result = resp match {
       case QueryResult(id, _, response) => {
         response.size shouldEqual 1
