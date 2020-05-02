@@ -48,18 +48,18 @@ final case class PeriodicSamplesMapper(start: Long,
 
  //scalastyle:off method.length
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     // enforcement of minimum step is good since we have a high limit on number of samples
-    if (step < queryConfig.minStepMs)
-      throw new BadQueryException(s"step should be at least ${queryConfig.minStepMs/1000}s")
+    if (step < querySession.queryConfig.minStepMs)
+      throw new BadQueryException(s"step should be at least ${querySession.queryConfig.minStepMs/1000}s")
     val valColType = RangeVectorTransformer.valueColumnType(sourceSchema)
     // If a max column is present, the ExecPlan's job is to put it into column 2
     val hasMaxCol = valColType == ColumnType.HistogramColumn && sourceSchema.colIDs.length > 2 &&
                       sourceSchema.columns(2).name == "max"
-    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, queryConfig,
+    val rangeFuncGen = RangeFunction.generatorFor(sourceSchema, functionId, valColType, querySession.queryConfig,
                                                   funcParams, rawSource)
 
     // Generate one range function to check if it is chunked
@@ -67,7 +67,7 @@ final case class PeriodicSamplesMapper(start: Long,
     // Really, use the stale lookback window size, not 0 which doesn't make sense
     // Default value for window  should be queryConfig.staleSampleAfterMs + 1 for empty functionId,
     // so that it returns value present at time - staleSampleAfterMs
-    val windowLength = window.getOrElse(if (isLastFn) queryConfig.staleSampleAfterMs + 1 else 0L)
+    val windowLength = window.getOrElse(if (isLastFn) querySession.queryConfig.staleSampleAfterMs + 1 else 0L)
 
     val rvs = sampleRangeFunc match {
       case c: ChunkedRangeFunction[_] if valColType == ColumnType.HistogramColumn =>
@@ -75,28 +75,29 @@ final case class PeriodicSamplesMapper(start: Long,
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                       windowLength, rangeFuncGen().asChunkedH, queryConfig, queryContext, histRow))
+                                       windowLength, rangeFuncGen().asChunkedH, querySession.queryConfig,
+                                       queryContext, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                       windowLength, rangeFuncGen().asChunkedD, queryConfig, queryContext))
+                                       windowLength, rangeFuncGen().asChunkedD, querySession.queryConfig, queryContext))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(new LongToDoubleIterator(rv.rows), startWithOffset, step, endWithOffset,
-              window.getOrElse(0L), rangeFuncGen().asSliding, queryConfig))
+              window.getOrElse(0L), rangeFuncGen().asSliding, querySession.queryConfig))
         }
       // Otherwise just feed in the double column
       case f: RangeFunction =>
         source.map { rv =>
           IteratorBackedRangeVector(rv.key,
             new SlidingWindowIterator(rv.rows, startWithOffset, step, endWithOffset, window.getOrElse(0L),
-              rangeFuncGen().asSliding, queryConfig))
+              rangeFuncGen().asSliding, querySession.queryConfig))
         }
     }
 

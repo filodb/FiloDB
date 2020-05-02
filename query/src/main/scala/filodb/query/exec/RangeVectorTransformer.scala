@@ -36,7 +36,7 @@ trait RangeVectorTransformer extends java.io.Serializable {
 
   def funcParams: Seq[FuncArgs]
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema, paramsResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector]
 
@@ -69,7 +69,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
                                              funcParams: Seq[FuncArgs] = Nil) extends RangeVectorTransformer {
   protected[exec] def args: String = s"function=$function"
 
-  def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], queryConfig: QueryConfig,
+  def evaluate(source: Observable[RangeVector], scalarRangeVector: Seq[ScalarRangeVector], querySession: QuerySession,
                limit: Int, sourceSchema: ResultSchema) : Observable[RangeVector] = {
     RangeVectorTransformer.valueColumnType(sourceSchema) match {
       case ColumnType.HistogramColumn =>
@@ -91,7 +91,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
         if (function == HistogramQuantile) {
           // Special mapper to pull all buckets together from different Prom-schema time series
           val mapper = HistogramQuantileMapper(funcParams)
-          mapper.apply(source, queryConfig, limit, sourceSchema, Nil)
+          mapper.apply(source, querySession, limit, sourceSchema, Nil)
         } else {
           val instantFunction = InstantFunction.double(function)
           source.map { rv =>
@@ -105,21 +105,21 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   }
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema, paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     if (funcParams.isEmpty) {
-      evaluate(source, Nil, queryConfig, limit, sourceSchema)
+      evaluate(source, Nil, querySession, limit, sourceSchema)
     } else {
       // Multiple ExecPlanFunArgs not supported yet
       funcParams.head match {
         case s: StaticFuncArgs   => evaluate(source, funcParams.map(x => x.asInstanceOf[StaticFuncArgs]).
-                                      map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)), queryConfig, limit,
+                                      map(x => ScalarFixedDouble(x.timeStepParams, x.scalar)), querySession, limit,
                                       sourceSchema)
         case t: TimeFuncArgs     => evaluate(source, funcParams.map(x => x.asInstanceOf[TimeFuncArgs]).
-                                      map(x => TimeScalar(x.timeStepParams)), queryConfig, limit, sourceSchema)
+                                      map(x => TimeScalar(x.timeStepParams)), querySession, limit, sourceSchema)
         case e: ExecPlanFuncArgs => paramResponse.head.map { param =>
-                                      evaluate(source, Seq(param), queryConfig, limit, sourceSchema)
+                                      evaluate(source, Seq(param), querySession, limit, sourceSchema)
                                     }.flatten
         case _                   => throw new IllegalArgumentException(s"Invalid function param")
       }
@@ -198,7 +198,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
@@ -250,7 +250,7 @@ final case class MiscellaneousFunctionMapper(function: MiscellaneousFunctionId, 
   }
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
@@ -262,7 +262,7 @@ final case class SortFunctionMapper(function: SortFunctionId) extends RangeVecto
   protected[exec] def args: String = s"function=$function"
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
@@ -309,7 +309,7 @@ final case class ScalarFunctionMapper(function: ScalarFunctionId,
     Observable.fromTask(resultRv).flatten
   }
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
@@ -327,7 +327,7 @@ final case class VectorFunctionMapper() extends RangeVectorTransformer {
   protected[exec] def args: String = s"funcParams=$funcParams"
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
@@ -356,7 +356,7 @@ final case class AbsentFunctionMapper(columnFilter: Seq[ColumnFilter], rangePara
   }
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
@@ -414,7 +414,7 @@ final case class HistToPromSeriesMapper(sch: PartitionSchema) extends RangeVecto
   // NOTE: apply() is only called for explicit instantiation of conversion function.  So this will error out if
   //       the data source is not histogram.
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {

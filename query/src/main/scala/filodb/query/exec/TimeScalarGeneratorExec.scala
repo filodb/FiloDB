@@ -72,7 +72,7 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, querySession.queryConfig, queryContext.sampleLimit, acc._2,
+          (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
             paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
           span.finish()

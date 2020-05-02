@@ -46,7 +46,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
     * be preceded by a rate function or a sum-of-rate function.
     */
   override def apply(source: Observable[RangeVector],
-                     queryConfig: QueryConfig,
+                     querySession: QuerySession,
                      limit: Int,
                      sourceSchema: ResultSchema,
                      paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
