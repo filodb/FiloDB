@@ -134,6 +134,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val querySession = QuerySession(QueryContext(), queryConfig)
 
   // windowSize and step are in number of elements of the data
   def numWindows(data: Seq[Any], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
