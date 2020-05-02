@@ -13,7 +13,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 import filodb.core.{DatasetRef, Response}
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.NativeMemoryManager
@@ -199,26 +199,28 @@ extends MemStore with StrictLogging {
                         chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
 
   def scanPartitions(ref: DatasetRef,
-                     iter: PartLookupResult): Observable[ReadablePartition] = {
+                     iter: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
     val shard = datasets(ref).get(iter.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard ${iter.shard} of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.scanPartitions(iter)
+    shard.scanPartitions(iter, querySession)
   }
 
   def lookupPartitions(ref: DatasetRef,
                        partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
     val shard = datasets(ref).get(partMethod.shard)
 
     if (shard == UnsafeUtils.ZeroPointer) {
       throw new IllegalArgumentException(s"Shard ${partMethod.shard} of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.lookupPartitions(partMethod, chunkMethod)
+    shard.lookupPartitions(partMethod, chunkMethod, querySession)
   }
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =

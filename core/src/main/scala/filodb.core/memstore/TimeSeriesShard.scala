@@ -26,7 +26,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -409,6 +409,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * logs, use at your own risk.
     */
   val tracedPartFilters = storeConfig.traceFilters
+
+  protected val shardReclaimLock = new StampedLock
 
   /**
     * Iterate TimeSeriesPartition objects relevant to given partIds.
@@ -1405,7 +1407,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Also returns detailed information about what is in memory and not, and does schema discovery.
     */
   def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = partMethod match {
     case SinglePartitionScan(partition, _) =>
       val partIds = debox.Buffer.empty[Int]
       getPartition(partition).foreach(p => partIds += p.partID)
@@ -1450,7 +1453,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
   }
 
-  def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
+  def scanPartitions(iterResult: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
     Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()

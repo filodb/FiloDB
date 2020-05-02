@@ -42,10 +42,11 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
   import SelectChunkInfosExec._
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
-    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
 
     val schemas = source.schemas(dataset).get
     val dataSchema = schema.map { s => schemas.schemas(s) }
@@ -55,7 +56,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
     Kamon.currentSpan().mark("creating-scanpartitions")
-    val rvs = source.scanPartitions(dataset, lookupRes)
+    val rvs = source.scanPartitions(dataset, lookupRes, querySession)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)

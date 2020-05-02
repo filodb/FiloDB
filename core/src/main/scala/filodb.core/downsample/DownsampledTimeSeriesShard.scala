@@ -18,7 +18,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -206,7 +206,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def refreshPartKeyIndexBlocking(): Unit = {}
 
   def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
     partMethod match {
       case SinglePartitionScan(partition, _) => throw new UnsupportedOperationException
       case MultiPartitionScan(partKeys, _) => throw new UnsupportedOperationException
@@ -230,7 +231,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  def scanPartitions(lookup: PartLookupResult): Observable[ReadablePartition] = {
+  def scanPartitions(lookup: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
 
     // Step 1: Choose the downsample level depending on the range requested
     val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)

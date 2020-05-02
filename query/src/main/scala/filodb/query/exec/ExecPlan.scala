@@ -92,7 +92,9 @@ trait ExecPlan extends QueryCommand {
     *
     */
   // scalastyle:off method.length
-  def execute(source: ChunkSource, queryConfig: QueryConfig)
+  def execute(source: ChunkSource,
+              queryConfig: QueryConfig,
+              querySession: QuerySession)
              (implicit sched: Scheduler): Task[QueryResponse] = {
 
     val parentSpan = Kamon.currentSpan()
@@ -110,7 +112,7 @@ trait ExecPlan extends QueryCommand {
       // across threads. Note that task/observable will not run on the thread where span is present since
       // kamon uses thread-locals.
       Kamon.runWithSpan(span, true) {
-        doExecute(source, queryConfig)
+        doExecute(source, queryConfig, querySession)
       }
     }
 
@@ -204,7 +206,8 @@ trait ExecPlan extends QueryCommand {
     * Note that this should not include any operations done in the transformers.
     */
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult
 
   /**
@@ -363,7 +366,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * from the non-empty results.
     */
   final def doExecute(source: ChunkSource,
-                      queryConfig: QueryConfig)
+                      queryConfig: QueryConfig,
+                      querySession: QuerySession)
                      (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     parentSpan.mark("create-child-tasks")

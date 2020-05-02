@@ -5,7 +5,7 @@ import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, QueryContext}
+import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.query.Query.qLogger
 import filodb.query.QueryConfig
@@ -39,10 +39,11 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
 
   var finalPlan: ExecPlan = _
 
-  private def finalizePlan(source: ChunkSource): ExecPlan = {
+  private def finalizePlan(source: ChunkSource,
+                           querySession: QuerySession): ExecPlan = {
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     Kamon.currentSpan().mark("filtered-partition-scan")
-    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod)
+    val lookupRes = source.lookupPartitions(dataset, partMethod, chunkMethod, querySession)
     Kamon.currentSpan().mark("lookup-partitions-done")
 
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
@@ -83,10 +84,11 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-    finalPlan = finalizePlan(source)
-    finalPlan.doExecute(source, queryConfig)(sched)
+    finalPlan = finalizePlan(source, querySession)
+    finalPlan.doExecute(source, queryConfig, querySession)(sched)
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +

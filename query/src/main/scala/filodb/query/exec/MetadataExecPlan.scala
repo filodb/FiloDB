@@ -108,7 +108,8 @@ final case class PartKeysExec(queryContext: QueryContext,
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val rvs = source match {
       case memStore: MemStore =>
@@ -140,7 +141,8 @@ final case class  LabelValuesExec(queryContext: QueryContext,
   override def enforceLimit: Boolean = false
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {

@@ -37,11 +37,13 @@ case class PromQlExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+  def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig)
+                       queryConfig: QueryConfig,
+                       querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())

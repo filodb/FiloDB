@@ -28,7 +28,8 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+                         querySession: QuerySession)
                         (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
       "a readily available static value")
@@ -41,7 +42,8 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
   override protected def args: String = s"params = $params, function = $function"
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig)
+                       queryConfig: QueryConfig,
+                       querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())

@@ -17,7 +17,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -101,7 +101,8 @@ final class QueryActor(memStore: MemStore,
     epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-    q.execute(memStore, queryConfig)(queryScheduler)
+    val querySession = QuerySession(q.queryContext, None)
+    q.execute(memStore, queryConfig, querySession)(queryScheduler)
       .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res

@@ -29,7 +29,8 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+  override def doExecute(source: ChunkSource, queryConfig: QueryConfig,
+                         querySession: QuerySession)
                         (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for ScalarFixedDoubleExec since it represents a " +
       "readily available static value")
@@ -43,7 +44,8 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
 
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig)
+                       queryConfig: QueryConfig,
+                       querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())

@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import java.util.UUID
+import java.util.concurrent.locks.Lock
 
 import com.typesafe.config.Config
 
@@ -9,7 +10,7 @@ import filodb.core.{SpreadChange, SpreadProvider}
 trait TsdbQueryParams
 
 /**
-  * This class provides PromQl query paramaters
+  * This class provides PromQl query parameters
   * Config has routing parameters
   */
 case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
@@ -26,6 +27,9 @@ final case class QueryContext(origQueryParams: TsdbQueryParams = UnavailableProm
                               shardOverrides: Option[Seq[Int]] = None,
                               queryId: String = UUID.randomUUID().toString,
                               submitTime: Long = System.currentTimeMillis())
+
+final case class QuerySession(qContext: QueryContext,
+                              var reclaimLock: Option[Lock] = None)
 
 object QueryContext {
   def apply(constSpread: Option[SpreadProvider], sampleLimit: Int): QueryContext =
