@@ -139,6 +139,8 @@ package object store {
      * Convenience method to scan/iterate over all rows of given selection of source data.  You must iterate
      * through all the elements.
      *
+     * Used for testing only.
+     *
      * @param dataset the Dataset to read from
      * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
      *                in each row.  These are the IDs from the Column instances.

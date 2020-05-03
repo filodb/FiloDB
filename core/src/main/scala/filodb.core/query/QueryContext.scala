@@ -59,14 +59,8 @@ object QueryContext {
 }
 
 case class QuerySession(qContext: QueryContext,
-                        queryConfig: QueryConfig,
-                        queryState: QueryState = QueryState())
+                        queryConfig: QueryConfig)
 
 object QuerySession {
   def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }
-
-/**
-  * Add query state like locks. They can be vars if necessary
-  */
-case class QueryState()
