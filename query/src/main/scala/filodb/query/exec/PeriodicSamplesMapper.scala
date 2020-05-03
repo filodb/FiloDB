@@ -75,15 +75,14 @@ final case class PeriodicSamplesMapper(start: Long,
           val histRow = if (hasMaxCol) new TransientHistMaxRow() else new TransientHistRow()
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorH(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                       windowLength, rangeFuncGen().asChunkedH, querySession.queryConfig,
-                                       queryContext, histRow))
+                                       windowLength, rangeFuncGen().asChunkedH, querySession, histRow))
         }
       case c: ChunkedRangeFunction[_] =>
         source.map { rv =>
           qLogger.trace(s"Creating ChunkedWindowIterator for rv=${rv.key}, step=$step windowLength=$windowLength")
           IteratorBackedRangeVector(rv.key,
             new ChunkedWindowIteratorD(rv.asInstanceOf[RawDataRangeVector], startWithOffset, step, endWithOffset,
-                                       windowLength, rangeFuncGen().asChunkedD, querySession.queryConfig, queryContext))
+                                       windowLength, rangeFuncGen().asChunkedD, querySession))
         }
       // Iterator-based: Wrap long columns to yield a double value
       case f: RangeFunction if valColType == ColumnType.LongColumn =>
@@ -158,13 +157,12 @@ abstract class ChunkedWindowIterator[R <: MutableRowReader](
     end: Long,
     window: Long,
     rangeFunction: ChunkedRangeFunction[R],
-    queryConfig: QueryConfig,
-    queryContext: QueryContext)
+    querySession: QuerySession)
 extends Iterator[R] with StrictLogging {
   // Lazily open the iterator and obtain the lock. This allows one thread to create the
   // iterator, but the lock is owned by the thread actually performing the iteration.
   private lazy val windowIt = {
-    val it = new WindowedChunkIterator(rv, start, step, end, window, queryContext)
+    val it = new WindowedChunkIterator(rv, start, step, end, window, querySession.qContext)
     // Need to hold the shared lock explicitly, because the window iterator needs to
     // pre-fetch chunks to determine the window. This pre-fetching can force the internal
     // iterator to close, which would release the lock too soon.
@@ -188,7 +186,7 @@ extends Iterator[R] with StrictLogging {
       try {
         rangeFunction.addChunks(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr, nextInfo.getTsReader,
                                 nextInfo.getValueVectorAccessor, nextInfo.getValueVectorAddr, nextInfo.getValueReader,
-                                wit.curWindowStart, wit.curWindowEnd, nextInfo, queryConfig)
+                                wit.curWindowStart, wit.curWindowEnd, nextInfo, querySession.queryConfig)
       } catch {
         case e: Exception =>
           val tsReader = LongBinaryVector(nextInfo.getTsVectorAccessor, nextInfo.getTsVectorAddr)
@@ -217,20 +215,18 @@ extends Iterator[R] with StrictLogging {
 class ChunkedWindowIteratorD(rv: RawDataRangeVector,
     start: Long, step: Long, end: Long, window: Long,
     rangeFunction: ChunkedRangeFunction[TransientRow],
-    queryConfig: QueryConfig,
-    queryContext: QueryContext = QueryContext(),
+    querySession: QuerySession,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientRow = new TransientRow()) extends
-ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, queryConfig, queryContext)
+ChunkedWindowIterator[TransientRow](rv, start, step, end, window, rangeFunction, querySession)
 
 class ChunkedWindowIteratorH(rv: RawDataRangeVector,
     start: Long, step: Long, end: Long, window: Long,
     rangeFunction: ChunkedRangeFunction[TransientHistRow],
-    queryConfig: QueryConfig,
-    queryContext: QueryContext = QueryContext(),
+    querySession: QuerySession,
     // put emitter here in constructor for faster access
     var sampleToEmit: TransientHistRow = new TransientHistRow()) extends
-ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, queryConfig, queryContext)
+ChunkedWindowIterator[TransientHistRow](rv, start, step, end, window, rangeFunction, querySession)
 
 class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size

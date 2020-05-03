@@ -410,8 +410,6 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   val tracedPartFilters = storeConfig.traceFilters
 
-  protected val shardReclaimLock = new StampedLock
-
   /**
     * Iterate TimeSeriesPartition objects relevant to given partIds.
     */
