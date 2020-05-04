@@ -6,14 +6,15 @@ import java.time.Instant
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigException, ConfigFactory}
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, SparkException}
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
+import filodb.cardbuster.CardinalityBuster
 import filodb.core.GlobalScheduler._
 import filodb.core.MachineMetricsData
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordSchema}
@@ -47,6 +48,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val batchDownsampler = new BatchDownsampler(settings)
 
   val seriesTags = Map("_ws_".utf8 -> "my_ws".utf8, "_ns_".utf8 -> "my_ns".utf8)
+  val bulkSeriesTags = Map("_ws_".utf8 -> "bulk_ws".utf8, "_ns_".utf8 -> "bulk_ns".utf8)
 
   val rawColStore = batchDownsampler.rawCassandraColStore
   val downsampleColStore = batchDownsampler.downsampleCassandraColStore
@@ -80,11 +82,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
   val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName, untypedName)
 
-  val downsampler = new Downsampler(settings, batchDownsampler)
-
   def hour(millis: Long = System.currentTimeMillis()): Long = millis / 1000 / 60 / 60
-
-  val indexUpdater = new IndexJobDriver(settings, dsIndexJobSettings)
 
   override def beforeAll(): Unit = {
     batchDownsampler.downsampleRefsByRes.values.foreach { ds =>
@@ -321,13 +319,14 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val start = pkUpdateHour / 6 * 6 // 6 is number of hours per downsample chunk
     start until start + 6
   }
+
   it("should simulate bulk part key records being written for migration") {
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val schemas = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
     case class PkToWrite(pkr: PartKeyRecord, shard: Int, updateHour: Long)
     val pks = for { i <- 0 to 10000 } yield {
       val schema = schemas(i % schemas.size)
-      val partKey = partBuilder.partKeyFromObjects(schema, s"metric$i", seriesTags)
+      val partKey = partBuilder.partKeyFromObjects(schema, s"metric$i", bulkSeriesTags)
       val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
       PkToWrite(PartKeyRecord(bytes, 0L, 1000L, Some(-i)), i % numShards, bulkPkUpdateHours(i % bulkPkUpdateHours.size))
     }
@@ -347,6 +346,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.userTimeOverride", Instant.ofEpochMilli(lastSampleTime).toString)
+    val downsampler = new Downsampler(settings, batchDownsampler)
     downsampler.run(sparkConf).close()
   }
 
@@ -355,10 +355,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     sparkConf.setMaster("local[2]")
     sparkConf.set("spark.filodb.downsampler.index.timeInPeriodOverride", Instant.ofEpochMilli(lastSampleTime).toString)
     sparkConf.set("spark.filodb.downsampler.index.toHourExclOverride", (pkUpdateHour + 6 + 1).toString)
+    val indexUpdater = new IndexJobDriver(settings, dsIndexJobSettings)
     indexUpdater.run(sparkConf).close()
   }
 
-  it ("should recover migrated partKey data and match the downsampled schema") {
+  it ("should verify migrated partKey data and match the downsampled schema") {
 
     def pkMetricSchemaReader(pkr: PartKeyRecord): (String, String) = {
       val schemaId = RecordSchema.schemaID(pkr.partKey, UnsafeUtils.arayOffset)
@@ -710,5 +711,66 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
       List((1574372982000L, 88.0), (1574373042000L, 24.0))
   }
+
+  it ("should fail when cardinality buster is not configured with any delete filters") {
+
+    // This test case is important to ensure that a run with missing configuration will not do unintended deletes
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    val settings2 = new DownsamplerSettings(conf)
+    val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
+    val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)
+    val caught = intercept[SparkException] {
+      cardBuster.run(sparkConf).close()
+    }
+    caught.getCause.asInstanceOf[ConfigException.Missing].getMessage
+      .contains("No configuration setting found for key 'cardbuster'") shouldEqual true
+  }
+
+  it ("should be able to bust cardinality in raw and downsample tables with spark job") {
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    val deleteFilterConfig = ConfigFactory.parseString( """
+                                                          |filodb.cardbuster.delete-pk-filters = [
+                                                          | {
+                                                          |    _ns_ = "bulk_ns"
+                                                          |    _ws_ = "bulk_ws"
+                                                          | }
+                                                          |]
+                                                        """.stripMargin)
+    val settings2 = new DownsamplerSettings(deleteFilterConfig.withFallback(conf))
+    val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
+    val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)
+    cardBuster.run(sparkConf).close()
+
+    sparkConf.set("spark.filodb.cardbuster.inDownsampleTables", "false")
+    cardBuster.run(sparkConf).close()
+  }
+
+  it("should verify bulk part key records are absent after deletion in both raw and downsample tables") {
+
+    def pkMetricName(pkr: PartKeyRecord): String = {
+      val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+      strPairs.find(p => p._1 == "_metric_").head._2
+    }
+
+    val readKeys = (0 until 4).flatMap { shard =>
+      val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
+        shard)
+      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+    }.toSet
+
+    // readKeys should not contain bulk PK records
+    readKeys shouldEqual (metricNames.toSet - untypedName)
+
+    val readKeys2 = (0 until 4).flatMap { shard =>
+      val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
+      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+    }.toSet
+
+    // readKeys should not contain bulk PK records
+    readKeys2 shouldEqual metricNames.toSet
+  }
+
 
 }

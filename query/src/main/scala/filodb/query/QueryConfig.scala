@@ -14,6 +14,7 @@ class QueryConfig(queryConfig: Config) {
   lazy val staleSampleAfterMs = queryConfig.getDuration("stale-sample-after").toMillis
   lazy val minStepMs = queryConfig.getDuration("min-step").toMillis
   lazy val fastReduceMaxWindows = queryConfig.getInt("fastreduce-max-windows")
+  lazy val routingConfig = queryConfig.getConfig("routing")
 
   /**
    * Feature flag test: returns true if the config has an entry with "true", "t" etc

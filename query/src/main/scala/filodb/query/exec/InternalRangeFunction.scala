@@ -44,6 +44,8 @@ object InternalRangeFunction {
 
   case object SumOverTime extends InternalRangeFunction
 
+  case object Last extends InternalRangeFunction
+
   // Used only for ds-gauge schema
   case object AvgWithSumAndCountOverTime extends InternalRangeFunction
 
@@ -75,6 +77,7 @@ object InternalRangeFunction {
     case RangeFunctionId.StdVarOverTime   => StdVarOverTime
     case RangeFunctionId.SumOverTime      => SumOverTime
     case RangeFunctionId.Timestamp        => Timestamp
+    case RangeFunctionId.Last             => Last
   }
   //scalastyle:on cyclomatic.complexity
 }

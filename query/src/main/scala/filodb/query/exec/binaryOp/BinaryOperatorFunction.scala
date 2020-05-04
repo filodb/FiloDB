@@ -32,12 +32,42 @@ object BinaryOperatorFunction {
       case GTE                => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs >= rhs) lhs else Double.NaN }
       case EQL                => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs == rhs) lhs else Double.NaN }
       case NEQ                => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs != rhs) lhs else Double.NaN }
-      case LSS_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs < rhs)  1.0 else 0.0 }
-      case LTE_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs <= rhs) 1.0 else 0.0 }
-      case GTR_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs > rhs)  1.0 else 0.0 }
-      case GTE_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs >= rhs) 1.0 else 0.0 }
-      case EQL_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs == rhs) 1.0 else 0.0 }
-      case NEQ_BOOL           => new ScalarFunction { override def calculate(lhs: Double, rhs: Double): Double = if (lhs != rhs) 1.0 else 0.0 }
+      case LSS_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs < rhs) 1.0 else 0.0
+                                  }
+                                 }
+      case LTE_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs <= rhs) 1.0 else 0.0
+                                  }
+                                 }
+      case GTR_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs > rhs) 1.0 else 0.0
+                                  }
+                                 }
+      case GTE_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs >= rhs) 1.0 else 0.0
+                                  }
+                                 }
+      case EQL_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs == rhs) 1.0 else 0.0
+                                  }
+                                 }
+      case NEQ_BOOL           => new ScalarFunction {
+                                  override def calculate(lhs: Double, rhs: Double): Double = {
+                                    if (lhs.isNaN || rhs.isNaN) Double.NaN
+                                    else if (lhs != rhs) 1.0 else 0.0
+                                  }
+                                 }
       case _                  => throw new UnsupportedOperationException(s"$function not supported.")
     }
   }

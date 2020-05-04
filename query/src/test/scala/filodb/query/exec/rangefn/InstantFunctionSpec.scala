@@ -255,10 +255,14 @@ class InstantFunctionSpec extends RawDataWindowingSpec with ScalaFutures {
   }
 
   it("should compute histogram_bucket on Histogram RV") {
-    val (data, histRV) = histogramRV(numSamples = 10)
+    val (data, histRV) = histogramRV(numSamples = 10, infBucket = true)
     val expected = Seq(1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0)
     applyFunctionAndAssertResult(Array(histRV), Array(expected.toIterator),
                                  InstantFunctionId.HistogramBucket, Seq(16.0), histSchema)
+
+    val infExpected = (1 to 10).map(_.toDouble)
+    applyFunctionAndAssertResult(Array(histRV), Array(infExpected.toIterator),
+                                 InstantFunctionId.HistogramBucket, Seq(Double.PositiveInfinity), histSchema)
 
     // Specifying a nonexistant bucket returns NaN
     applyFunctionAndAssertResult(Array(histRV), Array(Seq.fill(8)(Double.NaN).toIterator),

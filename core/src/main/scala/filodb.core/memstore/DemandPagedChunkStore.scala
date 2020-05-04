@@ -82,18 +82,22 @@ extends RawToPartitionMaker with StrictLogging {
           val memFactory = getMemFactory(timeBucketForChunkSet(infoBytes))
           val chunkID = ChunkSetInfo.getChunkID(infoBytes)
 
-          memFactory.startMetaSpan()
-          val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
-          val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
-                                                tsPart.schema.data.blockMetaSize.toShort)
-          require(metaAddr != 0)
-          val infoAddr = metaAddr + 4   // Important: don't point at partID
-          val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
+          if (!tsPart.chunkmapContains(chunkID)) {
+            memFactory.startMetaSpan()
+            val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
+            val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+              tsPart.schema.data.blockMetaSize.toShort)
+            require(metaAddr != 0)
+            val infoAddr = metaAddr + 4 // Important: don't point at partID
+            val inserted = tsPart.addChunkInfoIfAbsent(chunkID, infoAddr)
 
-          if (!inserted) {
-            logger.info(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has chunk " +
-              s"$chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
-              s"${ChunkSetInfo.getEndTime(infoBytes)}) partition earliestTime=${tsPart.earliestTime}")
+            logger.debug(s"Populating paged chunk into memory chunkId=$chunkID inserted=$inserted " +
+              s"partId=${tsPart.partID} shard=${tsShard.shardNum} ${tsPart.stringPartition}")
+            if (!inserted) {
+              logger.error(s"Chunks not copied to partId=${tsPart.partID} ${tsPart.stringPartition}, already has " +
+                  s"chunk $chunkID. Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, " +
+                  s"${ChunkSetInfo.getEndTime(infoBytes)}) partition currentEarliestTime=${tsPart.earliestTime}")
+            }
           }
         }
       }

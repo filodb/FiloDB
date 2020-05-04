@@ -56,7 +56,7 @@ case class ScalarFixedDoubleExec(queryContext: QueryContext,
     // kamon uses thread-locals.
     Kamon.runWithSpan(execPlan2Span, true) {
       Task {
-        val span = Kamon.spanBuilder(s"trasnform-${getClass.getSimpleName}")
+        val span = Kamon.spanBuilder(s"transform-${getClass.getSimpleName}")
           .asChildOf(execPlan2Span)
           .tag("query-id", queryContext.queryId)
           .start()

@@ -219,17 +219,20 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   /**
     * Copy a range of chunks to a target ColumnStore, for performing disaster recovery or
-    * backfills.
+    * backfills. This method can also be used to delete chunks, by specifying a ttl of zero.
+    * If the target is the same as the source, then this effectively deletes from the source.
+    *
+    * @param diskTimeToLiveSeconds pass zero to delete chunks
     */
   // scalastyle:off null method.length
-  def copyChunksByIngestionTimeRange(datasetRef: DatasetRef,
-                                     splits: Iterator[ScanSplit],
-                                     ingestionTimeStart: Long,
-                                     ingestionTimeEnd: Long,
-                                     batchSize: Int,
-                                     target: CassandraColumnStore,
-                                     targetDatasetRef: DatasetRef,
-                                     diskTimeToLiveSeconds: Int): Unit =
+  def copyOrDeleteChunksByIngestionTimeRange(datasetRef: DatasetRef,
+                                             splits: Iterator[ScanSplit],
+                                             ingestionTimeStart: Long,
+                                             ingestionTimeEnd: Long,
+                                             batchSize: Int,
+                                             target: CassandraColumnStore,
+                                             targetDatasetRef: DatasetRef,
+                                             diskTimeToLiveSeconds: Int): Unit =
   {
     val sourceIndexTable = getOrCreateIngestionTimeIndexTable(datasetRef)
     val sourceChunksTable = getOrCreateChunkTable(datasetRef)
@@ -241,8 +244,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val futures = new ArrayBuffer[Future[Response]]()
 
     def finishBatch(partition: ByteBuffer): Unit = {
-      for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
-        futures += targetChunksTable.writeChunks(partition, row, diskTimeToLiveSeconds)
+      if (diskTimeToLiveSeconds == 0) {
+        futures += targetChunksTable.deleteChunks(partition, chunkInfos)
+      } else {
+        for (row <- sourceChunksTable.readChunksNoAsync(partition, chunkInfos).iterator.asScala) {
+          futures += targetChunksTable.writeChunks(partition, row, sinkStats, diskTimeToLiveSeconds)
+        }
       }
 
       chunkInfos.clear()
@@ -276,7 +283,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
         }
 
         chunkInfos += row.getBytes(3) // info
-        futures += targetIndexTable.writeIndex(row, diskTimeToLiveSeconds);
+
+        if (diskTimeToLiveSeconds == 0) {
+          futures += targetIndexTable.deleteIndex(row);
+        } else {
+          futures += targetIndexTable.writeIndex(row, sinkStats, diskTimeToLiveSeconds);
+        }
 
         if (chunkInfos.size >= batchSize) {
           finishBatch(partition)
@@ -379,6 +391,15 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }.findL(_.isInstanceOf[ErrorResponse]).map(_.getOrElse(Success)).runAsync
     ret.onComplete(_ => span.finish())
     ret
+  }
+
+  def deletePartKeys(ref: DatasetRef,
+                     shard: Int,
+                     pks: Observable[Array[Byte]]): Future[Long] = {
+    val pkTable = getOrCreatePartitionKeysTable(ref, shard)
+    pks.mapAsync(writeParallelism) { pk =>
+      Task.fromFuture(pkTable.deletePartKey(pk, shard))
+    }.countL.runAsync
   }
 
   def getPartKeysByUpdateHour(ref: DatasetRef,

@@ -45,6 +45,10 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
     s"VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
 
+  private lazy val deleteChunksCql = session.prepare(
+    s"DELETE FROM $tableString WHERE partition=? AND chunkid IN ?")
+    .setConsistencyLevel(writeConsistencyLevel)
+
   private lazy val readChunkInCql = session.prepare(
     s"SELECT info, chunks FROM $tableString " +
     s"WHERE partition = ? AND chunkid IN ?")
@@ -92,19 +96,38 @@ sealed class TimeSeriesChunksTable(val dataset: DatasetRef,
   }
 
   /**
-    * Writes a single record, exactly as-is from the readChunks method. Is
+    * Writes a single record, exactly as-is from the readChunksNoAsync method. Is
     * used to copy records from one column store to another.
     */
   def writeChunks(partKeyBytes: ByteBuffer,
                   row: Row,
+                  stats: ChunkSinkStats,
                   diskTimeToLiveSeconds: Int): Future[Response] = {
+
+    val info = row.getBytes(1)
+    val chunks = row.getList(2, classOf[ByteBuffer])
+
+    val chunkBytes = chunks.asScala.map(buf => buf.remaining()).reduce(_ + _)
+
+    stats.addChunkWriteStats(chunks.size(), chunkBytes, ChunkSetInfo.getNumRows(info))
+
     connector.execStmtWithRetries(writeChunksCql.bind(
       partKeyBytes,                        // partition
       row.getLong(0): java.lang.Long,      // chunkid
-      row.getBytes(1),                     // info
-      row.getList(2, classOf[ByteBuffer]), // chunks
+      info,
+      chunks,
       diskTimeToLiveSeconds: java.lang.Integer)
     )
+  }
+
+  /**
+    * Deletes raw chunk set rows.
+    */
+  def deleteChunks(partKeyBytes: ByteBuffer,
+                   chunkInfos: Seq[ByteBuffer]): Future[Response] = {
+    val query = deleteChunksCql.bind().setBytes(0, partKeyBytes)
+                                      .setList(1, chunkInfos.map(ChunkSetInfo.getChunkID).asJava)
+    connector.execStmtWithRetries(query)
   }
 
   /**

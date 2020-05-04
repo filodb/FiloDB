@@ -85,9 +85,9 @@ final class QueryActor(memStore: MemStore,
   val functionalSpreadProvider = FunctionalSpreadProvider(spreadFunc)
 
   logger.info(s"Starting QueryActor and QueryEngine for ds=$dsRef schemas=$schemas")
-  val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
-                                              earliestRawTimestampFn, functionalSpreadProvider)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
+  val queryPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapFunc,
+                                              earliestRawTimestampFn, queryConfig, functionalSpreadProvider)
   val numSchedThreads = Math.ceil(config.getDouble("filodb.query.threads-factor") * sys.runtime.availableProcessors)
   val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName-$dsRef", numSchedThreads.toInt)
 
@@ -136,7 +136,7 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
-  private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef) = {
+  private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan

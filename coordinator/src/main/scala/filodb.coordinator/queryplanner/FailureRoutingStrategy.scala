@@ -52,13 +52,14 @@ object QueryFailureRoutingStrategy extends FailureRoutingStrategy {
     if ((nonOverlappingFailures.last.timeRange.endMs < time.startMs) ||
       (nonOverlappingFailures.head.timeRange.startMs > time.endMs)) {
        Seq(LocalRoute(None)) // No failure in this time range
+    } else {
+      // Recursively split query into local and remote routes starting from first FailureTimeRange
+      splitQueryTime(nonOverlappingFailures, 0, time.startMs - lookbackTime, time.endMs, lookbackTime,
+        step)
     }
-    logger.info("Logical plan time:" + time)
-
-    // Recursively split query into local and remote routes starting from first FailureTimeRange
-    splitQueryTime(nonOverlappingFailures, 0, time.startMs - lookbackTime, time.endMs, lookbackTime,
-     step)
   }
+
+
 
   /**
     * Recursively generate Local and Remote Routes by splitting query time based on failures

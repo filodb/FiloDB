@@ -42,6 +42,7 @@ class HistogramQueryBenchmark {
   import monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val queryConfig = new QueryConfig(config.getConfig("query"))
   val policy = new FixedMaxPartitionsEvictionPolicy(1000)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   val ingestConf = TestData.storeConf.copy(shardMemSize = 512 * 1024 * 1024, maxChunksSize = 200)
@@ -80,8 +81,10 @@ class HistogramQueryBenchmark {
   shardMapper.updateFromEvent(IngestionStarted(histDataset.ref, 0, coordinator))
 
   // Query configuration
-  val hEngine = new SingleClusterPlanner(histDataset.ref, histSchemas, shardMapper, 0)
-  val pEngine = new SingleClusterPlanner(promDataset.ref, promSchemas, shardMapper, 0)
+  val hEngine = new SingleClusterPlanner(histDataset.ref, histSchemas, shardMapper, 0,
+    queryConfig)
+  val pEngine = new SingleClusterPlanner(promDataset.ref, promSchemas, shardMapper, 0,
+    queryConfig)
   val startTime = 100000L + 100*1000  // 100 samples in.  Look back 30 samples, which normally would be 5min
 
   val histQuery = """histogram_quantile(0.9, sum_over_time(http_requests_total::h{job="prometheus"}[30s]))"""
@@ -94,7 +97,6 @@ class HistogramQueryBenchmark {
   val hLogicalPlan = Parser.queryToLogicalPlan(histQuery, startTime/1000)
   val hExecPlan = hEngine.materialize(hLogicalPlan, qContext)
   val querySched = Scheduler.singleThread(s"benchmark-query")
-  val queryConfig = new QueryConfig(config.getConfig("query"))
 
   val pLogicalPlan = Parser.queryToLogicalPlan(promQuery, startTime/1000)
   val pExecPlan = pEngine.materialize(pLogicalPlan, qContext)
