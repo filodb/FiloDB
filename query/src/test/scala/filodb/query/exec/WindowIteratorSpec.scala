@@ -210,7 +210,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 1100000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.SumOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = true).asChunkedD, queryConfig)
+                    useChunked = true).asChunkedD, querySession)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
@@ -245,7 +245,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val rv = timeValueRV(samples)
     val chunkedIt = new ChunkedWindowIteratorD(rv, 1548191496000L, 15000, 1548191796000L, 300000,
       RangeFunction(tsResSchema,
-        Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+        Some(Rate), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedIt.foreach { v =>
       windowResults.find(a => a._1 == v.timestamp).foreach(b => v.value shouldEqual b._2 +- 0.0000000001)
     }
@@ -292,7 +292,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedWinIt = new ChunkedWindowIteratorD(rv, 1540845090000L,
       15000, 1540855905000L, 180000,
       RangeFunction(tsResSchema,
-        Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+        Some(Last), ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
 
@@ -359,7 +359,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedWinIt = new ChunkedWindowIteratorD(rv, 1540845090000L,
                          15000, 1540855905000L, queryConfig.staleSampleAfterMs,
                          RangeFunction(tsResSchema,
-                           None, ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+                           None, ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
 
@@ -389,7 +389,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedWinIt = new ChunkedWindowIteratorD(rv, 100000L,
       100000, 600000L, queryConfig.staleSampleAfterMs + 1,
       RangeFunction(tsResSchema,
-        None, ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+        None, ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedWinIt.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual windowResults
   }
 
@@ -425,7 +425,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.AvgOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = true).asChunkedD, queryConfig)
+                    useChunked = true).asChunkedD, querySession)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
@@ -461,7 +461,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.CountOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = true).asChunkedD, queryConfig)
+                    useChunked = true).asChunkedD, querySession)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 
@@ -500,7 +500,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedItAvg = new ChunkedWindowIteratorD(rvAvg, 50000L, 100000, 750000L, 100000,
       RangeFunction(dsResSchema, rangeFunc,
         ColumnType.DoubleColumn, queryConfig,
-        useChunked = true).asChunkedD, queryConfig)
+        useChunked = true).asChunkedD, querySession)
     chunkedItAvg.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual avgWindowResults
 
     val rvCnt = timeValueRvDownsample(samples, Array(0, 4))
@@ -515,7 +515,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val cntFunc = RangeFunction.downsampleRangeFunction(Some(InternalRangeFunction.CountOverTime))
     val chunkedItCnt = new ChunkedWindowIteratorD(rvCnt, 50000L, 100000, 750000L, 100000,
       RangeFunction(dsResSchema, cntFunc,
-        ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, queryConfig)
+        ColumnType.DoubleColumn, queryConfig, useChunked = true).asChunkedD, querySession)
     chunkedItCnt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual countWindowResults
   }
 
@@ -550,7 +550,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MinOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = true).asChunkedD, queryConfig)
+                    useChunked = true).asChunkedD, querySession)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
 
   }
@@ -586,7 +586,7 @@ class WindowIteratorSpec extends RawDataWindowingSpec {
     val chunkedIt = new ChunkedWindowIteratorD(rv, 50000L, 100000, 700000L, 100000,
       RangeFunction(tsResSchema,
                     Some(InternalRangeFunction.MaxOverTime), ColumnType.DoubleColumn, queryConfig,
-                    useChunked = true).asChunkedD, queryConfig)
+                    useChunked = true).asChunkedD, querySession)
     chunkedIt.map(r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN).toList shouldEqual windowResults
   }
 }

@@ -18,11 +18,10 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.QueryConfig
 import filodb.query.exec.ExecPlan
 import filodb.timeseries.TestTimeseriesProducer
 
@@ -133,7 +132,8 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfRateBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumOfRate.execute(store, queryConfig).runAsync, 60.seconds)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      Await.result(scanSumOfRate.execute(store, querySession).runAsync, 60.seconds)
     }
   }
 
@@ -144,7 +144,8 @@ class QueryHiCardInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(100)
   def scanSumOfSumOverTimeBenchmark(): Unit = {
     (0 until numQueries).foreach { _ =>
-      Await.result(scanSumSumOverTime.execute(store, queryConfig).runAsync, 60.seconds)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      Await.result(scanSumSumOverTime.execute(store, querySession).runAsync, 60.seconds)
     }
   }
 

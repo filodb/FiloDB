@@ -1,16 +1,17 @@
 package filodb.query.exec.rangefn
 
-import scala.util.Random
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
-import filodb.core.query.{QueryContext, RangeParams, RawDataRangeVector, TransientHistMaxRow, TransientHistRow, TransientRow}
-import filodb.core.store.AllChunkScan
+
 import filodb.core.{MetricsTestData, QueryTimeoutException, TestData, MachineMetricsData => MMD}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, WriteBufferPool}
+import filodb.core.query._
+import filodb.core.store.AllChunkScan
 import filodb.memory._
 import filodb.memory.format.{TupleRowReader, vectors => bv}
-import filodb.query.QueryConfig
 import filodb.query.exec._
 
 /**
@@ -133,6 +134,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val querySession = QuerySession(QueryContext(), queryConfig)
 
   // windowSize and step are in number of elements of the data
   def numWindows(data: Seq[Any], windowSize: Int, step: Int): Int = data.sliding(windowSize, step).length
@@ -193,7 +195,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val windowStartTS = defaultStartTS + windowTime
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
-    new ChunkedWindowIteratorD(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, queryConfig)
+    new ChunkedWindowIteratorD(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime, func, querySession)
   }
 
   def chunkedWindowItHist[R <: TransientHistRow](data: Seq[Seq[Any]],
@@ -207,7 +209,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
     val stepTimeMillis = step.toLong * pubFreq
     val windowEndTS = windowStartTS + (numWindows(data, windowSize, step) - 1) * stepTimeMillis
     new ChunkedWindowIteratorH(rv, windowStartTS, stepTimeMillis, windowEndTS, windowTime,
-                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], queryConfig, QueryContext(), row)
+                               func.asInstanceOf[ChunkedRangeFunction[TransientHistRow]], querySession, row)
   }
 
   def chunkedWindowItHist(data: Seq[Seq[Any]],
@@ -396,7 +398,7 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     val step = 20
 
     val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-      new ChangesChunkedFunctionD(), queryConfig)
+      new ChangesChunkedFunctionD(), querySession)
     val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
     aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
   }
@@ -416,26 +418,26 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     for (i <- 0 until n) {
       var rv = timeValueRV(twoSampleData)
       val chunkedItTwoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
-        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), querySession)
       val aggregated2 = chunkedItTwoSample.map(_.getDouble(1)).toBuffer
       aggregated2(0) shouldEqual twoSampleDataResponses(i) +- 0.0000000001
 
       rv = timeValueRV(threeSampleData)
       val chunkedItThreeSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 50000,
-        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), querySession)
       val aggregated3 = chunkedItThreeSample.map(_.getDouble(1)).toBuffer
       aggregated3(0) shouldEqual threeSampleDataResponses(i) +- 0.0000000001
 
       rv = timeValueRV(unevenSampleData)
       val chunkedItUnevenSample = new ChunkedWindowIteratorD(rv, 120000, 20000, 130000, 30000,
-        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), queryConfig)
+        new QuantileOverTimeChunkedFunctionD(Seq(quantiles(i))), querySession)
       val aggregatedUneven = chunkedItUnevenSample.map(_.getDouble(1)).toBuffer
       aggregatedUneven(0) shouldEqual unevenSampleDataResponses(i) +- 0.0000000001
     }
     val emptyData = Seq()
     var rv = timeValueRV(emptyData)
     val chunkedItNoSample = new ChunkedWindowIteratorD(rv, 110000, 120000, 150000, 30000,
-      new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), queryConfig)
+      new QuantileOverTimeChunkedFunctionD(Seq(StaticFuncArgs(0.5, rangeParams))), querySession)
     val aggregatedEmpty = chunkedItNoSample.map(_.getDouble(1)).toBuffer
     aggregatedEmpty(0) isNaN
 
@@ -519,25 +521,25 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
 
     var rv = timeValueRV(positiveTrendData2)
     val chunkedIt2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(params), queryConfig)
+      new HoltWintersChunkedFunctionD(params), querySession)
     val aggregated2 = chunkedIt2.map(_.getDouble(1)).toBuffer
     aggregated2(0) shouldEqual holt_winters(positiveTrendData2)
 
     rv = timeValueRV(positiveTrendData3)
     val chunkedIt3 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(params), queryConfig)
+      new HoltWintersChunkedFunctionD(params), querySession)
     val aggregated3 = chunkedIt3.map(_.getDouble(1)).toBuffer
     aggregated3(0) shouldEqual holt_winters(positiveTrendData3)
 
     rv = timeValueRV(positiveTrendData4)
     val chunkedIt4 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(params), queryConfig)
+      new HoltWintersChunkedFunctionD(params), querySession)
     val aggregated4 = chunkedIt4.map(_.getDouble(1)).toBuffer
     aggregated4(0) shouldEqual holt_winters(positiveTrendData4)
 
     rv = timeValueRV(negativeTrendData2)
     val chunkedItNeg2 = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000,
-      new HoltWintersChunkedFunctionD(params), queryConfig)
+      new HoltWintersChunkedFunctionD(params), querySession)
     val aggregatedNeg2 = chunkedItNeg2.map(_.getDouble(1)).toBuffer
     aggregatedNeg2(0) shouldEqual holt_winters(negativeTrendData2)
 
@@ -627,7 +629,8 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
     }
   }
 
-  it("it should correctly calculate sum_over_time, avg_over_time, stddev_over_time & zscore when the sequence contains NaNs or is empty") {
+  it("it should correctly calculate sum_over_time, avg_over_time, stddev_over_time & " +
+    "zscore when the sequence contains NaNs or is empty") {
     val test_data = Seq(
       Seq(15900.0, 15920.0, 15940.0, 15960.0, 15980.0, 16000.0, 16020.0),
       Seq(-15900.0, -15920.0, -15940.0, -15960.0, -15980.0, -16000.0),
@@ -644,43 +647,44 @@ class AggrOverTimeFunctionsSpec extends RawDataWindowingSpec {
       val rv = timeValueRV(data)
 
       // sum_over_time
-      val chunkedItSumOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new SumOverTimeChunkedFunctionD(), queryConfig)
+      val chunkedItSumOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new SumOverTimeChunkedFunctionD(), querySession)
       val aggregatedSumOverTime = chunkedItSumOverTime.map(_.getDouble(1)).toBuffer
-      if (aggregatedSumOverTime(0).isNaN) aggregatedSumOverTime(0).isNaN shouldBe true else aggregatedSumOverTime(0) shouldBe sumWithNaN(data)
+      if (aggregatedSumOverTime(0).isNaN) aggregatedSumOverTime(0).isNaN shouldBe true
+      else aggregatedSumOverTime(0) shouldBe sumWithNaN(data)
 
       // avg_over_time
-      val chunkedItAvgOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new AvgOverTimeChunkedFunctionD(), queryConfig)
+      val chunkedItAvgOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new AvgOverTimeChunkedFunctionD(), querySession)
       val aggregatedAvgOverTime = chunkedItAvgOverTime.map(_.getDouble(1)).toBuffer
-      if (aggregatedAvgOverTime(0).isNaN) aggregatedAvgOverTime(0).isNaN shouldBe true else aggregatedAvgOverTime(0) shouldBe avgWithNaN(data)
+      if (aggregatedAvgOverTime(0).isNaN) aggregatedAvgOverTime(0).isNaN shouldBe true
+      else aggregatedAvgOverTime(0) shouldBe avgWithNaN(data)
 
       // stdvar_over_time
-      val chunkedItStdVarOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdVarOverTimeChunkedFunctionD(), queryConfig)
+      val chunkedItStdVarOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdVarOverTimeChunkedFunctionD(), querySession)
       val aggregatedStdVarOverTime = chunkedItStdVarOverTime.map(_.getDouble(1)).toBuffer
-      if (aggregatedStdVarOverTime(0).isNaN) aggregatedStdVarOverTime(0).isNaN shouldBe true else aggregatedStdVarOverTime(0) shouldBe stdVarWithNaN(data)
+      if (aggregatedStdVarOverTime(0).isNaN) aggregatedStdVarOverTime(0).isNaN shouldBe true
+      else aggregatedStdVarOverTime(0) shouldBe stdVarWithNaN(data)
 
       // stddev_over_time
-      val chunkedItStdDevOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdDevOverTimeChunkedFunctionD(), queryConfig)
+      val chunkedItStdDevOverTime = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new StdDevOverTimeChunkedFunctionD(), querySession)
       val aggregatedStdDevOverTime = chunkedItStdDevOverTime.map(_.getDouble(1)).toBuffer
-      if (aggregatedStdDevOverTime(0).isNaN) aggregatedStdDevOverTime(0).isNaN shouldBe true else aggregatedStdDevOverTime(0) shouldBe Math.sqrt(stdVarWithNaN(data))
+      if (aggregatedStdDevOverTime(0).isNaN) aggregatedStdDevOverTime(0).isNaN shouldBe true
+      else aggregatedStdDevOverTime(0) shouldBe Math.sqrt(stdVarWithNaN(data))
 
       // zscore
-      val chunkedItZscore = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new ZScoreChunkedFunctionD(), queryConfig)
+      val chunkedItZscore = new ChunkedWindowIteratorD(rv, 160000, 100000, 180000, 100000, new ZScoreChunkedFunctionD(), querySession)
       val aggregatedZscore = chunkedItZscore.map(_.getDouble(1)).toBuffer
-      if (aggregatedZscore(0).isNaN) aggregatedZscore(0).isNaN shouldBe true else aggregatedZscore(0) shouldBe z_score(data)
+      if (aggregatedZscore(0).isNaN) aggregatedZscore(0).isNaN shouldBe true
+      else aggregatedZscore(0) shouldBe z_score(data)
     }
   }
 
   it("should throw QueryTimeoutException when query processing time is greater than timeout") {
     the[QueryTimeoutException] thrownBy {
-      var data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
+      val data = Seq(1.5, 2.5, 3.5, 4.5, 5.5)
       val rv = timeValueRV(data)
-      val list = rv.rows.map(x => (x.getLong(0), x.getDouble(1))).toList
-
-      val windowSize = 100
-      val step = 20
-
       val chunkedIt = new ChunkedWindowIteratorD(rv, 100000, 20000, 150000, 30000,
-        new ChangesChunkedFunctionD(), queryConfig, QueryContext(submitTime = System.currentTimeMillis() - 180000))
+        new ChangesChunkedFunctionD(),
+        QuerySession(QueryContext(submitTime = System.currentTimeMillis() - 180000), queryConfig))
       val aggregated = chunkedIt.map(x => (x.getLong(0), x.getDouble(1))).toList
       aggregated shouldEqual List((100000, 0.0), (120000, 2.0), (140000, 2.0))
     } should have message "Query timeout in filodb.core.store.WindowedChunkIterator after 180 seconds"

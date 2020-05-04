@@ -31,7 +31,8 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
       500000L -> 200d
     )
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100000L, 100000, 600000L, None, None, QueryContext())
-    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema, Nil)
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)),
+      querySession, 1000, resultSchema, Nil)
 
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))
@@ -54,7 +55,8 @@ class PeriodicSamplesMapperSpec extends FunSpec with Matchers with ScalaFutures 
 
     val periodicSamplesVectorFnMapper = exec.PeriodicSamplesMapper(100100L, 100000, 600100L, None, None, QueryContext(),
       Nil, Some(100))
-    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), queryConfig, 1000, resultSchema, Nil)
+    val resultObs = periodicSamplesVectorFnMapper(Observable.fromIterable(Seq(rv)), querySession,
+      1000, resultSchema, Nil)
 
     val resultRows = resultObs.toListL.runAsync.futureValue.map(_.rows.map
     (r => (r.getLong(0), r.getDouble(1))).filter(!_._2.isNaN))

@@ -9,7 +9,7 @@ import filodb.core.{SpreadChange, SpreadProvider}
 trait TsdbQueryParams
 
 /**
-  * This class provides PromQl query paramaters
+  * This class provides PromQl query parameters
   * Config has routing parameters
   */
 case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
@@ -56,4 +56,11 @@ object QueryContext {
 
     simpleMapSpreadFunc(shardKeyNames.asScala, spreadAssignment, defaultSpread)
   }
+}
+
+case class QuerySession(qContext: QueryContext,
+                        queryConfig: QueryConfig)
+
+object QuerySession {
+  def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)
 }

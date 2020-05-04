@@ -14,6 +14,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
+import filodb.core.query.QuerySession
 import filodb.core.store._
 import filodb.memory.BinaryRegionLarge
 import filodb.memory.MemFactory
@@ -57,7 +58,8 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   //  4. upload to memory and return partition
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   //scalastyle:off
-  override def scanPartitions(partLookupRes: PartLookupResult): Observable[ReadablePartition] = {
+  override def scanPartitions(partLookupRes: PartLookupResult,
+                              querySession: QuerySession): Observable[ReadablePartition] = {
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed

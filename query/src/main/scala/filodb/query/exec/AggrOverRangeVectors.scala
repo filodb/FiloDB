@@ -25,7 +25,7 @@ final case class ReduceAggregateExec(queryContext: QueryContext,
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector] = {
+                        querySession: QuerySession): Observable[RangeVector] = {
     val results = childResponses.flatMap {
         case (QueryResult(_, _, result), _) => Observable.fromIterable(result)
         case (QueryError(_, ex), _)         => throw ex
@@ -55,7 +55,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]] = Nil): Observable[RangeVector] = {
@@ -71,7 +71,7 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
     // IF no grouping is done AND prev transformer is Periodic (has fixed length), use optimal path
     if (without.isEmpty && by.isEmpty && sourceSchema.fixedVectorLen.isDefined) {
-      sourceSchema.fixedVectorLen.filter(_ <= queryConfig.fastReduceMaxWindows).map { numWindows =>
+      sourceSchema.fixedVectorLen.filter(_ <= querySession.queryConfig.fastReduceMaxWindows).map { numWindows =>
         RangeVectorAggregator.fastReduce(aggregator, false, source, numWindows)
       }.getOrElse {
         RangeVectorAggregator.mapReduce(aggregator, skipMapPhase = false, source, grouping)
@@ -95,7 +95,7 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema,
             paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
