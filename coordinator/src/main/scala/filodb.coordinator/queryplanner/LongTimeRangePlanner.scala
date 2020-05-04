@@ -27,15 +27,18 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
         val earliestRawTime = earliestRawTimestampFn
-        // FIXME need to incorporate offset here - needs to be addressed in HA Planning too - punt to separate PR
-        lazy val lookbackMs = getRawSeriesStartTime(logicalPlan).map(p.startMs - _).get
+        lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+        lazy val lookbackMs = LogicalPlanUtils.getLookBackMillis(logicalPlan)
+        lazy val startWithOffsetMs = p.startMs - offsetMillis
+        lazy val endWithOffsetMs = p.endMs - offsetMillis
         if (!logicalPlan.isRoutable) rawClusterPlanner.materialize(logicalPlan, qContext)
-        else if (p.endMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
-        else if (p.startMs - lookbackMs >= earliestRawTime) rawClusterPlanner.materialize(logicalPlan, qContext)
+        else if (endWithOffsetMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
+        else if (startWithOffsetMs - lookbackMs >= earliestRawTime)
+          rawClusterPlanner.materialize(logicalPlan, qContext)
         else {
           // Split the query between raw and downsample planners
-          val numStepsInDownsample = (earliestRawTime - p.startMs + lookbackMs) / p.stepMs
-          val lastDownsampleInstant = p.startMs + numStepsInDownsample * p.stepMs
+          val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / p.stepMs
+          val lastDownsampleInstant = startWithOffsetMs + numStepsInDownsample * p.stepMs
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,

@@ -180,8 +180,9 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   def emptyAggHist: bv.MutableHistogram = bv.MutableHistogram.empty(MMD.histBucketScheme)
 
   // Designed explicitly to work with linearHistSeries records and histDataset from MachineMetricsData
-  def histogramRV(numSamples: Int = 100, numBuckets: Int = 8): (Stream[Seq[Any]], RawDataRangeVector) =
-    MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets)
+  def histogramRV(numSamples: Int = 100, numBuckets: Int = 8, infBucket: Boolean = false):
+  (Stream[Seq[Any]], RawDataRangeVector) =
+    MMD.histogramRV(defaultStartTS, pubFreq, numSamples, numBuckets, infBucket)
 
   def chunkedWindowIt(data: Seq[Double],
                       rv: RawDataRangeVector,

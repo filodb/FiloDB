@@ -49,8 +49,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
       override def rows: Iterator[RowReader] = data.iterator
     })
-    fireBinaryOperatorTests(samples)
-    fireComparatorOperatorTests(samples)
+    fireBinaryOperatorTests(samples, scalar)
+    fireComparatorOperatorTests(samples, scalar)
 
   }
 
@@ -78,8 +78,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
           new TransientRow(2L, 5.4d)).iterator
       }
     )
-    fireBinaryOperatorTests(samples)
-    fireComparatorOperatorTests(samples)
+    fireBinaryOperatorTests(samples, Double.NaN)
+    fireComparatorOperatorTests(samples, Double.NaN)
 
   }
 
@@ -101,11 +101,11 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
           new TransientRow(2L, 3.3d)).iterator
       }
     )
-    fireBinaryOperatorTests(samples)
-    fireComparatorOperatorTests(samples)
+    fireBinaryOperatorTests(samples, scalar)
+    fireComparatorOperatorTests(samples, scalar)
   }
 
-  private def fireBinaryOperatorTests(samples: Array[RangeVector]): Unit = {
+  private def fireBinaryOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // Subtraction - prefix
     val expectedSub1 = samples.map(_.rows.map(v => scalar - v.getDouble(1)))
@@ -157,7 +157,9 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
 
   }
 
-  private def fireComparatorOperatorTests(samples: Array[RangeVector]): Unit = {
+  //scalastyle:off method.length
+  //scalastyle:off cyclomatic.complexity
+  private def fireComparatorOperatorTests(samples: Array[RangeVector], scalar: Double): Unit = {
 
     // GTE - prefix
     val expectedGTE = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) scalar else Double.NaN))
@@ -184,29 +186,48 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     applyBinaryOperationAndAssertResult(samples, expectedNEQ, BinaryOperator.NEQ, scalar, true)
 
     // GTE_BOOL - prefix
-    val expectedGTE_BOOL = samples.map(_.rows.map(v => if (scalar >= v.getDouble(1)) 1.0 else 0.0))
+    val expectedGTE_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar >= v.getDouble(1)) 1.0 else 0.0
+    })
     applyBinaryOperationAndAssertResult(samples, expectedGTE_BOOL, BinaryOperator.GTE_BOOL, scalar, true)
 
     // GTR_BOOL - prefix
-    val expectedGTR_BOOL = samples.map(_.rows.map(v => if (scalar > v.getDouble(1))  1.0 else 0.0))
+    val expectedGTR_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar > v.getDouble(1)) 1.0 else 0.0
+    })
     applyBinaryOperationAndAssertResult(samples, expectedGTR_BOOL, BinaryOperator.GTR_BOOL, scalar, true)
 
     // LTE_BOOL - prefix
-    val expectedLTE_BOOL = samples.map(_.rows.map(v => if (scalar <= v.getDouble(1))  1.0 else 0.0))
-    applyBinaryOperationAndAssertResult(samples, expectedLTE_BOOL, BinaryOperator.LTE_BOOL, scalar, true)
+    val expectedLTE_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar <= v.getDouble(1)) 1.0 else 0.0
+    })
 
     // LTR_BOOL - prefix
-    val expectedLTR_BOOL = samples.map(_.rows.map(v => if (scalar < v.getDouble(1))  1.0 else 0.0))
+    val expectedLTR_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar < v.getDouble(1)) 1.0 else 0.0
+    })
     applyBinaryOperationAndAssertResult(samples, expectedLTR_BOOL, BinaryOperator.LSS_BOOL, scalar, true)
 
     // EQL_BOOL - prefix
-    val expectedEQL_BOOL = samples.map(_.rows.map(v => if (scalar == v.getDouble(1))  1.0 else 0.0))
+    val expectedEQL_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar == v.getDouble(1)) 1.0 else 0.0
+    })
     applyBinaryOperationAndAssertResult(samples, expectedEQL_BOOL, BinaryOperator.EQL_BOOL, scalar, true)
 
     // NEQ_BOOL - prefix
-    val expectedNEQ_BOOL = samples.map(_.rows.map(v => if (scalar != v.getDouble(1))  1.0 else 0.0))
+    val expectedNEQ_BOOL = samples.map(_.rows.map { v =>
+      if (scalar.isNaN || v.getDouble(1).isNaN) Double.NaN
+      else if (scalar != v.getDouble(1)) 1.0 else 0.0
+    })
     applyBinaryOperationAndAssertResult(samples, expectedNEQ_BOOL, BinaryOperator.NEQ_BOOL, scalar, true)
   }
+  //scalastyle:on method.length
+  //scalastyle:on cyclomatic.complexity
 
   it ("should fail with wrong calculation") {
     // ceil

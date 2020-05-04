@@ -59,10 +59,12 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
         ColumnFilter("id", Filter.Equals("0".utf8)))
-    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, now, now - 5000, 10)
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, false, now, now - 5000, 10)
     val seqMapConsumer = new SeqMapConsumer()
-    val tsPart = metadata.next()
-    timeseriesDataset.partKeySchema.consumeMapItems(tsPart.base, tsPart.offset, 0, seqMapConsumer)
+    val tsPartData = metadata.next()
+    timeseriesDataset.partKeySchema.consumeMapItems(tsPartData.base, tsPartData.offset, 0, seqMapConsumer)
+    tsPartData.startTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
+    tsPartData.endTime shouldEqual -1 // since fetchFirstLastSampleTimes is false
     seqMapConsumer.pairs shouldEqual jobQueryResult2
   }
 
@@ -76,6 +78,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
     val endTime = part.timestampOfLatestSample
+    val startTime = part.earliestTime
 
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(createRecordContainer(10, 20), 0))
     memStore.refreshIndexForTesting(timeseriesDataset.ref)
@@ -84,10 +87,12 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)),
       ColumnFilter("id", Filter.Equals("0".utf8)))
-    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, endTime, endTime - 5000, 10)
+    val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, true, endTime, endTime - 5000, 10)
     val seqMapConsumer = new SeqMapConsumer()
-    val tsPart = metadata.next()
-    timeseriesDataset.partKeySchema.consumeMapItems(tsPart.base, tsPart.offset, 0, seqMapConsumer)
+    val tsPartData = metadata.next()
+    timeseriesDataset.partKeySchema.consumeMapItems(tsPartData.base, tsPartData.offset, 0, seqMapConsumer)
+    tsPartData.startTime shouldEqual startTime
+    tsPartData.endTime shouldEqual endTime
     seqMapConsumer.pairs shouldEqual jobQueryResult2
   }
 
