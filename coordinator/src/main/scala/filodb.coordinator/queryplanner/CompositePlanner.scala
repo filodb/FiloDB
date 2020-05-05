@@ -21,6 +21,7 @@ class CompositePlanner(dsRef: DatasetRef,
                        failureProvider: FailureProvider,
                        earliestRawTimestampFn: => Long,
                        earliestDownsampleTimestampFn: => Long,
+                       latestDownsampleTimestampFn: => Long,
                        queryConfig: QueryConfig,
                        spreadProvider: SpreadProvider = StaticSpreadProvider(),
                        stitchDispatcher: => PlanDispatcher = { InProcessPlanDispatcher }) extends QueryPlanner
@@ -31,7 +32,7 @@ class CompositePlanner(dsRef: DatasetRef,
   val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc,
                                   earliestDownsampleTimestampFn, queryConfig, spreadProvider)
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
-                                          earliestRawTimestampFn, stitchDispatcher)
+                                          earliestRawTimestampFn, latestDownsampleTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryConfig)
   //val multiPodPlanner = new MultiClusterPlanner(podLocalityProvider, haPlanner)
 
