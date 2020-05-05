@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import java.util.UUID
+import java.util.concurrent.locks.Lock
 
 import com.typesafe.config.Config
 
@@ -58,8 +59,16 @@ object QueryContext {
   }
 }
 
+/**
+  * Placeholder for query related information. Typically passed along query execution path.
+  */
 case class QuerySession(qContext: QueryContext,
-                        queryConfig: QueryConfig)
+                        queryConfig: QueryConfig,
+                        var lock: Option[Lock] = None) {
+  def close(): Unit = {
+    lock.foreach(_.unlock())
+  }
+}
 
 object QuerySession {
   def forTestingOnly: QuerySession = QuerySession(QueryContext(), EmptyQueryConfig)

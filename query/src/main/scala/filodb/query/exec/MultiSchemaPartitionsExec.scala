@@ -1,6 +1,7 @@
 package filodb.query.exec
 
 import kamon.Kamon
+import monix.eval.Task
 import monix.execution.Scheduler
 
 import filodb.core.{DatasetRef, QueryTimeoutException}
@@ -8,6 +9,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QueryContext, QuerySession}
 import filodb.core.store._
 import filodb.query.Query.qLogger
+import filodb.query.QueryResponse
 
 final case class UnknownSchemaQueryErr(id: Int) extends
   Exception(s"Unknown schema ID $id during query.  This likely means a schema config change happened and " +
@@ -80,6 +82,15 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
                                     None, Some(lookupRes),
                                     schema.isDefined, Nil)
           }
+  }
+
+  /**
+    * Overridden to close the session and release locks after query executes
+    */
+  override def execute(source: ChunkSource,
+                       querySession: QuerySession)
+                      (implicit sched: Scheduler): Task[QueryResponse] = {
+    super.execute(source, querySession).doOnFinish(_ => Task.now(querySession.close()))
   }
 
   def doExecute(source: ChunkSource,
