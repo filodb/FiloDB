@@ -17,7 +17,10 @@ import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
   * @param earliestRawTimestampFn the function that will provide millis timestamp of earliest sample that
   *                             would be available in the raw cluster
   * @param latestDownsampleTimestampFn the function that will provide millis timestamp of newest sample
-  *                                    that would be available in the downsample cluster
+  *                                    that would be available in the downsample cluster. This typically
+  *                                    is not "now" because of the delay in popuation of downsampled data
+  *                                    via spark job. If job is run every 6 hours, `(System.currentTimeMillis - 12.hours.toMillis)`
+  *                                    may a function that would be passed. 12 hours to account for failures/reruns etc.
   * @param stitchDispatcher function to get the dispatcher for the stitch exec plan node
   */
 class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
