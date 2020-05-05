@@ -67,6 +67,7 @@ case class QuerySession(qContext: QueryContext,
                         var lock: Option[Lock] = None) {
   def close(): Unit = {
     lock.foreach(_.unlock())
+    lock = None
   }
 }
 
