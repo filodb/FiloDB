@@ -90,7 +90,10 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
-    super.execute(source, querySession).doOnFinish(_ => Task.now(querySession.close()))
+    val child = super.execute(source, querySession)
+    // doOnFinish handles the success and exception case. It does not handle the canceled case
+    child.doOnCancel(Task.now(querySession.close()))
+    child.doOnFinish(_ => Task.now(querySession.close()))
   }
 
   def doExecute(source: ChunkSource,

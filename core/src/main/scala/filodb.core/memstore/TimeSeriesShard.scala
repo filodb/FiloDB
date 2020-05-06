@@ -1416,6 +1416,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     val reclaimReadLock = reclaimLock.asReadLock()
     querySession.lock = Some(reclaimReadLock)
     reclaimReadLock.lock()
+    // any exceptions thrown here should be caught by a wrapped Task.
+    // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
       case SinglePartitionScan(partition, _) =>
         val partIds = debox.Buffer.empty[Int]
