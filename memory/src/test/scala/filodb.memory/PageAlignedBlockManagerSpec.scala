@@ -204,4 +204,38 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
     factory.currentBlock.owner shouldEqual None  // new requestor did not have owner
   }
+
+  it should "ensure free space" in {
+    val stats = new MemoryStats(Map("test5" -> "test5"))
+    // This block manager has 5 blocks capacity
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
+
+    blockManager.numFreeBlocks shouldEqual 5
+    blockManager.ensureFreePercent(50)
+    blockManager.numFreeBlocks shouldEqual 5
+
+    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.numFreeBlocks shouldEqual 4
+    blockManager.ensureFreePercent(50)
+    blockManager.numFreeBlocks shouldEqual 4
+
+    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.numFreeBlocks shouldEqual 3
+    blockManager.ensureFreePercent(50)
+    blockManager.numFreeBlocks shouldEqual 3
+
+    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.numFreeBlocks shouldEqual 2
+    blockManager.ensureFreePercent(50)
+    // Should actually have done something this time.
+    blockManager.numFreeBlocks shouldEqual 3
+
+    blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.numFreeBlocks shouldEqual 2
+    blockManager.ensureFreePercent(90)
+    // Should reclaim multiple blocks.
+    blockManager.numFreeBlocks shouldEqual 5
+
+    blockManager.releaseBlocks()
+  }
 }
