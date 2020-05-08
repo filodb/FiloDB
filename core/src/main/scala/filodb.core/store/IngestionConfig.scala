@@ -33,6 +33,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean,
                              evictedPkBfCapacity: Int,
+                             // Amount of free blocks to periodically reclaim, as a percent of total number of blocks
+                             ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
                              maxQueryMatches: Int) {
@@ -58,7 +60,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
                                "max-query-matches" -> maxQueryMatches,
-                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity).asJava)
+                               "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
+                               "ensure-headroom-percent" -> ensureHeadroomPercent).asJava)
 }
 
 final case class AssignShardConfig(address: String, shardList: Seq[Int])
@@ -86,6 +89,7 @@ object StoreConfig {
                                            |demand-paging-parallelism = 10
                                            |demand-paging-enabled = true
                                            |evicted-pk-bloom-filter-capacity = 5000000
+                                           |ensure-headroom-percent = 5.0
                                            |trace-filters = {}
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
@@ -116,6 +120,7 @@ object StoreConfig {
                 config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"),
                 config.getInt("evicted-pk-bloom-filter-capacity"),
+                config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
                 config.getInt("max-query-matches"))
   }

@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable.ArrayBuffer
@@ -311,6 +312,9 @@ class TimeSeriesShard(val ref: DatasetRef,
     * This is needed to prevent races between ODP queries and reclaims.
     */
   private[memstore] final val reclaimLock = new StampedLock
+
+  // Requires reclaimLock.
+  startHeadroomTask(ingestSched)
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
@@ -1471,6 +1475,51 @@ class TimeSeriesShard(val ref: DatasetRef,
       shardStats.partitionsQueried.increment()
       p
     })
+  }
+
+  private def startHeadroomTask(sched: Scheduler): Unit = {
+    sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
+      def run() = ensureFreeBlocks
+    })
+  }
+
+  /**
+    * Expected to be called via a background task, to periodically ensure that enough blocks
+    * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
+    * from itself.
+    */
+  private def ensureFreeBlocks(): Unit = {
+    val stamp = tryExclusiveReclaimLock()
+    if (stamp == 0) {
+      logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
+    } else {
+      val numFree = blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
+      reclaimLock.unlockWrite(stamp)
+      val numBytes = numFree * blockStore.blockSizeInBytes
+      logger.debug(s"shard=$shardNum: ensureFreeBlocks: $numFree ($numBytes bytes)")
+    }
+  }
+
+  private def tryExclusiveReclaimLock(): Long = {
+    // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
+    // waiting will also stall new queries from starting. To protect against this, attempt with
+    // a timeout to let any stalled queries through. To prevent starvation of the exclusive
+    // lock attempt, increase the timeout each time, but eventually give up.
+
+    var timeout = 1;
+    while (true) {
+      val stamp = reclaimLock.tryWriteLock(timeout, TimeUnit.MILLISECONDS)
+      if (stamp != 0) {
+        return stamp
+      }
+      timeout <<= 1
+      if (timeout > 1024) {
+        // Give up after waiting (in total) a little over 2 seconds.
+        return 0
+      }
+      Thread.`yield`()
+    }
+    0 // never reached, but scala compiler complains otherwise
   }
 
   /**

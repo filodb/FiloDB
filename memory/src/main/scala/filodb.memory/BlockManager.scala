@@ -48,14 +48,18 @@ trait BlockManager {
   /**
     * Attempts to reclaim as many blocks as necessary to ensure that enough free blocks are
     * available.
+    *
+    * @return numFreeBlocks
     */
-  def ensureFreeBlocks(num: Int): Unit
+  def ensureFreeBlocks(num: Int): Int
 
   /**
     * Attempts to reclaim as many blocks as necessary to ensure that enough free bytes are
     * available. The actual amount reclaimed might be higher than requested.
+    *
+    * @return numFreeBlocks
     */
-  def ensureFreeBytes(amt: Long): Unit = {
+  def ensureFreeBytes(amt: Long): Int = {
     val blocks = (amt + blockSizeInBytes - 1) / blockSizeInBytes
     ensureFreeBlocks(Math.min(Integer.MAX_VALUE, blocks).toInt)
   }
@@ -66,8 +70,9 @@ trait BlockManager {
     * requested.
     *
     * @param pct percentage: 0.0 to 100.0
+    * @return numFreeBlocks
     */
-  def ensureFreePercent(pct: Double): Unit = {
+  def ensureFreePercent(pct: Double): Int = {
     ensureFreeBytes((totalMemorySizeInBytes * pct * 0.01).toLong)
   }
 
@@ -193,11 +198,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  override def ensureFreeBlocks(num: Int): Unit = {
+  override def ensureFreeBlocks(num: Int): Int = {
     lock.lock()
     try {
-      val require = num - freeBlocks.size
+      val require = num - numFreeBlocks
       if (require > 0) tryReclaim(require)
+      numFreeBlocks
     } finally {
       lock.unlock()
     }
