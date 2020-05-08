@@ -1493,8 +1493,11 @@ class TimeSeriesShard(val ref: DatasetRef,
     if (stamp == 0) {
       logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
     } else {
-      val numFree = blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
-      reclaimLock.unlockWrite(stamp)
+      val numFree = try {
+        blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
+      } finally {
+        reclaimLock.unlockWrite(stamp)
+      }
       val numBytes = numFree * blockStore.blockSizeInBytes
       logger.debug(s"shard=$shardNum: ensureFreeBlocks: $numFree ($numBytes bytes)")
     }
