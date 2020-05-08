@@ -1507,7 +1507,15 @@ class TimeSeriesShard(val ref: DatasetRef,
     // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
     // waiting will also stall new queries from starting. To protect against this, attempt with
     // a timeout to let any stalled queries through. To prevent starvation of the exclusive
-    // lock attempt, increase the timeout each time, but eventually give up.
+    // lock attempt, increase the timeout each time, but eventually give up. The reason why
+    // waiting for an exclusive lock causes this problem is that the thread must enqueue itself
+    // into the lock as a waiter, and all new shared requests must wait their turn. The risk
+    // with timing out is that if there's a continuous stream of long running queries (more than
+    // one second), then the exclusive lock will never be acqiured, and then ensureFreeBlocks
+    // won't be able to do its job. The timeout settings might need to be adjusted in that case.
+    // Perhaps the timeout should increase automatically if ensureFreeBlocks failed the last time?
+    // This isn't safe to do until we gain higher confidence that the shared lock is always
+    // released by queries.
 
     var timeout = 1;
     while (true) {
