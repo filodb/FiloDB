@@ -18,7 +18,7 @@ import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
   *                             would be available in the raw cluster
   * @param latestDownsampleTimestampFn the function that will provide millis timestamp of newest sample
   *                                    that would be available in the downsample cluster. This typically
-  *                                    is not "now" because of the delay in popuation of downsampled data
+  *                                    is not "now" because of the delay in population of downsampled data
   *                                    via spark job. If job is run every 6 hours,
   *                                    `(System.currentTimeMillis - 12.hours.toMillis)`
   *                                    may a function that could be passed. 12 hours to account for failures/reruns etc.
