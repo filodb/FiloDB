@@ -105,6 +105,12 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * receiving them, assuming that the clocks are in sync.
     */
   val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").withTags(TagSet.from(tags))
+
+  /**
+    * How much time the ingestion thread was potentially stalled while attempting to ensure
+    * free space. Unit is milliseconds.
+    */
+  val ingestionHeadroomStall = Kamon.gauge("ingestion-headroom-stall").withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -1489,6 +1495,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     * from itself.
     */
   private def ensureFreeBlocks(): Unit = {
+    val start = System.currentTimeMillis()
     val stamp = tryExclusiveReclaimLock()
     if (stamp == 0) {
       logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
@@ -1501,6 +1508,8 @@ class TimeSeriesShard(val ref: DatasetRef,
       val numBytes = numFree * blockStore.blockSizeInBytes
       logger.debug(s"shard=$shardNum: ensureFreeBlocks: $numFree ($numBytes bytes)")
     }
+    val stall = System.currentTimeMillis() - start
+    shardStats.ingestionHeadroomStall.update(stall)
   }
 
   private def tryExclusiveReclaimLock(): Long = {
