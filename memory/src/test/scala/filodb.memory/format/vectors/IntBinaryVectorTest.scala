@@ -119,7 +119,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
         new MemoryStats(Map("test"-> "test")), null, 16) {
         freeBlocks.asScala.foreach(_.set(0x55))   // initialize blocks to nonzero value
       }
-      val blockFactory = new BlockMemFactory(blockStore, None, 24, Map("foo" -> "bar"), true)
+      val blockFactory = new BlockMemFactory(blockStore, false, 24, Map("foo" -> "bar"), true)
 
       // original values will get mixed with nonzero contents if append does not overwrite original memory
       val builder = IntBinaryVector.appendingVectorNoNA(blockFactory, 10, nbits = 4, signed = false)

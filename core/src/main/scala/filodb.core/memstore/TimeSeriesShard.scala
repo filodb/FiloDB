@@ -330,7 +330,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, maxMetaSize,
+  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, false, maxMetaSize,
                                              shardTags ++ Map("overflow" -> "true"), true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
@@ -961,7 +961,6 @@ class TimeSeriesShard(val ref: DatasetRef,
       logger.info(s"Flush of dataset=$ref shard=$shardNum group=${flushGroup.groupNum} " +
         s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
     }
-    partitionMaker.cleanupOldestBuckets()
     // Some partitions might be evictable, see if need to free write buffer memory
     checkEnableAddPartitions()
     updateGauges()

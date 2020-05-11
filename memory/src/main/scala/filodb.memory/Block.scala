@@ -84,6 +84,13 @@ trait ReusableMemory extends StrictLogging {
   }
 
   /**
+    * Marks this memory as reclaimable or not.
+    */
+  def markReclaimable(reclaimable: Boolean): Unit = {
+    _isReusable.set(reclaimable)
+  }
+
+  /**
    * Calls the reclaimListener for each piece of metadata that we own
    */
   protected def reclaimWithMetadata(): Unit

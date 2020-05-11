@@ -202,14 +202,14 @@ object BlockMemFactory {
   *
   * @param blockStore The BlockManager which is used to request more blocks when the current
   *                   block is full.
-  * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
+  * @param reclaimable true if allocated blocks are immediately reclaimable
   * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param tags a set of keys/values to identify the purpose of this MemFactory for debugging
   * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
   *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
 class BlockMemFactory(blockStore: BlockManager,
-                      bucketTime: Option[Long],
+                      reclaimable: Boolean,
                       metadataAllocSize: Int,
                       var tags: Map[String, String],
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
@@ -222,7 +222,9 @@ class BlockMemFactory(blockStore: BlockManager,
   // tracks block currently being populated
   var currentBlock = requestBlock()
 
-  private def requestBlock() = blockStore.requestBlock(bucketTime, optionSelf).get
+  private def requestBlock() =
+    (if (reclaimable) blockStore.requestReclaimableBlock(optionSelf)
+     else blockStore.requestNonReclaimableBlock(optionSelf)).get
 
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
@@ -371,7 +373,7 @@ class BlockMemFactory(blockStore: BlockManager,
   def shutdown(): Unit = {}
 
   def debugString: String =
-    s"BlockMemFactory($bucketTime) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
+    s"BlockMemFactory($reclaimable) ${tags.map { case (k, v) => s"$k=$v" }.mkString(" ")}"
 }
 
 

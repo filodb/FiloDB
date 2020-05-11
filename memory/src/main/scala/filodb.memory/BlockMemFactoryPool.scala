@@ -27,7 +27,7 @@ class BlockMemFactoryPool(blockStore: BlockManager,
       factoryPool.dequeue
     } else {
       logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one")
-      new BlockMemFactory(blockStore, None, metadataAllocSize, baseTags)
+      new BlockMemFactory(blockStore, false, metadataAllocSize, baseTags)
     }
     fact.tags = baseTags ++ moreTags
     fact

@@ -25,7 +25,7 @@ class OffHeapMemory(schemas: Seq[Schema],
     },
     numPagesPerBlock = 50)
 
-  val blockMemFactory = new BlockMemFactory(blockStore, None, maxMetaSize, kamonTags, false)
+  val blockMemFactory = new BlockMemFactory(blockStore, false, maxMetaSize, kamonTags, false)
 
   val nativeMemoryManager = new NativeMemoryManager(nativeMemSize, kamonTags)
 

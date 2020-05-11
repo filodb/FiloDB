@@ -25,7 +25,6 @@ object BlockDetective {
                    manager: PageAlignedBlockManager,
                    pool: BlockMemFactoryPool): String = {
     val reclaimEvents = manager.reclaimEventsForPtr(ptr)
-    val timeBucketBlocks = manager.timeBlocksForPtr(ptr)
     val flushBlocks = pool.blocksContainingPtr(ptr)
 
     f"=== BlockDetective Report for 0x$ptr%016x ===\nReclaim Events:\n" +
@@ -33,8 +32,6 @@ object BlockDetective {
       f"  Block 0x${blk.address}%016x at ${(new DateTime(reclaimTime)).toString()}%s with $remaining%d bytes left" +
       oldOwner.map { bmf => s"\tfrom ${bmf.debugString}" }.getOrElse("")
     }.mkString("\n") +
-    "\nTime bucketed blocks:\n" +
-    timeBucketBlocks.map(_.debugString).mkString("\n") +
     "\nFlush block lists:\n" +
     flushBlocks.map(_.debugString).mkString("\n")
   }

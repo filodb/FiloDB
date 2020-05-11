@@ -75,7 +75,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
                        .map(_.getDouble(0)).toSeq
     // 4 partitions were flushed and not in memory anymore (should be at least 60, but
     // ingestion-based flushing can flush a bit more)
-    data1 should have length (62)
+    data1.length >= 60 shouldEqual true
 
     // Re-read data in memstore.  Verify that on-demand paging will bring data back
     val agg2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))

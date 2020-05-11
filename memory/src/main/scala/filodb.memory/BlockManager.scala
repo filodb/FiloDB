@@ -1,13 +1,11 @@
 package filodb.memory
 
-import java.lang.{Long => jLong}
 import java.util
 import java.util.concurrent.locks.ReentrantLock
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import kamon.metric.Counter
 import kamon.tag.TagSet
 
 /**
@@ -26,24 +24,42 @@ trait BlockManager {
   def numFreeBlocks: Int
 
   /**
-   * @return true if the time bucket has blocks allocated
-   */
-  def hasTimeBucket(bucket: Long): Boolean
-
-  /**
-    * @param memorySize The size of memory in bytes for which blocks are to be allocated
-    * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
-    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
-    * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
-    */
-  def requestBlocks(memorySize: Long, bucketTime: Option[Long], owner: Option[BlockMemFactory] = None): Seq[Block]
-
-  /**
-    * @param bucketTime the timebucket from which to allocate block(s), or None for the general list
+    * Request one block which is immediately marked as reclaimable. Reclamation order is FIFO.
+    *
     * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
     * @return One block of memory
     */
-  def requestBlock(bucketTime: Option[Long], owner: Option[BlockMemFactory] = None): Option[Block]
+  def requestReclaimableBlock(owner: Option[BlockMemFactory] = None): Option[Block]
+
+  /**
+    * Request one block which must be manually marked as reclaimable. Reclamation order is
+    * FIFO, based on when the block was originally requested. If a block is still marked as
+    * non-reclaimable when it's in the oldest position, it gets moved to the newest position.
+    *
+    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
+    * @return One block of memory
+    */
+  def requestNonReclaimableBlock(owner: Option[BlockMemFactory] = None): Option[Block]
+
+  /**
+    * Request one or more blocs which are immediately marked as reclaimable. Reclamation order is FIFO.
+    *
+    * @param memorySize The size of memory in bytes for which blocks are to be allocated
+    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
+    * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
+    */
+  def requestReclaimableBlocks(memorySize: Long, owner: Option[BlockMemFactory] = None): Seq[Block]
+
+  /**
+    * Request one or more blocks which must be manually marked as reclaimable. Reclamation order is
+    * FIFO, based on when the block was originally requested. If a block is still marked as
+    * non-reclaimable when it's in the oldest position, it gets moved to the newest position.
+    *
+    * @param memorySize The size of memory in bytes for which blocks are to be allocated
+    * @param owner the BlockMemFactory that will be owning this block, until reclaim.  Used for debugging.
+    * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
+    */
+  def requestNonReclaimableBlocks(memorySize: Long, owner: Option[BlockMemFactory] = None): Seq[Block]
 
   /**
     * Attempts to reclaim as many blocks as necessary to ensure that enough free blocks are
@@ -84,11 +100,6 @@ trait BlockManager {
   def releaseBlocks(): Unit
 
   /**
-   * Marks all time-bucketed blocks in buckets up to upTo as reclaimable
-   */
-  def markBucketedBlocksReclaimable(upTo: Long): Unit
-
-  /**
     * @return Memory stats for recording
     */
   def stats(): MemoryStats
@@ -98,9 +109,6 @@ class MemoryStats(tags: Map[String, String]) {
   val usedBlocksMetric = Kamon.gauge("blockstore-used-blocks").withTags(TagSet.from(tags))
   val freeBlocksMetric = Kamon.gauge("blockstore-free-blocks").withTags(TagSet.from(tags))
   val requestedBlocksMetric = Kamon.counter("blockstore-blocks-requested").withTags(TagSet.from(tags))
-  val usedBlocksTimeOrderedMetric = Kamon.gauge("blockstore-used-time-ordered-blocks").withTags(TagSet.from(tags))
-  val timeOrderedBlocksReclaimedMetric = Kamon.counter("blockstore-time-ordered-blocks-reclaimed")
-                                            .withTags(TagSet.from(tags))
   val blocksReclaimedMetric = Kamon.counter("blockstore-blocks-reclaimed").withTags(TagSet.from(tags))
 }
 
@@ -134,8 +142,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   protected var firstPageAddress: Long = 0L
 
   protected val freeBlocks: util.LinkedList[Block] = allocate()
-  protected[memory] val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
-  protected[memory] val usedBlocksTimeOrdered = new util.TreeMap[Long, util.LinkedList[Block]]
+  protected[memory] val usedBlocks: util.Queue[Block] = new util.ArrayDeque[Block]()
   val reclaimLog = new collection.mutable.Queue[ReclaimEvent]
 
   protected val lock = new ReentrantLock()
@@ -148,8 +155,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   override def numFreeBlocks: Int = freeBlocks.size
 
-  override def requestBlock(bucketTime: Option[Long], bmf: Option[BlockMemFactory] = None): Option[Block] = {
-    val blocks = requestBlocks(blockSizeInBytes, bucketTime, bmf)
+  override def requestReclaimableBlock(bmf: Option[BlockMemFactory] = None): Option[Block] = {
+    oneBlockOnly(requestReclaimableBlocks(blockSizeInBytes, bmf))
+  }
+
+  override def requestNonReclaimableBlock(bmf: Option[BlockMemFactory] = None): Option[Block] = {
+    oneBlockOnly(requestNonReclaimableBlocks(blockSizeInBytes, bmf))
+  }
+
+  private def oneBlockOnly(blocks: Seq[Block]): Option[Block] = {
     blocks.size match {
       case 0 => None
       case 1 => Some(blocks.head)
@@ -157,22 +171,17 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  /* Used in tests for assertion */
-  def usedBlocksSize(bucketTime: Option[Long]): Int = {
-    bucketTime match {
-      case Some(t) => usedBlocksTimeOrdered.get(t).size()
-      case None => usedBlocks.size()
-    }
+  override def requestReclaimableBlocks(memorySize: Long, bmf: Option[BlockMemFactory] = None): Seq[Block] = {
+    doRequestBlocks(memorySize, true, bmf);
   }
 
-  /**
-    * Allocates requested number of blocks. If enough blocks are not available,
-    * then uses the ReclaimPolicy to check if blocks can be reclaimed
-    * Uses a lock to ensure that concurrent requests are safe.
-    */
-  override def requestBlocks(memorySize: Long,
-                             bucketTime: Option[Long],
-                             bmf: Option[BlockMemFactory] = None): Seq[Block] = {
+  override def requestNonReclaimableBlocks(memorySize: Long, bmf: Option[BlockMemFactory] = None): Seq[Block] = {
+    doRequestBlocks(memorySize, false, bmf);
+  }
+
+  private def doRequestBlocks(memorySize: Long,
+                              reclaimable: Boolean,
+                              bmf: Option[BlockMemFactory] = None): Seq[Block] = {
     lock.lock()
     try {
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
@@ -185,7 +194,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         (0 until num).foreach { i =>
           val block = freeBlocks.remove()
           if (bmf.nonEmpty) block.setOwner(bmf.get)
-          use(block, bucketTime)
+          block.markReclaimable(reclaimable);
+          usedBlocks.add(block)
+          stats.usedBlocksMetric.update(usedBlocks.size())
+          stats.freeBlocksMetric.update(freeBlocks.size())
           allocated(i) = block
         }
         allocated
@@ -196,6 +208,11 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     } finally {
       lock.unlock()
     }
+  }
+
+  /* Used in tests for assertion */
+  def usedBlocksSize: Int = {
+    usedBlocks.size()
   }
 
   override def ensureFreeBlocks(num: Int): Int = {
@@ -222,22 +239,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     blocks
   }
 
-  protected def use(block: Block, bucketTime: Option[Long]) = {
-    block.markInUse
-    bucketTime match {
-      case Some(bucket) => val blockList = Option(usedBlocksTimeOrdered.get(bucket)).getOrElse {
-                                             val list = new util.LinkedList[Block]()
-                                             usedBlocksTimeOrdered.put(bucket, list)
-                                             list
-                                           }
-                           blockList.add(block)
-                           stats.usedBlocksTimeOrderedMetric.update(numTimeOrderedBlocks)
-      case None =>         usedBlocks.add(block)
-                           stats.usedBlocksMetric.update(usedBlocks.size())
-    }
-    stats.freeBlocksMetric.update(freeBlocks.size())
-  }
-
   private def addToReclaimLog(block: Block): Unit = {
     val event = ReclaimEvent(block, System.currentTimeMillis, block.owner, block.remaining)
     if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
@@ -246,72 +247,27 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   protected def tryReclaim(num: Int): Unit = {
     var reclaimed = 0
-    var currList = 0
-    val timeOrderedListIt = usedBlocksTimeOrdered.entrySet.iterator
-    while ( reclaimed < num &&
-            timeOrderedListIt.hasNext ) {
-      val entry = timeOrderedListIt.next
-      val prevReclaimed = reclaimed
-      val removed = reclaimFrom(entry.getValue, stats.timeOrderedBlocksReclaimedMetric)
-      if (removed.nonEmpty) {
-        logger.info(s"timeBlockReclaim: Reclaimed ${removed.length} time ordered blocks " +
-                    s"from list at t=${entry.getKey} (${(System.currentTimeMillis - entry.getKey)/3600000} hrs ago) " +
-                    s"\nReclaimed blocks: ${removed.map(b => jLong.toHexString(b.address)).mkString(" ")}")
+
+    for (i <- 0 until usedBlocks.size()) {
+      if (reclaimed >= num) return
+      val block = usedBlocks.remove()
+      if (!block.canReclaim) {
+        // Skip it the next time.
+        usedBlocks.add(block)
+      } else {
+        addToReclaimLog(block)
+        block.reclaim()
+        block.clearOwner()
+        freeBlocks.add(block)
+        stats.freeBlocksMetric.update(freeBlocks.size())
+        stats.blocksReclaimedMetric.increment()
+        reclaimed += 1
       }
-      // If the block list is now empty, remove it from tree map
-      if (entry.getValue.isEmpty) timeOrderedListIt.remove()
     }
-    if (reclaimed < num) reclaimFrom(usedBlocks, stats.blocksReclaimedMetric)
-    // if we do not get required blocks even after reclaim call
+
     if (reclaimed < num) {
-      logger.warn(s"$num blocks to reclaim but only reclaimed $reclaimed.  usedblocks=${usedBlocks.size} " +
-                  s"usedBlocksTimeOrdered=${usedBlocksTimeOrdered.asScala.toList.map{case(n, l) => (n, l.size)}}")
+      logger.warn(s"$num blocks to reclaim but only reclaimed $reclaimed.  usedblocks=${usedBlocks.size}")
     }
-
-    def reclaimFrom(list: util.LinkedList[Block], reclaimedCounter: Counter): Seq[Block] = {
-      val entries = list.iterator
-      val removed = new collection.mutable.ArrayBuffer[Block]
-      while (entries.hasNext && reclaimed < num) {
-        val block = entries.next
-        if (block.canReclaim) {
-          entries.remove()
-          removed += block
-          addToReclaimLog(block)
-          block.reclaim()
-          block.clearOwner()
-          freeBlocks.add(block)
-          stats.freeBlocksMetric.update(freeBlocks.size())
-          reclaimedCounter.increment()
-          reclaimed = reclaimed + 1
-        }
-      }
-      removed
-    }
-  }
-
-  def numTimeOrderedBlocks: Int = usedBlocksTimeOrdered.values.asScala.map(_.size).sum
-
-  def timeBuckets: Seq[Long] = usedBlocksTimeOrdered.keySet.asScala.toSeq
-
-  def markBucketedBlocksReclaimable(upTo: Long): Unit = {
-    lock.lock()
-    try {
-      logger.info(s"timeBlockReclaim: Marking ($upTo) - this is -${(System.currentTimeMillis - upTo)/3600000}hrs")
-      val keys = usedBlocksTimeOrdered.headMap(upTo).keySet.asScala
-      logger.info(s"timeBlockReclaim: Marking lists $keys as reclaimable")
-      usedBlocksTimeOrdered.headMap(upTo).values.asScala.foreach { list =>
-        list.asScala.foreach(_.tryMarkReclaimable)
-      }
-    } finally {
-      lock.unlock()
-    }
-  }
-
-  def hasTimeBucket(bucket: Long): Boolean = {
-    lock.lock()
-    val result = usedBlocksTimeOrdered.containsKey(bucket)
-    lock.unlock()
-    result
   }
 
   /**
@@ -319,9 +275,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
    */
   def reclaimAll(): Unit = {
     logger.warn(s"Reclaiming all used blocks -- THIS BETTER BE A TEST!!!")
-    markBucketedBlocksReclaimable(Long.MaxValue)
     usedBlocks.asScala.foreach(_.markReclaimable)
-    tryReclaim(usedBlocks.size + numTimeOrderedBlocks)
   }
 
   /**
@@ -330,17 +284,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
    */
   def reclaimEventsForPtr(ptr: BinaryRegion.NativePointer): Seq[ReclaimEvent] =
     reclaimLog.filter { ev => ptr >= ev.block.address && ptr < (ev.block.address + ev.block.capacity) }
-
-  def timeBlocksForPtr(ptr: BinaryRegion.NativePointer): Seq[Block] = {
-    lock.lock()
-    try {
-      usedBlocksTimeOrdered.entrySet.iterator.asScala.flatMap { entry =>
-        BlockDetective.containsPtr(ptr, entry.getValue)
-      }.toBuffer
-    } finally {
-      lock.unlock()
-    }
-  }
 
   def releaseBlocks(): Unit = {
     lock.lock()
