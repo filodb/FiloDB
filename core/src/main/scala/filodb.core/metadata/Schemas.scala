@@ -261,6 +261,9 @@ final case class Schemas(part: PartitionSchema,
 
   schemas.values.foreach { s => _schemas(s.schemaHash) = s }
 
+  /**
+    * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
+    */
   val bytesPerSampleSwag: Map[Int, Int] = {
     schemas.values.map { s  =>
       val est = s.data.columns.map(_.columnType).map {

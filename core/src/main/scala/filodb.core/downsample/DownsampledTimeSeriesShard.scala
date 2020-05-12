@@ -246,7 +246,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
       .mapAsync(downsampleStoreConfig.demandPagingParallelism) { partBytes =>
         val partLoadSpan = Kamon.spanBuilder(s"single-partition-cassandra-latency")
-          .asChildOf(Kamon.currentSpan()).tag("dataset", rawDatasetRef.toString).tag("shard", shardNum)
+          .asChildOf(Kamon.currentSpan())
+          .tag("dataset", rawDatasetRef.toString)
+          .tag("shard", shardNum)
           .start()
         // TODO test multi-partition scan if latencies are high
         store.readRawPartitions(downsampledDataset,
@@ -280,8 +282,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val numSamplesPerChunk = downsampleStoreConfig.flushInterval.toMillis / resolution
           val numChunksPerTs = (end-st + downsampleStoreConfig.flushInterval.toMillis - 1) /
                                            downsampleStoreConfig.flushInterval.toMillis
-          val estDataSize = schemas.bytesPerSampleSwag(schId) * lookup.partsInMemory.length *
-                                    numSamplesPerChunk * numChunksPerTs
+
+          val estDataSize = schemas.bytesPerSampleSwag(schemas(schId).downsample.get.schemaHash) *
+                          lookup.partsInMemory.length * numSamplesPerChunk * numChunksPerTs
           require(estDataSize > downsampleStoreConfig.maxDataPerShardQuery,
             s"Estimate of $estDataSize bytes exceeds limit of " +
               s"${downsampleStoreConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
