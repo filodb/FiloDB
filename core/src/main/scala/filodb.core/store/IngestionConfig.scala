@@ -74,7 +74,7 @@ object StoreConfig {
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
-                                           |max-data-per-shard-query = 1gb
+                                           |max-data-per-shard-query = 1 GB
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
