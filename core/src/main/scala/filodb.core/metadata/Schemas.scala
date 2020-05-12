@@ -8,6 +8,7 @@ import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.BinaryRegion
@@ -259,6 +260,19 @@ final case class Schemas(part: PartitionSchema,
   private val _schemas = Array.fill(64*1024)(Schemas.UnknownSchema)
 
   schemas.values.foreach { s => _schemas(s.schemaHash) = s }
+
+  val bytesPerSampleSwag: Map[Int, Int] = {
+    schemas.values.map { s  =>
+      val est = s.data.columns.map(_.columnType).map {
+        case ColumnType.LongColumn => 3000
+        case ColumnType.TimestampColumn => 10
+        case ColumnType.HistogramColumn => 3000
+        case ColumnType.DoubleColumn => 1000
+        case _ => ???
+      }.sum
+      s.schemaHash -> est
+    }.toMap
+  }
 
   /**
    * Returns the Schema for a given schemaID, or UnknownSchema if not found

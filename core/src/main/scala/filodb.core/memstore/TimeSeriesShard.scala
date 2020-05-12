@@ -1437,17 +1437,13 @@ class TimeSeriesShard(val ref: DatasetRef,
         val partIds = debox.Buffer.empty[Int]
         partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
         PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
-      case FilteredPartitionScan(split, filters) =>
+      case FilteredPartitionScan(_, filters) =>
         // No matter if there are filters or not, need to run things through Lucene so we can discover potential
         // TSPartitions to read back from disk
         val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
         shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
 
         Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
-        if (matches.length > storeConfig.maxQueryMatches)
-          throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
-            s"to narrow your query by adding more filters so there is less than " +
-            s"${storeConfig.maxQueryMatches} matches or request that number of shards for the metric be increased")
 
         // first find out which partitions are being queried for data not in memory
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
@@ -1474,8 +1470,39 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
+  /**
+    * Note this approach below assumes the following for quick size estimation. The sizing is more
+    * a swag than reality:
+    * (a) every matched time series ingests at all query times. Looking up start/end times and more
+    *     precise size estimation is costly
+    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
+    *     number of histogram buckets, samples per chunk etc.
+    * (c) Assumes reporting interval is 20s.
+    */
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult) = {
+    lookup.firstSchemaId.foreach { schId =>
+      lookup.chunkMethod match {
+        case TimeRangeChunkScan(st, end) =>
+          val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
+          val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
+          val numSamplesPerChunk = storeConfig.flushInterval.toMillis / assumedResolution
+          val numChunksPerTs = (end-st + storeConfig.flushInterval.toMillis - 1)/ storeConfig.flushInterval.toMillis
+          val estDataSize = schemas.bytesPerSampleSwag(schId) * numMatches * numSamplesPerChunk * numChunksPerTs
+          require(estDataSize > storeConfig.maxDataPerShardQuery,
+              s"Estimate of $estDataSize bytes exceeds limit of " +
+              s"${storeConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
+              s"(a) narrow your query filters to reduce to fewer than the current $numMatches matches " +
+              s"(b) reduce current time range of ${(end-st) / 1000 / 60 / 60} hours")
+        case _ =>
+        }
+      }
+  }
+
   def scanPartitions(iterResult: PartLookupResult,
                      querySession: QuerySession): Observable[ReadablePartition] = {
+
+  capDataScannedPerShardCheck(iterResult)
+
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
     Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()

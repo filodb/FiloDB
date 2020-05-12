@@ -37,7 +37,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              ensureHeadroomPercent: Double,
                              // filters on ingested records to log in detail
                              traceFilters: Map[String, String],
-                             maxQueryMatches: Int) {
+                             maxDataPerShardQuery: Long) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -59,7 +59,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "multi-partition-odp" -> multiPartitionODP,
                                "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled,
-                               "max-query-matches" -> maxQueryMatches,
+                               "max-data-per-shard-query" -> maxDataPerShardQuery,
                                "evicted-pk-bloom-filter-capacity" -> evictedPkBfCapacity,
                                "ensure-headroom-percent" -> ensureHeadroomPercent).asJava)
 }
@@ -74,7 +74,7 @@ object StoreConfig {
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
-                                           |max-query-matches = 250000
+                                           |max-data-per-shard-query = 1gb
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000
@@ -122,7 +122,7 @@ object StoreConfig {
                 config.getInt("evicted-pk-bloom-filter-capacity"),
                 config.getDouble("ensure-headroom-percent"),
                 config.as[Map[String, String]]("trace-filters"),
-                config.getInt("max-query-matches"))
+                config.getMemorySize("max-data-per-shard-query").toBytes)
   }
 }
 
