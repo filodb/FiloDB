@@ -268,10 +268,11 @@ final case class Schemas(part: PartitionSchema,
     schemas.values.map { s  =>
       val est = s.data.columns.map(_.columnType).map {
         case ColumnType.LongColumn => 3000
+        case ColumnType.IntColumn => 3000
         case ColumnType.TimestampColumn => 10
         case ColumnType.HistogramColumn => 3000
         case ColumnType.DoubleColumn => 1000
-        case _ => ???
+        case _ => 0
       }.sum
       s.schemaHash -> est
     }.toMap
