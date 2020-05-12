@@ -80,7 +80,7 @@ object StoreConfig {
                                            |max-buffer-pool-size = 10000
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
-                                           |num-block-pages = 1000
+                                           |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
                                            |part-index-flush-max-delay = 60 seconds
