@@ -1,14 +1,19 @@
-package filodb.coordinator.queryplanner
+//package filodb.coordinator.queryplanner
+//
+//import filodb.core.query.QueryContext
+//import filodb.query.LogicalPlan
+//import filodb.query.exec.ExecPlan
+//
 
-import filodb.core.query.QueryContext
-import filodb.query.LogicalPlan
-import filodb.query.exec.ExecPlan
-
-class MultiPartitionPlanner(metricPlannerMap: Map[String, QueryPlanner],
-                            localPlanner: QueryPlanner) extends  QueryPlanner {
-
-  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    // TODO create multiple planners based on query locality and stitch results
-    localPlanner.materialize(logicalPlan, qContext)
-  }
-}
+//
+//class MultiPartitionPlanner(plannerProvider: PlannerProvider,
+//                            localPlanner: QueryPlanner) extends  QueryPlanner {
+//
+//  override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+//    val routingKeys = LogicalPlanUtils.getRoutingKeys(logicalPlan)
+//    // TODO get time for Non Periodic Series like LabelValues, SeriesKeysByFilters
+//    val timeRange = LogicalPlanUtils.getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
+//    val planners = routingKeys.flatMap(plannerProvider.getPlanners(_, timeRange))
+//    localPlanner.materialize(logicalPlan, qContext)
+//  }
+//}

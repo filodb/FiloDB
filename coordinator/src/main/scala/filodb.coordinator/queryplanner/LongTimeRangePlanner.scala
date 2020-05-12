@@ -23,6 +23,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            earliestRawTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
 
+  override def getSingleClusterPlanner: SingleClusterPlanner = rawClusterPlanner.getSingleClusterPlanner
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     logicalPlan match {
       case p: PeriodicSeriesPlan =>

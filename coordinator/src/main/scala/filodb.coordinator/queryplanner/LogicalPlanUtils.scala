@@ -1,5 +1,7 @@
 package filodb.coordinator.queryplanner
 
+import filodb.core.query.ColumnFilter
+import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 
@@ -29,7 +31,7 @@ object LogicalPlanUtils {
       case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-        getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
+                                              getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
@@ -122,14 +124,52 @@ object LogicalPlanUtils {
     }
   }
 
-  def getMetricName(logicalPlan: LogicalPlan): Seq[String] = {
+  def getMetricName(logicalPlan: LogicalPlan): String = {
+   getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel).get.head
+  }
+
+  def getRoutingKeys(logicalPlan: LogicalPlan): Seq[RoutingKey] = {
     val leafPlans = LogicalPlan.findLeafLogicalPlans(logicalPlan)
     leafPlans.map {
       _ match {
-        case lp: RawSeries => lp.filters.filter(_.column.equals("__name__")).map(_.filter.valuesStrings.head.toString).
-          head
+        case lp: RawSeries => val workspace = lp.filters.filter(_.column.equals("_ws_")).
+                              map(_.filter.valuesStrings.head.toString).head
+                              val namespace = lp.filters.filter(_.column.equals("_ns_")).
+                              map(_.filter.valuesStrings.head.toString).head
+                              RoutingKey(workspace, namespace)
+
         case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
+    }
+  }
+
+  private def getLabelValueFromFilters(filters: Seq[ColumnFilter], labelName: String): Option[Set[String]] = {
+    val matchingFilters = filters.filter(_.column.equals(labelName))
+    if (matchingFilters.isEmpty)
+      None
+    else
+      Some(matchingFilters.head.filter.valuesStrings.map(_.toString))
+  }
+
+  def getLabelValueFromLogicalPlan(logicalPlan: LogicalPlan, labelName: String): Option[Set[String]] = {
+    val labelValues = LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
+      lp match {
+        case lp: LabelValues           => lp.labelConstraints.get(labelName).map(Set(_))
+        case lp: RawSeries             => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: RawChunkMeta          => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: SeriesKeysByFilters   => getLabelValueFromFilters(lp.filters, labelName)
+        case lp: ScalarTimeBasedPlan   => Nil // Plan does not have labels
+        case lp: ScalarFixedDoublePlan => Nil
+        case lp: ScalarBinaryOperation => Nil
+        case _                         => throw new BadQueryException("Invalid logical plan")
+      }
+    }
+    if (labelValues.isEmpty) {
+      None
+    } else {
+      val res: Set[String] = Set()
+      // Concatenate results
+      Some(labelValues.foldLeft(res) { (acc, i) => i.union(acc) })
     }
   }
 }

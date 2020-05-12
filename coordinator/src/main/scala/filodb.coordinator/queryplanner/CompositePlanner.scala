@@ -1,7 +1,6 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
@@ -21,10 +20,12 @@ class CompositePlanner(dsRef: DatasetRef,
                        failureProvider: FailureProvider,
                        earliestRawTimestampFn: => Long,
                        earliestDownsampleTimestampFn: => Long,
+                       plannerProvider: PlannerProvider,
                        queryConfig: QueryConfig,
                        spreadProvider: SpreadProvider = StaticSpreadProvider(),
                        stitchDispatcher: => PlanDispatcher = { InProcessPlanDispatcher }) extends QueryPlanner
   with StrictLogging {
+
   // Note the composition of query planners below using decorator pattern
   val rawClusterPlanner = new SingleClusterPlanner(dsRef, schemas, shardMapperFunc,
                                   earliestRawTimestampFn, queryConfig, spreadProvider)
@@ -33,9 +34,11 @@ class CompositePlanner(dsRef: DatasetRef,
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
                                           earliestRawTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryConfig)
-  //val multiPodPlanner = new MultiClusterPlanner(podLocalityProvider, haPlanner)
+  val multiClusterPlanner = new MultiClusterPlanner(plannerProvider, haPlanner, schemas.)
 
+
+  def getSingleClusterPlanner: SingleClusterPlanner = longTimeRangePlanner.getSingleClusterPlanner
   def materialize(rootLogicalPlan: LogicalPlan, options: QueryContext): ExecPlan = {
-    haPlanner.materialize(rootLogicalPlan, options)
+    multiClusterPlanner.materialize(rootLogicalPlan, options)
   }
 }

@@ -28,6 +28,8 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("raw", logicalPlan)
     }
+
+
   }
 
   val downsamplePlanner = new QueryPlanner {
