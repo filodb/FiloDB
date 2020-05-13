@@ -282,9 +282,9 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val numSamplesPerChunk = downsampleStoreConfig.flushInterval.toMillis / resolution
           val numChunksPerTs = (end-st + downsampleStoreConfig.flushInterval.toMillis - 1) /
                                            downsampleStoreConfig.flushInterval.toMillis
-          val estDataSize = schemas.bytesPerSampleSwag(schemas(schId).downsample.get.schemaHash) *
+          val estDataSize = schemas.bytesPerSampleSwag(schemas(schId).schemaHash) *
                           lookup.partsInMemory.length * numSamplesPerChunk * numChunksPerTs
-          require(estDataSize > downsampleStoreConfig.maxDataPerShardQuery,
+          require(estDataSize < downsampleStoreConfig.maxDataPerShardQuery,
             s"Estimate of $estDataSize bytes exceeds limit of " +
               s"${downsampleStoreConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
               s"(a) narrow your query filters to reduce to fewer than the current ${lookup.partsInMemory.length} " +
@@ -309,7 +309,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
         val ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
-        downsampleTtls(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
+        downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }

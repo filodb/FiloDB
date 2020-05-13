@@ -265,7 +265,9 @@ final case class Schemas(part: PartitionSchema,
     * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
     */
   val bytesPerSampleSwag: Map[Int, Double] = {
-    schemas.values.map { s  =>
+
+    val allSchemas = schemas.values ++ schemas.values.flatMap(_.downsample)
+    allSchemas.map { s  =>
       val est = s.data.columns.map(_.columnType).map {
         case ColumnType.LongColumn => 1
         case ColumnType.IntColumn => 1

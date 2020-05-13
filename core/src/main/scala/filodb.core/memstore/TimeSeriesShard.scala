@@ -1488,7 +1488,7 @@ class TimeSeriesShard(val ref: DatasetRef,
           val numSamplesPerChunk = storeConfig.flushInterval.toMillis / assumedResolution
           val numChunksPerTs = (end-st + storeConfig.flushInterval.toMillis - 1)/ storeConfig.flushInterval.toMillis
           val estDataSize = schemas.bytesPerSampleSwag(schId) * numMatches * numSamplesPerChunk * numChunksPerTs
-          require(estDataSize > storeConfig.maxDataPerShardQuery,
+          require(estDataSize < storeConfig.maxDataPerShardQuery,
               s"Estimate of $estDataSize bytes exceeds limit of " +
               s"${storeConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
               s"(a) narrow your query filters to reduce to fewer than the current $numMatches matches " +
