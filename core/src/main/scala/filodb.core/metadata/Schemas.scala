@@ -264,15 +264,15 @@ final case class Schemas(part: PartitionSchema,
   /**
     * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
     */
-  val bytesPerSampleSwag: Map[Int, Int] = {
+  val bytesPerSampleSwag: Map[Int, Double] = {
     schemas.values.map { s  =>
       val est = s.data.columns.map(_.columnType).map {
-        case ColumnType.LongColumn => 3000
-        case ColumnType.IntColumn => 3000
-        case ColumnType.TimestampColumn => 10
-        case ColumnType.HistogramColumn => 3000
-        case ColumnType.DoubleColumn => 1000
-        case _ => 0
+        case ColumnType.LongColumn => 1
+        case ColumnType.IntColumn => 1
+        case ColumnType.TimestampColumn => 0.5
+        case ColumnType.HistogramColumn => 10
+        case ColumnType.DoubleColumn => 2
+        case _ => 0 // TODO allow without sizing for now
       }.sum
       s.schemaHash -> est
     }.toMap

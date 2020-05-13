@@ -282,7 +282,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
           val numSamplesPerChunk = downsampleStoreConfig.flushInterval.toMillis / resolution
           val numChunksPerTs = (end-st + downsampleStoreConfig.flushInterval.toMillis - 1) /
                                            downsampleStoreConfig.flushInterval.toMillis
-
           val estDataSize = schemas.bytesPerSampleSwag(schemas(schId).downsample.get.schemaHash) *
                           lookup.partsInMemory.length * numSamplesPerChunk * numChunksPerTs
           require(estDataSize > downsampleStoreConfig.maxDataPerShardQuery,
