@@ -1470,32 +1470,19 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  /**
-    * Note this approach below assumes the following for quick size estimation. The sizing is more
-    * a swag than reality:
-    * (a) every matched time series ingests at all query times. Looking up start/end times and more
-    *     precise size estimation is costly
-    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
-    *     number of histogram buckets, samples per chunk etc.
-    * (c) Assumes reporting interval is 20s.
-    */
+  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
+
   private def capDataScannedPerShardCheck(lookup: PartLookupResult) = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
         case TimeRangeChunkScan(st, end) =>
           val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
-          val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
-          val numSamplesPerChunk = storeConfig.flushInterval.toMillis / assumedResolution
-          val numChunksPerTs = (end-st + storeConfig.flushInterval.toMillis - 1)/ storeConfig.flushInterval.toMillis
-          val estDataSize = schemas.bytesPerSampleSwag(schId) * numMatches * numSamplesPerChunk * numChunksPerTs
-          require(estDataSize < storeConfig.maxDataPerShardQuery,
-              s"Estimate of $estDataSize bytes exceeds limit of " +
-              s"${storeConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
-              s"(a) narrow your query filters to reduce to fewer than the current $numMatches matches " +
-              s"(b) reduce current time range of ${(end-st) / 1000 / 60 / 60} hours")
+          schemas.ensureQueriedDataSizeWithinLimit(schId, numMatches,
+            storeConfig.flushInterval.toMillis,
+            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
         case _ =>
-        }
       }
+    }
   }
 
   def scanPartitions(iterResult: PartLookupResult,

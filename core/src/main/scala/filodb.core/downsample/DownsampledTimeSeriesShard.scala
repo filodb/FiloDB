@@ -267,29 +267,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       }
   }
 
-  /**
-    * Note this approach below assumes the following for quick size estimation. The sizing is more
-    * a swag than reality:
-    * (a) every matched time series ingests at all query times. Looking up start/end times and more
-    *     precise size estimation is costly
-    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
-    *     number of histogram buckets, samples per chunk etc.
-    */
   private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long) = {
     lookup.firstSchemaId.foreach { schId =>
       lookup.chunkMethod match {
         case TimeRangeChunkScan(st, end) =>
-          val numSamplesPerChunk = downsampleStoreConfig.flushInterval.toMillis / resolution
-          val numChunksPerTs = (end-st + downsampleStoreConfig.flushInterval.toMillis - 1) /
-                                           downsampleStoreConfig.flushInterval.toMillis
-          val estDataSize = schemas.bytesPerSampleSwag(schemas(schId).schemaHash) *
-                          lookup.partsInMemory.length * numSamplesPerChunk * numChunksPerTs
-          require(estDataSize < downsampleStoreConfig.maxDataPerShardQuery,
-            s"Estimate of $estDataSize bytes exceeds limit of " +
-              s"${downsampleStoreConfig.maxDataPerShardQuery} bytes queried per shard. Try one or more of these: " +
-              s"(a) narrow your query filters to reduce to fewer than the current ${lookup.partsInMemory.length} " +
-              s"matches (b) reduce current time range of ${(end-st) / 1000 / 60 / 60} hours")
-
+          schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.partsInMemory.length,
+                                      downsampleStoreConfig.flushInterval.toMillis,
+                                      resolution, end - st, downsampleStoreConfig.maxDataPerShardQuery)
         case _ =>
       }
     }
