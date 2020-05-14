@@ -2,8 +2,8 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
-import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
+import filodb.query.{LabelValues, LogicalPlan, MetadataQueryPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
+import filodb.query.exec.{ExecPlan, LabelValuesDistConcatExec, PartKeysDistConcatExec, PlanDispatcher, StitchRvsExec}
 
 /**
   * LongTimeRangePlanner knows about limited retention of raw data, and existence of downsampled data.
@@ -23,7 +23,8 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            earliestRawTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
 
-  override def getSingleClusterPlanner: SingleClusterPlanner = rawClusterPlanner.getSingleClusterPlanner
+  override def getBasePlanner: SingleClusterPlanner = rawClusterPlanner.getBasePlanner
+
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     logicalPlan match {
       case p: PeriodicSeriesPlan =>
@@ -51,9 +52,15 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
-      case _ =>
-        // for now send everything else to raw cluster. Metadata queries are TODO
-        rawClusterPlanner.materialize(logicalPlan, qContext)
+      case l: LabelValues =>
+        val rawExec = rawClusterPlanner.materialize(l, qContext)
+        val downSampleExec = downsampleClusterPlanner.materialize(l, qContext)
+        LabelValuesDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
+
+      case s: SeriesKeysByFilters =>
+        val rawExec = rawClusterPlanner.materialize(s, qContext)
+        val downSampleExec = downsampleClusterPlanner.materialize(s, qContext)
+        PartKeysDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
     }
   }
 }

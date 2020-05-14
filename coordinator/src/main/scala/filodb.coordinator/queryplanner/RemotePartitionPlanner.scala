@@ -7,7 +7,7 @@ import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec}
 
 class RemotePartitionPlanner(dsRef: DatasetRef) extends QueryPlanner {
 
-  override def getSingleClusterPlanner: SingleClusterPlanner = ???
+  override def getBasePlanner: SingleClusterPlanner = ???
   /**
     * Converts a logical plan to execution plan.
     *

@@ -26,10 +26,10 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
 
-  def getSingleClusterPlanner: SingleClusterPlanner = {
+  def getBasePlanner: SingleClusterPlanner = {
     localPlanner match {
       case s: SingleClusterPlanner => s
-      case l: LongTimeRangePlanner => l.getSingleClusterPlanner
+      case l: LongTimeRangePlanner => l.getBasePlanner
     }
   }
 

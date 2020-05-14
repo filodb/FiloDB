@@ -34,10 +34,10 @@ class CompositePlanner(dsRef: DatasetRef,
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
                                           earliestRawTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryConfig)
-  val multiClusterPlanner = new MultiClusterPlanner(plannerProvider, haPlanner, schemas.)
+  val multiClusterPlanner = new MultiClusterPlanner(plannerProvider, haPlanner)
 
 
-  def getSingleClusterPlanner: SingleClusterPlanner = longTimeRangePlanner.getSingleClusterPlanner
+  def getBasePlanner: SingleClusterPlanner = longTimeRangePlanner.getBasePlanner
   def materialize(rootLogicalPlan: LogicalPlan, options: QueryContext): ExecPlan = {
     multiClusterPlanner.materialize(rootLogicalPlan, options)
   }

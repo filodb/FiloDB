@@ -38,6 +38,6 @@ trait QueryPlanner {
     }
   }
 
-  def getSingleClusterPlanner: SingleClusterPlanner
+  def getBasePlanner: SingleClusterPlanner
 
 }

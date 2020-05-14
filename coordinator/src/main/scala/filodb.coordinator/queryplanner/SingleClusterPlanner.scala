@@ -38,7 +38,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
                            spreadProvider: SpreadProvider = StaticSpreadProvider())
                                 extends QueryPlanner with StrictLogging {
 
-  override def getSingleClusterPlanner: SingleClusterPlanner = this
+  override def getBasePlanner: SingleClusterPlanner = this
   private val dsOptions = schemas.part.options
   private val shardColumns = dsOptions.shardKeyColumns.sorted
 

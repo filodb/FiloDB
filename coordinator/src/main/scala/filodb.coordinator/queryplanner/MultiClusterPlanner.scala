@@ -14,18 +14,18 @@ import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
 case class RoutingKey (workspace: String, namespace: String)
 
 trait PlannerProvider {
-  def getPlanner(metricName: String): QueryPlanner
-  // Returns true if Planner is for local/current cluster
-  def isLocal(planner: QueryPlanner): Boolean
-  // Give all remote & local planners for given time range
-  def getPlanners (routingKey: RoutingKey, queryTimeRange: TimeRange): Seq[QueryPlanner]
-  // Get remote planners for current partition. It will give all Recording rules cluster planners and
-  def getRemotePlannersForPartition: Seq[QueryPlanner]
+
+  // It will give remote cluster planner for given metricName.
+  // If it does not return anything localPlanner should be used
+  def getRemotePlanner(metricName: String): Option[QueryPlanner]
+  
+  // Get remote planners for current partition
+  def getRemotePlannersForCurrentPartition: Seq[QueryPlanner]
 }
 
 class MultiClusterPlanner(plannerProvider: PlannerProvider, localPlanner: HighAvailabilityPlanner) extends QueryPlanner {
 
-  override def getSingleClusterPlanner: SingleClusterPlanner = localPlanner.getSingleClusterPlanner
+  override def getBasePlanner: SingleClusterPlanner = localPlanner.getBasePlanner
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
@@ -39,15 +39,15 @@ class MultiClusterPlanner(plannerProvider: PlannerProvider, localPlanner: HighAv
   }
 
   def processSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
-    plannerProvider.getPlanner(LogicalPlanUtils.getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel).get.head).materialize(logicalPlan, qContext)
+    plannerProvider.getRemotePlanner(LogicalPlanUtils.getMetricName(logicalPlan)).getOrElse(localPlanner).materialize(logicalPlan, qContext)
   }
 
   def processBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
 
     val lhsMetrics = LogicalPlanUtils.getMetricName(logicalPlan.lhs)
     val rhsMetrics = LogicalPlanUtils.getMetricName(logicalPlan.rhs)
-    val lhsPlanner = plannerProvider.getPlanner(lhsMetrics)
-    val rhsPlanner = plannerProvider.getPlanner(rhsMetrics)
+    val lhsPlanner = plannerProvider.getRemotePlanner(lhsMetrics).getOrElse(localPlanner)
+    val rhsPlanner = plannerProvider.getRemotePlanner(rhsMetrics).getOrElse(localPlanner)
     val lhsExec = logicalPlan.lhs match {
       case b: BinaryJoin => processBinaryJoin(b, qContext)
       case _             => lhsPlanner.materialize(logicalPlan.lhs, qContext)
@@ -55,31 +55,34 @@ class MultiClusterPlanner(plannerProvider: PlannerProvider, localPlanner: HighAv
 
     val rhsExec = logicalPlan.rhs match {
       case b: BinaryJoin => processBinaryJoin(b, qContext)
-      case _             => lhsPlanner.materialize(logicalPlan.rhs, qContext)
+      case _             => rhsPlanner.materialize(logicalPlan.rhs, qContext)
     }
+
 
     // TODO Dispatch to LHS planner by default. Randomly select lhs or rhs in future
     var planner = lhsPlanner
     var dispatcher = lhsExec.dispatcher
 
-    if (plannerProvider.isLocal(rhsPlanner)) {
+
+    // If LHS is remote planner use RHS to do BinaryJoin
+    if (plannerProvider.getRemotePlanner(lhsMetrics).isDefined) {
        planner = rhsPlanner
        dispatcher = rhsExec.dispatcher
     }
 
-    planner.getSingleClusterPlanner.materializeBinaryJoin(qContext,logicalPlan, lhsExec, rhsExec, dispatcher)
+    planner.getBasePlanner.materializeBinaryJoin(qContext,logicalPlan, lhsExec, rhsExec, dispatcher)
 
   }
 
-  def processLabelValues(values: LabelValues, qContext: QueryContext) = {
-    val execPlans = plannerProvider.getRemotePlannersForPartition.toList.distinct.map(_.materialize(values, qContext))
-    val localExec = localPlanner.materialize(values, qContext)
+  def processLabelValues(logicalPlan: LogicalPlan, qContext: QueryContext) = {
+    val execPlans = plannerProvider.getRemotePlannersForCurrentPartition.toList.distinct.map(_.getBasePlanner.materialize(values, qContext))
+    val localExec = localPlanner.materialize(logicalPlan, qContext)
     LabelValuesDistConcatExec(qContext,localExec.dispatcher, execPlans :+ localExec)
   }
 
-  def processSeriesKeysFilters(values: SeriesKeysByFilters, qContext: QueryContext) = {
-    val execPlans = plannerProvider.getRemotePlannersForPartition.toList.distinct.map(_.materialize(values, qContext))
-    val localExec = localPlanner.materialize(values, qContext)
+  def processSeriesKeysFilters(logicalPlan: LogicalPlan, qContext: QueryContext) = {
+    val execPlans = plannerProvider.getRemotePlannersForCurrentPartition.toList.distinct.map(_.getBasePlanner.materialize(values, qContext))
+    val localExec = localPlanner.materialize(logicalPlan, qContext)
     PartKeysDistConcatExec(qContext,localExec.dispatcher, execPlans :+ localExec)
   }
 }
