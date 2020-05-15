@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}

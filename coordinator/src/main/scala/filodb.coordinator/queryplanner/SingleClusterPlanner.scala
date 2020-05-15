@@ -55,7 +55,7 @@ class SingleClusterPlanner(dsRef: DatasetRef,
   /**
     * Picks one dispatcher randomly from child exec plans passed in as parameter
     */
-   def  pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+  private def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
     val childTargets = children.map(_.dispatcher)
     // Above list can contain duplicate dispatchers, and we don't make them distinct.
     // Those with more shards must be weighed higher

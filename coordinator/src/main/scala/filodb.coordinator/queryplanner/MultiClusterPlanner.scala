@@ -23,7 +23,7 @@ trait PlannerProvider {
   def getAllRemotePlanners: Seq[QueryPlanner]
 
   // Returns true if metricName belongs to remote planner/cluster
-  def hasRemotePlanner(metricName: String) = getRemotePlanner(metricName).isEmpty
+  def hasRemotePlanner(metricName: String) = getRemotePlanner(metricName).isDefined
 }
 
 class MultiClusterPlanner(plannerProvider: PlannerProvider, localPlanner: HighAvailabilityPlanner)
