@@ -2,7 +2,7 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
-import filodb.query.{LabelValues, LogicalPlan, MetadataQueryPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
+import filodb.query.{LabelValues, LogicalPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
 import filodb.query.exec.{ExecPlan, LabelValuesDistConcatExec, PartKeysDistConcatExec, PlanDispatcher, StitchRvsExec}
 
 /**
@@ -61,6 +61,8 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         val rawExec = rawClusterPlanner.materialize(s, qContext)
         val downSampleExec = downsampleClusterPlanner.materialize(s, qContext)
         PartKeysDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
+
+      case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }
 }

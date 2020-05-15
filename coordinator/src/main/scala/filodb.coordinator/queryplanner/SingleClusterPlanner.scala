@@ -224,23 +224,18 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     // In the interest of keeping it simple, deferring decorations to the ExecPlan. Add only if needed after measuring.
 
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
-    val joined = if (lp.operator.isInstanceOf[SetOperator])
-      Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        renameLabels(lp.on), renameLabels(lp.ignoring), dsOptions.metricColumn))
-    else
-      Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn))
-    PlanResult(joined, false)
+    val joined = createBinaryJoinExec(qContext, lp, stitchedLhs, stitchedRhs, targetActor)
+    PlanResult(Seq(joined), false)
   }
 
-  def materializeBinaryJoin(qContext: QueryContext, lp: BinaryJoin, lhsExec: ExecPlan,
-                            rhsExec: ExecPlan, dispatcher: PlanDispatcher): ExecPlan = {
-    //val targetActor = if (lhsLocal) pickDispatcher(Seq(lhsExec))  else pickDispatcher(Seq(rhsExec))
+  def createBinaryJoinExec(qContext: QueryContext, lp: BinaryJoin, lhsExec: Seq[ExecPlan],
+                           rhsExec: Seq[ExecPlan], dispatcher: PlanDispatcher): ExecPlan = {
+
     if (lp.operator.isInstanceOf[SetOperator])
-      exec.SetOperatorExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), lp.operator,
+      exec.SetOperatorExec(qContext, dispatcher, lhsExec, rhsExec, lp.operator,
         renameLabels(lp.on), renameLabels(lp.ignoring), dsOptions.metricColumn)
     else
-      BinaryJoinExec(qContext, dispatcher, Seq(lhsExec), Seq(rhsExec), lp.operator, lp.cardinality,
+      BinaryJoinExec(qContext, dispatcher, lhsExec, rhsExec, lp.operator, lp.cardinality,
         renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn)
   }
 

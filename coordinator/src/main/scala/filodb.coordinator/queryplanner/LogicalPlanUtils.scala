@@ -124,23 +124,9 @@ object LogicalPlanUtils {
     }
   }
 
-  def getMetricName(logicalPlan: LogicalPlan): String = {
-   getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel).get.head
-  }
-
-  def getRoutingKeys(logicalPlan: LogicalPlan): Seq[RoutingKey] = {
-    val leafPlans = LogicalPlan.findLeafLogicalPlans(logicalPlan)
-    leafPlans.map {
-      _ match {
-        case lp: RawSeries => val workspace = lp.filters.filter(_.column.equals("_ws_")).
-                              map(_.filter.valuesStrings.head.toString).head
-                              val namespace = lp.filters.filter(_.column.equals("_ns_")).
-                              map(_.filter.valuesStrings.head.toString).head
-                              RoutingKey(workspace, namespace)
-
-        case _ => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
-      }
-    }
+  def getMetricName(logicalPlan: LogicalPlan): Set[String] = {
+   getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel).getOrElse(throw new
+       BadQueryException(s"Logical plan does not have metric name label $PromMetricLabel"))
   }
 
   private def getLabelValueFromFilters(filters: Seq[ColumnFilter], labelName: String): Option[Set[String]] = {
@@ -161,7 +147,7 @@ object LogicalPlanUtils {
         case lp: ScalarTimeBasedPlan   => Nil // Plan does not have labels
         case lp: ScalarFixedDoublePlan => Nil
         case lp: ScalarBinaryOperation => Nil
-        case _                         => throw new BadQueryException("Invalid logical plan")
+        case _                         => throw new BadQueryException(s"Invalid logical plan $logicalPlan")
       }
     }
     if (labelValues.isEmpty) {
