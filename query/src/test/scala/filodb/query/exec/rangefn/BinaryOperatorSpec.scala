@@ -7,7 +7,7 @@ import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import filodb.core.MetricsTestData
-import filodb.core.query.{CustomRangeVectorKey, RangeParams, RangeVector, RangeVectorKey, ResultSchema, TransientRow}
+import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.{StaticFuncArgs, TimeFuncArgs}
@@ -32,6 +32,8 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
         new TransientRow(4L, 94935.1523d)).iterator
     })
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val querySession = QuerySession(QueryContext(), queryConfig)
+
   val rand = new Random()
   val error = 0.00000001d
   val scalar = 5.0
@@ -233,7 +235,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     // ceil
     val expectedVal = sampleBase.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
-    val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
+    val resultObs = binaryOpMapper(Observable.fromIterable(sampleBase), querySession, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -269,7 +271,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     )
     val expectedVal = samples.map(_.rows.map(v => v.getDouble(1) * 2))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(TimeFuncArgs(RangeParams(1,1,4))))
-    val resultObs = binaryOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     result.foreach(x=> println(x.toList))
     expectedVal.zip(result).foreach {
@@ -293,7 +295,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
     )
     val expectedVal = samples.map(_.rows.map(v => scala.math.floor(v.getDouble(1))))
     val binaryOpMapper = exec.ScalarOperationMapper(BinaryOperator.ADD, true, Seq(StaticFuncArgs(1571267260, RangeParams(0,0,0))))
-    val resultObs = binaryOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = binaryOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
     expectedVal.zip(result).foreach {
       case (ex, res) =>  {
@@ -308,7 +310,7 @@ class BinaryOperatorSpec extends FunSpec with Matchers with ScalaFutures {
   private def applyBinaryOperationAndAssertResult(samples: Array[RangeVector], expectedVal: Array[Iterator[Double]],
                                                   binOp: BinaryOperator, scalar: Double, scalarOnLhs: Boolean): Unit = {
     val scalarOpMapper = exec.ScalarOperationMapper(binOp, scalarOnLhs, Seq(StaticFuncArgs(scalar, RangeParams(0,0,0))))
-    val resultObs = scalarOpMapper(Observable.fromIterable(samples), queryConfig, 1000, resultSchema)
+    val resultObs = scalarOpMapper(Observable.fromIterable(samples), querySession, 1000, resultSchema)
     val result = resultObs.toListL.runAsync.futureValue.map(_.rows.map(_.getDouble(1)))
 
     expectedVal.zip(result).foreach {

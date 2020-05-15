@@ -8,7 +8,7 @@ import org.scalatest.{FunSpec, Matchers}
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
-import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryContext, RangeParams}
+import filodb.core.query.{ColumnFilter, Filter, PromQlQueryParams, QueryConfig, QueryContext, RangeParams}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.ScalarFunctionId.Time

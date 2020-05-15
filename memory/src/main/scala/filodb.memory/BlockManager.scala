@@ -46,6 +46,39 @@ trait BlockManager {
   def requestBlock(bucketTime: Option[Long], owner: Option[BlockMemFactory] = None): Option[Block]
 
   /**
+    * Attempts to reclaim as many blocks as necessary to ensure that enough free blocks are
+    * available.
+    *
+    * @return numFreeBlocks
+    */
+  def ensureFreeBlocks(num: Int): Int
+
+  /**
+    * Attempts to reclaim as many blocks as necessary to ensure that enough free bytes are
+    * available. The actual amount reclaimed might be higher than requested.
+    *
+    * @return numFreeBlocks
+    */
+  def ensureFreeBytes(amt: Long): Int = {
+    val blocks = (amt + blockSizeInBytes - 1) / blockSizeInBytes
+    ensureFreeBlocks(Math.min(Integer.MAX_VALUE, blocks).toInt)
+  }
+
+  /**
+    * Attempts to reclaim as many blocks as necessary to ensure that enough free bytes are
+    * available as a percentage of total size. The actual amount reclaimed might be higher than
+    * requested.
+    *
+    * @param pct percentage: 0.0 to 100.0
+    * @return numFreeBlocks
+    */
+  def ensureFreePercent(pct: Double): Int = {
+    ensureFreeBytes((totalMemorySizeInBytes * pct * 0.01).toLong)
+  }
+
+  def totalMemorySizeInBytes: Long
+
+  /**
     * Releases all blocks allocated by this store.
     */
   def releaseBlocks(): Unit
@@ -160,6 +193,17 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         logger.warn(s"Out of blocks to allocate!  num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}")
         Seq.empty[Block]
       }
+    } finally {
+      lock.unlock()
+    }
+  }
+
+  override def ensureFreeBlocks(num: Int): Int = {
+    lock.lock()
+    try {
+      val require = num - numFreeBlocks
+      if (require > 0) tryReclaim(require)
+      numFreeBlocks
     } finally {
       lock.unlock()
     }

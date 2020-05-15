@@ -5,18 +5,20 @@ import java.util.concurrent.{Executors, TimeUnit}
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core.MetricsTestData.{builder, timeseriesDataset, timeseriesSchema}
 import filodb.core.TestData
 import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, Filter, QueryContext}
+import filodb.core.query.{ColumnFilter, Filter, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.{AllChunkScan, InMemoryMetaStore, NullColumnStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -59,6 +61,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
   val config: Config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
+  val querySession = QuerySession(QueryContext(), queryConfig)
   val policy = new FixedMaxPartitionsEvictionPolicy(20)
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
@@ -91,7 +94,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
-    val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
+    val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
       0, filters, AllChunkScan)
@@ -119,7 +122,7 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
 
     val dispatcher: PlanDispatcher = InProcessPlanDispatcher
 
-    val dummyDispatcher = DummyDispatcher(memStore, queryConfig)
+    val dummyDispatcher = DummyDispatcher(memStore, querySession)
 
     val execPlan1 = MultiSchemaPartitionsExec(QueryContext(), dummyDispatcher, timeseriesDataset.ref,
       0, filters, AllChunkScan)
@@ -162,10 +165,10 @@ class InProcessPlanDispatcherSpec extends FunSpec with Matchers with ScalaFuture
   }
 }
 
-case class DummyDispatcher(memStore: TimeSeriesMemStore, queryConfig: QueryConfig) extends PlanDispatcher {
+case class DummyDispatcher(memStore: TimeSeriesMemStore, querySession: QuerySession) extends PlanDispatcher {
   // run locally withing any check.
   override def dispatch(plan: ExecPlan)
                        (implicit sched: Scheduler): Task[QueryResponse] = {
-    plan.execute(memStore, queryConfig)
+    plan.execute(memStore, querySession)
   }
 }

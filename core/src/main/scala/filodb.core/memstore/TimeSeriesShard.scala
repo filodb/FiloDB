@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable.ArrayBuffer
@@ -26,7 +27,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -104,6 +105,12 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * receiving them, assuming that the clocks are in sync.
     */
   val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").withTags(TagSet.from(tags))
+
+  /**
+    * How much time the ingestion thread was potentially stalled while attempting to ensure
+    * free space. Unit is milliseconds.
+    */
+  val ingestionHeadroomStall = Kamon.gauge("ingestion-headroom-stall").withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -305,6 +312,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   // Use a StampedLock because it supports optimistic read locking. This means that no blocking
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
+
+  /**
+    * Lock that protects chunks from being reclaimed from Memstore.
+    * This is needed to prevent races between ODP queries and reclaims.
+    */
+  private[memstore] final val reclaimLock = new StampedLock
+
+  // Requires reclaimLock.
+  startHeadroomTask(ingestSched)
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
@@ -1405,57 +1421,125 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Also returns detailed information about what is in memory and not, and does schema discovery.
     */
   def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
-    case SinglePartitionScan(partition, _) =>
-      val partIds = debox.Buffer.empty[Int]
-      getPartition(partition).foreach(p => partIds += p.partID)
-      PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
-    case MultiPartitionScan(partKeys, _)   =>
-      val partIds = debox.Buffer.empty[Int]
-      partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-      PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
-    case FilteredPartitionScan(split, filters) =>
-      // No matter if there are filters or not, need to run things through Lucene so we can discover potential
-      // TSPartitions to read back from disk
-      val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-      shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
+    val reclaimReadLock = reclaimLock.asReadLock()
+    querySession.lock = Some(reclaimReadLock)
+    reclaimReadLock.lock()
+    // any exceptions thrown here should be caught by a wrapped Task.
+    // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
+    partMethod match {
+      case SinglePartitionScan(partition, _) =>
+        val partIds = debox.Buffer.empty[Int]
+        getPartition(partition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
+      case MultiPartitionScan(partKeys, _)   =>
+        val partIds = debox.Buffer.empty[Int]
+        partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
+      case FilteredPartitionScan(split, filters) =>
+        // No matter if there are filters or not, need to run things through Lucene so we can discover potential
+        // TSPartitions to read back from disk
+        val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
 
-      Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
-      if (matches.length > storeConfig.maxQueryMatches)
-        throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
-          s"to narrow your query by adding more filters so there is less than ${storeConfig.maxQueryMatches} matches " +
-          s"or request that number of shards for the metric be increased")
+        Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
+        if (matches.length > storeConfig.maxQueryMatches)
+          throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
+            s"to narrow your query by adding more filters so there is less than " +
+            s"${storeConfig.maxQueryMatches} matches or request that number of shards for the metric be increased")
 
-      // first find out which partitions are being queried for data not in memory
-      val firstPartId = if (matches.isEmpty) None else Some(matches(0))
-      val _schema = firstPartId.map(schemaIDFromPartID)
-      val it1 = InMemPartitionIterator2(matches)
-      val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
-      val partIdsNotInMem = it1.skippedPartIDs
-      Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
-      val startTimes = if (partIdsToPage.nonEmpty) {
-        val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
-        logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
-          s"startTime lookup for query in dataset=$ref shard=$shardNum " +
-          s"resulted in startTimes=$st")
-        st
-      }
-      else {
-        logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
-          s"shard=$shardNum are in memory")
-        debox.Map.empty[Int, Long]
-      }
-      // now provide an iterator that additionally supplies the startTimes for
-      // those partitions that may need to be paged
-      PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+        // first find out which partitions are being queried for data not in memory
+        val firstPartId = if (matches.isEmpty) None else Some(matches(0))
+        val _schema = firstPartId.map(schemaIDFromPartID)
+        val it1 = InMemPartitionIterator2(matches)
+        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+        val partIdsNotInMem = it1.skippedPartIDs
+        Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
+        val startTimes = if (partIdsToPage.nonEmpty) {
+          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
+            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
+            s"resulted in startTimes=$st")
+          st
+        }
+        else {
+          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
+            s"shard=$shardNum are in memory")
+          debox.Map.empty[Int, Long]
+        }
+        // now provide an iterator that additionally supplies the startTimes for
+        // those partitions that may need to be paged
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+    }
   }
 
-  def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
+  def scanPartitions(iterResult: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
     Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
     })
+  }
+
+  private def startHeadroomTask(sched: Scheduler): Unit = {
+    sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
+      def run() = ensureFreeBlocks
+    })
+  }
+
+  /**
+    * Expected to be called via a background task, to periodically ensure that enough blocks
+    * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
+    * from itself.
+    */
+  private def ensureFreeBlocks(): Unit = {
+    val start = System.currentTimeMillis()
+    val stamp = tryExclusiveReclaimLock()
+    if (stamp == 0) {
+      logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
+    } else {
+      val numFree = try {
+        blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
+      } finally {
+        reclaimLock.unlockWrite(stamp)
+      }
+      val numBytes = numFree * blockStore.blockSizeInBytes
+      logger.debug(s"shard=$shardNum: ensureFreeBlocks: $numFree ($numBytes bytes)")
+    }
+    val stall = System.currentTimeMillis() - start
+    shardStats.ingestionHeadroomStall.update(stall)
+  }
+
+  private def tryExclusiveReclaimLock(): Long = {
+    // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
+    // waiting will also stall new queries from starting. To protect against this, attempt with
+    // a timeout to let any stalled queries through. To prevent starvation of the exclusive
+    // lock attempt, increase the timeout each time, but eventually give up. The reason why
+    // waiting for an exclusive lock causes this problem is that the thread must enqueue itself
+    // into the lock as a waiter, and all new shared requests must wait their turn. The risk
+    // with timing out is that if there's a continuous stream of long running queries (more than
+    // one second), then the exclusive lock will never be acqiured, and then ensureFreeBlocks
+    // won't be able to do its job. The timeout settings might need to be adjusted in that case.
+    // Perhaps the timeout should increase automatically if ensureFreeBlocks failed the last time?
+    // This isn't safe to do until we gain higher confidence that the shared lock is always
+    // released by queries.
+
+    var timeout = 1;
+    while (true) {
+      val stamp = reclaimLock.tryWriteLock(timeout, TimeUnit.MILLISECONDS)
+      if (stamp != 0) {
+        return stamp
+      }
+      timeout <<= 1
+      if (timeout > 1024) {
+        // Give up after waiting (in total) a little over 2 seconds.
+        return 0
+      }
+      Thread.`yield`()
+    }
+    0 // never reached, but scala compiler complains otherwise
   }
 
   /**

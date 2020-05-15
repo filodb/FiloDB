@@ -19,11 +19,11 @@ import filodb.core.SpreadChange
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryConfig, QueryError => QError, QueryResult => QueryResult2}
+import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
@@ -186,8 +186,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def singleThreadedRawQuery(): Long = {
+    val querySession = QuerySession(QueryContext(), queryConfig)
+
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      execPlan.execute(cluster.memStore, queryConfig)(querySched)
+      execPlan.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -203,7 +205,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedMinOverTimeQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      minEP.execute(cluster.memStore, queryConfig)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      minEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)
@@ -219,7 +222,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def singleThreadedSumRateCCQuery(): Long = {
     val f = Observable.fromIterable(0 until numQueries).mapAsync(1) { n =>
-      sumRateEP.execute(cluster.memStore, queryConfig)(querySched)
+      val querySession = QuerySession(QueryContext(), queryConfig)
+      sumRateEP.execute(cluster.memStore, querySession)(querySched)
     }.executeOn(querySched)
      .countL.runAsync
     Await.result(f, 60.seconds)

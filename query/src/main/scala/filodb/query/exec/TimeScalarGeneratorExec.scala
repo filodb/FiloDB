@@ -9,7 +9,7 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.query.{BadQueryException, QueryConfig, QueryResponse, QueryResult, ScalarFunctionId}
+import filodb.query.{BadQueryException, QueryResponse, QueryResult, ScalarFunctionId}
 import filodb.query.ScalarFunctionId.{DayOfMonth, DayOfWeek, DaysInMonth, Hour, Minute, Month, Time, Year}
 
 /**
@@ -28,7 +28,8 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
     * implementation of the operation represented by this exec plan
     * node
     */
-  override def doExecute(source: ChunkSource, queryConfig: QueryConfig)
+  override def doExecute(source: ChunkSource,
+                         querySession: QuerySession)
                         (implicit sched: Scheduler): ExecResult = {
     throw new IllegalStateException("doExecute should not be called for TimeScalarGeneratorExec since it represents" +
       "a readily available static value")
@@ -41,7 +42,7 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
   override protected def args: String = s"params = $params, function = $function"
 
   override def execute(source: ChunkSource,
-                       queryConfig: QueryConfig)
+                       querySession: QuerySession)
                       (implicit sched: Scheduler): Task[QueryResponse] = {
     val execPlan2Span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
@@ -71,7 +72,8 @@ case class TimeScalarGeneratorExec(queryContext: QueryContext,
         rangeVectorTransformers.foldLeft((Observable.fromIterable(rangeVectors), resultSchema)) { (acc, transf) =>
           span.mark(transf.getClass.getSimpleName)
           val paramRangeVector: Seq[Observable[ScalarRangeVector]] = transf.funcParams.map(_.getResult)
-          (transf.apply(acc._1, queryConfig, queryContext.sampleLimit, acc._2, paramRangeVector), transf.schema(acc._2))
+          (transf.apply(acc._1, querySession, queryContext.sampleLimit, acc._2,
+            paramRangeVector), transf.schema(acc._2))
         }._1.toListL.map({
           span.finish()
           QueryResult(queryContext.queryId, resultSchema, _)

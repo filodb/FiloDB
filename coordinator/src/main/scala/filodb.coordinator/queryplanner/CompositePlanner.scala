@@ -6,7 +6,7 @@ import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.StaticSpreadProvider
 import filodb.core.{DatasetRef, SpreadProvider}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext}
 import filodb.query._
 import filodb.query.exec._
 
@@ -22,6 +22,7 @@ class CompositePlanner(dsRef: DatasetRef,
                        earliestRawTimestampFn: => Long,
                        earliestDownsampleTimestampFn: => Long,
                        plannerProvider: PlannerProvider,
+                       latestDownsampleTimestampFn: => Long,
                        queryConfig: QueryConfig,
                        spreadProvider: SpreadProvider = StaticSpreadProvider(),
                        stitchDispatcher: => PlanDispatcher = { InProcessPlanDispatcher }) extends QueryPlanner
@@ -33,7 +34,7 @@ class CompositePlanner(dsRef: DatasetRef,
   val downsampleClusterPlanner = new SingleClusterPlanner(dsRef, schemas, downsampleMapperFunc,
                                   earliestDownsampleTimestampFn, queryConfig, spreadProvider)
   val longTimeRangePlanner = new LongTimeRangePlanner(rawClusterPlanner, downsampleClusterPlanner,
-                                          earliestRawTimestampFn, stitchDispatcher)
+                                          earliestRawTimestampFn, latestDownsampleTimestampFn, stitchDispatcher)
   val haPlanner = new HighAvailabilityPlanner(dsRef, longTimeRangePlanner, failureProvider, queryConfig)
   val multiClusterPlanner = new MultiClusterPlanner(plannerProvider, haPlanner)
 

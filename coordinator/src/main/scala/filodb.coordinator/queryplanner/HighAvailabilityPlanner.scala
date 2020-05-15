@@ -3,8 +3,8 @@ package filodb.coordinator.queryplanner
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
-import filodb.core.query.{PromQlQueryParams, QueryContext}
-import filodb.query.{LogicalPlan, QueryConfig}
+import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
+import filodb.query.LogicalPlan
 import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
 
 /**

@@ -5,12 +5,11 @@ import java.lang.{Double => JLDouble}
 import debox.Buffer
 import java.util
 
-import filodb.core.query.{TransientHistMaxRow, TransientHistRow, TransientRow}
+import filodb.core.query.{QueryConfig, TransientHistMaxRow, TransientHistRow, TransientRow}
 import filodb.core.store.ChunkSetInfoReader
 import filodb.memory.format.{BinaryVector, MemoryReader, VectorDataReader}
 import filodb.memory.format.{vectors => bv}
 import filodb.memory.format.vectors.DoubleIterator
-import filodb.query.QueryConfig
 import filodb.query.exec.{FuncArgs, StaticFuncArgs}
 
 class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {

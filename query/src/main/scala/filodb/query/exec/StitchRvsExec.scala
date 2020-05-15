@@ -66,7 +66,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
 
   protected def compose(childResponses: Observable[(QueryResponse, Int)],
                         firstSchema: Task[ResultSchema],
-                        queryConfig: QueryConfig): Observable[RangeVector] = {
+                        querySession: QuerySession): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsExec: Stitching results:")
     val stitched = childResponses.map {
       case (QueryResult(_, _, result), _) => result
@@ -103,7 +103,7 @@ final case class StitchRvsExec(queryContext: QueryContext,
 final case class StitchRvsMapper() extends RangeVectorTransformer {
 
   def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
+            querySession: QuerySession,
             limit: Int,
             sourceSchema: ResultSchema, paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {
     qLogger.debug(s"StitchRvsMapper: Stitching results:")
