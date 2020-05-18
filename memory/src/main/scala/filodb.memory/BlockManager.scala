@@ -119,11 +119,14 @@ object PageAlignedBlockManager {
   * @param stats                  Memory metrics which need to be recorded
   * @param reclaimer              ReclaimListener to use on block metadata when a block is freed
   * @param numPagesPerBlock       The number of pages a block spans
+  * @param onDemandTimeOrderedReclamation  When false, requestimg time ordered blocks fails if it
+                                           would force a reclamation
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
                               reclaimer: ReclaimListener,
-                              numPagesPerBlock: Int)
+                              numPagesPerBlock: Int,
+                              onDemandTimeOrderedReclamation: Boolean = true)
   extends BlockManager with StrictLogging {
   import PageAlignedBlockManager._
 
@@ -178,7 +181,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
       stats.requestedBlocksMetric.increment(num)
 
-      if (freeBlocks.size < num) tryReclaim(num)
+      if (freeBlocks.size < num) {
+        if (bucketTime.isEmpty || onDemandTimeOrderedReclamation) {
+          tryReclaim(num)
+        } else {
+            val msg = s"Unable to allocate time ordered block(s) without forcing a reclamation: " +
+                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
+            throw new IllegalStateException(msg)
+        }
+      }
 
       if (freeBlocks.size >= num) {
         val allocated = new Array[Block](num)
