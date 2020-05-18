@@ -1470,25 +1470,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     }
   }
 
-  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
-
-  private def capDataScannedPerShardCheck(lookup: PartLookupResult) = {
-    lookup.firstSchemaId.foreach { schId =>
-      lookup.chunkMethod match {
-        case TimeRangeChunkScan(st, end) =>
-          val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
-          schemas.ensureQueriedDataSizeWithinLimit(schId, numMatches,
-            storeConfig.flushInterval.toMillis,
-            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
-        case _ =>
-      }
-    }
-  }
-
   def scanPartitions(iterResult: PartLookupResult,
                      querySession: QuerySession): Observable[ReadablePartition] = {
-
-  capDataScannedPerShardCheck(iterResult)
 
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
     Observable.fromIterator(partIter.map { p =>

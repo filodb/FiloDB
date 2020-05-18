@@ -297,10 +297,12 @@ final case class Schemas(part: PartitionSchema,
     val numSamplesPerChunk = chunkDurationMillis / resolutionMs
     // find number of chunks to be scanned. Ceil division needed here
     val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
-    val estDataSize = bytesPerSampleSwag(schemaId) * numTsPartitions * numSamplesPerChunk * numChunksPerTs
+    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
     require(estDataSize < dataSizeLimit,
       s"Estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard. Try one or more of these: " +
+        s"$dataSizeLimit bytes queried per shard with $bytesPerSample bytes per sample " +
+        s"for ${_schemas(schemaId).name} schema. Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
         s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
   }

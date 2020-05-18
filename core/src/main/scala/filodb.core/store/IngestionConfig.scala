@@ -70,11 +70,13 @@ final case class UnassignShardConfig(shardList: Seq[Int])
 
 object StoreConfig {
   // NOTE: there are no defaults for flush interval and shard memory, those should be explicitly calculated
+  // default max-data-per-shard-query was calculated as follows:
+  // 750k TsPartitions * 48 chunksets queried * 2kb per chunkset / 256 shards = 280MB
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 400
-                                           |max-data-per-shard-query = 1 GB
+                                           |max-data-per-shard-query = 300 MB
                                            |max-blob-buffer-size = 15000
                                            |ingestion-buffer-mem-size = 10M
                                            |max-buffer-pool-size = 10000

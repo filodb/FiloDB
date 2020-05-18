@@ -51,6 +51,21 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
     .tag("shard", shardNum)
     .start()
 
+  val assumedResolution = 20000 // for now hard-code and assume 30ms as reporting interval
+
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult): Unit = {
+    lookup.firstSchemaId.foreach { schId =>
+      lookup.chunkMethod match {
+        case TimeRangeChunkScan(st, end) =>
+          val numMatches = lookup.partsInMemory.length + lookup.partIdsNotInMemory.length
+          schemas.ensureQueriedDataSizeWithinLimit(schId, numMatches,
+            storeConfig.flushInterval.toMillis,
+            assumedResolution, end - st, storeConfig.maxDataPerShardQuery)
+        case _ =>
+      }
+    }
+  }
+
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
   //  2. Determine, one at a time, what chunks are missing and could be fetched from disk
@@ -60,6 +75,9 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   //scalastyle:off
   override def scanPartitions(partLookupRes: PartLookupResult,
                               querySession: QuerySession): Observable[ReadablePartition] = {
+
+    capDataScannedPerShardCheck(partLookupRes)
+
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
     // 2. Timestamp column almost always needed
