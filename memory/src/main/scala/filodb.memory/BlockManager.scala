@@ -128,7 +128,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
                               reclaimer: ReclaimListener,
                               numPagesPerBlock: Int,
-                              onDemandTimeOrderedReclamation: Boolean)
+                              onDemandTimeOrderedReclamation: Boolean = false)
   extends BlockManager with StrictLogging {
   import PageAlignedBlockManager._
 

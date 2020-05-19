@@ -324,9 +324,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
-  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats,
-    reclaimListener, storeConfig.numPagesPerBlock,
-    onDemandTimeOrderedReclamation = false) // prevent ODP from eating itself and rely on headroom task instead
+  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
+    storeConfig.numPagesPerBlock)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding

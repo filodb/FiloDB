@@ -29,7 +29,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Allocate blocks as requested for size" in {
     //2MB
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
 
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(512)
@@ -46,7 +46,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
   it should "Align block size to page size" in {
     val stats = new MemoryStats(Map("test2" -> "test2"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     blockSize should be(pageSize)
 
@@ -56,7 +56,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Not allow a request of blocks over the upper bound if no blocks are reclaimable" in {
     //2 pages
     val stats = new MemoryStats(Map("test3" -> "test3"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(2)
@@ -77,7 +77,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Allocate blocks as requested even when upper bound is reached if blocks can be reclaimed" in {
     //2 pages
     val stats = new MemoryStats(Map("test4" -> "test4"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 2
@@ -100,7 +100,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Fail to Allocate blocks when enough blocks cannot be reclaimed" in {
     //4 pages
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 4
@@ -116,7 +116,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
   it should "allocate and reclaim blocks with time order" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    // This block manager has 5 blocks capacity
+    // This block manager has 5 blocks capacity and fully allows on demand time reclamation
     val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, true)
 
     blockManager.usedBlocks.size() shouldEqual 0
@@ -171,8 +171,8 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
   it should "fail to allocate time order block" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    // This block manager has 5 blocks capacity and disallows on demand reclamation
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, false)
+    // This block manager has 5 blocks capacity
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.usedBlocks.size() shouldEqual 0
     blockManager.numTimeOrderedBlocks shouldEqual 0
@@ -243,7 +243,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "ensure free space" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.numFreeBlocks shouldEqual 5
     blockManager.ensureFreePercent(50)

@@ -8,7 +8,7 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
   import PageAlignedBlockManagerSpec._
 
   val stats = new MemoryStats(Map("test1" -> "test1"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, true)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
 
   before {
     testReclaimer.reclaimedBytes = 0

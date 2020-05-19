@@ -9,7 +9,7 @@ with ConductorFixture with Matchers with BeforeAndAfterAll {
   import PageAlignedBlockManagerSpec._
 
   val memoryStats = new MemoryStats(Map("test"-> "test"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, testReclaimer, 1, true)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, testReclaimer, 1)
   val pageSize = blockManager.blockSizeInBytes
 
   override def afterAll(): Unit = {
