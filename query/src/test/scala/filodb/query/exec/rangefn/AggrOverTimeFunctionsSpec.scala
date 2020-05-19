@@ -21,7 +21,7 @@ trait RawDataWindowingSpec extends FunSpec with Matchers with BeforeAndAfterAll 
   import MetricsTestData._
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), null, 16)
+    new MemoryStats(Map("test"-> "test")), null, 16, true)
   val storeConf = TestData.storeConf.copy(maxChunksSize = 200)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, timeseriesSchema.data.blockMetaSize,
                                       MMD.dummyContext, true)

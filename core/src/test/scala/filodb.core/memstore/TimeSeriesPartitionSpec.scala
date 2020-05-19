@@ -68,7 +68,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   }
 
   private val blockStore = new PageAlignedBlockManager(200 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), reclaimer, 1)
+    new MemoryStats(Map("test"-> "test")), reclaimer, 1, true)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, schema1.data.blockMetaSize,
                                       dummyContext, true)
 

@@ -116,7 +116,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
     it("should append correctly when memory has previous values / was not zeroed") {
       import collection.JavaConverters._
       val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024,
-        new MemoryStats(Map("test"-> "test")), null, 16) {
+        new MemoryStats(Map("test"-> "test")), null, 16, true) {
         freeBlocks.asScala.foreach(_.set(0x55))   // initialize blocks to nonzero value
       }
       val blockFactory = new BlockMemFactory(blockStore, None, 24, Map("foo" -> "bar"), true)
