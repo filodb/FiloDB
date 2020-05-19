@@ -10,6 +10,8 @@ import kamon.Kamon
 import kamon.metric.Counter
 import kamon.tag.TagSet
 
+final case class MemoryRequestException(msg: String) extends Exception(msg)
+
 /**
   * Allows requesting blocks.
   */
@@ -187,7 +189,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         } else {
             val msg = s"Unable to allocate time ordered block(s) without forcing a reclamation: " +
                       s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
-            throw new IllegalStateException(msg)
+            throw new MemoryRequestException(msg)
         }
       }
 
