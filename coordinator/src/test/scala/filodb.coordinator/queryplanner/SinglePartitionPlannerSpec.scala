@@ -11,11 +11,12 @@ import filodb.core.{DatasetRef, MetricsTestData}
 import filodb.core.metadata.Schemas
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.ChunkSource
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query._
 import filodb.query.exec._
 
-class MultiClusterPlannerSpec extends FunSpec with Matchers{
+class SinglePartitionPlannerSpec extends FunSpec with Matchers{
   private implicit val system = ActorSystem()
   private val node = TestProbe().ref
 
@@ -65,27 +66,19 @@ class MultiClusterPlannerSpec extends FunSpec with Matchers{
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("rules1", logicalPlan)
     }
-
-    override def getBasePlanner: SingleClusterPlanner = remotePlanner
   }
 
   val rrPlanner2 = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("rules2", logicalPlan)
     }
-
-    override def getBasePlanner: SingleClusterPlanner = remotePlanner
   }
 
-  val plannerProvider = new PlannerProvider {
-    override def getRemotePlanner(metricName: String): Option[QueryPlanner] =
-      if (metricName.equals("rr1")) Some(rrPlanner1)
-      else if (metricName.equals("rr2")) Some(rrPlanner2) else None
+  val planners = Map("local" -> highAvailabilityPlanner, "rules1" -> rrPlanner1, "rules2" -> rrPlanner2)
+  val plannerSelector = (metricName: String) => { if (metricName.equals("rr1")) "rules1"
+  else if (metricName.equals("rr2")) "rules2" else "local" }
 
-    override def getAllRemotePlanners: Seq[QueryPlanner] = Seq(rrPlanner1, rrPlanner2)
-  }
-
-  val engine = new MultiClusterPlanner(plannerProvider, highAvailabilityPlanner)
+  val engine = new SinglePartitionPlanner(planners, plannerSelector, "_metric_")
 
   it("should generate Exec plan for simple query") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"}", 1000)
@@ -113,6 +106,15 @@ class MultiClusterPlannerSpec extends FunSpec with Matchers{
     }
   }
 
+  it("should generate exec plan for nested Binary Join query") {
+    val lp = Parser.queryToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"} + test3{job = \"app\"}", 1000)
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
+    execPlan.asInstanceOf[BinaryJoinExec].lhs.head.isInstanceOf[BinaryJoinExec] shouldEqual true
+    execPlan.asInstanceOf[BinaryJoinExec].rhs.head.isInstanceOf[DistConcatExec] shouldEqual true
+  }
+
   it("should generate BinaryJoin Exec plan with remote and local cluster metrics") {
     val lp = Parser.queryToLogicalPlan("test{job = \"app\"} + rr1{job = \"app\"}", 1000)
 
@@ -127,10 +129,26 @@ class MultiClusterPlannerSpec extends FunSpec with Matchers{
     val lp = Parser.queryToLogicalPlan("rr1{job = \"app\"} + rr2{job = \"app\"}", 1000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.printTree()
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual (true)
     execPlan.asInstanceOf[BinaryJoinExec].lhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[BinaryJoinExec].rhs.head.asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }
+
+  it("should generate Exec plan for Metadata query") {
+    val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
+      TimeStepParams(1000, 10, 2000))
+
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.printTree()
+    execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children.length shouldEqual(3)
+
+    // For Raw and Downsample
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual true
+
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
+  }
+
 }
 

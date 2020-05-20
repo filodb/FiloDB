@@ -37,7 +37,4 @@ trait QueryPlanner {
       execPlan.dispatcher.dispatch(execPlan)
     }
   }
-
-  def getBasePlanner: SingleClusterPlanner
-
 }

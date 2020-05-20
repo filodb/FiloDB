@@ -30,16 +30,12 @@ class LongTimeRangePlannerSpec extends FunSpec with Matchers {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("raw", logicalPlan)
     }
-
-    override def getBasePlanner: SingleClusterPlanner = ???
   }
 
   val downsamplePlanner = new QueryPlanner {
     override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
       new MockExecPlan("downsample", logicalPlan)
     }
-
-    override def getBasePlanner: SingleClusterPlanner = ???
   }
 
   val rawRetention = 10.minutes

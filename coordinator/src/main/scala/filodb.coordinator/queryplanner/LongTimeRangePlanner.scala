@@ -30,8 +30,6 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            latestDownsampleTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
 
-  override def getBasePlanner: SingleClusterPlanner = rawClusterPlanner.getBasePlanner
-
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
     logicalPlan match {
       case p: PeriodicSeriesPlan =>

@@ -26,13 +26,6 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
 
-  def getBasePlanner: SingleClusterPlanner = {
-    localPlanner match {
-      case s: SingleClusterPlanner => s
-      case l: LongTimeRangePlanner => l.getBasePlanner
-    }
-  }
-
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
     */

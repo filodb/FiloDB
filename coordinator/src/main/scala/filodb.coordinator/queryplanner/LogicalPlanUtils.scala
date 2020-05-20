@@ -158,4 +158,18 @@ object LogicalPlanUtils {
       Some(labelValues.foldLeft(res) { (acc, i) => i.union(acc) })
     }
   }
+
+  /**
+    * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
+    * if it is not the prometheus standard
+    */
+   def renameLabels(labels: Seq[String], datasetMetricColumn: String): Seq[String] =
+    if (datasetMetricColumn != PromMetricLabel) {
+      labels map {
+        case PromMetricLabel     => datasetMetricColumn
+        case other: String       => other
+      }
+    } else {
+      labels
+    }
 }
