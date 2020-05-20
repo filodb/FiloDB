@@ -10,6 +10,8 @@ import kamon.Kamon
 import kamon.metric.Counter
 import kamon.tag.TagSet
 
+final case class MemoryRequestException(msg: String) extends Exception(msg)
+
 /**
   * Allows requesting blocks.
   */
@@ -169,6 +171,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * Allocates requested number of blocks. If enough blocks are not available,
     * then uses the ReclaimPolicy to check if blocks can be reclaimed
     * Uses a lock to ensure that concurrent requests are safe.
+    *
+    * If bucketTime is provided, a MemoryRequestException is thrown when no blocks are
+    * currently available. In other words, time ordered block allocation doesn't force
+    * reclamation. Instead, a background task must be running which calls ensureFreeBlocks.
+    * Time ordered blocks are used for on-demand-paging only (ODP), initiated by a query, and
+    * reclamation during ODP can end up causing the query results to have "holes". Throwing an
+    * exception isn't a perfect solution, but it can suffice until a proper block pinning
+    * mechanism is in place. Queries which fail with this exception can retry, perhaps after
+    * calling ensureFreeBLocks explicitly.
     */
   override def requestBlocks(memorySize: Long,
                              bucketTime: Option[Long],
@@ -178,7 +189,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
       stats.requestedBlocksMetric.increment(num)
 
-      if (freeBlocks.size < num) tryReclaim(num)
+      if (freeBlocks.size < num) {
+        if (bucketTime.isEmpty) {
+          tryReclaim(num)
+        } else {
+            val msg = s"Unable to allocate time ordered block(s) without forcing a reclamation: " +
+                      s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
+            throw new MemoryRequestException(msg)
+        }
+      }
 
       if (freeBlocks.size >= num) {
         val allocated = new Array[Block](num)
