@@ -285,7 +285,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
 
             if (shouldTrace)
               DownsamplerContext.dsLogger.info(s"Downsample Periods for ${part.stringPartition} " +
-                s"${chunkset.debugString} resolution=$resolution downsamplePeriods=$downsamplePeriods")
+                s"${chunkset.debugString} resolution=$resolution " +
+                s"downsamplePeriods=${downsamplePeriods.mkString(",")}")
 
             try {
               // for each downsample period
