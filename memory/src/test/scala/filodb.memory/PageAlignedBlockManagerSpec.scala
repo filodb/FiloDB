@@ -116,7 +116,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   /* No longer valid now that time ordered allocation doesn't force reclamation.
   it should "allocate and reclaim blocks with time order" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    // This block manager has 5 blocks capacity and fully allows on demand time reclamation
+    // This block manager has 5 blocks capacity
     val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.usedBlocks.size() shouldEqual 0
