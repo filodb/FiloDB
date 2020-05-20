@@ -450,27 +450,27 @@ class TracingTimeSeriesPartition(partID: Int,
 TimeSeriesPartition(partID, schema, partitionKey, shard, bufferPool, shardStats, memFactory, initMapSize) {
   import TimeSeriesPartition._
 
-  _log.debug(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
+  _log.info(s"Creating TracingTimeSeriesPartition dataset=$ref schema=${schema.name} partId=$partID $stringPartition")
 
   override def ingest(ingestionTime: Long, row: RowReader, blockHolder: BlockMemFactory, maxChunkTime: Long): Unit = {
     val ts = row.getLong(0)
-    _log.debug(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
+    _log.info(s"Ingesting dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition " +
                s"ingestionTime=$ingestionTime ts=$ts " +
                (1 until schema.numDataColumns).map(row.getAny).mkString("[", ",", "]"))
     super.ingest(ingestionTime, row, blockHolder, maxChunkTime)
   }
 
   override def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Boolean = {
-    _log.debug(s"SwitchBuffers dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
+    _log.info(s"SwitchBuffers dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"encode=$encode for currentChunk ${currentInfo.debugString}")
     super.switchBuffers(blockHolder, encode)
   }
 
   override protected def initNewChunk(startTime: Long, ingestionTime: Long): Unit = {
-    _log.debug(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
+    _log.info(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"initNewChunk($startTime, $ingestionTime)")
     super.initNewChunk(startTime, ingestionTime)
-    _log.debug(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
+    _log.info(s"dataset=$ref schema=${schema.name} shard=$shard partId=$partID $stringPartition - " +
                s"newly created ChunkInfo ${currentInfo.debugString}")
   }
 }
