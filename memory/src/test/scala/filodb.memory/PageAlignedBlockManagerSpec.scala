@@ -18,7 +18,6 @@ object PageAlignedBlockManagerSpec {
 
 class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndAfter {
   import PageAlignedBlockManagerSpec._
-  import collection.JavaConverters._
 
   val pageSize = PageManager.getInstance().pageSize()
 
@@ -114,10 +113,11 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     blockManager.releaseBlocks()
   }
 
+  /* No longer valid now that time ordered allocation doesn't force reclamation.
   it should "allocate and reclaim blocks with time order" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity and fully allows on demand time reclamation
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.usedBlocks.size() shouldEqual 0
     blockManager.numTimeOrderedBlocks shouldEqual 0
@@ -168,6 +168,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
     blockManager.releaseBlocks()
   }
+  */
 
   it should "fail to allocate time order block" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
@@ -207,7 +208,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should ("allocate blocks using BlockMemFactory with ownership and reclaims") in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, true)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.usedBlocks.size() shouldEqual 0
     blockManager.numTimeOrderedBlocks shouldEqual 0
@@ -233,6 +234,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     // Mark as reclaimable the blockMemFactory's block.  Then request more blocks, that one will be reclaimed.
     // Check ownership is now cleared.
     factory.currentBlock.markReclaimable
+    blockManager.ensureFreeBlocks(1)
     blockManager.requestBlock(Some(9000L)).isDefined shouldEqual true
     blockManager.hasTimeBucket(10000L) shouldEqual false
     blockManager.hasTimeBucket(9000L) shouldEqual true
