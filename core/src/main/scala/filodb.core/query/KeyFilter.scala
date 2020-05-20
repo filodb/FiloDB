@@ -28,7 +28,7 @@ object Filter {
     private val leftFunc = left.filterFunc
     private val rightFunc = right.filterFunc
     val filterFunc: (Any) => Boolean = (item: Any) => leftFunc(item) && rightFunc(item)
-    val operatorString: String = "in"
+    val operatorString: String = "&&"
     def valuesStrings: Set[Any] = left.valuesStrings.union(right.valuesStrings)
   }
 
