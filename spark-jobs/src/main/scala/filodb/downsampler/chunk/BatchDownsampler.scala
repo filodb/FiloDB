@@ -259,6 +259,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     val timestampCol = 0
     val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
 
+    require(downsamplers.size > 1, s"Number of downsamplers for ${rawPartToDownsample.stringPartition} should be > 1")
+
     // for each chunk
     while (rawChunksets.hasNext) {
       val chunkset = rawChunksets.nextInfoReader
@@ -269,6 +271,16 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         val tsPtr = chunkset.vectorAddress(timestampCol)
         val tsAcc = chunkset.vectorAccessor(timestampCol)
         val tsReader = rawPartToDownsample.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
+
+        if (shouldTrace) {
+          downsamplers.zipWithIndex.foreach { case (d, i) =>
+            val ptr = chunkset.vectorAddress(i)
+            val acc = chunkset.vectorAccessor(i)
+            val reader = rawPartToDownsample.chunkReader(i, acc, ptr)
+            DownsamplerContext.dsLogger.info(s"Hex Vectors: Col $i for ${rawPartToDownsample.stringPartition} uses " +
+              s"downsampler ${d.encoded} vector=${reader.toHexString(acc, ptr)}RemoveEOL")
+          }
+        }
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
         // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
