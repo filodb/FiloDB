@@ -27,26 +27,29 @@ class SinglePartitionPlanner(planners: Map[String, QueryPlanner], plannerSelecto
     }
   }
 
-  private def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+  /**
+    * Returns planner for first metric in logical plan
+    * If logical plan does not have metric, first planner present in planners is returned
+    */
+  private def getPlanner(logicalPlan: LogicalPlan): QueryPlanner = {
+    LogicalPlanUtils.getMetricName(logicalPlan, datasetMetricColumn).
+      map(x => planners.get(plannerSelector(x.head)).get).getOrElse(planners.values.head)
+  }
 
-    planners.get(plannerSelector(LogicalPlanUtils.getMetricName(logicalPlan).head)).get.
-      materialize(logicalPlan, qContext)
+  private def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
+    getPlanner(logicalPlan).materialize(logicalPlan, qContext)
   }
 
   private def materializeBinaryJoin(logicalPlan: BinaryJoin, qContext: QueryContext): ExecPlan = {
 
-    val lhsMetrics = LogicalPlanUtils.getMetricName(logicalPlan.lhs)
-    val rhsMetrics = LogicalPlanUtils.getMetricName(logicalPlan.rhs)
-    val lhsPlanner = planners.get(plannerSelector(lhsMetrics.head)).get
-    val rhsPlanner = planners.get(plannerSelector(rhsMetrics.head)).get
     val lhsExec = logicalPlan.lhs match {
       case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-      case _             => lhsPlanner.materialize(logicalPlan.lhs, qContext)
+      case _             => getPlanner(logicalPlan.lhs).materialize(logicalPlan.lhs, qContext)
     }
 
     val rhsExec = logicalPlan.rhs match {
       case b: BinaryJoin => materializeBinaryJoin(b, qContext)
-      case _             => rhsPlanner.materialize(logicalPlan.rhs, qContext)
+      case _             => getPlanner(logicalPlan.rhs).materialize(logicalPlan.rhs, qContext)
     }
 
     if (logicalPlan.operator.isInstanceOf[SetOperator])

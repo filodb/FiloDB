@@ -124,9 +124,10 @@ object LogicalPlanUtils {
     }
   }
 
-  def getMetricName(logicalPlan: LogicalPlan): Set[String] = {
-   getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel).getOrElse(throw new
-       BadQueryException(s"Logical plan does not have metric name label $PromMetricLabel"))
+  def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Option[Set[String]] = {
+    val metricName = getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel)
+    if (metricName.isEmpty) getLabelValueFromLogicalPlan(logicalPlan, datasetMetricColumn)
+    else metricName
   }
 
   private def getLabelValueFromFilters(filters: Seq[ColumnFilter], labelName: String): Option[Set[String]] = {

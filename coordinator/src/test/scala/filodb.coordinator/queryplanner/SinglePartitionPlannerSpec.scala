@@ -150,5 +150,11 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")
   }
 
+  it("should generate Exec plan for Scalar query which does not have any metric") {
+    val lp = Parser.queryToLogicalPlan("time()", 1000)
+    val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
+    execPlan.isInstanceOf[TimeScalarGeneratorExec] shouldEqual true
+  }
+
 }
 
