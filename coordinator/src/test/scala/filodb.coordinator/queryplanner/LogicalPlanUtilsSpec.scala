@@ -1,4 +1,4 @@
-package filodb.query.util
+package filodb.coordinator.queryplanner
 
 import org.scalatest.{FunSpec, Matchers}
 
@@ -17,7 +17,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
       ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), Some(300000), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
-    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name_")
+    val res = LogicalPlanUtils.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name_")
     res.get.shouldEqual(Set("MetricName"))
   }
 
@@ -27,7 +27,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
       ColumnFilter("instance", In(Set("Inst-0", "Inst-1")))), Seq("_name_", "instance"), Some(300000), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
-    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "instance")
+    val res = LogicalPlanUtils.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "instance")
     res.get.shouldEqual(Set("Inst-0", "Inst-1"))
   }
 
@@ -43,7 +43,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
 
     val binaryJoin = BinaryJoin(lhs, DIV, OneToOne, rhs)
 
-    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(binaryJoin, "_name_")
+    val res = LogicalPlanUtils.getLabelValueFromLogicalPlan(binaryJoin, "_name_")
     res.get.shouldEqual(Set("MetricName1"))
   }
 
@@ -53,7 +53,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
       ColumnFilter("instance", Equals("Inst-0"))), Seq("_name_", "instance"), Some(300000), None)
     val periodicSeriesWithWindowing = PeriodicSeriesWithWindowing(rawSeries, 1000, 500, 5000, 100, SumOverTime)
 
-    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name")
+    val res = LogicalPlanUtils.getLabelValueFromLogicalPlan(periodicSeriesWithWindowing, "_name")
     res.isEmpty shouldEqual(true)
   }
 
@@ -69,7 +69,7 @@ class LogicalPlanUtilSpec extends FunSpec with Matchers {
 
     val binaryJoin = BinaryJoin(lhs, DIV, OneToOne, rhs)
 
-    val res = LogicalPlanUtil.getLabelValueFromLogicalPlan(binaryJoin, "instance")
+    val res = LogicalPlanUtils.getLabelValueFromLogicalPlan(binaryJoin, "instance")
     res.get.shouldEqual(Set("Inst-1", "Inst-0"))
   }
 

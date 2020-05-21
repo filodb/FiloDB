@@ -154,20 +154,6 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     }
 
   /**
-    * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
-    * if it is not the prometheus standard
-    */
-  private def renameLabels(labels: Seq[String]): Seq[String] =
-    if (dsOptions.metricColumn != PromMetricLabel) {
-      labels map {
-        case PromMetricLabel     => dsOptions.metricColumn
-        case other: String       => other
-      }
-    } else {
-      labels
-    }
-
-  /**
     * Walk logical plan tree depth-first and generate execution plans starting from the bottom
     *
     * @return ExecPlans that answer the logical plan provided
@@ -225,10 +211,13 @@ class SingleClusterPlanner(dsRef: DatasetRef,
     val targetActor = pickDispatcher(stitchedLhs ++ stitchedRhs)
     val joined = if (lp.operator.isInstanceOf[SetOperator])
       Seq(exec.SetOperatorExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator,
-        renameLabels(lp.on), renameLabels(lp.ignoring), dsOptions.metricColumn))
+        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn), dsOptions.metricColumn))
     else
       Seq(BinaryJoinExec(qContext, targetActor, stitchedLhs, stitchedRhs, lp.operator, lp.cardinality,
-        renameLabels(lp.on), renameLabels(lp.ignoring), renameLabels(lp.include), dsOptions.metricColumn))
+        LogicalPlanUtils.renameLabels(lp.on, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.ignoring, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.include, dsOptions.metricColumn), dsOptions.metricColumn))
     PlanResult(joined, false)
   }
 
@@ -248,8 +237,9 @@ class SingleClusterPlanner(dsRef: DatasetRef,
      * Starting off with solution 1 first until (2) or some other approach is decided on.
      */
     toReduceLevel1.plans.foreach {
-      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, renameLabels(lp.without),
-        renameLabels(lp.by)))
+      _.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params,
+        LogicalPlanUtils.renameLabels(lp.without, dsOptions.metricColumn),
+        LogicalPlanUtils.renameLabels(lp.by, dsOptions.metricColumn)))
     }
 
     val toReduceLevel2 =
