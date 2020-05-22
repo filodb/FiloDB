@@ -133,6 +133,13 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
+          // which thread are we on right now ?
+          logger.debug(s"Finished creating full ODP partitions ${odpParts.map(_.partID)}")
+          if(logger.underlying.isDebugEnabled) {
+            partKeyBytesToPage.zip(pagingMethods).foreach { case (pk, method) =>
+              logger.debug(s"Paging in chunks for partId=${getPartition(pk).get.partID} chunkMethod=$method")
+            }
+          }
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
@@ -142,6 +149,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
                   .asyncBoundary(strategy) // This is needed so future computations happen in a different thread
                   .defaultIfEmpty(getPartition(partBytes).get)
                   .headL
+                  // headL since we are fetching a SinglePartition above
               }
               .doOnTerminate(ex => span.finish())
           } else {
@@ -161,11 +169,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
                           methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
   if (partIdsNotInMemory.nonEmpty) {
-    createODPPartitionsTask(partIdsNotInMemory, { case (bytes, offset) =>
+    createODPPartitionsTask(partIdsNotInMemory, { case (pId, bytes, offset) =>
       val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
       partKeyBytesToPage += partKeyBytes
       methods += chunkMethod
+      logger.debug(s"Finished creating part for full odp. Now need to page partId=$pId chunkMethod=$chunkMethod")
       shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
     // asyncBoundary above will cause subsequent map operations to run on designated scheduler for task or observable
@@ -179,7 +188,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
    * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
-  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
+  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte], Int) => Unit):
                                                                   Task[Seq[TimeSeriesPartition]] = Task {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
@@ -202,7 +211,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
             } finally {
               partSetLock.unlockWrite(stamp)
             }
-            callback(partKeyBytesRef.bytes, unsafeKeyOffset)
+            callback(part.partID, partKeyBytesRef.bytes, unsafeKeyOffset)
             part
           }
           // create the partition and update data structures (but no need to add to Lucene!)
