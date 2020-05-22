@@ -111,6 +111,12 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * free space. Unit is milliseconds.
     */
   val ingestionHeadroomStall = Kamon.gauge("ingestion-headroom-stall").withTags(TagSet.from(tags))
+
+  /**
+    * How much time the ingestion thread was stalled while attempting to acquire the reclaim lock.
+    * Unit is milliseconds.
+    */
+  val ingestionFlushStall = Kamon.gauge("ingestion-flush-stall").withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -888,8 +894,30 @@ class TimeSeriesShard(val ref: DatasetRef,
       // seem to be consistent environment to environment.
       // assertThreadName(IOSchedName)
 
-      /* Step 2: Make chunks to be flushed for each partition */
-      val chunks = p.makeFlushChunks(blockHolder)
+      /* Step 2: Make chunks to be flushed for each partition, but make sure we don't reclaim
+        chunks needed by concurrent queries. */
+
+      val start = System.currentTimeMillis()
+      // Give up after waiting (in total) a little over 16 seconds.
+      val stamp = tryExclusiveReclaimLock(8192)
+
+      if (stamp == 0) {
+        // Don't stall ingestion forever. Some queries might return invalid results because the
+        // lock isn't held. If the lock state is broken, then ingestion is really stuck and the
+        // node must be restarted. Queries should always release the lock.
+        logger.error(s"shard=$shardNum: lock for makeFlushChunks timed out: ${reclaimLock}")
+      }
+
+      val chunks = try {
+        p.makeFlushChunks(blockHolder)
+      } finally {
+        if (stamp != 0) {
+          reclaimLock.unlockWrite(stamp)
+        }
+      }
+
+      val stall = System.currentTimeMillis() - start
+      shardStats.ingestionFlushStall.update(stall)
 
       /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
          in writeChunksFuture below */
@@ -1493,7 +1521,8 @@ class TimeSeriesShard(val ref: DatasetRef,
     */
   private def ensureFreeBlocks(): Unit = {
     val start = System.currentTimeMillis()
-    val stamp = tryExclusiveReclaimLock()
+    // Give up after waiting (in total) a little over 2 seconds.
+    val stamp = tryExclusiveReclaimLock(1024)
     if (stamp == 0) {
       logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
     } else {
@@ -1509,7 +1538,7 @@ class TimeSeriesShard(val ref: DatasetRef,
     shardStats.ingestionHeadroomStall.update(stall)
   }
 
-  private def tryExclusiveReclaimLock(): Long = {
+  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Long = {
     // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
     // waiting will also stall new queries from starting. To protect against this, attempt with
     // a timeout to let any stalled queries through. To prevent starvation of the exclusive
@@ -1530,8 +1559,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         return stamp
       }
       timeout <<= 1
-      if (timeout > 1024) {
-        // Give up after waiting (in total) a little over 2 seconds.
+      if (timeout > finalTimeoutMillis) {
         return 0
       }
       Thread.`yield`()
