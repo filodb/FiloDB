@@ -116,7 +116,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * How much time the ingestion thread was stalled while attempting to acquire the reclaim lock.
     * Unit is milliseconds.
     */
-  val ingestionFlushStall = Kamon.gauge("ingestion-flush-stall").withTags(TagSet.from(tags))
+  val ingestionReclaimStall = Kamon.gauge("ingestion-reclaim-stall").withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -331,7 +331,43 @@ class TimeSeriesShard(val ref: DatasetRef,
   // The off-heap block store used for encoded chunks
   private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-    storeConfig.numPagesPerBlock)
+    storeConfig.numPagesPerBlock) {
+
+    // Override to wait for queries to finish before potentially reclaiming blocks which are in
+    // use. Expected to be called only by the ingestion thread when chunks are flushed.
+    override protected def tryReclaimOnDemand(num: Int): Unit = {
+      lock.unlock() // inherited
+      var stamp: Long = 0
+      try {
+        val start = System.currentTimeMillis()
+        // Give up after waiting (in total) a little over 16 seconds.
+        stamp = tryExclusiveReclaimLock(8192)
+
+        if (stamp == 0) {
+          // Don't stall ingestion forever. Some queries might return invalid results because
+          // the lock isn't held. If the lock state is broken, then ingestion is really stuck
+          // and the node must be restarted. Queries should always release the lock.
+          logger.error(s"shard=$shardNum: lock for tryReclaimOnDemand timed out: ${reclaimLock}")
+        }
+
+        val stall = System.currentTimeMillis() - start
+        shardStats.ingestionReclaimStall.update(stall)
+      } finally {
+        lock.lock()
+      }
+
+      try {
+        if (numFreeBlocks < num) { // double check since lock was released
+          tryReclaim(num)
+        }
+      } finally {
+        if (stamp != 0) {
+          reclaimLock.unlockWrite(stamp)
+        }
+      }
+    }
+  }
+
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
@@ -896,28 +932,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
       /* Step 2: Make chunks to be flushed for each partition, but make sure we don't reclaim
         chunks needed by concurrent queries. */
-
-      val start = System.currentTimeMillis()
-      // Give up after waiting (in total) a little over 16 seconds.
-      val stamp = tryExclusiveReclaimLock(8192)
-
-      if (stamp == 0) {
-        // Don't stall ingestion forever. Some queries might return invalid results because the
-        // lock isn't held. If the lock state is broken, then ingestion is really stuck and the
-        // node must be restarted. Queries should always release the lock.
-        logger.error(s"shard=$shardNum: lock for makeFlushChunks timed out: ${reclaimLock}")
-      }
-
-      val chunks = try {
-        p.makeFlushChunks(blockHolder)
-      } finally {
-        if (stamp != 0) {
-          reclaimLock.unlockWrite(stamp)
-        }
-      }
-
-      val stall = System.currentTimeMillis() - start
-      shardStats.ingestionFlushStall.update(stall)
+      val chunks = p.makeFlushChunks(blockHolder)
 
       /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
          in writeChunksFuture below */

@@ -121,6 +121,7 @@ object PageAlignedBlockManager {
   * @param stats                  Memory metrics which need to be recorded
   * @param reclaimer              ReclaimListener to use on block metadata when a block is freed
   * @param numPagesPerBlock       The number of pages a block spans
+  * @param reclamLock             Acquired (with a timeout) when reclaiming on demand
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
@@ -184,14 +185,14 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   override def requestBlocks(memorySize: Long,
                              bucketTime: Option[Long],
                              bmf: Option[BlockMemFactory] = None): Seq[Block] = {
+    val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
+    stats.requestedBlocksMetric.increment(num)
+
     lock.lock()
     try {
-      val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
-      stats.requestedBlocksMetric.increment(num)
-
       if (freeBlocks.size < num) {
         if (bucketTime.isEmpty) {
-          tryReclaim(num)
+          tryReclaimOnDemand(num)
         } else {
             val msg = s"Unable to allocate time ordered block(s) without forcing a reclamation: " +
                       s"num_blocks=$num num_bytes=$memorySize freeBlocks=${freeBlocks.size}"
@@ -262,6 +263,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
     reclaimLog += event
   }
+
+  /**
+    * Called from requestBlocks with lock held. To avoid deadlock, release and re-acquire the
+    * lock if the overridden implementation acquires a different lock.
+    */
+  protected def tryReclaimOnDemand(num: Int): Unit = tryReclaim(num)
 
   protected def tryReclaim(num: Int): Unit = {
     var reclaimed = 0
