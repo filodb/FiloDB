@@ -930,8 +930,7 @@ class TimeSeriesShard(val ref: DatasetRef,
       // seem to be consistent environment to environment.
       // assertThreadName(IOSchedName)
 
-      /* Step 2: Make chunks to be flushed for each partition, but make sure we don't reclaim
-        chunks needed by concurrent queries. */
+      /* Step 2: Make chunks to be flushed for each partition */
       val chunks = p.makeFlushChunks(blockHolder)
 
       /* VERY IMPORTANT: This block is lazy and is executed when chunkSetIter is consumed
