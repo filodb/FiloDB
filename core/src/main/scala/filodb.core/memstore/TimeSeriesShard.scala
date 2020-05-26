@@ -1476,7 +1476,7 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def startHeadroomTask(sched: Scheduler): Unit = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
+      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
     })
   }
 

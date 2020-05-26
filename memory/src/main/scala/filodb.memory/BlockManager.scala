@@ -303,8 +303,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * Expected to be called via a background task, to periodically ensure that enough blocks
     * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
     * from itself.
+    *
+    * @param pct percentage: 0.0 to 100.0
     */
-  override def ensureFreePercent(pct: Double): Int = {
+  def ensureHeadroom(pct: Double): Int = {
     var numFree: Int = 0
     val start = System.currentTimeMillis()
     // Give up after waiting (in total) a little over 2 seconds.
@@ -314,7 +316,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       numFree = numFreeBlocks
     } else {
       try {
-        numFree = super.ensureFreePercent(pct)
+        numFree = ensureFreePercent(pct)
       } finally {
         reclaimLock.unlockWrite(stamp)
       }
