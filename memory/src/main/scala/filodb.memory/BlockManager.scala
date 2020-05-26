@@ -121,7 +121,6 @@ object PageAlignedBlockManager {
   * @param stats                  Memory metrics which need to be recorded
   * @param reclaimer              ReclaimListener to use on block metadata when a block is freed
   * @param numPagesPerBlock       The number of pages a block spans
-  * @param reclamLock             Acquired (with a timeout) when reclaiming on demand
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
