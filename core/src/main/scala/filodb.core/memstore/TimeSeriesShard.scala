@@ -105,18 +105,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
     * receiving them, assuming that the clocks are in sync.
     */
   val ingestionClockDelay = Kamon.gauge("ingestion-clock-delay").withTags(TagSet.from(tags))
-
-  /**
-    * How much time the ingestion thread was potentially stalled while attempting to ensure
-    * free space. Unit is milliseconds.
-    */
-  val ingestionHeadroomStall = Kamon.gauge("ingestion-headroom-stall").withTags(TagSet.from(tags))
-
-  /**
-    * How much time the ingestion thread was stalled while attempting to acquire the reclaim lock.
-    * Unit is milliseconds.
-    */
-  val ingestionReclaimStall = Kamon.gauge("ingestion-reclaim-stall").withTags(TagSet.from(tags))
 }
 
 object TimeSeriesShard {
@@ -319,56 +307,20 @@ class TimeSeriesShard(val ref: DatasetRef,
   // occurs in the common case, when there isn't any contention reading from partSet.
   private[memstore] final val partSetLock = new StampedLock
 
+  // The off-heap block store used for encoded chunks
+  private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
+  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
+    storeConfig.numPagesPerBlock)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+
   /**
     * Lock that protects chunks from being reclaimed from Memstore.
     * This is needed to prevent races between ODP queries and reclaims.
     */
-  private[memstore] final val reclaimLock = new StampedLock
+  private[memstore] final val reclaimLock = blockStore.reclaimLock
 
-  // Requires reclaimLock.
+  // Requires blockStore.
   startHeadroomTask(ingestSched)
-
-  // The off-heap block store used for encoded chunks
-  private val shardTags = Map("dataset" -> ref.dataset, "shard" -> shardNum.toString)
-  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-    storeConfig.numPagesPerBlock) {
-
-    // Override to wait for queries to finish before potentially reclaiming blocks which are in
-    // use. Expected to be called only by the ingestion thread when chunks are flushed.
-    override protected def tryReclaimOnDemand(num: Int): Unit = {
-      lock.unlock() // inherited
-      var stamp: Long = 0
-      try {
-        val start = System.currentTimeMillis()
-        // Give up after waiting (in total) a little over 16 seconds.
-        stamp = tryExclusiveReclaimLock(8192)
-
-        if (stamp == 0) {
-          // Don't stall ingestion forever. Some queries might return invalid results because
-          // the lock isn't held. If the lock state is broken, then ingestion is really stuck
-          // and the node must be restarted. Queries should always release the lock.
-          logger.error(s"shard=$shardNum: lock for tryReclaimOnDemand timed out: ${reclaimLock}")
-        }
-
-        val stall = System.currentTimeMillis() - start
-        shardStats.ingestionReclaimStall.update(stall)
-      } finally {
-        lock.lock()
-      }
-
-      try {
-        if (numFreeBlocks < num) { // double check since lock was released
-          tryReclaim(num)
-        }
-      } finally {
-        if (stamp != 0) {
-          reclaimLock.unlockWrite(stamp)
-        }
-      }
-    }
-  }
-
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
@@ -1524,61 +1476,8 @@ class TimeSeriesShard(val ref: DatasetRef,
 
   private def startHeadroomTask(sched: Scheduler): Unit = {
     sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
-      def run() = ensureFreeBlocks
+      def run() = blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
     })
-  }
-
-  /**
-    * Expected to be called via a background task, to periodically ensure that enough blocks
-    * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
-    * from itself.
-    */
-  private def ensureFreeBlocks(): Unit = {
-    val start = System.currentTimeMillis()
-    // Give up after waiting (in total) a little over 2 seconds.
-    val stamp = tryExclusiveReclaimLock(1024)
-    if (stamp == 0) {
-      logger.warn(s"shard=$shardNum: ensureFreeBlocks timed out: ${reclaimLock}")
-    } else {
-      val numFree = try {
-        blockStore.ensureFreePercent(storeConfig.ensureHeadroomPercent)
-      } finally {
-        reclaimLock.unlockWrite(stamp)
-      }
-      val numBytes = numFree * blockStore.blockSizeInBytes
-      logger.debug(s"shard=$shardNum: ensureFreeBlocks: $numFree ($numBytes bytes)")
-    }
-    val stall = System.currentTimeMillis() - start
-    shardStats.ingestionHeadroomStall.update(stall)
-  }
-
-  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Long = {
-    // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
-    // waiting will also stall new queries from starting. To protect against this, attempt with
-    // a timeout to let any stalled queries through. To prevent starvation of the exclusive
-    // lock attempt, increase the timeout each time, but eventually give up. The reason why
-    // waiting for an exclusive lock causes this problem is that the thread must enqueue itself
-    // into the lock as a waiter, and all new shared requests must wait their turn. The risk
-    // with timing out is that if there's a continuous stream of long running queries (more than
-    // one second), then the exclusive lock will never be acqiured, and then ensureFreeBlocks
-    // won't be able to do its job. The timeout settings might need to be adjusted in that case.
-    // Perhaps the timeout should increase automatically if ensureFreeBlocks failed the last time?
-    // This isn't safe to do until we gain higher confidence that the shared lock is always
-    // released by queries.
-
-    var timeout = 1;
-    while (true) {
-      val stamp = reclaimLock.tryWriteLock(timeout, TimeUnit.MILLISECONDS)
-      if (stamp != 0) {
-        return stamp
-      }
-      timeout <<= 1
-      if (timeout > finalTimeoutMillis) {
-        return 0
-      }
-      Thread.`yield`()
-    }
-    0 // never reached, but scala compiler complains otherwise
   }
 
   /**

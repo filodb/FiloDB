@@ -2,7 +2,9 @@ package filodb.memory
 
 import java.lang.{Long => jLong}
 import java.util
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.StampedLock
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
@@ -104,6 +106,18 @@ class MemoryStats(tags: Map[String, String]) {
   val timeOrderedBlocksReclaimedMetric = Kamon.counter("blockstore-time-ordered-blocks-reclaimed")
                                             .withTags(TagSet.from(tags))
   val blocksReclaimedMetric = Kamon.counter("blockstore-blocks-reclaimed").withTags(TagSet.from(tags))
+
+  /**
+    * How much time a thread was potentially stalled while attempting to ensure
+    * free space. Unit is milliseconds.
+    */
+  val blockHeadroomStall = Kamon.gauge("blockstore-headroom-stall").withTags(TagSet.from(tags))
+
+  /**
+    * How much time a thread was stalled while attempting to acquire the reclaim lock.
+    * Unit is milliseconds.
+    */
+  val blockReclaimStall = Kamon.gauge("blockstore-reclaim-stall").withTags(TagSet.from(tags))
 }
 
 final case class ReclaimEvent(block: Block, reclaimTime: Long, oldOwner: Option[BlockMemFactory], remaining: Long)
@@ -141,6 +155,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   val reclaimLog = new collection.mutable.Queue[ReclaimEvent]
 
   protected val lock = new ReentrantLock()
+
+  // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
+  final val reclaimLock = new StampedLock
 
   override def blockSizeInBytes: Long = PageManager.getInstance().pageSize() * numPagesPerBlock
 
@@ -217,6 +234,98 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
+  /**
+    * Called from requestBlocks with the lock held. To avoid deadlock, this method releases and
+    * re-acquires the lock.
+    */
+  private def tryReclaimOnDemand(num: Int): Unit = {
+    lock.unlock()
+    var stamp: Long = 0
+    try {
+      val start = System.currentTimeMillis()
+      // Give up after waiting (in total) a little over 16 seconds.
+      stamp = tryExclusiveReclaimLock(8192)
+
+      if (stamp == 0) {
+        // Don't stall ingestion forever. Some queries might return invalid results because
+        // the lock isn't held. If the lock state is broken, then ingestion is really stuck
+        // and the node must be restarted. Queries should always release the lock.
+        logger.error(s"Lock for BlockManager.tryReclaimOnDemand timed out: ${reclaimLock}")
+      }
+
+      val stall = System.currentTimeMillis() - start
+      stats.blockReclaimStall.update(stall)
+    } finally {
+      lock.lock()
+    }
+
+    try {
+      if (numFreeBlocks < num) { // double check since lock was released
+        tryReclaim(num)
+      }
+    } finally {
+      if (stamp != 0) {
+        reclaimLock.unlockWrite(stamp)
+      }
+    }
+  }
+
+  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Long = {
+    // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
+    // waiting will also stall new queries from starting. To protect against this, attempt with
+    // a timeout to let any stalled queries through. To prevent starvation of the exclusive
+    // lock attempt, increase the timeout each time, but eventually give up. The reason why
+    // waiting for an exclusive lock causes this problem is that the thread must enqueue itself
+    // into the lock as a waiter, and all new shared requests must wait their turn. The risk
+    // with timing out is that if there's a continuous stream of long running queries (more than
+    // one second), then the exclusive lock will never be acqiured, and then ensureFreeBlocks
+    // won't be able to do its job. The timeout settings might need to be adjusted in that case.
+    // Perhaps the timeout should increase automatically if ensureFreeBlocks failed the last time?
+    // This isn't safe to do until we gain higher confidence that the shared lock is always
+    // released by queries.
+
+    var timeout = 1;
+    while (true) {
+      val stamp = reclaimLock.tryWriteLock(timeout, TimeUnit.MILLISECONDS)
+      if (stamp != 0) {
+        return stamp
+      }
+      timeout <<= 1
+      if (timeout > finalTimeoutMillis) {
+        return 0
+      }
+      Thread.`yield`()
+    }
+    0 // never reached, but scala compiler complains otherwise
+  }
+
+  /**
+    * Expected to be called via a background task, to periodically ensure that enough blocks
+    * are free for new allocations. This helps prevent ODP activity from reclaiming immediately
+    * from itself.
+    */
+  override def ensureFreePercent(pct: Double): Int = {
+    var numFree: Int = 0
+    val start = System.currentTimeMillis()
+    // Give up after waiting (in total) a little over 2 seconds.
+    val stamp = tryExclusiveReclaimLock(1024)
+    if (stamp == 0) {
+      logger.warn(s"Lock for BlockManager.ensureFreePercent timed out: ${reclaimLock}")
+      numFree = numFreeBlocks
+    } else {
+      try {
+        numFree = super.ensureFreePercent(pct)
+      } finally {
+        reclaimLock.unlockWrite(stamp)
+      }
+      val numBytes = numFree * blockSizeInBytes
+      logger.debug(s"BlockManager.ensureFreePercent numFree: $numFree ($numBytes bytes)")
+    }
+    val stall = System.currentTimeMillis() - start
+    stats.blockHeadroomStall.update(stall)
+    numFree
+  }
+
   override def ensureFreeBlocks(num: Int): Int = {
     lock.lock()
     try {
@@ -262,12 +371,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     if (reclaimLog.size >= MaxReclaimLogSize) { reclaimLog.dequeue }
     reclaimLog += event
   }
-
-  /**
-    * Called from requestBlocks with lock held. To avoid deadlock, release and re-acquire the
-    * lock if the overridden implementation acquires a different lock.
-    */
-  protected def tryReclaimOnDemand(num: Int): Unit = tryReclaim(num)
 
   protected def tryReclaim(num: Int): Unit = {
     var reclaimed = 0
