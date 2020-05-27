@@ -359,7 +359,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   /**
     * Called when a document is updated with new endTime
     */
-  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
+  def startTimeFromPartIds(partIds: debox.Buffer[Int]): debox.Map[Int, Long] = {
     val span = Kamon.spanBuilder("index-startTimes-for-odp-lookup-latency")
       .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
@@ -437,8 +437,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def leafFilter(column: String, filter: Filter): Query = {
     filter match {
       case EqualsRegex(value) =>
-        val term = new Term(column, value.toString)
-        new RegexpQuery(term, RegExp.NONE)
+        val equalsRegexQuery = new BooleanQuery.Builder
+        equalsRegexQuery.add(new RegexpQuery(new Term(column, value.toString), RegExp.NONE), Occur.FILTER)
+        equalsRegexQuery.build()
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
@@ -447,8 +448,9 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
-        val term = new Term(column, value.toString)
-        new TermQuery(term)
+        val equalsQuery = new BooleanQuery.Builder
+        equalsQuery.add(new TermQuery(new Term(column, value.toString)), Occur.FILTER)
+        equalsQuery.build()
       case NotEquals(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery

@@ -50,12 +50,13 @@ class PartKeyIndexBenchmark {
   partKeyIndex.refreshReadersBlocking()
 
   @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
+  @BenchmarkMode(Array(Mode.Throughput, Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithEqualsFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+    for ( i <- 0 to 100 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+            ColumnFilter("_ws_", Filter.Equals("demo")),
             ColumnFilter("host", Filter.EqualsRegex("H0")),
             ColumnFilter("__name__", Filter.Equals("heap_usage"))),
         now,
@@ -64,12 +65,13 @@ class PartKeyIndexBenchmark {
   }
 
   @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
+  @BenchmarkMode(Array(Mode.Throughput, Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithSuffixRegexFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+    for ( i <- 0 to 100 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("__name__", Filter.Equals("heap_usage")),
           ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
         now,
@@ -78,12 +80,13 @@ class PartKeyIndexBenchmark {
   }
 
   @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
+  @BenchmarkMode(Array(Mode.Throughput, Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def partIdsLookupWithPrefixRegexFilters(): Unit = {
-    for ( i <- 0 to 20 optimized) {
+    for ( i <- 0 to 100 optimized) {
       partKeyIndex.partIdsFromFilters(
-        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+        Seq(ColumnFilter("_ns_", Filter.Equals(s"App-$i")),
+          ColumnFilter("_ws_", Filter.Equals("demo")),
           ColumnFilter("__name__", Filter.Equals("heap_usage")),
           ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
         now,
@@ -92,11 +95,15 @@ class PartKeyIndexBenchmark {
   }
 
   @Benchmark
-  @BenchmarkMode(Array(Mode.Throughput))
+  @BenchmarkMode(Array(Mode.Throughput, Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def startTimeLookupWithPartId(): Unit = {
+    var pId = 0
     for ( i <- 0 to 20 optimized) {
-      partKeyIndex.startTimeFromPartId(i)
+      val pIds = debox.Buffer.empty[Int]
+      for ( j <- pId to pId + 1000 optimized) { pIds += j }
+      partKeyIndex.startTimeFromPartIds(pIds)
+      pId += 1000
     }
   }
 

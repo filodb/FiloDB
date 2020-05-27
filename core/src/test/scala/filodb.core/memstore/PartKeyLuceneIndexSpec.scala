@@ -133,7 +133,9 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
     keyIndex.refreshReadersBlocking()
 
-    val startTimes = keyIndex.startTimeFromPartIds((0 until numPartIds).iterator)
+    val pIds = debox.Buffer.empty[Int]
+    (0 until numPartIds).foreach(pIds += _)
+    val startTimes = keyIndex.startTimeFromPartIds(pIds)
     for { i <- 0 until numPartIds} {
       startTimes(i) shouldEqual start + i
     }
