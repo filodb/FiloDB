@@ -242,7 +242,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     * shared reclaimLock. To prevent indefinite stalls, this method times out lock acquisition,
     * logs an error, and then reclaims anyhow.
     *
-    * This methid must be called with the primary lock object held. To avoid deadlock, this
+    * This method must be called with the primary lock object held. To avoid deadlock, this
     * method releases and re-acquires the lock.
     */
   private def tryReclaimOnDemand(num: Int): Unit = {
