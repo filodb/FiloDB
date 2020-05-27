@@ -235,8 +235,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   /**
-    * Called from requestBlocks with the lock held. To avoid deadlock, this method releases and
-    * re-acquires the lock.
+    * Internal variant of the tryReclaim method which is called when blocks are requested, but
+    * none are available. Instead of blindly reclaiming blocks, it attempts to exclusively
+    * acquire the reclaim lock. By doing so, it avoids reclaiming blocks which are currently
+    * being accessed. To work properly, all threads which require this protection must hold the
+    * shared reclaimLock. To prevent indefinite stalls, this method times out lock acquisition,
+    * logs an error, and then reclaims anyhow.
+    *
+    * This methid must be called with the primary lock object held. To avoid deadlock, this
+    * method releases and re-acquires the lock.
     */
   private def tryReclaimOnDemand(num: Int): Unit = {
     lock.unlock()
