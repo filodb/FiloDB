@@ -367,8 +367,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .start()
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
-    partIds.foreach { pId =>
-      terms.add(new BytesRef(pId.toString.getBytes))
+    for { i <- 0 until partIds.length optimized } {
+      terms.add(new BytesRef(partIds(i).toString.getBytes))
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene
