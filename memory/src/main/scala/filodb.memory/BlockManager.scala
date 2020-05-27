@@ -149,9 +149,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
   protected var firstPageAddress: Long = 0L
 
-  protected val freeBlocks: util.LinkedList[Block] = allocate()
-  protected[memory] val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
-  protected[memory] val usedBlocksTimeOrdered = new util.TreeMap[Long, util.LinkedList[Block]]
+  protected val freeBlocks: util.ArrayDeque[Block] = allocate()
+  protected[memory] val usedBlocks: util.ArrayDeque[Block] = new util.ArrayDeque[Block]()
+  protected[memory] val usedBlocksTimeOrdered = new util.TreeMap[Long, util.ArrayDeque[Block]]
   val reclaimLog = new collection.mutable.Queue[ReclaimEvent]
 
   protected val lock = new ReentrantLock()
@@ -346,9 +346,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  protected def allocate(): util.LinkedList[Block] = {
+  protected def allocate(): util.ArrayDeque[Block] = {
     val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
-    val blocks = new util.LinkedList[Block]()
+    val blocks = new util.ArrayDeque[Block]()
     logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
     firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, false)
     for (i <- 0 until numBlocks) {
@@ -363,7 +363,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     block.markInUse
     bucketTime match {
       case Some(bucket) => val blockList = Option(usedBlocksTimeOrdered.get(bucket)).getOrElse {
-                                             val list = new util.LinkedList[Block]()
+                                             val list = new util.ArrayDeque[Block]()
                                              usedBlocksTimeOrdered.put(bucket, list)
                                              list
                                            }
@@ -405,7 +405,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                   s"usedBlocksTimeOrdered=${usedBlocksTimeOrdered.asScala.toList.map{case(n, l) => (n, l.size)}}")
     }
 
-    def reclaimFrom(list: util.LinkedList[Block], reclaimedCounter: Counter): Seq[Block] = {
+    def reclaimFrom(list: util.ArrayDeque[Block], reclaimedCounter: Counter): Seq[Block] = {
       val entries = list.iterator
       val removed = new collection.mutable.ArrayBuffer[Block]
       while (entries.hasNext && reclaimed < num) {
