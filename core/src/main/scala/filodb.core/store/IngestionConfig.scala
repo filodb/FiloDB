@@ -72,6 +72,10 @@ object StoreConfig {
   // NOTE: there are no defaults for flush interval and shard memory, those should be explicitly calculated
   // default max-data-per-shard-query was calculated as follows:
   // 750k TsPartitions * 48 chunksets queried * 2kb per chunkset / 256 shards = 280MB
+
+  // The num-block-pages setting when multiplied by the page size (4KB) defines the
+  // BlockManager block size. When num-block-pages is 100, the effective block size is 400KB.
+
   val defaults = ConfigFactory.parseString("""
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
@@ -82,7 +86,7 @@ object StoreConfig {
                                            |max-buffer-pool-size = 10000
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
-                                           |num-block-pages = 1000
+                                           |num-block-pages = 100
                                            |failure-retries = 3
                                            |retry-delay = 15 seconds
                                            |part-index-flush-max-delay = 60 seconds
