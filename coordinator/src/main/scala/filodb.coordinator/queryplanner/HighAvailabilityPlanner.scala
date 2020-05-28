@@ -84,7 +84,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (!logicalPlan.isRoutable ||
         !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
         (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of
+          && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of failure routing
         !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
         failures.isEmpty) { // no failures in query time range
       localPlanner.materialize(logicalPlan, qContext)
