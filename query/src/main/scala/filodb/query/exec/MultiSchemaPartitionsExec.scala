@@ -99,12 +99,6 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
-
-    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
-    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
-    if (queryTimeElapsed >= queryContext.queryTimeoutMillis)
-      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
-
     finalPlan = finalizePlan(source, querySession)
     finalPlan.doExecute(source, querySession)(sched)
    }

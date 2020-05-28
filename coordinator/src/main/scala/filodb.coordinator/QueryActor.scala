@@ -124,6 +124,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
+    checkTimeout(q.qContext)
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment()
     try {
@@ -138,6 +139,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
+    checkTimeout(q.qContext)
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan
@@ -159,6 +161,13 @@ final class QueryActor(memStore: MemStore,
       if (destNode != ActorRef.noSender) { destNode.forward(g) }
       else                               { originator ! BadArgument(s"Shard ${g.shard} is not assigned") }
     }
+  }
+
+  def checkTimeout(queryContext: QueryContext): Unit = {
+    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis)
+      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
   }
 
   def receive: Receive = {
