@@ -266,7 +266,7 @@ object CliMain extends ArgMain[Arguments] with FilodbClusterNode {
   def parseLabelValuesQuery(client: LocalClient, labelNames: Seq[String], constraints: Map[String, String], dataset: String,
                             timeParams: TimeRangeParams,
                             options: QOptions): Unit = {
-    val logicalPlan = LabelValues(labelNames, constraints, 3.days.toMillis)
+    val logicalPlan = LabelValues(labelNames, constraints, timeParams.start * 1000, timeParams.end * 1000)
     executeQuery2(client, dataset, logicalPlan, options, UnavailablePromQlQueryParams)
   }
 
