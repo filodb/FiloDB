@@ -116,7 +116,7 @@ class PartKeyIndexBenchmark {
     for ( i <- 0 until 8 optimized) {
       val pIds = debox.Buffer.empty[Int]
       for ( j <- i * 1000 to i * 1000 + 1000 optimized) { pIds += j }
-      partKeyIndex.startTimeFromPartIds(pIds)
+      partKeyIndex.startTimeFromPartIds(pIds.iterator())
     }
   }
 
