@@ -437,9 +437,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   private def leafFilter(column: String, filter: Filter): Query = {
     filter match {
       case EqualsRegex(value) =>
-        val equalsRegexQuery = new BooleanQuery.Builder
-        equalsRegexQuery.add(new RegexpQuery(new Term(column, value.toString), RegExp.NONE), Occur.FILTER)
-        equalsRegexQuery.build()
+        val term = new Term(column, value.toString)
+        new RegexpQuery(term, RegExp.NONE)
       case NotEqualsRegex(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
@@ -448,9 +447,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
         booleanQuery.add(new RegexpQuery(term, RegExp.NONE), Occur.MUST_NOT)
         booleanQuery.build()
       case Equals(value) =>
-        val equalsQuery = new BooleanQuery.Builder
-        equalsQuery.add(new TermQuery(new Term(column, value.toString)), Occur.FILTER)
-        equalsQuery.build()
+        val term = new Term(column, value.toString)
+        new TermQuery(term)
       case NotEquals(value) =>
         val term = new Term(column, value.toString)
         val allDocs = new MatchAllDocsQuery
