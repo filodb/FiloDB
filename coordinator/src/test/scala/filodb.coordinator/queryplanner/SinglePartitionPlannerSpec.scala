@@ -139,12 +139,13 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
       TimeStepParams(1000, 10, 2000))
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
-    execPlan.printTree()
     execPlan.isInstanceOf[PartKeysDistConcatExec] shouldEqual (true)
     execPlan.asInstanceOf[PartKeysDistConcatExec].children.length shouldEqual(3)
 
-    // For Raw and Downsample
+    // For Raw
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(0).isInstanceOf[PartKeysDistConcatExec] shouldEqual true
+    execPlan.asInstanceOf[PartKeysDistConcatExec].children(0).asInstanceOf[PartKeysDistConcatExec].children.
+      forall(_.isInstanceOf[PartKeysExec]) shouldEqual true
 
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(1).asInstanceOf[MockExecPlan].name shouldEqual ("rules1")
     execPlan.asInstanceOf[PartKeysDistConcatExec].children(2).asInstanceOf[MockExecPlan].name shouldEqual ("rules2")

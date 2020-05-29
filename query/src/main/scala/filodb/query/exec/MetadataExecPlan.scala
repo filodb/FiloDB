@@ -135,7 +135,8 @@ final case class  LabelValuesExec(queryContext: QueryContext,
                                   shard: Int,
                                   filters: Seq[ColumnFilter],
                                   columns: Seq[String],
-                                  lookBackInMillis: Long) extends LeafExecPlan {
+                                  startMs: Long,
+                                  endMs: Long) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 
@@ -145,9 +146,6 @@ final case class  LabelValuesExec(queryContext: QueryContext,
     val parentSpan = Kamon.currentSpan()
     val rvs = if (source.isInstanceOf[MemStore]) {
       val memStore = source.asInstanceOf[MemStore]
-      val curr = System.currentTimeMillis()
-      val end = curr - curr % 1000 // round to the floor second
-      val start = end - lookBackInMillis
       val response = filters.isEmpty match {
         // retrieves label values for a single label - no column filter
         case true if (columns.size == 1) => memStore.labelValues(dataset, shard, columns.head, queryContext.sampleLimit)
@@ -155,7 +153,7 @@ final case class  LabelValuesExec(queryContext: QueryContext,
           .toIterator
         case true => throw new BadQueryException("either label name is missing " +
           "or there are multiple label names without filter")
-        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, end, start,
+        case false => memStore.labelValuesWithFilters(dataset, shard, filters, columns, endMs, startMs,
           queryContext.sampleLimit)
       }
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
@@ -169,5 +167,5 @@ final case class  LabelValuesExec(queryContext: QueryContext,
   }
 
   def args: String = s"shard=$shard, filters=$filters, col=$columns, limit=${queryContext.sampleLimit}, " +
-    s"lookBackInMillis=$lookBackInMillis"
+    s"startMs=$startMs, endMs=$endMs"
 }

@@ -54,7 +54,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should update time in logical plan") {
 
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"))
-    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000), 0)
+    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000))
 
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)
@@ -160,7 +160,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
 
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"),
       Some(100), None)
-    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed, TimeRange(20000, 30000), 100)
+    val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed, TimeRange(20000, 30000))
 
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
     getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)

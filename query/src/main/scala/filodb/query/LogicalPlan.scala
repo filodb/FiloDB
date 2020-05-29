@@ -77,7 +77,8 @@ case class RawSeries(rangeSelector: RangeSelector,
 
 case class LabelValues(labelNames: Seq[String],
                        labelConstraints: Map[String, String],
-                       lookbackTimeMs: Long) extends MetadataQueryPlan
+                       startMs: Long,
+                       endMs: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                fetchFirstLastSampleTimes: Boolean,

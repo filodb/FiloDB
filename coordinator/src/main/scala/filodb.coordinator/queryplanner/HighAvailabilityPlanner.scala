@@ -43,7 +43,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // Offset logic is handled in ExecPlan
           localPlanner.materialize(
             copyWithUpdatedTimeRange(rootLogicalPlan, TimeRange(timeRange.startMs + offsetMs,
-              timeRange.endMs + offsetMs) , lookBackTime), qContext)
+              timeRange.endMs + offsetMs)), qContext)
         }
         case route: RemoteRoute =>
           val timeRange = route.timeRange.get
@@ -84,7 +84,8 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
     if (!logicalPlan.isRoutable ||
         !tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
         (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-          && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was part of failure routing
+          && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processFailure) || // This is a query that was
+                                                                                 // part of failure routing
         !hasSingleTimeRange(logicalPlan) || // Sub queries have different time ranges (unusual)
         failures.isEmpty) { // no failures in query time range
       localPlanner.materialize(logicalPlan, qContext)

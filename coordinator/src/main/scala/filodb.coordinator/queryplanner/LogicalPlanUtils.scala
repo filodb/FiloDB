@@ -47,30 +47,29 @@ object LogicalPlanUtils {
     * NOTE: Plan should be PeriodicSeriesPlan
     */
   def copyWithUpdatedTimeRange(logicalPlan: LogicalPlan,
-                               timeRange: TimeRange,
-                               lookBackTime: Long): PeriodicSeriesPlan = {
+                               timeRange: TimeRange): PeriodicSeriesPlan = {
     logicalPlan match {
       case lp: PeriodicSeries => lp.copy(startMs = timeRange.startMs,
                                          endMs = timeRange.endMs,
-                                         rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange,
-                                                                         lookBackTime).asInstanceOf[RawSeries])
+                                         rawSeries = copyNonPeriodicWithUpdatedTimeRange(lp.rawSeries, timeRange)
+                                                     .asInstanceOf[RawSeries])
       case lp: PeriodicSeriesWithWindowing => lp.copy(startMs = timeRange.startMs,
                                                       endMs = timeRange.endMs,
-                                                      series = copyNonPeriodicWithUpdatedTimeRange(lp.series, timeRange,
-                                                                                                   lookBackTime))
-      case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+                                                      series = copyNonPeriodicWithUpdatedTimeRange(lp.series,
+                                                               timeRange))
+      case lp: ApplyInstantFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: Aggregate  => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+      case lp: Aggregate  => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange, lookBackTime),
-                                     rhs = copyWithUpdatedTimeRange(lp.rhs, timeRange, lookBackTime))
+      case lp: BinaryJoin => lp.copy(lhs = copyWithUpdatedTimeRange(lp.lhs, timeRange),
+                                     rhs = copyWithUpdatedTimeRange(lp.rhs, timeRange))
       case lp: ScalarVectorBinaryOperation =>
-                      lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange, lookBackTime))
+                      lp.copy(vector = copyWithUpdatedTimeRange(lp.vector, timeRange))
 
       case lp: ApplyMiscellaneousFunction =>
-                      lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+                      lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
-      case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange, lookBackTime))
+      case lp: ApplySortFunction => lp.copy(vectors = copyWithUpdatedTimeRange(lp.vectors, timeRange))
 
       case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
     }
@@ -80,15 +79,14 @@ object LogicalPlanUtils {
     * Used to change rangeSelector of RawSeriesLikePlan
     */
   private def copyNonPeriodicWithUpdatedTimeRange(plan: RawSeriesLikePlan,
-                                                  timeRange: TimeRange,
-                                                  lookBackTime: Long): RawSeriesLikePlan = {
+                                                  timeRange: TimeRange): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {
         case is: IntervalSelector => rs.copy(rangeSelector = is.copy(timeRange.startMs, timeRange.endMs))
         case _ => throw new UnsupportedOperationException("Copy supported only for IntervalSelector")
       }
       case p: ApplyInstantFunctionRaw =>
-        p.copy(vectors = copyNonPeriodicWithUpdatedTimeRange(p.vectors, timeRange, lookBackTime)
+        p.copy(vectors = copyNonPeriodicWithUpdatedTimeRange(p.vectors, timeRange)
           .asInstanceOf[RawSeries])
       case _ => throw new UnsupportedOperationException("Copy supported only for RawSeries")
     }

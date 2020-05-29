@@ -114,7 +114,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
   }
 
-  it("should generate RemotExecPlan with RawSeries time according to lookBack") {
+  it("should generate RemoteExecPlan with RawSeries time according to lookBack") {
     val to = 2000000
     val from = 1000000
     val intervalSelector = IntervalSelector(from, to) // Lookback of 50000

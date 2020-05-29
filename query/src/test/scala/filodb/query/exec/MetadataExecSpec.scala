@@ -86,7 +86,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = LabelValuesExec(QueryContext(), dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, Seq("job"), 10)
+      timeseriesDataset.ref, 0, filters, Seq("job"), now-5000, now)
 
     val resp = execPlan.execute(memStore, querySession).runAsync.futureValue
     val result = resp match {

@@ -3,26 +3,23 @@ package filodb.coordinator.queryplanner
 import com.typesafe.config.ConfigFactory
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
-import filodb.core.DatasetRef
-import filodb.core.metadata.DatasetOptions
+import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryContext}
-import filodb.query.{BinaryJoin, LogicalPlan, SeriesKeysByFilters}
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PartKeysDistConcatExec, PromQlExec, StitchRvsExec}
-
+import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
 
-trait PartitionLocationProvider{
+trait PartitionLocationProvider {
 
   def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment]
-  def getAuthorizedPartitions(timeRange: TimeRange): Seq[PartitionAssignment]
+  def getAuthorizedPartitions(timeRange: TimeRange): List[PartitionAssignment]
 }
 
 class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider,
                             localPlanner: QueryPlanner,
                             localPartition: String,
-                            datasetOptions: DatasetOptions,
-                            datasetRef: DatasetRef) extends QueryPlanner {
+                            dataset: Dataset) extends QueryPlanner {
 
   override def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
@@ -30,21 +27,29 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
 
     if(!tsdbQueryParams.isInstanceOf[PromQlQueryParams] || // We don't know the promql issued (unusual)
       (tsdbQueryParams.isInstanceOf[PromQlQueryParams]
-        && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processRouting) || // Query was part of routing
-      !hasSingleTimeRange(logicalPlan)) // Sub queries have different time ranges (unusual)
+        && !tsdbQueryParams.asInstanceOf[PromQlQueryParams].processRouting)) // Query was part of routing
       localPlanner.materialize(logicalPlan, qContext)
 
     else logicalPlan match {
       case lp: BinaryJoin          => materializeBinaryJoin(lp, qContext)
-     // case lp: LabelValues         => materializeLabelValues(lp, qContext)
+      case lp: LabelValues         => materializeLabelValues(lp, qContext)
       case lp: SeriesKeysByFilters => materializeSeriesKeysFilters(lp, qContext)
       case _                       => materializeSimpleQuery(logicalPlan, qContext)
 
     }
   }
 
-  private def getRoutingKeys(logicalPlan: LogicalPlan) = datasetOptions.nonMetricShardColumns
-    .map(x => (x, LogicalPlanUtils.getLabelValueFromLogicalPlan(logicalPlan, x)))
+  private def getRoutingKeys(logicalPlan: LogicalPlan) = dataset.options.nonMetricShardColumns
+    .map(x => (x, LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, x)))
+
+  private def generateRemoteExec(queryContext: QueryContext, startMs: Long,
+                                 endMs: Long, endPoint: String): PromQlExec = {
+    val queryParams = queryContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+    val promQlParams = PromQlQueryParams(ConfigFactory.parseString(s"""endpoint = "${endPoint}""""),
+      queryParams.promQl, startMs / 1000, queryParams.stepSecs, endMs / 1000, queryParams.spread, processFailure = true,
+      processRouting = false)
+    PromQlExec(queryContext, InProcessPlanDispatcher, dataset.ref, promQlParams)
+  }
 
   def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
@@ -52,27 +57,24 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     if (routingKeys.forall(_._2.isEmpty)) localPlanner.materialize(logicalPlan, qContext)
     else {
       val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
-      lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-      lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
-        periodicSeriesTime.endMs - offsetMillis)
-      lazy val lookBackTimeMs = getLookBackMillis(logicalPlan)
+      val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+      val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
+      val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMs,
+        periodicSeriesTime.endMs - offsetMs)
+      val lookBackTimeMs = getLookBackMillis(logicalPlan)
       // Time at which raw data would be retrieved which is used to get partition assignments.
       // It should have time with offset and lookback as we need raw data at time including offset and lookback.
-      lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
+      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
         periodicSeriesTimeWithOffset.endMs)
-      lazy val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
+
+      val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
         sortBy(_.timeRange.startMs)
-      val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
       val execPlans = partitions.map { p =>
-        if (p.equals(localPartition)) localPlanner.materialize(logicalPlan, qContext)
-        else {
-          val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-          val promQlParams = PromQlQueryParams(ConfigFactory.parseString(s"""buddy.http.endpoint ="${p.endPoint}""""),
-            queryParams.promQl, (p.timeRange.startMs + offsetMs + lookBackTimeMs) / 1000, queryParams.stepSecs,
-            (p.timeRange.endMs + offsetMs) / 1000, queryParams.spread, processFailure = true, processRouting = false)
-          PromQlExec(qContext, InProcessPlanDispatcher, datasetRef, promQlParams)
-        }
+        val startMs = p.timeRange.startMs + offsetMs + lookBackTimeMs
+        val endMs = p.timeRange.endMs + offsetMs
+        if (p.partitionName.equals(localPartition)) localPlanner.materialize(
+          copyWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
+        else generateRemoteExec(qContext, startMs, endMs, p.endPoint)
       }
       if (execPlans.size == 1) execPlans.head
       else StitchRvsExec(qContext,
@@ -98,35 +100,46 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // It should have time with offset and lookback as we need raw data at time including offset and lookback.
       lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
         periodicSeriesTimeWithOffset.endMs)
-      val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
-      lazy val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
+      // Lhs & Rhs in Binary Join can have different values
+      val routingKeyMap = routingKeys.flatMap(x => x._2.get.map(y => (x._1, y))).toMap
+      val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
         sortBy(_.timeRange.startMs)
-      if (partitions.forall(_.partitionName.equals((localPartition)))) localPlanner.materialize(logicalPlan, qContext)
+      val partitionName = partitions.head.partitionName
+
+      // Binary Join supported only fro single partition now
+      if (partitions.forall(_.partitionName.equals((partitionName)))) {
+        if (partitionName.equals(localPartition)) localPlanner.materialize(logicalPlan, qContext)
+        else generateRemoteExec(qContext, periodicSeriesTime.startMs / 1000, periodicSeriesTime.endMs / 1000,
+          partitions.head.endPoint)
+      }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
     }
   }
-//
-//  def materializeLabelValues(lp: LogicalPlan, qContext: QueryContext): ExecPlan = {
-//  partitionLocationProvider.getAuthorizedPartitions(T)
-//  }
 
   def materializeSeriesKeysFilters(lp: SeriesKeysByFilters, qContext: QueryContext): ExecPlan = {
    val partitions = partitionLocationProvider.getAuthorizedPartitions(TimeRange(lp.startMs, lp.endMs))
     val execPlans = partitions.map { p =>
-      if (p.equals(localPartition)) localPlanner.materialize(lp, qContext)
-      else {
-        val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
-        val promQlParams = PromQlQueryParams(ConfigFactory.parseString(s"""buddy.http.endpoint ="${p.endPoint}""""),
-          queryParams.promQl, p.timeRange.startMs / 1000, queryParams.stepSecs,
-          p.timeRange.endMs / 1000, queryParams.spread, processFailure = true, processRouting = false)
-        PromQlExec(qContext, InProcessPlanDispatcher, datasetRef, promQlParams)
-      }
+      if (p.partitionName.equals(localPartition))
+        localPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
+      else generateRemoteExec(qContext, p.timeRange.startMs, p.timeRange.endMs, p.endPoint)
     }
     if (execPlans.size == 1) execPlans.head
     else PartKeysDistConcatExec(qContext,
       InProcessPlanDispatcher,
       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
+  }
 
+  def materializeLabelValues(lp: LabelValues, qContext: QueryContext): ExecPlan = {
+    val partitions = partitionLocationProvider.getAuthorizedPartitions(TimeRange(lp.startMs, lp.endMs))
+    val execPlans = partitions.map { p =>
+      if (p.partitionName.equals(localPartition))
+        localPlanner.materialize(lp.copy(startMs = p.timeRange.startMs, endMs = p.timeRange.endMs), qContext)
+      else generateRemoteExec(qContext, p.timeRange.startMs, p.timeRange.endMs, p.endPoint)
+    }
+    if (execPlans.size == 1) execPlans.head
+    else LabelValuesDistConcatExec(qContext,
+      InProcessPlanDispatcher,
+      execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
   }
 
 }

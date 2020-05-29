@@ -2,8 +2,8 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
-import filodb.query.{LabelValues, LogicalPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
-import filodb.query.exec.{ExecPlan, LabelValuesDistConcatExec, PartKeysDistConcatExec, PlanDispatcher, StitchRvsExec}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
+import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
 
 /**
   * LongTimeRangePlanner knows about limited retention of raw data, and existence of downsampled data.
@@ -48,7 +48,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
             logicalPlan
           } else {
             copyWithUpdatedTimeRange(logicalPlan,
-              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis), lookbackMs)
+              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis))
           }
           downsampleClusterPlanner.materialize(downsampleLp, qContext)
         } else {
@@ -58,24 +58,13 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
-                                                      TimeRange(p.startMs, lastDownsampleInstant),
-                                                      lookbackMs)
+                                                      TimeRange(p.startMs, lastDownsampleInstant))
           val downsampleEp = downsampleClusterPlanner.materialize(downsampleLp, qContext)
 
-          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs), lookbackMs)
+          val rawLp = copyWithUpdatedTimeRange(logicalPlan, TimeRange(firstInstantInRaw, p.endMs))
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
-      case l: LabelValues =>
-        val rawExec = rawClusterPlanner.materialize(l, qContext)
-        val downSampleExec = downsampleClusterPlanner.materialize(l, qContext)
-        LabelValuesDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
-
-      case s: SeriesKeysByFilters =>
-        val rawExec = rawClusterPlanner.materialize(s, qContext)
-        val downSampleExec = downsampleClusterPlanner.materialize(s, qContext)
-        PartKeysDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
-
       case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }
