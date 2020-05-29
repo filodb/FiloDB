@@ -91,14 +91,14 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     val routingKeys = getRoutingKeys(logicalPlan)
     if (routingKeys.forall(_._2.isEmpty)) localPlanner.materialize(logicalPlan, qContext)
     else {
-      lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-      lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
+      val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
+      val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
+      val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
         periodicSeriesTime.endMs - offsetMillis)
-      lazy val lookBackTimeMs = getLookBackMillis(logicalPlan)
+      val lookBackTimeMs = getLookBackMillis(logicalPlan)
       // Time at which raw data would be retrieved which is used to get partition assignments.
       // It should have time with offset and lookback as we need raw data at time including offset and lookback.
-      lazy val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
+      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
         periodicSeriesTimeWithOffset.endMs)
       // Lhs & Rhs in Binary Join can have different values
       val routingKeyMap = routingKeys.flatMap(x => x._2.get.map(y => (x._1, y))).toMap

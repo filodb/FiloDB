@@ -32,7 +32,6 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     queryConfig)
 
   it ("should not generate PromQlExec plan when partitions are local") {
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -108,7 +107,6 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate only local exec for fixed scalar queries") {
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -128,7 +126,6 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate BinaryJoinExec plan when lhs and rhs are in local partition") {
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -150,7 +147,6 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate PromQlExec plan for BinaryJoin when lhs and rhs are in same remote partition") {
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("remote", "remote-url", TimeRange(timeRange.startMs, timeRange.endMs)))
@@ -174,7 +170,6 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
   }
 
   it ("should generate Exec plan for Metadata query") {
-
     val partitionLocationProvider = new PartitionLocationProvider {
       override def getPartitions(routingKey: Map[String, String], timeRange: TimeRange): List[PartitionAssignment] =
         List(PartitionAssignment("local", "local-url", TimeRange(timeRange.startMs, timeRange.endMs)))
