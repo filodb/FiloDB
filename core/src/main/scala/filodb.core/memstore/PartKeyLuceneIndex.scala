@@ -359,7 +359,7 @@ class PartKeyLuceneIndex(ref: DatasetRef,
   /**
     * Called when a document is updated with new endTime
     */
-  def startTimeFromPartIds(partIds: debox.Buffer[Int]): debox.Map[Int, Long] = {
+  def startTimeFromPartIds(partIds: Iterator[Int]): debox.Map[Int, Long] = {
     val span = Kamon.spanBuilder("index-startTimes-for-odp-lookup-latency")
       .asChildOf(Kamon.currentSpan())
       .tag("dataset", ref.dataset)
@@ -367,8 +367,8 @@ class PartKeyLuceneIndex(ref: DatasetRef,
       .start()
     val collector = new PartIdStartTimeCollector()
     val terms = new util.ArrayList[BytesRef]()
-    for { i <- 0 until partIds.length optimized } {
-      terms.add(new BytesRef(partIds(i).toString.getBytes))
+    partIds.foreach { pId =>
+      terms.add(new BytesRef(pId.toString.getBytes))
     }
     // dont use BooleanQuery which will hit the 1024 term limit. Instead use TermInSetQuery which is
     // more efficient within Lucene

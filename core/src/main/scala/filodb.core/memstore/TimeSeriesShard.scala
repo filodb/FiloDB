@@ -1443,8 +1443,7 @@ class TimeSeriesShard(val ref: DatasetRef,
         val firstPartId = if (matches.isEmpty) None else Some(matches(0))
         val _schema = firstPartId.map(schemaIDFromPartID)
         val it1 = InMemPartitionIterator2(matches)
-        val partIdsToPage = debox.Buffer.empty[Int]
-        it1.filter(_.earliestTime > chunkMethod.startTime).foreach( partIdsToPage += _.partID)
+        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
         val partIdsNotInMem = it1.skippedPartIDs
         Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
         val startTimes = if (partIdsToPage.nonEmpty) {
