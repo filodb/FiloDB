@@ -5,7 +5,7 @@ import com.typesafe.config.ConfigFactory
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{PromQlQueryParams, QueryContext}
-import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, SeriesKeysByFilters}
+import filodb.query.{BinaryJoin, LabelValues, LogicalPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
 import filodb.query.exec._
 
 case class PartitionAssignment(partitionName: String, endPoint: String, timeRange: TimeRange)
@@ -61,25 +61,32 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
       val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMs,
         periodicSeriesTime.endMs - offsetMs)
-      val lookBackTimeMs = getLookBackMillis(logicalPlan)
+      val lookBackMs = getLookBackMillis(logicalPlan)
+      val stepMs = logicalPlan.asInstanceOf[PeriodicSeriesPlan].stepMs
       // Time at which raw data would be retrieved which is used to get partition assignments.
       // It should have time with offset and lookback as we need raw data at time including offset and lookback.
-      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackTimeMs,
+      val queryTimeRange = TimeRange(periodicSeriesTimeWithOffset.startMs - lookBackMs,
         periodicSeriesTimeWithOffset.endMs)
 
       val partitions = partitionLocationProvider.getPartitions(routingKeyMap, queryTimeRange).
         sortBy(_.timeRange.startMs)
-      val execPlans = partitions.map { p =>
-        val startMs = p.timeRange.startMs + offsetMs + lookBackTimeMs
+      var prevPartitionStart = periodicSeriesTimeWithOffset.startMs
+      val execPlans = partitions.zipWithIndex.map { case (p, i) =>
+        // First partition should start from query start time
+        val startMs = if (i == 0) periodicSeriesTime.startMs
+                      else {
+                        val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
+                        val lastPartitionInstant = prevPartitionStart + numStepsInPrevPartition * stepMs
+                        lastPartitionInstant + stepMs
+                      }
+        prevPartitionStart = startMs
         val endMs = p.timeRange.endMs + offsetMs
         if (p.partitionName.equals(localPartition)) localPlanner.materialize(
           copyWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
         else generateRemoteExec(qContext, startMs, endMs, p.endPoint)
       }
       if (execPlans.size == 1) execPlans.head
-      else StitchRvsExec(qContext,
-        InProcessPlanDispatcher,
-        execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
+      else StitchRvsExec(qContext, InProcessPlanDispatcher, execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
       // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
       // Sort to move RemoteExec in end as it does not have schema
     }
@@ -124,8 +131,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       else generateRemoteExec(qContext, p.timeRange.startMs, p.timeRange.endMs, p.endPoint)
     }
     if (execPlans.size == 1) execPlans.head
-    else PartKeysDistConcatExec(qContext,
-      InProcessPlanDispatcher,
+    else PartKeysDistConcatExec(qContext, InProcessPlanDispatcher,
       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
   }
 
@@ -137,8 +143,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       else generateRemoteExec(qContext, p.timeRange.startMs, p.timeRange.endMs, p.endPoint)
     }
     if (execPlans.size == 1) execPlans.head
-    else LabelValuesDistConcatExec(qContext,
-      InProcessPlanDispatcher,
+    else LabelValuesDistConcatExec(qContext, InProcessPlanDispatcher,
       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
   }
 
