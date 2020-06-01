@@ -111,13 +111,13 @@ class MemoryStats(tags: Map[String, String]) {
     * How much time a thread was potentially stalled while attempting to ensure
     * free space. Unit is nanoseconds.
     */
-  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall").withTags(TagSet.from(tags))
+  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
 
   /**
     * How much time a thread was stalled while attempting to acquire the reclaim lock.
     * Unit is nanoseconds.
     */
-  val blockReclaimStall = Kamon.counter("blockstore-reclaim-stall").withTags(TagSet.from(tags))
+  val blockReclaimStall = Kamon.counter("blockstore-reclaim-stall-nanos").withTags(TagSet.from(tags))
 }
 
 final case class ReclaimEvent(block: Block, reclaimTime: Long, oldOwner: Option[BlockMemFactory], remaining: Long)
