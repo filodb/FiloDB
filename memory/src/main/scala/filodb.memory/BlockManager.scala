@@ -109,15 +109,15 @@ class MemoryStats(tags: Map[String, String]) {
 
   /**
     * How much time a thread was potentially stalled while attempting to ensure
-    * free space. Unit is milliseconds.
+    * free space. Unit is nanoseconds.
     */
-  val blockHeadroomStall = Kamon.gauge("blockstore-headroom-stall").withTags(TagSet.from(tags))
+  val blockHeadroomStall = Kamon.counter("blockstore-headroom-stall-nanos").withTags(TagSet.from(tags))
 
   /**
     * How much time a thread was stalled while attempting to acquire the reclaim lock.
-    * Unit is milliseconds.
+    * Unit is nanoseconds.
     */
-  val blockReclaimStall = Kamon.gauge("blockstore-reclaim-stall").withTags(TagSet.from(tags))
+  val blockReclaimStall = Kamon.counter("blockstore-reclaim-stall-nanos").withTags(TagSet.from(tags))
 }
 
 final case class ReclaimEvent(block: Block, reclaimTime: Long, oldOwner: Option[BlockMemFactory], remaining: Long)
@@ -249,7 +249,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     lock.unlock()
     var stamp: Long = 0
     try {
-      val start = System.currentTimeMillis()
+      val start = System.nanoTime()
       // Give up after waiting (in total) a little over 16 seconds.
       stamp = tryExclusiveReclaimLock(8192)
 
@@ -258,10 +258,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
         logger.error(s"Lock for BlockManager.tryReclaimOnDemand timed out: ${reclaimLock}")
+      } else {
+        logger.debug("Lock for BlockManager.tryReclaimOnDemand aquired")
       }
 
-      val stall = System.currentTimeMillis() - start
-      stats.blockReclaimStall.update(stall)
+      val stall = System.nanoTime() - start
+      stats.blockReclaimStall.increment(stall)
     } finally {
       lock.lock()
     }
@@ -315,7 +317,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     */
   def ensureHeadroom(pct: Double): Int = {
     var numFree: Int = 0
-    val start = System.currentTimeMillis()
+    val start = System.nanoTime()
     // Give up after waiting (in total) a little over 2 seconds.
     val stamp = tryExclusiveReclaimLock(1024)
     if (stamp == 0) {
@@ -330,8 +332,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val numBytes = numFree * blockSizeInBytes
       logger.debug(s"BlockManager.ensureFreePercent numFree: $numFree ($numBytes bytes)")
     }
-    val stall = System.currentTimeMillis() - start
-    stats.blockHeadroomStall.update(stall)
+    val stall = System.nanoTime() - start
+    stats.blockHeadroomStall.increment(stall)
     numFree
   }
 
