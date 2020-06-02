@@ -12,7 +12,7 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core.{DatasetRef, ErrorResponse, Instance}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordSchema}
 import filodb.core.downsample._
-import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition, TimeSeriesShardStats}
+import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.store.{AllChunkScan, ChunkSet, RawPartData, ReadablePartition}
 import filodb.downsampler.DownsamplerContext
@@ -135,8 +135,9 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
           val pkPairs = schema.partKeySchema.toStringPairs(rawPart.partitionKey, UnsafeUtils.arayOffset)
           if (settings.isEligibleForDownsample(pkPairs)) {
             try {
+              val shouldTrace = settings.shouldTrace(pkPairs)
               downsamplePart(offHeapMem, rawPart, pagedPartsToFree, downsampledPartsToFree,
-                downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+                downsampledChunksToPersist, userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
               numPartitionsCompleted.increment()
             } catch { case e: Exception =>
               DownsamplerContext.dsLogger.error(s"Error occurred when downsampling partition $pkPairs", e)
@@ -178,6 +179,7 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
     * @param downsampledPartsToFree downsample partitions to be freed are added to this mutable list
     * @param downsampledChunksToPersist downsample chunks to persist are added to this mutable map
     */
+  // scalastyle:off parameter.number
   private def downsamplePart(offHeapMem: OffHeapMemory,
                              rawPart: RawPartData,
                              pagedPartsToFree: ArrayBuffer[PagedReadablePartition],
@@ -185,7 +187,8 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                              downsampledChunksToPersist: MMap[FiniteDuration, Iterator[ChunkSet]],
                              userTimeStart: Long,
                              userTimeEndExclusive: Long,
-                             dsRecordBuilder: RecordBuilder) = {
+                             dsRecordBuilder: RecordBuilder,
+                             shouldTrace: Boolean) = {
 
     val rawSchemaId = RecordSchema.schemaID(rawPart.partitionKey, UnsafeUtils.arayOffset)
     val rawPartSchema = schemas(rawSchemaId)
@@ -205,15 +208,20 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         // update schema of the partition key to downsample schema
         RecordBuilder.updateSchema(UnsafeUtils.ZeroPointer, partKeyPtr, downsampleSchema)
 
-        val downsampledParts = settings.downsampleResolutions.map { res =>
-          val part = new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
-                                            0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
-          res -> part
+        val downsampledParts = settings.downsampleResolutions.zip(settings.downsampledDatasetRefs).map {
+          case (res, ref) =>
+            val part = if (shouldTrace)
+              new TracingTimeSeriesPartition(0, ref, downsampleSchema, partKeyPtr,
+                0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
+            else
+              new TimeSeriesPartition(0, downsampleSchema, partKeyPtr,
+                                      0, bufferPool, shardStats, offHeapMem.nativeMemoryManager, 1)
+            res -> part
         }.toMap
 
         val downsamplePartSpan = Kamon.spanBuilder("downsample-single-partition-latency").start()
-        downsampleChunks(offHeapMem, rawReadablePart, downsamplers, periodMarker,
-                         downsampledParts, userTimeStart, userTimeEndExclusive, dsRecordBuilder)
+        downsampleChunks(offHeapMem, rawReadablePart, downsamplers, periodMarker, downsampledParts,
+                         userTimeStart, userTimeEndExclusive, dsRecordBuilder, shouldTrace)
 
         pagedPartsToFree += rawReadablePart
         downsampledPartsToFree ++= downsampledParts.values
@@ -245,9 +253,13 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
                                downsampleResToPart: Map[FiniteDuration, TimeSeriesPartition],
                                userTimeStart: Long,
                                userTimeEndExclusive: Long,
-                               dsRecordBuilder: RecordBuilder) = {
+                               dsRecordBuilder: RecordBuilder,
+                               shouldTrace: Boolean) = {
+
     val timestampCol = 0
     val rawChunksets = rawPartToDownsample.infos(AllChunkScan)
+
+    require(downsamplers.size > 1, s"Number of downsamplers for ${rawPartToDownsample.stringPartition} should be > 1")
 
     // for each chunk
     while (rawChunksets.hasNext) {
@@ -259,6 +271,16 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
         val tsPtr = chunkset.vectorAddress(timestampCol)
         val tsAcc = chunkset.vectorAccessor(timestampCol)
         val tsReader = rawPartToDownsample.chunkReader(timestampCol, tsAcc, tsPtr).asLongReader
+
+        if (shouldTrace) {
+          downsamplers.zipWithIndex.foreach { case (d, i) =>
+            val ptr = chunkset.vectorAddress(i)
+            val acc = chunkset.vectorAccessor(i)
+            val reader = rawPartToDownsample.chunkReader(i, acc, ptr)
+            DownsamplerContext.dsLogger.info(s"Hex Vectors: Col $i for ${rawPartToDownsample.stringPartition} uses " +
+              s"downsampler ${d.encoded} vector=${reader.toHexString(acc, ptr)}RemoveEOL")
+          }
+        }
 
         val startRow = tsReader.binarySearch(tsAcc, tsPtr, userTimeStart) & 0x7fffffff
         // userTimeEndExclusive-1 since ceilingIndex does an inclusive check
@@ -272,6 +294,11 @@ class BatchDownsampler(settings: DownsamplerSettings) extends Instance with Seri
             val downsamplePeriods =
               periodMarker.periods(rawPartToDownsample, chunkset, resMillis, startRow, endRow).toArray()
             java.util.Arrays.sort(downsamplePeriods)
+
+            if (shouldTrace)
+              DownsamplerContext.dsLogger.info(s"Downsample Periods for ${part.stringPartition} " +
+                s"${chunkset.debugString} resolution=$resolution " +
+                s"downsamplePeriods=${downsamplePeriods.mkString(",")}")
 
             try {
               // for each downsample period

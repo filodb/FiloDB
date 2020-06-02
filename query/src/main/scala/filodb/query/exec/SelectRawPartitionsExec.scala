@@ -8,9 +8,9 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.{Column, Schema, Schemas}
-import filodb.core.query.{QueryContext, ResultSchema}
+import filodb.core.query.{QueryContext, QuerySession, ResultSchema}
 import filodb.core.store._
-import filodb.query.{Query, QueryConfig}
+import filodb.query.Query
 import filodb.query.Query.qLogger
 import filodb.query.exec.rangefn.RangeFunction
 
@@ -122,7 +122,7 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
   }
 
   def doExecute(source: ChunkSource,
-                queryConfig: QueryConfig)
+                querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = {
     val span = Kamon.spanBuilder(s"execute-${getClass.getSimpleName}")
       .asChildOf(Kamon.currentSpan())
@@ -131,7 +131,7 @@ final case class SelectRawPartitionsExec(queryContext: QueryContext,
       s"${lookupRes.map(_.shard).getOrElse("")} " + s"schema=" +
       s"${dataSchema.map(_.name)} is configured to use columnIDs=$colIds")
     val rvs = dataSchema.map { sch =>
-      source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas)
+      source.rangeVectors(datasetRef, lookupRes.get, colIds, sch, filterSchemas, querySession)
     }.getOrElse(Observable.empty)
     span.finish()
     ExecResult(rvs, Task.eval(schemaOfDoExecute()))

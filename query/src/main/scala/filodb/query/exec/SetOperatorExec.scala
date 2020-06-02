@@ -51,7 +51,7 @@ final case class SetOperatorExec(queryContext: QueryContext,
 
   protected[exec] def compose(childResponses: Observable[(QueryResponse, Int)],
                               firstSchema: Task[ResultSchema],
-                              queryConfig: QueryConfig): Observable[RangeVector] = {
+                              querySession: QuerySession): Observable[RangeVector] = {
     val taskOfResults = childResponses.map {
       case (QueryResult(_, _, result), i) => (result, i)
       case (QueryError(_, ex), _)         => throw ex

@@ -1,4 +1,4 @@
-package filodb.query
+package filodb.core.query
 
 import scala.concurrent.duration.FiniteDuration
 

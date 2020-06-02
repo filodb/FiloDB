@@ -17,7 +17,7 @@ import filodb.coordinator.queryplanner.SingleClusterPlanner
 import filodb.core._
 import filodb.core.memstore.{FiloSchedulers, MemStore, TermInfo}
 import filodb.core.metadata.Schemas
-import filodb.core.query.QueryContext
+import filodb.core.query.{QueryConfig, QueryContext, QuerySession}
 import filodb.core.store.CorruptVectorException
 import filodb.query._
 import filodb.query.exec.ExecPlan
@@ -101,7 +101,8 @@ final class QueryActor(memStore: MemStore,
     epRequests.increment()
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-    q.execute(memStore, queryConfig)(queryScheduler)
+    val querySession = QuerySession(q.queryContext, queryConfig)
+    q.execute(memStore, querySession)(queryScheduler)
       .foreach { res =>
        FiloSchedulers.assertThreadName(QuerySchedName)
        replyTo ! res
@@ -123,6 +124,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
+    checkTimeout(q.qContext)
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment()
     try {
@@ -137,6 +139,7 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
+    checkTimeout(q.qContext)
     try {
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan
@@ -158,6 +161,13 @@ final class QueryActor(memStore: MemStore,
       if (destNode != ActorRef.noSender) { destNode.forward(g) }
       else                               { originator ! BadArgument(s"Shard ${g.shard} is not assigned") }
     }
+  }
+
+  def checkTimeout(queryContext: QueryContext): Unit = {
+    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis)
+      throw QueryTimeoutException(queryTimeElapsed, this.getClass.getName)
   }
 
   def receive: Receive = {

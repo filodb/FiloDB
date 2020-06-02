@@ -1,5 +1,6 @@
 package filodb.coordinator.queryplanner
 
+import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.prometheus.ast.WindowConstants
 import filodb.query._
 
@@ -29,7 +30,7 @@ object LogicalPlanUtils {
       case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-        getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
+                                              getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
       case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
       case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
       case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
@@ -121,4 +122,24 @@ object LogicalPlanUtils {
       case _             => 0
     }
   }
+
+  def getMetricName(logicalPlan: LogicalPlan, datasetMetricColumn: String): Option[Seq[String]] = {
+    val metricName = LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, PromMetricLabel)
+    if (metricName.isEmpty) LogicalPlan.getLabelValueFromLogicalPlan(logicalPlan, datasetMetricColumn)
+    else metricName
+  }
+
+  /**
+    * Renames Prom AST __name__ label to one based on the actual metric column of the dataset,
+    * if it is not the prometheus standard
+    */
+   def renameLabels(labels: Seq[String], datasetMetricColumn: String): Seq[String] =
+    if (datasetMetricColumn != PromMetricLabel) {
+      labels map {
+        case PromMetricLabel     => datasetMetricColumn
+        case other: String       => other
+      }
+    } else {
+      labels
+    }
 }

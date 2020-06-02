@@ -18,7 +18,7 @@ import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 
@@ -53,9 +53,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   private val indexTtl = downsampleTtls.last
 
   private val downsampleStoreConfig = StoreConfig(filodbConfig.getConfig("downsampler.downsample-store-config"))
-
-  // since all partitions are paged from store, this would be much lower than what is configured for raw data
-  private val maxQueryMatches = downsampleStoreConfig.maxQueryMatches
 
   private val nextPartitionID = new AtomicInteger(0)
 
@@ -206,7 +203,8 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   def refreshPartKeyIndexBlocking(): Unit = {}
 
   def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = {
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
     partMethod match {
       case SinglePartitionScan(partition, _) => throw new UnsupportedOperationException
       case MultiPartitionScan(partKeys, _) => throw new UnsupportedOperationException
@@ -230,21 +228,19 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }
   }
 
-  def scanPartitions(lookup: PartLookupResult): Observable[ReadablePartition] = {
+  def scanPartitions(lookup: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
 
     // Step 1: Choose the downsample level depending on the range requested
-    val downsampledDataset = chooseDownsampleResolution(lookup.chunkMethod)
+    val (resolution, downsampledDataset) = chooseDownsampleResolution(lookup.chunkMethod)
     logger.debug(s"Chose resolution $downsampledDataset for chunk method ${lookup.chunkMethod}")
+
+    capDataScannedPerShardCheck(lookup, resolution)
+
     // Step 2: Query Cassandra table for that downsample level using downsampleColStore
     // Create a ReadablePartition objects that contain the time series data. This can be either a
     // PagedReadablePartitionOnHeap or PagedReadablePartitionOffHeap. This will be garbage collected/freed
     // when query is complete.
-
-    if (lookup.partsInMemory.length > maxQueryMatches)
-      throw new IllegalArgumentException(s"Seeing ${lookup.partsInMemory.length} matching time series per shard. Try " +
-        s"to narrow your query by adding more filters so there is less than $maxQueryMatches matches " +
-        s"or request for increasing number of shards this metric lives in")
-
     val partKeys = lookup.partsInMemory.iterator().map(partKeyFromPartId)
     Observable.fromIterator(partKeys)
       // 3 times value configured for raw dataset since expected throughput for downsampled cluster is much lower
@@ -271,6 +267,18 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       }
   }
 
+  private def capDataScannedPerShardCheck(lookup: PartLookupResult, resolution: Long) = {
+    lookup.firstSchemaId.foreach { schId =>
+      lookup.chunkMethod match {
+        case TimeRangeChunkScan(st, end) =>
+          schemas.ensureQueriedDataSizeWithinLimit(schId, lookup.partsInMemory.length,
+                                      downsampleStoreConfig.flushInterval.toMillis,
+                                      resolution, end - st, downsampleStoreConfig.maxDataPerShardQuery)
+        case _ =>
+      }
+    }
+  }
+
   protected def schemaIDFromPartID(partID: Int): Int = {
     partKeyIndex.partKeyFromPartId(partID).map { pkBytesRef =>
       val unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(pkBytesRef.offset)
@@ -278,12 +286,14 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
     }.getOrElse(throw new IllegalStateException(s"PartId $partID returned by lucene, but partKey not found"))
   }
 
-  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): DatasetRef = {
+  private def chooseDownsampleResolution(chunkScanMethod: ChunkScanMethod): (Long, DatasetRef) = {
     chunkScanMethod match {
-      case AllChunkScan => downsampledDatasetRefs.last // since it is the highest resolution/ttl
+      case AllChunkScan =>
+        // since it is the highest resolution/ttl
+        downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
         val ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
-        downsampledDatasetRefs(ttlIndex)
+        downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }

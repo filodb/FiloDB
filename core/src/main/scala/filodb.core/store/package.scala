@@ -6,6 +6,7 @@ import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
+import filodb.core.query.QuerySession
 import filodb.memory.format.{RowReader, UnsafeUtils}
 
 package object store {
@@ -138,6 +139,8 @@ package object store {
      * Convenience method to scan/iterate over all rows of given selection of source data.  You must iterate
      * through all the elements.
      *
+     * Used for testing only.
+     *
      * @param dataset the Dataset to read from
      * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
      *                in each row.  These are the IDs from the Column instances.
@@ -145,8 +148,9 @@ package object store {
     def scanRows(dataset: Dataset,
                  columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[RowReader] =
-      source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod)
+                 chunkMethod: ChunkScanMethod = AllChunkScan,
+                 querySession: QuerySession = QuerySession.forTestingOnly): Iterator[RowReader] =
+      source.scanPartitions(dataset.ref, columnIDs, partMethod, chunkMethod, querySession)
             .toIterator()
             .flatMap(_.timeRangeRows(chunkMethod, columnIDs.toArray))
   }

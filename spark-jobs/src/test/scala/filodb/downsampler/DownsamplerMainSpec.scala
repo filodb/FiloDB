@@ -22,7 +22,7 @@ import filodb.core.downsample.DownsampledTimeSeriesStore
 import filodb.core.memstore.{PagedReadablePartition, TimeSeriesPartition}
 import filodb.core.memstore.FiloSchedulers.QuerySchedName
 import filodb.core.metadata.{Dataset, Schemas}
-import filodb.core.query.{ColumnFilter, CustomRangeVectorKey, QueryContext, RawDataRangeVector}
+import filodb.core.query._
 import filodb.core.query.Filter.Equals
 import filodb.core.store.{AllChunkScan, PartKeyRecord, SinglePartitionScan, StoreConfig}
 import filodb.downsampler.chunk.{BatchDownsampler, Downsampler, DownsamplerSettings, OffHeapMemory}
@@ -30,7 +30,7 @@ import filodb.downsampler.index.{DSIndexJobSettings, IndexJobDriver}
 import filodb.memory.format.{PrimitiveVectorReader, UnsafeUtils}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.memory.format.vectors.{CustomBuckets, LongHistogram}
-import filodb.query.{QueryConfig, QueryResult}
+import filodb.query.QueryResult
 import filodb.query.exec.{InProcessPlanDispatcher, MultiSchemaPartitionsExec}
 
 /**
@@ -44,6 +44,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val conf = ConfigFactory.parseFile(new File("conf/timeseries-filodb-server.conf"))
 
   val settings = new DownsamplerSettings(conf)
+  val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
   val dsIndexJobSettings = new DSIndexJobSettings(settings)
   val batchDownsampler = new BatchDownsampler(settings)
 
@@ -652,9 +653,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
         batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
-      val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
+      val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+      val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
         .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
@@ -680,9 +681,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
         batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan)
 
-      val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
+      val querySession = QuerySession(QueryContext(), queryConfig)
       val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-      val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+      val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
         .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
       queryScheduler.shutdown()
 
@@ -702,9 +703,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val exec = MultiSchemaPartitionsExec(QueryContext(sampleLimit = 1000), InProcessPlanDispatcher,
       batchDownsampler.rawDatasetRef, 0, queryFilters, AllChunkScan,
       colName = Option("sum"))
-    val queryConfig = new QueryConfig(settings.filodbConfig.getConfig("query"))
+    val querySession = QuerySession(QueryContext(), queryConfig)
     val queryScheduler = Scheduler.fixedPool(s"$QuerySchedName", 3)
-    val res = exec.execute(downsampleTSStore, queryConfig)(queryScheduler)
+    val res = exec.execute(downsampleTSStore, querySession)(queryScheduler)
       .runAsync(queryScheduler).futureValue.asInstanceOf[QueryResult]
     queryScheduler.shutdown()
     res.result.size shouldEqual 1

@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.StampedLock
 
 import scala.collection.mutable.ArrayBuffer
@@ -26,7 +27,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher, ShardDownsampler}
 import filodb.core.metadata.{Schema, Schemas}
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
@@ -311,6 +312,15 @@ class TimeSeriesShard(val ref: DatasetRef,
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
     storeConfig.numPagesPerBlock)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, maxMetaSize, shardTags)
+
+  /**
+    * Lock that protects chunks from being reclaimed from Memstore.
+    * This is needed to prevent races between ODP queries and reclaims.
+    */
+  private[memstore] final val reclaimLock = blockStore.reclaimLock
+
+  // Requires blockStore.
+  startHeadroomTask(ingestSched)
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
@@ -1405,56 +1415,68 @@ class TimeSeriesShard(val ref: DatasetRef,
     * Also returns detailed information about what is in memory and not, and does schema discovery.
     */
   def lookupPartitions(partMethod: PartitionScanMethod,
-                       chunkMethod: ChunkScanMethod): PartLookupResult = partMethod match {
-    case SinglePartitionScan(partition, _) =>
-      val partIds = debox.Buffer.empty[Int]
-      getPartition(partition).foreach(p => partIds += p.partID)
-      PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
-    case MultiPartitionScan(partKeys, _)   =>
-      val partIds = debox.Buffer.empty[Int]
-      partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
-      PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
-    case FilteredPartitionScan(split, filters) =>
-      // No matter if there are filters or not, need to run things through Lucene so we can discover potential
-      // TSPartitions to read back from disk
-      val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-      shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
+                       chunkMethod: ChunkScanMethod,
+                       querySession: QuerySession): PartLookupResult = {
+    val reclaimReadLock = reclaimLock.asReadLock()
+    querySession.lock = Some(reclaimReadLock)
+    reclaimReadLock.lock()
+    // any exceptions thrown here should be caught by a wrapped Task.
+    // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
+    partMethod match {
+      case SinglePartitionScan(partition, _) =>
+        val partIds = debox.Buffer.empty[Int]
+        getPartition(partition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, Some(RecordSchema.schemaID(partition)))
+      case MultiPartitionScan(partKeys, _)   =>
+        val partIds = debox.Buffer.empty[Int]
+        partKeys.flatMap(getPartition).foreach(p => partIds += p.partID)
+        PartLookupResult(shardNum, chunkMethod, partIds, partKeys.headOption.map(RecordSchema.schemaID))
+      case FilteredPartitionScan(_, filters) =>
+        // No matter if there are filters or not, need to run things through Lucene so we can discover potential
+        // TSPartitions to read back from disk
+        val matches = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        shardStats.queryTimeRangeMins.record((chunkMethod.endTime - chunkMethod.startTime) / 60000 )
 
-      Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
-      if (matches.length > storeConfig.maxQueryMatches)
-        throw new IllegalArgumentException(s"Seeing ${matches.length} matching time series per shard. Try " +
-          s"to narrow your query by adding more filters so there is less than ${storeConfig.maxQueryMatches} matches " +
-          s"or request that number of shards for the metric be increased")
+        Kamon.currentSpan().tag(s"num-partitions-from-index-$shardNum", matches.length)
 
-      // first find out which partitions are being queried for data not in memory
-      val firstPartId = if (matches.isEmpty) None else Some(matches(0))
-      val _schema = firstPartId.map(schemaIDFromPartID)
-      val it1 = InMemPartitionIterator2(matches)
-      val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
-      val partIdsNotInMem = it1.skippedPartIDs
-      Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
-      val startTimes = if (partIdsToPage.nonEmpty) {
-        val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
-        logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
-          s"startTime lookup for query in dataset=$ref shard=$shardNum " +
-          s"resulted in startTimes=$st")
-        st
-      }
-      else {
-        logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
-          s"shard=$shardNum are in memory")
-        debox.Map.empty[Int, Long]
-      }
-      // now provide an iterator that additionally supplies the startTimes for
-      // those partitions that may need to be paged
-      PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+        // first find out which partitions are being queried for data not in memory
+        val firstPartId = if (matches.isEmpty) None else Some(matches(0))
+        val _schema = firstPartId.map(schemaIDFromPartID)
+        val it1 = InMemPartitionIterator2(matches)
+        val partIdsToPage = it1.filter(_.earliestTime > chunkMethod.startTime).map(_.partID)
+        val partIdsNotInMem = it1.skippedPartIDs
+        Kamon.currentSpan().tag(s"num-partitions-not-in-memory-$shardNum", partIdsNotInMem.length)
+        val startTimes = if (partIdsToPage.nonEmpty) {
+          val st = partKeyIndex.startTimeFromPartIds(partIdsToPage)
+          logger.debug(s"Some partitions have earliestTime > queryStartTime(${chunkMethod.startTime}); " +
+            s"startTime lookup for query in dataset=$ref shard=$shardNum " +
+            s"resulted in startTimes=$st")
+          st
+        }
+        else {
+          logger.debug(s"StartTime lookup was not needed. All partition's data for query in dataset=$ref " +
+            s"shard=$shardNum are in memory")
+          debox.Map.empty[Int, Long]
+        }
+        // now provide an iterator that additionally supplies the startTimes for
+        // those partitions that may need to be paged
+        PartLookupResult(shardNum, chunkMethod, matches, _schema, startTimes, partIdsNotInMem)
+    }
   }
 
-  def scanPartitions(iterResult: PartLookupResult): Observable[ReadablePartition] = {
+  def scanPartitions(iterResult: PartLookupResult,
+                     querySession: QuerySession): Observable[ReadablePartition] = {
+
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
     Observable.fromIterator(partIter.map { p =>
       shardStats.partitionsQueried.increment()
       p
+    })
+  }
+
+  private def startHeadroomTask(sched: Scheduler): Unit = {
+    sched.scheduleWithFixedDelay(1, 1, TimeUnit.MINUTES, new Runnable {
+      def run() = blockStore.ensureHeadroom(storeConfig.ensureHeadroomPercent)
     })
   }
 
