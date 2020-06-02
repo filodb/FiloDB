@@ -42,14 +42,14 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
 
-  val numShards = 2
+  val numShards = 64
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
-  val spread = 1
+  val spread = 6
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
@@ -70,8 +70,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
-                  | shard-mem-size = 512MB
-                  | ingestion-buffer-mem-size = 50MB
+                  | shard-mem-size = 96MB
+                  | ingestion-buffer-mem-size = 30MB
                   | groups-per-shard = 4
                   | demand-paging-enabled = false
                   """.stripMargin))
@@ -127,9 +127,13 @@ class QueryInMemoryBenchmark extends StrictLogging {
     LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
   }
 
+  var queriesSucceeded = 0
+  var queriesFailed = 0
+
   @TearDown
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
+    println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
@@ -141,8 +145,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
       f.onSuccess {
-        case q: QueryResult2 =>
-        case e: QError       => throw new RuntimeException(s"Query error $e")
+        case q: QueryResult2 => queriesSucceeded += 1
+        case e: QError       => queriesFailed += 1
       }
       f
     }
@@ -164,8 +168,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands2(n % queryCommands2.length))
       f.onSuccess {
-        case q: QueryResult2 =>
-        case e: QError       => throw new RuntimeException(s"Query error $e")
+        case q: QueryResult2 => queriesSucceeded += 1
+        case e: QError       => queriesFailed += 1
       }
       f
     }
