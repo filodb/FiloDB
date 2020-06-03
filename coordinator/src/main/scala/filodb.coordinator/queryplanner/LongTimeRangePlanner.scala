@@ -2,8 +2,8 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
-import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
-import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
+import filodb.query.{LabelValues, LogicalPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
+import filodb.query.exec.{ExecPlan, LabelValuesDistConcatExec, PartKeysDistConcatExec, PlanDispatcher, StitchRvsExec}
 
 /**
   * LongTimeRangePlanner knows about limited retention of raw data, and existence of downsampled data.
@@ -16,11 +16,18 @@ import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
   *                                 abstracts planning for downsample cluster data
   * @param earliestRawTimestampFn the function that will provide millis timestamp of earliest sample that
   *                             would be available in the raw cluster
+  * @param latestDownsampleTimestampFn the function that will provide millis timestamp of newest sample
+  *                                    that would be available in the downsample cluster. This typically
+  *                                    is not "now" because of the delay in population of downsampled data
+  *                                    via spark job. If job is run every 6 hours,
+  *                                    `(System.currentTimeMillis - 12.hours.toMillis)`
+  *                                    may a function that could be passed. 12 hours to account for failures/reruns etc.
   * @param stitchDispatcher function to get the dispatcher for the stitch exec plan node
   */
 class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
                            downsampleClusterPlanner: QueryPlanner,
                            earliestRawTimestampFn: => Long,
+                           latestDownsampleTimestampFn: => Long,
                            stitchDispatcher: => PlanDispatcher) extends QueryPlanner {
 
   def materialize(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
@@ -35,10 +42,19 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
         else if (endWithOffsetMs < earliestRawTime) downsampleClusterPlanner.materialize(logicalPlan, qContext)
         else if (startWithOffsetMs - lookbackMs >= earliestRawTime)
           rawClusterPlanner.materialize(logicalPlan, qContext)
-        else {
+        else if (endWithOffsetMs - lookbackMs < earliestRawTime) {
+          val lastDownsampleSampleTime = latestDownsampleTimestampFn
+          val downsampleLp = if (endWithOffsetMs < lastDownsampleSampleTime) {
+            logicalPlan
+          } else {
+            copyWithUpdatedTimeRange(logicalPlan,
+              TimeRange(p.startMs, latestDownsampleTimestampFn + offsetMillis), lookbackMs)
+          }
+          downsampleClusterPlanner.materialize(downsampleLp, qContext)
+        } else {
           // Split the query between raw and downsample planners
           val numStepsInDownsample = (earliestRawTime - startWithOffsetMs + lookbackMs) / p.stepMs
-          val lastDownsampleInstant = startWithOffsetMs + numStepsInDownsample * p.stepMs
+          val lastDownsampleInstant = p.startMs + numStepsInDownsample * p.stepMs
           val firstInstantInRaw = lastDownsampleInstant + p.stepMs
 
           val downsampleLp = copyWithUpdatedTimeRange(logicalPlan,
@@ -50,9 +66,17 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
-      case _ =>
-        // for now send everything else to raw cluster. Metadata queries are TODO
-        rawClusterPlanner.materialize(logicalPlan, qContext)
+      case l: LabelValues =>
+        val rawExec = rawClusterPlanner.materialize(l, qContext)
+        val downSampleExec = downsampleClusterPlanner.materialize(l, qContext)
+        LabelValuesDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
+
+      case s: SeriesKeysByFilters =>
+        val rawExec = rawClusterPlanner.materialize(s, qContext)
+        val downSampleExec = downsampleClusterPlanner.materialize(s, qContext)
+        PartKeysDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
+
+      case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }
 }

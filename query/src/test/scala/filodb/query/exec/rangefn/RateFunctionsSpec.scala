@@ -64,7 +64,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedRateFunction, queryConfig)
+                                        new ChunkedRateFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
@@ -86,7 +86,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedRateFunction, queryConfig)
+                                        new ChunkedRateFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
@@ -123,13 +123,13 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(rv, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedRateFunction, queryConfig)
+                                        new ChunkedRateFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk
 
     // Two drops in one chunk
     val rv2 = timeValueRV(resetChunk1 ++ resetChunk2)
     val it2 = new ChunkedWindowIteratorD(rv2, endTs, 10000, endTs, endTs - startTs,
-                                         new ChunkedRateFunction, queryConfig)
+                                         new ChunkedRateFunction, querySession)
     it2.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
@@ -138,7 +138,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val endTs =   8103215L
 
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedRateFunction, queryConfig)
+                                        new ChunkedRateFunction, querySession)
     it.next.getDouble(1).isNaN shouldEqual true
   }
 
@@ -150,7 +150,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(flatRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedRateFunction, queryConfig)
+                                        new ChunkedRateFunction, querySession)
     it.next.getDouble(1) shouldEqual 0.0
   }
 
@@ -206,7 +206,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorH(rv, endTs, 100000, endTs, endTs - startTs,
-                                        new HistRateFunction, queryConfig)
+                                        new HistRateFunction, querySession)
     // Scheme should have remained the same
     val answer = it.next.getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
@@ -245,7 +245,7 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorH(rv, endTs, 110000, endTs, endTs - startTs,
-                                        new HistRateFunction, queryConfig)
+                                        new HistRateFunction, querySession)
     // Scheme should have remained the same
     val answer = it.next.getHistogram(1)
     answer.numBuckets shouldEqual expected.numBuckets
@@ -374,12 +374,12 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val endTs =   8163070L
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
-    IncreaseFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
+    IncreaseFunction.apply(startTs, endTs, counterWindow, toEmit, queryConfig)
     toEmit.value shouldEqual expected +- errorOk
 
     // One window, start=end=endTS
     val it = new ChunkedWindowIteratorD(counterRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedIncreaseFunction, queryConfig)
+                                        new ChunkedIncreaseFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 
@@ -388,13 +388,13 @@ class RateFunctionsSpec extends RawDataWindowingSpec {
     val endTs =   8163070L
     val expected = (q2.last.value - q2.head.value) / (q2.last.timestamp - q2.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
-    DeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
+    DeltaFunction.apply(startTs, endTs, gaugeWindow, toEmit, queryConfig)
     toEmit.value shouldEqual expected +- errorOk
 
     // One window, start=end=endTS
     val gaugeRV = timeValueRV(gaugeSamples)
     val it = new ChunkedWindowIteratorD(gaugeRV, endTs, 10000, endTs, endTs - startTs,
-                                        new ChunkedDeltaFunction, queryConfig)
+                                        new ChunkedDeltaFunction, querySession)
     it.next.getDouble(1) shouldEqual expected +- errorOk
   }
 

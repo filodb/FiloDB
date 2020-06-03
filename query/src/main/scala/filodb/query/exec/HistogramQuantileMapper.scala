@@ -7,7 +7,6 @@ import scalaxy.loops._
 import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.memory.format.vectors.Histogram
-import filodb.query.QueryConfig
 
 object HistogramQuantileMapper {
   import ZeroCopyUTF8String._
@@ -47,7 +46,7 @@ final case class HistogramQuantileMapper(funcParams: Seq[FuncArgs]) extends Rang
     * be preceded by a rate function or a sum-of-rate function.
     */
   override def apply(source: Observable[RangeVector],
-                     queryConfig: QueryConfig,
+                     querySession: QuerySession,
                      limit: Int,
                      sourceSchema: ResultSchema,
                      paramResponse: Seq[Observable[ScalarRangeVector]]): Observable[RangeVector] = {

@@ -5,12 +5,14 @@ import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.coordinator.{ActorSpecConfig, ActorTest, ShardMapper}
 import filodb.coordinator.queryplanner.SingleClusterPlanner
-import filodb.core.{MachineMetricsData, SpreadChange, query}
+import filodb.core.{query, MachineMetricsData, SpreadChange}
 import filodb.core.binaryrecord2.BinaryRecordRowReader
 import filodb.core.metadata.{Dataset, Schemas}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.query.QueryConfig
 import filodb.core.store.IngestionConfig
 import filodb.memory.format.{RowReader, SeqRowReader, UTF8MapIteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams

@@ -8,6 +8,7 @@ import filodb.core.GlobalConfig
 import filodb.core.Types._
 import filodb.core.binaryrecord2._
 import filodb.core.downsample.{ChunkDownsampler, DownsamplePeriodMarker}
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
 import filodb.memory.BinaryRegion
@@ -259,6 +260,52 @@ final case class Schemas(part: PartitionSchema,
   private val _schemas = Array.fill(64*1024)(Schemas.UnknownSchema)
 
   schemas.values.foreach { s => _schemas(s.schemaHash) = s }
+
+  /**
+    * This is purely a SWAG to be used for query size estimation. Do not rely for other use cases.
+    */
+  private val bytesPerSampleSwag: Map[Int, Double] = {
+
+    val allSchemas = schemas.values ++ schemas.values.flatMap(_.downsample)
+    allSchemas.map { s  =>
+      val est = s.data.columns.map(_.columnType).map {
+        case ColumnType.LongColumn => 1
+        case ColumnType.IntColumn => 1
+        case ColumnType.TimestampColumn => 0.5
+        case ColumnType.HistogramColumn => 20
+        case ColumnType.DoubleColumn => 2
+        case _ => 0 // TODO allow without sizing for now
+      }.sum
+      s.schemaHash -> est
+    }.toMap
+  }
+
+  /**
+    * Note this approach below assumes the following for quick size estimation. The sizing is more
+    * a swag than reality:
+    * (a) every matched time series ingests at all query times. Looking up start/end times and more
+    *     precise size estimation is costly
+    * (b) it also assigns bytes per sample based on schema which is much of a swag. In reality, it would depend on
+    *     number of histogram buckets, samples per chunk etc.
+    */
+  def ensureQueriedDataSizeWithinLimit(schemaId: Int,
+                                       numTsPartitions: Int,
+                                       chunkDurationMillis: Long,
+                                       resolutionMs: Long,
+                                       queryDurationMs: Long,
+                                       dataSizeLimit: Long): Unit = {
+    val numSamplesPerChunk = chunkDurationMillis / resolutionMs
+    // find number of chunks to be scanned. Ceil division needed here
+    val numChunksPerTs = (queryDurationMs + chunkDurationMillis - 1) / chunkDurationMillis
+    val bytesPerSample = bytesPerSampleSwag(schemaId)
+    val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
+    require(estDataSize < dataSizeLimit,
+      s"Estimate of $estDataSize bytes exceeds limit of " +
+        s"$dataSizeLimit bytes queried per shard with $bytesPerSample bytes per sample " +
+        s"for ${_schemas(schemaId).name} schema. Try one or more of these: " +
+        s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
+        s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
+  }
 
   /**
    * Returns the Schema for a given schemaID, or UnknownSchema if not found
