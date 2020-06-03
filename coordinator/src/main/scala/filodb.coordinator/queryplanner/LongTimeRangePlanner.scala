@@ -66,16 +66,6 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
-      case l: LabelValues =>
-        val rawExec = rawClusterPlanner.materialize(l, qContext)
-        val downSampleExec = downsampleClusterPlanner.materialize(l, qContext)
-        LabelValuesDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
-
-      case s: SeriesKeysByFilters =>
-        val rawExec = rawClusterPlanner.materialize(s, qContext)
-        val downSampleExec = downsampleClusterPlanner.materialize(s, qContext)
-        PartKeysDistConcatExec(qContext, rawExec.dispatcher, Seq(rawExec, downSampleExec))
-
       case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }
