@@ -2,8 +2,8 @@ package filodb.coordinator.queryplanner
 
 import filodb.coordinator.queryplanner.LogicalPlanUtils._
 import filodb.core.query.QueryContext
-import filodb.query.{LabelValues, LogicalPlan, PeriodicSeriesPlan, SeriesKeysByFilters}
-import filodb.query.exec.{ExecPlan, LabelValuesDistConcatExec, PartKeysDistConcatExec, PlanDispatcher, StitchRvsExec}
+import filodb.query.{LogicalPlan, PeriodicSeriesPlan}
+import filodb.query.exec.{ExecPlan, PlanDispatcher, StitchRvsExec}
 
 /**
   * LongTimeRangePlanner knows about limited retention of raw data, and existence of downsampled data.
