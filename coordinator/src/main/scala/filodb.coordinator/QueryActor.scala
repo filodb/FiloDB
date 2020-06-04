@@ -124,10 +124,10 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    checkTimeout(q.qContext)
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment()
     try {
+      checkTimeout(q.qContext)
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       self forward execPlan
     } catch {
@@ -139,8 +139,8 @@ final class QueryActor(memStore: MemStore,
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
-    checkTimeout(q.qContext)
     try {
+      checkTimeout(q.qContext)
       val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
       replyTo ! execPlan
     } catch {

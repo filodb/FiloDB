@@ -294,6 +294,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
         var ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
+        // -1 return value means query startTime is before the earliest retention. Just pick the highest resolution
         if (ttlIndex == -1) ttlIndex = downsampleTtls.size - 1
         downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
