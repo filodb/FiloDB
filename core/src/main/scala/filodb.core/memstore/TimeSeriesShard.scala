@@ -1465,6 +1465,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def scanPartitions(iterResult: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)

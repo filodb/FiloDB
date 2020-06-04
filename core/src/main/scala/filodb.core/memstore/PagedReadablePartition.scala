@@ -1,7 +1,10 @@
 package filodb.core.memstore
 
+import java.nio.ByteBuffer
+
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.core.Types
 import filodb.core.Types.ChunkID
 import filodb.core.metadata.Schema
 import filodb.core.store._
@@ -9,6 +12,7 @@ import filodb.memory.format.UnsafeUtils
 
 object PagedReadablePartition extends StrictLogging {
   val _log = logger
+  val emptyByteBuffer = ByteBuffer.allocate(0)
 }
 
 /**
@@ -20,11 +24,24 @@ object PagedReadablePartition extends StrictLogging {
   *
   * Any ChunkScanMethod will return results from all available chunks. This optimization
   * is done since that check would already done and does not need to be repeated.
+  *
+  * @param colIds the colIds that need to be retained. Leave empty if all are needed.
   */
 class PagedReadablePartition(override val schema: Schema,
                              override val shard: Int,
                              override val partID: Int,
-                             partData: RawPartData) extends ReadablePartition {
+                             partData: RawPartData,
+                             colIds: Seq[Types.ColumnId] = Seq.empty) extends ReadablePartition {
+
+  import PagedReadablePartition._
+  val notNeededColIds = if (colIds.nonEmpty) schema.dataInfos.indices.toSet -- colIds.toSet
+                        else Set.empty
+  partData.chunkSets.foreach { vectors =>
+    // release vectors that are not needed so they can be GCed quickly before scans
+    // finish. This is a temporary workaround since we dont have ability to fetch
+    // specific columns from Cassandra
+    notNeededColIds.foreach(i => vectors.vectors(i) = emptyByteBuffer)
+  }
 
   override def numChunks: Int = partData.chunkSets.length
 
