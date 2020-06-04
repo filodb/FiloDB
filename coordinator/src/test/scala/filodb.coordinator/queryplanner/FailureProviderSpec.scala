@@ -45,7 +45,7 @@ class FailureProviderSpec extends FunSpec with Matchers {
   it("should extract time from logical plan") {
     hasSingleTimeRange(summed1) shouldEqual (true)
 
-    val timeRange = getPeriodicSeriesTimeFromLogicalPlan(summed1)
+    val timeRange = getTimeFromLogicalPlan(summed1)
 
     timeRange.startMs shouldEqual (100000)
     timeRange.endMs shouldEqual (150000)
@@ -56,8 +56,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
     val expectedRaw = RawSeries(rangeSelector = IntervalSelector(20000, 30000), filters = f1, columns = Seq("value"))
     val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed1, TimeRange(20000, 30000))
 
-    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
-    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)
+    getTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
+    getTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)
 
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]
@@ -162,8 +162,8 @@ class FailureProviderSpec extends FunSpec with Matchers {
       Some(100), None)
     val updatedTimeLogicalPlan = copyWithUpdatedTimeRange(summed, TimeRange(20000, 30000))
 
-    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
-    getPeriodicSeriesTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)
+    getTimeFromLogicalPlan(updatedTimeLogicalPlan).startMs shouldEqual (20000)
+    getTimeFromLogicalPlan(updatedTimeLogicalPlan).endMs shouldEqual (30000)
 
     updatedTimeLogicalPlan.isInstanceOf[Aggregate] shouldEqual (true)
     val aggregate = updatedTimeLogicalPlan.asInstanceOf[Aggregate]

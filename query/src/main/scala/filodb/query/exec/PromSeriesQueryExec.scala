@@ -39,7 +39,7 @@ case class PromSeriesQueryExec(queryContext: QueryContext,
     QueryResult(id, resultSchema, rangeVectors)
   }
 }
-case class PromLabelQueryExec(queryContext: QueryContext,
+case class PromLabelQueryExec (queryContext: QueryContext,
                                dispatcher: PlanDispatcher,
                                dataset: DatasetRef,
                                params: PromQlQueryParams) extends RemoteExec {

@@ -12,8 +12,8 @@ object LogicalPlanUtils {
   def hasSingleTimeRange(logicalPlan: LogicalPlan): Boolean = {
     logicalPlan match {
       case binaryJoin: BinaryJoin =>
-        val lhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.lhs)
-        val rhsTime = getPeriodicSeriesTimeFromLogicalPlan(binaryJoin.rhs)
+        val lhsTime = getTimeFromLogicalPlan(binaryJoin.lhs)
+        val rhsTime = getTimeFromLogicalPlan(binaryJoin.rhs)
         (lhsTime.startMs == rhsTime.startMs) && (lhsTime.endMs == rhsTime.endMs)
       case _ => true
     }
@@ -21,24 +21,27 @@ object LogicalPlanUtils {
 
   /**
     * Retrieve start and end time from LogicalPlan
-    * NOTE: Plan should be PeriodicSeriesPlan
     */
-  def getPeriodicSeriesTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
+  def getTimeFromLogicalPlan(logicalPlan: LogicalPlan): TimeRange = {
     logicalPlan match {
       case lp: PeriodicSeries              => TimeRange(lp.startMs, lp.endMs)
       case lp: PeriodicSeriesWithWindowing => TimeRange(lp.startMs, lp.endMs)
-      case lp: ApplyInstantFunction        => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: Aggregate                   => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplyInstantFunction        => getTimeFromLogicalPlan(lp.vectors)
+      case lp: Aggregate                   => getTimeFromLogicalPlan(lp.vectors)
       case lp: BinaryJoin                  => // can assume lhs & rhs have same time
-                                              getPeriodicSeriesTimeFromLogicalPlan(lp.lhs)
-      case lp: ScalarVectorBinaryOperation => getPeriodicSeriesTimeFromLogicalPlan(lp.vector)
-      case lp: ApplyMiscellaneousFunction  => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ApplySortFunction           => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case lp: ScalarVaryingDoublePlan     => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
+                                              getTimeFromLogicalPlan(lp.lhs)
+      case lp: ScalarVectorBinaryOperation => getTimeFromLogicalPlan(lp.vector)
+      case lp: ApplyMiscellaneousFunction  => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ApplySortFunction           => getTimeFromLogicalPlan(lp.vectors)
+      case lp: ScalarVaryingDoublePlan     => getTimeFromLogicalPlan(lp.vectors)
       case lp: ScalarTimeBasedPlan         => TimeRange(lp.rangeParams.startSecs, lp.rangeParams.endSecs)
-      case lp: VectorPlan                  => getPeriodicSeriesTimeFromLogicalPlan(lp.scalars)
-      case lp: ApplyAbsentFunction         => getPeriodicSeriesTimeFromLogicalPlan(lp.vectors)
-      case _                               => throw new BadQueryException(s"Invalid logical plan")
+      case lp: VectorPlan                  => getTimeFromLogicalPlan(lp.scalars)
+      case lp: ApplyAbsentFunction         => getTimeFromLogicalPlan(lp.vectors)
+      case lp: RawSeries                   => lp.rangeSelector match {
+                                                case i: IntervalSelector => TimeRange(i.from, i.to)
+                                                case _ => throw new BadQueryException(s"Invalid logical plan")
+                                              }
+      case _                               => throw new BadQueryException(s"Invalid logical plan ${logicalPlan}")
     }
   }
 

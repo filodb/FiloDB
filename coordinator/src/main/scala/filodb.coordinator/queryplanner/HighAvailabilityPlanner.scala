@@ -70,7 +70,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
 
     // lazy because we want to fetch failures only if needed
     lazy val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-    lazy val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
+    lazy val periodicSeriesTime = getTimeFromLogicalPlan(logicalPlan)
     lazy val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
       periodicSeriesTime.endMs - offsetMillis)
     lazy val lookBackTime = getLookBackMillis(logicalPlan)

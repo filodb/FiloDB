@@ -58,9 +58,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     else {
       val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
       val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-      val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMs,
-        periodicSeriesTime.endMs - offsetMs)
+      val logicalPlanTime = getTimeFromLogicalPlan(logicalPlan)
+      val periodicSeriesTimeWithOffset = TimeRange(logicalPlanTime.startMs - offsetMs,
+        logicalPlanTime.endMs - offsetMs)
       val lookBackMs = getLookBackMillis(logicalPlan)
       val stepMs = logicalPlan.asInstanceOf[PeriodicSeriesPlan].stepMs
       // Time at which raw data would be retrieved which is used to get partition assignments.
@@ -73,7 +73,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       var prevPartitionStart = periodicSeriesTimeWithOffset.startMs
       val execPlans = partitions.zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time
-        val startMs = if (i == 0) periodicSeriesTime.startMs
+        val startMs = if (i == 0) logicalPlanTime.startMs
                       else {
                         // Lookback not supported across partitions
                         val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
@@ -103,9 +103,9 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
     if (routingKeys.forall(_._2.isEmpty)) localPartitionPlanner.materialize(logicalPlan, qContext)
     else {
       val offsetMillis = LogicalPlanUtils.getOffsetMillis(logicalPlan)
-      val periodicSeriesTime = getPeriodicSeriesTimeFromLogicalPlan(logicalPlan)
-      val periodicSeriesTimeWithOffset = TimeRange(periodicSeriesTime.startMs - offsetMillis,
-        periodicSeriesTime.endMs - offsetMillis)
+      val logicalPlanTime = getTimeFromLogicalPlan(logicalPlan)
+      val periodicSeriesTimeWithOffset = TimeRange(logicalPlanTime.startMs - offsetMillis,
+        logicalPlanTime.endMs - offsetMillis)
       val lookBackTimeMs = getLookBackMillis(logicalPlan)
       // Time at which raw data would be retrieved which is used to get partition assignments.
       // It should have time with offset and lookback as we need raw data at time including offset and lookback.
@@ -121,7 +121,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       if (partitions.forall(_.partitionName.equals((partitionName)))) {
         if (partitionName.equals(localPartitionName)) localPartitionPlanner.materialize(logicalPlan, qContext)
         else PromQlExec(qContext, InProcessPlanDispatcher, dataset.ref,
-          generateRemoteExecParams(qContext, periodicSeriesTime.startMs / 1000, periodicSeriesTime.endMs / 1000,
+          generateRemoteExecParams(qContext, logicalPlanTime.startMs / 1000, logicalPlanTime.endMs / 1000,
             partitions.head.endPoint))
       }
       else throw new UnsupportedOperationException("Binary Join across multiple partitions not supported")
