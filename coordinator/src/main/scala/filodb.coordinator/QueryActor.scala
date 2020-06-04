@@ -171,7 +171,8 @@ final class QueryActor(memStore: MemStore,
     // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
     val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
     if (queryTimeElapsed >= queryContext.queryTimeoutMillis) {
-      replyTo ! QueryError("Actor mailbox timeout", QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
+      replyTo ! QueryError(s"Query timeout, $queryTimeElapsed ms > ${queryContext.queryTimeoutMillis}",
+                           QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
       false
     } else true
   }

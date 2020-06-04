@@ -42,14 +42,14 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
 
-  val numShards = 64
+  val numShards = 32
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 150        // # of seconds between each query sample "step"
-  val spread = 6
+  val spread = 5
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
@@ -124,7 +124,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, 1))), 20000))
+    LogicalPlan2Query(dataset.ref, plan, QueryContext(Some(new StaticSpreadProvider(SpreadChange(0, spread))), 20000))
   }
 
   var queriesSucceeded = 0
@@ -143,7 +143,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OperationsPerInvocation(500)
   def someOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
-      val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
+      val qCmd = queryCommands(n % queryCommands.length)
+      val time = System.currentTimeMillis
+      val f = asyncAsk(coordinator, qCmd.copy(qContext = qCmd.qContext.copy(queryId = n.toString, submitTime = time)))
       f.onSuccess {
         case q: QueryResult2 => queriesSucceeded += 1
         case e: QError       => queriesFailed += 1
