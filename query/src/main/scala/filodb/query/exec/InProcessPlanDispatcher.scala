@@ -5,7 +5,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Types}
 import filodb.core.memstore.PartLookupResult
 import filodb.core.metadata.Schemas
 import filodb.core.query.{EmptyQueryConfig, QueryConfig, QuerySession}
@@ -44,6 +44,7 @@ case object InProcessPlanDispatcher extends PlanDispatcher {
 case class UnsupportedChunkSource() extends ChunkSource {
   def scanPartitions(ref: DatasetRef,
                      iter: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] =
     throw new UnsupportedOperationException("This operation is not supported")
 
