@@ -104,7 +104,7 @@ final case class MultiSchemaPartitionsExec(queryContext: QueryContext,
    }
 
   protected def args: String = s"dataset=$dataset, shard=$shard, " +
-                               s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName"
+                               s"chunkMethod=$chunkMethod, filters=$filters, colName=$colName, schema=$schema"
 
   // Print inner node's details for debugging
   override def curNodeText(level: Int): String = {

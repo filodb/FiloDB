@@ -82,13 +82,14 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
                      querySession: QuerySession): Observable[ReadablePartition] = {
     logger.debug(s"scanPartitions dataset=$ref shard=${partMethod.shard} " +
       s"partMethod=$partMethod chunkMethod=$chunkMethod")
-    scanPartitions(ref, lookupPartitions(ref, partMethod, chunkMethod, querySession), querySession)
+    scanPartitions(ref, lookupPartitions(ref, partMethod, chunkMethod, querySession), columnIDs, querySession)
   }
 
 
   // Internal API that needs to actually be implemented
   def scanPartitions(ref: DatasetRef,
                      lookupRes: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition]
 
   // internal method to find # of groups in a dataset
@@ -134,12 +135,12 @@ trait ChunkSource extends RawChunkSource with StrictLogging {
     val numGroups = groupsInDataset(ref)
 
     val filteredParts = if (filterSchemas) {
-      scanPartitions(ref, lookupRes, querySession)
+      scanPartitions(ref, lookupRes, columnIDs, querySession)
         .filter { p => p.schema.schemaHash == schema.schemaHash && p.hasChunks(lookupRes.chunkMethod) }
     } else {
       lookupRes.firstSchemaId match {
         case Some(reqSchemaId) =>
-          scanPartitions(ref, lookupRes, querySession).filter { p =>
+          scanPartitions(ref, lookupRes, columnIDs, querySession).filter { p =>
             if (p.schema.schemaHash != reqSchemaId)
               throw SchemaMismatch(Schemas.global.schemaName(reqSchemaId), p.schema.name)
             p.hasChunks(lookupRes.chunkMethod)

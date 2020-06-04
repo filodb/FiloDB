@@ -10,7 +10,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response}
+import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
@@ -101,6 +101,7 @@ extends MemStore with StrictLogging {
 
   def scanPartitions(ref: DatasetRef,
                      lookupRes: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
     val shard = datasets(ref).get(lookupRes.shard)
 
@@ -108,7 +109,7 @@ extends MemStore with StrictLogging {
       throw new IllegalArgumentException(s"Shard $shard of dataset $ref is not assigned to " +
         s"this node. Was it was recently reassigned to another node? Prolonged occurrence indicates an issue.")
     }
-    shard.scanPartitions(lookupRes, querySession)
+    shard.scanPartitions(lookupRes, colIds, querySession)
   }
 
   def activeShards(dataset: DatasetRef): Seq[Int] =

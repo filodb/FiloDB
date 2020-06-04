@@ -10,7 +10,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
@@ -74,6 +74,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   //scalastyle:off
   override def scanPartitions(partLookupRes: PartLookupResult,
+                              colIds: Seq[Types.ColumnId],
                               querySession: QuerySession): Observable[ReadablePartition] = {
 
     capDataScannedPerShardCheck(partLookupRes)

@@ -300,7 +300,7 @@ final case class Schemas(part: PartitionSchema,
     val bytesPerSample = bytesPerSampleSwag(schemaId)
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
     require(estDataSize < dataSizeLimit,
-      s"Estimate of $estDataSize bytes exceeds limit of " +
+      s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
         s"$dataSizeLimit bytes queried per shard with $bytesPerSample bytes per sample " +
         s"for ${_schemas(schemaId).name} schema. Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
