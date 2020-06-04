@@ -143,6 +143,12 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
           }
           if (partKeyBytesToPage.nonEmpty) {
             val span = startODPSpan()
+            logger.debug(s"Preparing to page chunks for partIdsFullOdp=$partIdsNotInMemory " +
+              s" partIdsPartialOdp=$inMemOdp " +
+              s" from cass shard=$shardNum " +
+              s" partKeyBytesToPageSize=${partKeyBytesToPage.size}" +
+              s" pagingMethodsSize=${pagingMethods.size}" +
+              s" pagingMethods=$pagingMethods")
             Observable.fromIterable(partKeyBytesToPage.zip(pagingMethods))
               .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
                 rawStore.readRawPartitions(ref, maxChunkTime, SinglePartitionScan(partBytes, shardNum), method)
@@ -168,13 +174,13 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
   private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
-                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
+                          pagingMethods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
   if (partIdsNotInMemory.nonEmpty) {
     createODPPartitionsTask(partIdsNotInMemory, { case (pId, bytes, offset) =>
       val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
                          else BinaryRegionLarge.asNewByteArray(bytes, offset)
       partKeyBytesToPage += partKeyBytes
-      methods += chunkMethod
+      pagingMethods += chunkMethod
       logger.debug(s"Finished creating part for full odp. Now need to page partId=$pId chunkMethod=$chunkMethod")
       shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
