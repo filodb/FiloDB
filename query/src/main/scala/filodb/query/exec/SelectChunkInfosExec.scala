@@ -54,7 +54,7 @@ final case class SelectChunkInfosExec(queryContext: QueryContext,
     val partCols = dataSchema.partitionInfos
     val numGroups = source.groupsInDataset(dataset)
     Kamon.currentSpan().mark("creating-scanpartitions")
-    val rvs = source.scanPartitions(dataset, lookupRes, querySession)
+    val rvs = source.scanPartitions(dataset, lookupRes, Seq.empty, querySession)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
