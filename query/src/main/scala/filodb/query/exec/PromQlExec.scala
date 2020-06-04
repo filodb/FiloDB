@@ -20,18 +20,10 @@ import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 
-case class PromQlExec(queryContext: QueryContext,
-                      dispatcher: PlanDispatcher,
-                      dataset: DatasetRef,
-                      params: PromQlQueryParams) extends LeafExecPlan {
+trait RemoteExec extends LeafExecPlan{
 
+  val params: PromQlQueryParams
   protected def args: String = params.toString
-  import PromQlExec._
-
-  val builder = SerializedRangeVector.newBuilder()
-
-  def limit: Int = ???
-
   /**
     * Sub classes should override this method to provide a concrete
     * implementation of the operation represented by this exec plan
@@ -40,6 +32,8 @@ case class PromQlExec(queryContext: QueryContext,
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
+
+  def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse
 
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
@@ -51,11 +45,11 @@ case class PromQlExec(queryContext: QueryContext,
 
     val queryResponse = PromQlExec.httpGet(params, queryContext.submitTime).
       map { response =>
-      response.unsafeBody match {
-        case Left(error) => QueryError(queryContext.queryId, error.error)
-        case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+        response.unsafeBody match {
+          case Left(error) => QueryError(queryContext.queryId, error.error)
+          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+        }
       }
-    }
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
@@ -63,6 +57,23 @@ case class PromQlExec(queryContext: QueryContext,
       Task.fromFuture(queryResponse)
     }
   }
+
+}
+
+case class PromQlExec(queryContext: QueryContext,
+                      dispatcher: PlanDispatcher,
+                      dataset: DatasetRef,
+                      params: PromQlQueryParams) extends RemoteExec {
+
+  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+    ColumnInfo("value", ColumnType.DoubleColumn))
+  val recSchema = SerializedRangeVector.toSchema(columns)
+  val resultSchema = ResultSchema(columns, 1)
+
+  val builder = SerializedRangeVector.newBuilder()
+
+  def limit: Int = ???
+
 
   // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
   //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
@@ -105,10 +116,6 @@ object PromQlExec extends StrictLogging {
   import io.circe.generic.auto._
   import net.ceedubs.ficus.Ficus._
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-   ColumnInfo("value", ColumnType.DoubleColumn))
-  val recSchema = SerializedRangeVector.toSchema(columns)
-  val resultSchema = ResultSchema(columns, 1)
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
@@ -131,7 +138,6 @@ object PromQlExec extends StrictLogging {
                         "step" -> promQlQueryParams.stepSecs,
                         "processFailure" -> promQlQueryParams.processFailure)
     if (promQlQueryParams.spread.isDefined) urlParams = urlParams + ("spread" -> promQlQueryParams.spread.get)
-
     val url = uri"$endpoint?$urlParams"
     logger.debug("promqlexec url is {}", url)
     sttp

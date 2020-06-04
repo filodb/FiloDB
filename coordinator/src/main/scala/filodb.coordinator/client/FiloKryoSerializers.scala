@@ -90,7 +90,10 @@ class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
     val spreadInt = input.readInt()
     val spread = if (spreadInt == -1) None else Some(spreadInt)
     val procFailure = input.readBoolean()
-    PromQlQueryParams(config, promQl, start, step, end, spread, procFailure)
+    val queryPathString = input.readString()
+    val queryPath = if (queryPathString == -1) None else Some(queryPathString)
+    val procRouting = input.readBoolean()
+    PromQlQueryParams(config, promQl, start, step, end, queryPath, spread, procFailure, procRouting)
   }
   override def write(kryo: Kryo, output: Output, promParam: PromQlQueryParams): Unit = {
     output.writeString(promParam.config.root().render(ConfigRenderOptions.concise()))

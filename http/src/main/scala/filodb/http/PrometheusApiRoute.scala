@@ -49,8 +49,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
 
           // No cross-cluster failure routing in this API, hence we pass empty config
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false), verbose.getOrElse(false),
-            spread, PromQlQueryParams(ConfigFactory.empty, query, start.toLong, step.toLong, end.toLong, spread),
-            histMap.getOrElse(false))
+            spread, PromQlQueryParams(ConfigFactory.empty, query, start.toLong, step.toLong, end.toLong,
+              Some("/api/v1/query_range/"), spread), histMap.getOrElse(false))
         }
       }
     } ~
@@ -66,7 +66,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit a
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
           askQueryAndRespond(dataset, logicalPlan, explainOnly.getOrElse(false),
             verbose.getOrElse(false), spread, PromQlQueryParams(ConfigFactory.empty, query, time.toLong, 1000,
-              time.toLong, spread),
+              time.toLong, Some("/api/v1/query/"), spread),
             histMap.getOrElse(false))
         }
       }

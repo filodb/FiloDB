@@ -14,7 +14,8 @@ trait TsdbQueryParams
   * Config has routing parameters
   */
 case class PromQlQueryParams(config: Config, promQl: String, startSecs: Long, stepSecs: Long, endSecs: Long,
-                             spread: Option[Int] = None, processFailure: Boolean = true,
+                             queryPath: Option[String] = None, spread: Option[Int] = None,
+                             processFailure: Boolean = true,
                              processRouting: Boolean = true) extends TsdbQueryParams
 case object UnavailablePromQlQueryParams extends TsdbQueryParams
 

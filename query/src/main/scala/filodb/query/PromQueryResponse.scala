@@ -24,3 +24,5 @@ sealed trait DataSampl
 final case class Sampl(timestamp: Long, value: Double) extends DataSampl
 
 final case class HistSampl(timestamp: Long, buckets: Map[String, Double]) extends DataSampl
+
+final case class MetadataSampl( values: Map[String, String]) extends DataSampl

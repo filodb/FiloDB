@@ -65,6 +65,7 @@ class LongTimeRangePlanner(rawClusterPlanner: QueryPlanner,
           val rawEp = rawClusterPlanner.materialize(rawLp, qContext)
           StitchRvsExec(qContext, stitchDispatcher, Seq(rawEp, downsampleEp))
         }
+       // Metadata query not supported for downsample cluster
       case _ => rawClusterPlanner.materialize(logicalPlan, qContext)
     }
   }

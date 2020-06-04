@@ -6,10 +6,11 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.query
-import filodb.query.{Data, QueryResponse, QueryResult, Sampl}
+import filodb.query.{Data, MetadataSampl, QueryResponse, QueryResult, Sampl}
 
 class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
   val timeseriesDataset = Dataset.make("timeseries",
@@ -50,4 +51,31 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   }
 
+  it ("should convert vector Data to QueryResponse for MetadataQuery") {
+    val exec = PromLabelQueryExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
+    val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
+    val result1 = query.Result (Map.empty, None, Some(MetadataSampl(map1)))
+    val result2 = query.Result (Map.empty, None, Some(MetadataSampl(map2)))
+    val res = exec.toQueryResponse(Data("vector", Seq(result1, result2)), "id", Kamon.currentSpan())
+    res.isInstanceOf[QueryResult] shouldEqual true
+    val queryResult = res.asInstanceOf[QueryResult]
+    val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)
+    data(0) shouldEqual(map1)
+    data(1) shouldEqual(map2)
+  }
+
+  it ("should convert vector Data to QueryResponse for Metadata series query") {
+    val exec = PromSeriesQueryExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
+    val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
+    val result1 = query.Result (Map.empty, None, Some(MetadataSampl(map1)))
+    val result2 = query.Result (Map.empty, None, Some(MetadataSampl(map2)))
+    val res = exec.toQueryResponse(Data("vector", Seq(result1, result2)), "id", Kamon.currentSpan())
+    res.isInstanceOf[QueryResult] shouldEqual true
+    val queryResult = res.asInstanceOf[QueryResult]
+    val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)
+    data(0) shouldEqual(map1)
+    data(1) shouldEqual(map2)
+  }
 }

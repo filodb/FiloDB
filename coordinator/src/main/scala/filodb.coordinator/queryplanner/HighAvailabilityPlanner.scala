@@ -51,7 +51,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
           val promQlParams = PromQlQueryParams(queryConfig.routingConfig, queryParams.promQl,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
-            queryParams.spread, processFailure = false)
+            queryParams.queryPath, queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
           PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
