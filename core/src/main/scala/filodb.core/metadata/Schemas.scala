@@ -1,6 +1,7 @@
 package filodb.core.metadata
 
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
@@ -280,6 +281,12 @@ final case class Schemas(part: PartitionSchema,
     }.toMap
   }
 
+  private def bytesPerSampleSwagString = bytesPerSampleSwag.map { case e =>
+    schemaName(e._1) + ": " + e._2
+  }
+
+  Schemas._log.info(s"bytesPerSampleSwag: $bytesPerSampleSwagString")
+
   /**
     * Note this approach below assumes the following for quick size estimation. The sizing is more
     * a swag than reality:
@@ -301,8 +308,7 @@ final case class Schemas(part: PartitionSchema,
     val estDataSize = bytesPerSample * numTsPartitions * numSamplesPerChunk * numChunksPerTs
     require(estDataSize < dataSizeLimit,
       s"With match of $numTsPartitions time series, estimate of $estDataSize bytes exceeds limit of " +
-        s"$dataSizeLimit bytes queried per shard with $bytesPerSample bytes per sample " +
-        s"for ${_schemas(schemaId).name} schema. Try one or more of these: " +
+        s"$dataSizeLimit bytes queried per shard for ${_schemas(schemaId).name} schema. Try one or more of these: " +
         s"(a) narrow your query filters to reduce to fewer than the current $numTsPartitions matches " +
         s"(b) reduce query time range, currently at ${queryDurationMs / 1000 / 60 } minutes")
   }
@@ -336,10 +342,12 @@ final case class Schemas(part: PartitionSchema,
  *   }
  * }}}
  */
-object Schemas {
+object Schemas extends StrictLogging {
   import java.nio.charset.StandardCharsets.UTF_8
   import Accumulation._
   import Dataset._
+
+  val _log = logger
 
   val rowKeyIDs = Seq(0)    // First or timestamp column is always the row keys
 
