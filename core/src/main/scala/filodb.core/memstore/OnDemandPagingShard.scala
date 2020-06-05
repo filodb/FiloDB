@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.util
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
@@ -16,9 +18,7 @@ import filodb.core.downsample.{DownsampleConfig, DownsamplePublisher}
 import filodb.core.metadata.Schemas
 import filodb.core.query.QuerySession
 import filodb.core.store._
-import filodb.memory.BinaryRegionLarge
 import filodb.memory.MemFactory
-import filodb.memory.format.UnsafeUtils
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
@@ -134,7 +134,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
       } else {
         Observable.fromTask(odpPartTask(partIdsNotInMemory, partKeyBytesToPage, pagingMethods,
                                         partLookupRes.chunkMethod)).flatMap { odpParts =>
-          // which thread are we on right now ?
+          assertThreadName(QuerySchedName)
           logger.debug(s"Finished creating full ODP partitions ${odpParts.map(_.partID)}")
           if(logger.underlying.isDebugEnabled) {
             partKeyBytesToPage.zip(pagingMethods).foreach { case (pk, method) =>
@@ -168,13 +168,11 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
   // 3. Deal with partitions no longer in memory but still indexed in Lucene.
   //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
   private def odpPartTask(partIdsNotInMemory: Buffer[Int], partKeyBytesToPage: ArrayBuffer[Array[Byte]],
-                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
+                          pagingMethods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) =
   if (partIdsNotInMemory.nonEmpty) {
-    createODPPartitionsTask(partIdsNotInMemory, { case (pId, bytes, offset) =>
-      val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
-                         else BinaryRegionLarge.asNewByteArray(bytes, offset)
-      partKeyBytesToPage += partKeyBytes
-      methods += chunkMethod
+    createODPPartitionsTask(partIdsNotInMemory, { case (pId, pkBytes) =>
+      partKeyBytesToPage += pkBytes
+      pagingMethods += chunkMethod
       logger.debug(s"Finished creating part for full odp. Now need to page partId=$pId chunkMethod=$chunkMethod")
       shardStats.partitionsRestored.increment()
     }).executeOn(ingestSched).asyncBoundary
@@ -189,7 +187,7 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
    * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
    * It runs in ingestion thread so it can correctly verify which ones to actually create or not
    */
-  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte], Int) => Unit):
+  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Int, Array[Byte]) => Unit):
                                                                   Task[Seq[TimeSeriesPartition]] = Task {
     assertThreadName(IngestSchedName)
     require(partIDs.nonEmpty)
@@ -212,7 +210,9 @@ TimeSeriesShard(ref, schemas, storeConfig, shardNum, bufferMemoryManager, rawSto
             } finally {
               partSetLock.unlockWrite(stamp)
             }
-            callback(part.partID, partKeyBytesRef.bytes, unsafeKeyOffset)
+            val pkBytes = util.Arrays.copyOfRange(partKeyBytesRef.bytes, partKeyBytesRef.offset,
+                            partKeyBytesRef.offset + partKeyBytesRef.length)
+            callback(part.partID, pkBytes)
             part
           }
           // create the partition and update data structures (but no need to add to Lucene!)
