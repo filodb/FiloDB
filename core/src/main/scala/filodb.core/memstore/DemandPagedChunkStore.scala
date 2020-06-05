@@ -69,6 +69,7 @@ extends RawToPartitionMaker with StrictLogging {
     FiloSchedulers.assertThreadName(FiloSchedulers.PopulateChunksSched)
     // Find the right partition given the partition key
     tsShard.getPartition(rawPartition.partitionKey).map { tsPart =>
+      logger.debug(s"Populating paged chunks for shard=${tsShard.shardNum} partId=${tsPart.partID}")
       tsShard.shardStats.partitionsPagedFromColStore.increment()
       tsShard.shardStats.numChunksPagedIn.increment(rawPartition.chunkSets.size)
       // One chunkset at a time, load them into offheap and populate the partition
