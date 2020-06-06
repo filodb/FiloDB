@@ -1,11 +1,10 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
-
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.LogicalPlan
-import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlExec, StitchRvsExec}
+import filodb.query.exec.{ExecPlan, InProcessPlanDispatcher, PromQlRemoteExec, StitchRvsExec}
 
 /**
   * HighAvailabilityPlanner responsible for using underlying local planner and FailureProvider
@@ -23,6 +22,7 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
                               failureProvider: FailureProvider,
                               queryConfig: QueryConfig) extends QueryPlanner with StrictLogging {
 
+  import net.ceedubs.ficus.Ficus._
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
 
@@ -49,18 +49,20 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val promQlParams = PromQlQueryParams(queryConfig.routingConfig, queryParams.promQl,
+          val remoteHttpEndpoint = queryConfig.routingConfig.as[Option[String]]("remote.http.endpoint")
+          val promQlParams = PromQlQueryParams(queryParams.promQl,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
-            queryParams.queryPath, queryParams.spread, processFailure = false)
+            queryParams.spread, remoteHttpEndpoint, Option.empty,
+            queryParams.httpRequestTimeoutMs, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          PromQlRemoteExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
     }
 
     if (execPlans.size == 1) execPlans.head
     else StitchRvsExec(qContext,
                        InProcessPlanDispatcher,
-                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlExec]))
+                       execPlans.sortWith((x, y) => !x.isInstanceOf[PromQlRemoteExec]))
     // ^^ Stitch RemoteExec plan results with local using InProcessPlanDispatcher
     // Sort to move RemoteExec in end as it does not have schema
 

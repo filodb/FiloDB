@@ -2,7 +2,6 @@ package com.esotericsoftware.kryo.io
 
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
 import com.esotericsoftware.kryo.Kryo
-import com.typesafe.config.{ ConfigFactory, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
@@ -82,26 +81,31 @@ class PartitionInfoSerializer extends KryoSerializer[PartitionInfo] {
 
 class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
   override def read(kryo: Kryo, input: Input, typ: Class[PromQlQueryParams]): PromQlQueryParams = {
-    val config = ConfigFactory.parseString(input.readString())
     val promQl = input.readString()
     val start = input.readLong()
     val step = input.readLong()
     val end = input.readLong()
     val spreadInt = input.readInt()
     val spread = if (spreadInt == -1) None else Some(spreadInt)
-    val procFailure = input.readBoolean()
+    val endpointString = input.readString()
+    val endpoint = if (endpointString == "-1") None else Some(endpointString)
     val queryPathString = input.readString()
-    val queryPath = if (queryPathString == -1) None else Some(queryPathString)
-    val procRouting = input.readBoolean()
-    PromQlQueryParams(config, promQl, start, step, end, queryPath, spread, procFailure, procRouting)
+    val queryPath = if (queryPathString == "-1") None else Some(queryPathString)
+    val timeout = input.readLong()
+    val procFailure = input.readBoolean()
+    val procMultiPartition = input.readBoolean()
+    PromQlQueryParams(promQl, start, step, end, spread, endpoint, queryPath, timeout, procFailure, procMultiPartition)
   }
   override def write(kryo: Kryo, output: Output, promParam: PromQlQueryParams): Unit = {
-    output.writeString(promParam.config.root().render(ConfigRenderOptions.concise()))
     output.writeString(promParam.promQl)
     output.writeLong(promParam.startSecs)
     output.writeLong(promParam.stepSecs)
     output.writeLong(promParam.endSecs)
     output.writeInt(promParam.spread.getOrElse(-1))
+    output.writeString(promParam.remoteQueryEndpoint.getOrElse("-1"))
+    output.writeString(promParam.remoteQueryPath.getOrElse("-1"))
+    output.writeLong(promParam.httpRequestTimeoutMs)
     output.writeBoolean(promParam.processFailure)
+    output.writeBoolean(promParam.processMultiPartition)
   }
 }

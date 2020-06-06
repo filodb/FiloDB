@@ -46,6 +46,19 @@ object LogicalPlanUtils {
   }
 
   /**
+   * Used to change start and end time(TimeRange) of LogicalPlan
+   * NOTE: Plan should be PeriodicSeriesPlan
+   */
+  def copyLogicalPlanWithUpdatedTimeRange(logicalPlan: LogicalPlan,
+                                          timeRange: TimeRange): LogicalPlan = {
+    logicalPlan match {
+      case lp: PeriodicSeriesPlan => copyWithUpdatedTimeRange(lp, timeRange)
+      case lp: RawSeriesLikePlan => copyNonPeriodicWithUpdatedTimeRange(lp, timeRange)
+      case _ => throw new UnsupportedOperationException("Logical plan not supported for copy")
+    }
+  }
+
+  /**
     * Used to change start and end time(TimeRange) of LogicalPlan
     * NOTE: Plan should be PeriodicSeriesPlan
     */
@@ -81,7 +94,7 @@ object LogicalPlanUtils {
   /**
     * Used to change rangeSelector of RawSeriesLikePlan
     */
-  private def copyNonPeriodicWithUpdatedTimeRange(plan: RawSeriesLikePlan,
+  private def copyNonPeriodicWithUpdatedTimeRange(plan: LogicalPlan,
                                                   timeRange: TimeRange): RawSeriesLikePlan = {
     plan match {
       case rs: RawSeries => rs.rangeSelector match {

@@ -129,14 +129,14 @@ final case class PartKeysExec(queryContext: QueryContext,
   def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.sampleLimit}"
 }
 
-final case class  LabelValuesExec(queryContext: QueryContext,
-                                  dispatcher: PlanDispatcher,
-                                  dataset: DatasetRef,
-                                  shard: Int,
-                                  filters: Seq[ColumnFilter],
-                                  columns: Seq[String],
-                                  startMs: Long,
-                                  endMs: Long) extends LeafExecPlan {
+final case class LabelValuesExec(queryContext: QueryContext,
+                                 dispatcher: PlanDispatcher,
+                                 dataset: DatasetRef,
+                                 shard: Int,
+                                 filters: Seq[ColumnFilter],
+                                 columns: Seq[String],
+                                 startMs: Long,
+                                 endMs: Long) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 

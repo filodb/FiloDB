@@ -4,7 +4,6 @@ import akka.actor.ActorSystem
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
-
 import filodb.coordinator.ShardMapper
 import filodb.core.MetricsTestData
 import filodb.core.metadata.Schemas
@@ -43,7 +42,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "test{job = \"app\"}", 1000, 100, 2000, None)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", 1000, 100, 2000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -77,24 +76,23 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset)
     val lp = Parser.queryRangeToLogicalPlan("test{job = \"app\"}", TimeStepParams(startSeconds, step, endSeconds))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "test{job = \"app\"}", startSeconds, step,
-      endSeconds, None)
+    val promQlQueryParams = PromQlQueryParams("test{job = \"app\"}", startSeconds, step, endSeconds)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[DistConcatExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
 
-    val remoteExec = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
+    val remoteExec = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
     remoteExec.params.startSecs shouldEqual startSeconds
     remoteExec.params.endSecs shouldEqual (localPartitionStart - 1)
     remoteExec.params.stepSecs shouldEqual step
     remoteExec.params.processFailure shouldEqual true
-    remoteExec.params.processRouting shouldEqual false
-    remoteExec.params.config.getString("endpoint") shouldEqual "remote-url"
+    remoteExec.params.processMultiPartition shouldEqual false
+    remoteExec.params.remoteQueryEndpoint shouldEqual "remote-url"
 
     val localExec = stitchRvsExec.children(0).asInstanceOf[DistConcatExec]
     localExec.isInstanceOf[DistConcatExec] shouldEqual (true)
@@ -129,7 +127,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val engine = new MultiPartitionPlanner(partitionLocationProvider, localPlanner, "local", dataset)
     val lp = Parser.queryRangeToLogicalPlan("time()", TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "time()", 1000, 100, 2000, None)
+    val promQlQueryParams = PromQlQueryParams("time()", 1000, 100, 2000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -149,8 +147,7 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "test1{job = \"app\"} + test2{job = \"app\"}",
-      1000, 100, 2000, None)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 2000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
@@ -170,14 +167,13 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val lp = Parser.queryRangeToLogicalPlan("test1{job = \"app\"} + test2{job = \"app\"}",
       TimeStepParams(1000, 100, 10000))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "test1{job = \"app\"} + test2{job = \"app\"}",
-      1000, 100, 10000, None)
+    val promQlQueryParams = PromQlQueryParams("test1{job = \"app\"} + test2{job = \"app\"}", 1000, 100, 10000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual 1
-    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual 10
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual 1
+    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual 10
   }
 
   it ("should generate Exec plan for Metadata query") {
@@ -193,8 +189,8 @@ class MultiPartitionPlannerSpec extends FunSpec with Matchers {
     val lp = Parser.metadataQueryToLogicalPlan("http_requests_total{job=\"prometheus\", method=\"GET\"}",
       TimeStepParams(1000, 100, 2000))
 
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty,
-      "http_requests_total{job=\"prometheus\", method=\"GET\"}", 1000, 100, 2000, None)
+    val promQlQueryParams = PromQlQueryParams(
+      "http_requests_total{job=\"prometheus\", method=\"GET\"}", 1000, 100, 2000)
 
     val execPlan = engine.materialize(lp, QueryContext(origQueryParams = promQlQueryParams))
 

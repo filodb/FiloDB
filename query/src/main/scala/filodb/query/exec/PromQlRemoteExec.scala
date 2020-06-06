@@ -8,10 +8,10 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
-
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -19,21 +19,22 @@ import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
+import kamon.trace.Span
 
-trait RemoteExec extends LeafExecPlan{
+trait RemoteExec extends LeafExecPlan {
 
   val params: PromQlQueryParams
+
   protected def args: String = params.toString
+
   /**
-    * Sub classes should override this method to provide a concrete
-    * implementation of the operation represented by this exec plan
-    * node
-    */
+   * Sub classes should override this method to provide a concrete
+   * implementation of the operation represented by this exec plan
+   * node
+   */
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
                (implicit sched: Scheduler): ExecResult = ???
-
-  def toQueryResponse(data: Data, id: String, parentSpan: kamon.trace.Span): QueryResponse
 
   override def execute(source: ChunkSource,
                        querySession: QuerySession)
@@ -43,13 +44,9 @@ trait RemoteExec extends LeafExecPlan{
       .tag("query-id", queryContext.queryId)
       .start()
 
-    val queryResponse = PromQlExec.httpGet(params, queryContext.submitTime).
-      map { response =>
-        response.unsafeBody match {
-          case Left(error) => QueryError(queryContext.queryId, error.error)
-          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
-        }
-      }
+    val httpEndpoint = params.remoteQueryEndpoint.get + params.remoteQueryPath.getOrElse("")
+    val queryResponse = sendHttpRequest(execPlan2Span, httpEndpoint, params.httpRequestTimeoutMs)
+
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
     // kamon uses thread-locals.
@@ -58,15 +55,21 @@ trait RemoteExec extends LeafExecPlan{
     }
   }
 
+  def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
+                     (implicit sched: Scheduler): Future[QueryResponse]
+
+  def getUrlParams(): Map[String, Any]
+
 }
 
-case class PromQlExec(queryContext: QueryContext,
-                      dispatcher: PlanDispatcher,
-                      dataset: DatasetRef,
-                      params: PromQlQueryParams) extends RemoteExec {
+case class PromQlRemoteExec(queryContext: QueryContext,
+                            dispatcher: PlanDispatcher,
+                            dataset: DatasetRef,
+                            params: PromQlQueryParams,
+                            numberColumnRequired: Boolean = false) extends RemoteExec {
 
   val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
-    ColumnInfo("value", ColumnType.DoubleColumn))
+    ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))
   val recSchema = SerializedRangeVector.toSchema(columns)
   val resultSchema = ResultSchema(columns, 1)
 
@@ -74,6 +77,28 @@ case class PromQlExec(queryContext: QueryContext,
 
   def limit: Int = ???
 
+  override def getUrlParams(): Map[String, Any] = {
+    var urlParams = Map("query" -> params.promQl,
+      "start" -> params.startSecs,
+      "end" -> params.endSecs,
+      "time" -> params.endSecs,
+      "step" -> params.stepSecs,
+      "processFailure" -> params.processFailure,
+      "processMultiPartition" -> params.processMultiPartition)
+    if (params.spread.isDefined) urlParams = urlParams + ("spread" -> params.spread.get)
+    urlParams
+  }
+
+  override def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
+                     (implicit sched: Scheduler): Future[QueryResponse] = {
+    PromQlRemoteExec.httpGet(httpEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
+      .map { response =>
+        response.unsafeBody match {
+          case Left(error) => QueryError(queryContext.queryId, error.error)
+          case Right(successResponse) => toQueryResponse(successResponse.data, queryContext.queryId, execPlan2Span)
+        }
+      }
+  }
 
   // TODO: Set histogramMap=true and parse histogram maps.  The problem is that code below assumes normal double
   //   schema.  Would need to detect ahead of time to use TransientHistRow(), so we'd need to add schema to output,
@@ -103,6 +128,8 @@ case class PromQlExec(queryContext: QueryContext,
 
       }
       SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
+      // TODO: Raw series resuls are incorrect
+      // TODO: verbose flag is not setting correct values
     }
     span.finish()
     QueryResult(id, resultSchema, rangeVectors)
@@ -110,12 +137,10 @@ case class PromQlExec(queryContext: QueryContext,
 
 }
 
-object PromQlExec extends StrictLogging {
+object PromQlRemoteExec extends StrictLogging {
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
-  import net.ceedubs.ficus.Ficus._
-
 
   // DO NOT REMOVE PromCirceSupport import below assuming it is unused - Intellij removes it in auto-imports :( .
   // Needed to override Sampl case class Encoder.
@@ -124,26 +149,29 @@ object PromQlExec extends StrictLogging {
 
   ShutdownHookThread(shutdown())
 
-  def httpGet(promQlQueryParams: PromQlQueryParams, submitTime: Long)(implicit scheduler: Scheduler):
-  Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
-    val endpoint = promQlQueryParams.config.as[Option[String]]("buddy.http.endpoint").getOrElse(promQlQueryParams.
-      config.as[Option[String]]("endpoint").get)
+  def httpGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+  (implicit scheduler: Scheduler): Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
-    val buddyHttpTimeout = promQlQueryParams.config.as[Option[FiniteDuration]]("buddy.http.timeout").
-                            getOrElse(60000.millis)
-    val readTimeout = FiniteDuration(buddyHttpTimeout.toMillis - queryTimeElapsed, TimeUnit.MILLISECONDS)
-    var urlParams = Map("query" -> promQlQueryParams.promQl,
-                        "start" -> promQlQueryParams.startSecs,
-                        "end" -> promQlQueryParams.endSecs,
-                        "step" -> promQlQueryParams.stepSecs,
-                        "processFailure" -> promQlQueryParams.processFailure)
-    if (promQlQueryParams.spread.isDefined) urlParams = urlParams + ("spread" -> promQlQueryParams.spread.get)
-    val url = uri"$endpoint?$urlParams"
-    logger.debug("promqlexec url is {}", url)
+    val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
+    val url = uri"$httpEndpoint?$urlParams"
+    logger.debug("promQlExec url={}", url)
     sttp
       .get(url)
       .readTimeout(readTimeout)
       .response(asJson[SuccessResponse])
+      .send()
+  }
+
+  def httpMetadataGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
+             (implicit scheduler: Scheduler): Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
+    val queryTimeElapsed = System.currentTimeMillis() - submitTime
+    val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
+    val url = uri"$httpEndpoint?$urlParams"
+    logger.debug("promMetadataExec url={}", url)
+    sttp
+      .get(url)
+      .readTimeout(readTimeout)
+      .response(asJson[MetadataSuccessResponse])
       .send()
   }
 
