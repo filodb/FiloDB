@@ -1518,5 +1518,6 @@ class TimeSeriesShard(val ref: DatasetRef,
        method to ensure that no threads are accessing the memory before it's freed.
     blockStore.releaseBlocks()
     */
+    ingestSched.shutdown()
   }
 }
