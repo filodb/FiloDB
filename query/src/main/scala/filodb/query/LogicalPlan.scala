@@ -336,8 +336,24 @@ case class ApplyAbsentFunction(vectors: PeriodicSeriesPlan,
   override def endMs: Long = vectors.endMs
 }
 
-case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
+//case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
+//  extends Ordered[LabelValueOperator]
+//{
+//  //import scala.math.Ordered.orderingToOrdered
+//  def compare(that: LabelValueOperator): Int = (this.columnName, this.value.head, this.operator) compare
+//    (that.columnName, that.value.head, that.operator)
+//}
 
+case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
+object LabelValueOperator {
+  // Note that because `Ordering[A]` is not contravariant, the declaration
+  // must be type-parametrized in the event that you want the implicit
+  // ordering to apply to subclasses of `Employee`.
+  implicit def orderingByName[A <: LabelValueOperator]: Ordering[A] =
+    Ordering.by(e => (e.columnName, e.value.head, e.operator))
+
+}
+//case class LabelValueOperator(columnName: String, value: Seq[String], operator: String)
 case class LabelValueOperatorGroup(labelValueOperators: Seq[LabelValueOperator])
 
 object LogicalPlan {
@@ -356,34 +372,37 @@ object LogicalPlan {
     getLabelValueFromLogicalPlan(getLabelValueOperatorsFromLogicalPlan(logicalPlan), labelName)
   }
 
-  def getLabelValueFromLogicalPlan(labelValues: Option[Seq[LabelValueOperatorGroup]],
+  def getLabelValueFromLogicalPlan(labelValues: Option[LabelValueOperatorGroup],
                                    labelName: String): Option[Seq[String]] = {
     labelValues match {
       case None => None
-      case _    => labelValues.get.flatMap(group =>
-        group.labelValueOperators.flatMap(lops => {
-          lops.columnName.equals(labelName) match {
-            case true  => lops.value
+      case _    => labelValues.get.labelValueOperators.flatMap(l =>
+          l.columnName.equals(labelName) match {
+            case true  => l.value
             case false => Seq()
           }
-        })).distinct match {
+        ).distinct match {
         case Nil                    => None
         case lVFilters: Seq[String] => Some(lVFilters)
       }
     }
   }
 
-  private def getLabelValueOpsFromFilters(filters: Seq[ColumnFilter]): Option[LabelValueOperatorGroup] = {
-    Some(LabelValueOperatorGroup(filters.map(cf => LabelValueOperator(cf.column,
-      cf.filter.valuesStrings.map(_.toString).toSeq.sorted, cf.filter.operatorString))))
+  private def getLabelValueOpsFromFilters(filters: Seq[ColumnFilter]): Seq[LabelValueOperator] = {
+    filters.map(cf => LabelValueOperator(cf.column,
+      cf.filter.valuesStrings.map(_.toString).toSeq.sorted, cf.filter.operatorString))
+      .sorted(LabelValueOperator.orderingByName)
+
   }
 
-  def getLabelValueOperatorsFromLogicalPlan(logicalPlan: LogicalPlan): Option[Seq[LabelValueOperatorGroup]] = {
+  def getLabelValueOperatorsFromLogicalPlan(logicalPlan: LogicalPlan): Option[LabelValueOperatorGroup] = {
     LogicalPlan.findLeafLogicalPlans(logicalPlan).flatMap { lp =>
       lp match {
-        case lp: LabelValues           => Some(
-          LabelValueOperatorGroup(
-            lp.labelConstraints.map(lbc => LabelValueOperator(lbc._1, Seq(lbc._2), "=")).toSeq))
+//        case lp: LabelValues           => LabelValueOperatorGroup(
+//            lp.labelConstraints.map(lbc => LabelValueOperator(lbc._1, Seq(lbc._2), "=")).toSeq)
+//        case lp: LabelValues           => val r = lp.labelConstraints.map(lbc =>
+//                                          LabelValueOperator(lbc._1, Seq(lbc._2), "=")).toSeq
+//                                          LabelValueOperatorGroup(r)
         case lp: RawSeries             => getLabelValueOpsFromFilters(lp.filters)
         case lp: RawChunkMeta          => getLabelValueOpsFromFilters(lp.filters)
         case lp: SeriesKeysByFilters   => getLabelValueOpsFromFilters(lp.filters)
@@ -394,7 +413,9 @@ object LogicalPlan {
       }
     } match {
       case Nil => None
-      case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq)
+      //case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq.sorted)
+     // case groupSeq: Seq[LabelValueOperatorGroup] => Some(groupSeq.sorted(LabelValueOperator.orderingByName))
+      case groupSeq: Seq[LabelValueOperator] => Some(LabelValueOperatorGroup(groupSeq))
     }
   }
 }
