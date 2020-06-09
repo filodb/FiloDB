@@ -1417,9 +1417,8 @@ class TimeSeriesShard(val ref: DatasetRef,
   def lookupPartitions(partMethod: PartitionScanMethod,
                        chunkMethod: ChunkScanMethod,
                        querySession: QuerySession): PartLookupResult = {
-    val reclaimReadLock = reclaimLock.asReadLock()
-    querySession.lock = Some(reclaimReadLock)
-    reclaimReadLock.lock()
+    querySession.lock = Some(reclaimLock)
+    reclaimLock.lock()
     // any exceptions thrown here should be caught by a wrapped Task.
     // At the end, MultiSchemaPartitionsExec.execute releases the lock when the task is complete
     partMethod match {
