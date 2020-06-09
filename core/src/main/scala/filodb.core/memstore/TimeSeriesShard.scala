@@ -1478,6 +1478,7 @@ class TimeSeriesShard(val ref: DatasetRef,
   }
 
   def scanPartitions(iterResult: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     val partIter = new InMemPartitionIterator2(iterResult.partsInMemory)
@@ -1530,5 +1531,6 @@ class TimeSeriesShard(val ref: DatasetRef,
        method to ensure that no threads are accessing the memory before it's freed.
     blockStore.releaseBlocks()
     */
+    ingestSched.shutdown()
   }
 }

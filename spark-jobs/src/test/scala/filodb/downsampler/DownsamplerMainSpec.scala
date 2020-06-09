@@ -78,7 +78,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
   val gaugeLowFreqName = "my_gauge_low_freq"
   var gaugeLowFreqPartKeyBytes: Array[Byte] = _
 
-  val lastSampleTime = 1574373042000L
+  val lastSampleTime = 74373042000L
   val pkUpdateHour = hour(lastSampleTime)
 
   val metricNames = Seq(gaugeName, gaugeLowFreqName, counterName, histName, untypedName)
@@ -112,20 +112,20 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     untypedPartKeyBytes = part.partKeyBytes
 
     val rawSamples = Stream(
-      Seq(1574372801000L, 3d, untypedName, seriesTags),
-      Seq(1574372802000L, 5d, untypedName, seriesTags),
+      Seq(74372801000L, 3d, untypedName, seriesTags),
+      Seq(74372802000L, 5d, untypedName, seriesTags),
 
-      Seq(1574372861000L, 9d, untypedName, seriesTags),
-      Seq(1574372862000L, 11d, untypedName, seriesTags),
+      Seq(74372861000L, 9d, untypedName, seriesTags),
+      Seq(74372862000L, 11d, untypedName, seriesTags),
 
-      Seq(1574372921000L, 13d, untypedName, seriesTags),
-      Seq(1574372922000L, 15d, untypedName, seriesTags),
+      Seq(74372921000L, 13d, untypedName, seriesTags),
+      Seq(74372922000L, 15d, untypedName, seriesTags),
 
-      Seq(1574372981000L, 17d, untypedName, seriesTags),
-      Seq(1574372982000L, 15d, untypedName, seriesTags),
+      Seq(74372981000L, 17d, untypedName, seriesTags),
+      Seq(74372982000L, 15d, untypedName, seriesTags),
 
-      Seq(1574373041000L, 13d, untypedName, seriesTags),
-      Seq(1574373042000L, 11d, untypedName, seriesTags)
+      Seq(74373041000L, 13d, untypedName, seriesTags),
+      Seq(74373042000L, 11d, untypedName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -136,7 +136,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(untypedPartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
+    val pk = PartKeyRecord(untypedPartKeyBytes, 74372801000L, 74373042000L, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -154,20 +154,20 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     gaugePartKeyBytes = part.partKeyBytes
 
     val rawSamples = Stream(
-      Seq(1574372801000L, 3d, gaugeName, seriesTags),
-      Seq(1574372802000L, 5d, gaugeName, seriesTags),
+      Seq(74372801000L, 3d, gaugeName, seriesTags),
+      Seq(74372802000L, 5d, gaugeName, seriesTags),
 
-      Seq(1574372861000L, 9d, gaugeName, seriesTags),
-      Seq(1574372862000L, 11d, gaugeName, seriesTags),
+      Seq(74372861000L, 9d, gaugeName, seriesTags),
+      Seq(74372862000L, 11d, gaugeName, seriesTags),
 
-      Seq(1574372921000L, 13d, gaugeName, seriesTags),
-      Seq(1574372922000L, 15d, gaugeName, seriesTags),
+      Seq(74372921000L, 13d, gaugeName, seriesTags),
+      Seq(74372922000L, 15d, gaugeName, seriesTags),
 
-      Seq(1574372981000L, 17d, gaugeName, seriesTags),
-      Seq(1574372982000L, 15d, gaugeName, seriesTags),
+      Seq(74372981000L, 17d, gaugeName, seriesTags),
+      Seq(74372982000L, 15d, gaugeName, seriesTags),
 
-      Seq(1574373041000L, 13d, gaugeName, seriesTags),
-      Seq(1574373042000L, 11d, gaugeName, seriesTags)
+      Seq(74373041000L, 13d, gaugeName, seriesTags),
+      Seq(74373042000L, 11d, gaugeName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -178,7 +178,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugePartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
+    val pk = PartKeyRecord(gaugePartKeyBytes, 74372801000L, 74373042000L, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -196,18 +196,18 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     gaugeLowFreqPartKeyBytes = part.partKeyBytes
 
     val rawSamples = Stream(
-      Seq(1574372801000L, 3d, gaugeName, seriesTags),
-      Seq(1574372802000L, 5d, gaugeName, seriesTags),
+      Seq(74372801000L, 3d, gaugeName, seriesTags),
+      Seq(74372802000L, 5d, gaugeName, seriesTags),
 
       // skip next minute
 
-      Seq(1574372921000L, 13d, gaugeName, seriesTags),
-      Seq(1574372922000L, 15d, gaugeName, seriesTags),
+      Seq(74372921000L, 13d, gaugeName, seriesTags),
+      Seq(74372922000L, 15d, gaugeName, seriesTags),
 
       // skip next minute
 
-      Seq(1574373041000L, 13d, gaugeName, seriesTags),
-      Seq(1574373042000L, 11d, gaugeName, seriesTags)
+      Seq(74373041000L, 13d, gaugeName, seriesTags),
+      Seq(74373042000L, 11d, gaugeName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -218,7 +218,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 1574372801000L, 1574373042000L, Some(150))
+    val pk = PartKeyRecord(gaugeLowFreqPartKeyBytes, 74372801000L, 74373042000L, Some(150))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -236,24 +236,24 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     counterPartKeyBytes = part.partKeyBytes
 
     val rawSamples = Stream(
-      Seq(1574372801000L, 3d, counterName, seriesTags),
-      Seq(1574372801500L, 4d, counterName, seriesTags),
-      Seq(1574372802000L, 5d, counterName, seriesTags),
+      Seq(74372801000L, 3d, counterName, seriesTags),
+      Seq(74372801500L, 4d, counterName, seriesTags),
+      Seq(74372802000L, 5d, counterName, seriesTags),
 
-      Seq(1574372861000L, 9d, counterName, seriesTags),
-      Seq(1574372861500L, 10d, counterName, seriesTags),
-      Seq(1574372862000L, 11d, counterName, seriesTags),
+      Seq(74372861000L, 9d, counterName, seriesTags),
+      Seq(74372861500L, 10d, counterName, seriesTags),
+      Seq(74372862000L, 11d, counterName, seriesTags),
 
-      Seq(1574372921000L, 2d, counterName, seriesTags),
-      Seq(1574372921500L, 7d, counterName, seriesTags),
-      Seq(1574372922000L, 15d, counterName, seriesTags),
+      Seq(74372921000L, 2d, counterName, seriesTags),
+      Seq(74372921500L, 7d, counterName, seriesTags),
+      Seq(74372922000L, 15d, counterName, seriesTags),
 
-      Seq(1574372981000L, 17d, counterName, seriesTags),
-      Seq(1574372981500L, 1d, counterName, seriesTags),
-      Seq(1574372982000L, 15d, counterName, seriesTags),
+      Seq(74372981000L, 17d, counterName, seriesTags),
+      Seq(74372981500L, 1d, counterName, seriesTags),
+      Seq(74372982000L, 15d, counterName, seriesTags),
 
-      Seq(1574373041000L, 18d, counterName, seriesTags),
-      Seq(1574373042000L, 20d, counterName, seriesTags)
+      Seq(74373041000L, 18d, counterName, seriesTags),
+      Seq(74373042000L, 20d, counterName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -264,7 +264,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(counterPartKeyBytes, 1574372801000L, 1574373042000L, Some(1))
+    val pk = PartKeyRecord(counterPartKeyBytes, 74372801000L, 74373042000L, Some(1))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -283,24 +283,24 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     val bucketScheme = CustomBuckets(Array(3d, 10d, Double.PositiveInfinity))
     val rawSamples = Stream( // time, sum, count, hist, name, tags
-      Seq(1574372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histName, seriesTags),
-      Seq(1574372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
-      Seq(1574372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
+      Seq(74372801000L, 0d, 1d, LongHistogram(bucketScheme, Array(0L, 0, 1)), histName, seriesTags),
+      Seq(74372801500L, 2d, 3d, LongHistogram(bucketScheme, Array(0L, 2, 3)), histName, seriesTags),
+      Seq(74372802000L, 5d, 6d, LongHistogram(bucketScheme, Array(2L, 5, 6)), histName, seriesTags),
 
-      Seq(1574372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histName, seriesTags),
-      Seq(1574372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
-      Seq(1574372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
+      Seq(74372861000L, 9d, 9d, LongHistogram(bucketScheme, Array(2L, 5, 9)), histName, seriesTags),
+      Seq(74372861500L, 10d, 10d, LongHistogram(bucketScheme, Array(2L, 5, 10)), histName, seriesTags),
+      Seq(74372862000L, 11d, 14d, LongHistogram(bucketScheme, Array(2L, 8, 14)), histName, seriesTags),
 
-      Seq(1574372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histName, seriesTags),
-      Seq(1574372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histName, seriesTags),
-      Seq(1574372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
+      Seq(74372921000L, 2d, 2d, LongHistogram(bucketScheme, Array(0L, 0, 2)), histName, seriesTags),
+      Seq(74372921500L, 7d, 9d, LongHistogram(bucketScheme, Array(1L, 7, 9)), histName, seriesTags),
+      Seq(74372922000L, 15d, 19d, LongHistogram(bucketScheme, Array(1L, 15, 19)), histName, seriesTags),
 
-      Seq(1574372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
-      Seq(1574372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histName, seriesTags),
-      Seq(1574372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
+      Seq(74372981000L, 17d, 21d, LongHistogram(bucketScheme, Array(2L, 16, 21)), histName, seriesTags),
+      Seq(74372981500L, 1d, 1d, LongHistogram(bucketScheme, Array(0L, 1, 1)), histName, seriesTags),
+      Seq(74372982000L, 15d, 15d, LongHistogram(bucketScheme, Array(0L, 15, 15)), histName, seriesTags),
 
-      Seq(1574373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
-      Seq(1574373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histName, seriesTags)
+      Seq(74373041000L, 18d, 19d, LongHistogram(bucketScheme, Array(1L, 16, 19)), histName, seriesTags),
+      Seq(74373042000L, 20d, 25d, LongHistogram(bucketScheme, Array(4L, 20, 25)), histName, seriesTags)
     )
 
     MachineMetricsData.records(rawDataset, rawSamples).records.foreach { case (base, offset) =>
@@ -311,7 +311,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val chunks = part.makeFlushChunks(offheapMem.blockMemFactory)
 
     rawColStore.write(rawDataset.ref, Observable.fromIterator(chunks)).futureValue
-    val pk = PartKeyRecord(histPartKeyBytes, 1574372801000L, 1574373042000L, Some(199))
+    val pk = PartKeyRecord(histPartKeyBytes, 74372801000L, 74373042000L, Some(199))
     rawColStore.writePartKeys(rawDataset.ref, 0, Observable.now(pk), 259200, pkUpdateHour).futureValue
   }
 
@@ -415,13 +415,18 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, min, max, sum, count, avg
     downsampledData1 shouldEqual Seq(
-      (1574372802000L, 3.0, 5.0, 8.0, 2.0, 4.0),
-      (1574372862000L, 9.0, 11.0, 20.0, 2.0, 10.0),
-      (1574372922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
-      (1574372982000L, 15.0, 17.0, 32.0, 2.0, 16.0),
-      (1574373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
+      (74372802000L, 3.0, 5.0, 8.0, 2.0, 4.0),
+      (74372862000L, 9.0, 11.0, 20.0, 2.0, 10.0),
+      (74372922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
+      (74372982000L, 15.0, 17.0, 32.0, 2.0, 16.0),
+      (74373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
     )
   }
+
+  /*
+  Tip: After running this spec, you can bring up the local downsample server and hit following URL on browser
+  http://localhost:9080/promql/prometheus/api/v1/query_range?query=my_gauge%7B_ws_%3D%27my_ws%27%2C_ns_%3D%27my_ns%27%7D&start=74372801&end=74373042&step=10&verbose=true&spread=2
+   */
 
   it("should read and verify low freq gauge in cassandra using PagedReadablePartition for 1-min downsampled data") {
 
@@ -445,9 +450,9 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, min, max, sum, count, avg
     downsampledData1 shouldEqual Seq(
-      (1574372802000L, 3.0, 5.0, 8.0, 2.0, 4.0),
-      (1574372922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
-      (1574373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
+      (74372802000L, 3.0, 5.0, 8.0, 2.0, 4.0),
+      (74372922000L, 13.0, 15.0, 28.0, 2.0, 14.0),
+      (74373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
     )
   }
 
@@ -474,19 +479,19 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, counter
     downsampledData1 shouldEqual Seq(
-      (1574372801000L, 3d),
-      (1574372802000L, 5d),
+      (74372801000L, 3d),
+      (74372802000L, 5d),
 
-      (1574372862000L, 11d),
+      (74372862000L, 11d),
 
-      (1574372921000L, 2d),
-      (1574372922000L, 15d),
+      (74372921000L, 2d),
+      (74372922000L, 15d),
 
-      (1574372981000L, 17d),
-      (1574372981500L, 1d),
-      (1574372982000L, 15d),
+      (74372981000L, 17d),
+      (74372981500L, 1d),
+      (74372982000L, 15d),
 
-      (1574373042000L, 20d)
+      (74373042000L, 20d)
 
     )
   }
@@ -519,19 +524,19 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      (1574372801000L, 0d, 1d, Seq(0d, 0d, 1d)),
-      (1574372802000L, 5d, 6d, Seq(2d, 5d, 6d)),
+      (74372801000L, 0d, 1d, Seq(0d, 0d, 1d)),
+      (74372802000L, 5d, 6d, Seq(2d, 5d, 6d)),
 
-      (1574372862000L, 11d, 14d, Seq(2d, 8d, 14d)),
+      (74372862000L, 11d, 14d, Seq(2d, 8d, 14d)),
 
-      (1574372921000L, 2d, 2d, Seq(0d, 0d, 2d)),
-      (1574372922000L, 15d, 19d, Seq(1d, 15d, 19d)),
+      (74372921000L, 2d, 2d, Seq(0d, 0d, 2d)),
+      (74372922000L, 15d, 19d, Seq(1d, 15d, 19d)),
 
-      (1574372981000L, 17d, 21d, Seq(2d, 16d, 21d)),
-      (1574372981500L, 1d, 1d, Seq(0d, 1d, 1d)),
-      (1574372982000L, 15d, 15d, Seq(0d, 15d, 15d)),
+      (74372981000L, 17d, 21d, Seq(2d, 16d, 21d)),
+      (74372981500L, 1d, 1d, Seq(0d, 1d, 1d)),
+      (74372982000L, 15d, 15d, Seq(0d, 15d, 15d)),
 
-      (1574373042000L, 20d, 25d, Seq(4d, 20d, 25d))
+      (74373042000L, 20d, 25d, Seq(4d, 20d, 25d))
     )
   }
 
@@ -555,8 +560,8 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, min, max, sum, count, avg
     downsampledData2 shouldEqual Seq(
-      (1574372982000L, 3.0, 17.0, 88.0, 8.0, 11.0),
-      (1574373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
+      (74372982000L, 3.0, 17.0, 88.0, 8.0, 11.0),
+      (74373042000L, 11.0, 13.0, 24.0, 2.0, 12.0)
     )
   }
 
@@ -583,18 +588,18 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, counter
     downsampledData1 shouldEqual Seq(
-      (1574372801000L, 3d),
+      (74372801000L, 3d),
 
-      (1574372862000L, 11d),
+      (74372862000L, 11d),
 
-      (1574372921000L, 2d),
+      (74372921000L, 2d),
 
-      (1574372981000L, 17d),
-      (1574372981500L, 1d),
+      (74372981000L, 17d),
+      (74372981500L, 1d),
 
-      (1574372982000L, 15.0d),
+      (74372982000L, 15.0d),
 
-      (1574373042000L, 20.0d)
+      (74373042000L, 20.0d)
     )
   }
 
@@ -626,13 +631,13 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
 
     // time, sum, count, histogram
     downsampledData1 shouldEqual Seq(
-      (1574372801000L, 0d, 1d, Seq(0d, 0d, 1d)),
-      (1574372862000L, 11d, 14d, Seq(2d, 8d, 14d)),
-      (1574372921000L, 2d, 2d, Seq(0d, 0d, 2d)),
-      (1574372981000L, 17d, 21d, Seq(2d, 16d, 21d)),
-      (1574372981500L, 1d, 1d, Seq(0d, 1d, 1d)),
-      (1574372982000L, 15.0d, 15.0d, Seq(0.0, 15.0, 15.0)),
-      (1574373042000L, 20.0d, 25.0d, Seq(4.0, 20.0, 25.0))
+      (74372801000L, 0d, 1d, Seq(0d, 0d, 1d)),
+      (74372862000L, 11d, 14d, Seq(2d, 8d, 14d)),
+      (74372921000L, 2d, 2d, Seq(0d, 0d, 2d)),
+      (74372981000L, 17d, 21d, Seq(2d, 16d, 21d)),
+      (74372981500L, 1d, 1d, Seq(0d, 1d, 1d)),
+      (74372982000L, 15.0d, 15.0d, Seq(0.0, 15.0, 15.0)),
+      (74373042000L, 20.0d, 25.0d, Seq(4.0, 20.0, 25.0))
     )
   }
 
@@ -710,7 +715,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     queryScheduler.shutdown()
     res.result.size shouldEqual 1
     res.result.head.rows.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual
-      List((1574372982000L, 88.0), (1574373042000L, 24.0))
+      List((74372982000L, 88.0), (74373042000L, 24.0))
   }
 
   it ("should fail when cardinality buster is not configured with any delete filters") {

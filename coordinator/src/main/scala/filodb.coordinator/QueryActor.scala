@@ -98,54 +98,60 @@ final class QueryActor(memStore: MemStore,
   private val queryErrors = Kamon.counter("queryactor-query-errors").withTags(TagSet.from(tags))
 
   def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
-    epRequests.increment()
-    Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-    Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
-    val querySession = QuerySession(q.queryContext, queryConfig)
-    q.execute(memStore, querySession)(queryScheduler)
-      .foreach { res =>
-       FiloSchedulers.assertThreadName(QuerySchedName)
-       replyTo ! res
-       res match {
-         case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-         case e: QueryError =>
-           queryErrors.increment()
-           logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
-           e.t match {
-             case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
-             case t: Throwable =>
-           }
-       }
-     }(queryScheduler).recover { case ex =>
-       // Unhandled exception in query, should be rare
-       logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
-       replyTo ! QueryError(q.queryContext.queryId, ex)
-     }(queryScheduler)
+    if (checkTimeout(q.queryContext, replyTo)) {
+      epRequests.increment()
+      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+      Kamon.currentSpan().tag("query-id", q.queryContext.queryId)
+      val querySession = QuerySession(q.queryContext, queryConfig)
+      q.execute(memStore, querySession)(queryScheduler)
+        .foreach { res =>
+          FiloSchedulers.assertThreadName(QuerySchedName)
+          replyTo ! res
+          res match {
+            case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+            case e: QueryError =>
+              queryErrors.increment()
+              logger.debug(s"queryId ${q.queryContext.queryId} Normal QueryError returned from query execution: $e")
+              e.t match {
+                case cve: CorruptVectorException => memStore.analyzeAndLogCorruptPtr(dsRef, cve)
+                case t: Throwable =>
+              }
+          }
+        }(queryScheduler).recover { case ex =>
+        // Unhandled exception in query, should be rare
+        logger.error(s"queryId ${q.queryContext.queryId} Unhandled Query Error: ", ex)
+        replyTo ! QueryError(q.queryContext.queryId, ex)
+      }(queryScheduler)
+    }
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
-    // This is for CLI use only. Always prefer clients to materialize logical plan
-    lpRequests.increment()
-    try {
-      val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-      self forward execPlan
-    } catch {
-      case NonFatal(ex) =>
-        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          logger.error(s"Exception while materializing logical plan", ex)
-        replyTo ! QueryError("unknown", ex)
+    if (checkTimeout(q.qContext, replyTo)) {
+      // This is for CLI use only. Always prefer clients to materialize logical plan
+      lpRequests.increment()
+      try {
+        val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
+        self forward execPlan
+      } catch {
+        case NonFatal(ex) =>
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            logger.error(s"Exception while materializing logical plan", ex)
+          replyTo ! QueryError("unknown", ex)
+      }
     }
   }
 
   private def processExplainPlanQuery(q: ExplainPlan2Query, replyTo: ActorRef): Unit = {
-    try {
-      val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
-      replyTo ! execPlan
-    } catch {
-      case NonFatal(ex) =>
-        if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
-          logger.error(s"Exception while materializing logical plan", ex)
-        replyTo ! QueryError("unknown", ex)
+    if (checkTimeout(q.qContext, replyTo)) {
+      try {
+        val execPlan = queryPlanner.materialize(q.logicalPlan, q.qContext)
+        replyTo ! execPlan
+      } catch {
+        case NonFatal(ex) =>
+          if (!ex.isInstanceOf[BadQueryException]) // dont log user errors
+            logger.error(s"Exception while materializing logical plan", ex)
+          replyTo ! QueryError("unknown", ex)
+      }
     }
   }
 
@@ -159,6 +165,15 @@ final class QueryActor(memStore: MemStore,
       if (destNode != ActorRef.noSender) { destNode.forward(g) }
       else                               { originator ! BadArgument(s"Shard ${g.shard} is not assigned") }
     }
+  }
+
+  def checkTimeout(queryContext: QueryContext, replyTo: ActorRef): Boolean = {
+    // timeout can occur here if there is a build up in actor mailbox queue and delayed delivery
+    val queryTimeElapsed = System.currentTimeMillis() - queryContext.submitTime
+    if (queryTimeElapsed >= queryContext.queryTimeoutMillis) {
+      replyTo ! QueryError("Actor mailbox timeout", QueryTimeoutException(queryTimeElapsed, this.getClass.getName))
+      false
+    } else true
   }
 
   def receive: Receive = {

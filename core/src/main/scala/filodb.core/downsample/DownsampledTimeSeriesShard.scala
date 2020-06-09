@@ -14,7 +14,7 @@ import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.Observable
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore._
 import filodb.core.metadata.Schemas
@@ -234,6 +234,7 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
   }
 
   def scanPartitions(lookup: PartLookupResult,
+                     colIds: Seq[Types.ColumnId],
                      querySession: QuerySession): Observable[ReadablePartition] = {
 
     // Step 1: Choose the downsample level depending on the range requested
@@ -261,13 +262,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                                 SinglePartitionScan(partBytes, shardNum),
                                 lookup.chunkMethod)
           .map { pd =>
-            val part = makePagedPartition(pd, lookup.firstSchemaId.get)
+            val part = makePagedPartition(pd, lookup.firstSchemaId.get, colIds)
             stats.partitionsQueried.increment()
             stats.chunksQueried.increment(part.numChunks)
             partLoadSpan.finish()
             part
           }
-          .defaultIfEmpty(makePagedPartition(RawPartData(partBytes, Seq.empty), lookup.firstSchemaId.get))
+          .defaultIfEmpty(makePagedPartition(RawPartData(partBytes, Seq.empty), lookup.firstSchemaId.get, colIds))
           .headL
       }
   }
@@ -297,19 +298,22 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
         // since it is the highest resolution/ttl
         downsampleTtls.last.toMillis -> downsampledDatasetRefs.last
       case TimeRangeChunkScan(startTime, _) =>
-        val ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
+        var ttlIndex = downsampleTtls.indexWhere(t => startTime > System.currentTimeMillis() - t.toMillis)
+        // -1 return value means query startTime is before the earliest retention. Just pick the highest resolution
+        if (ttlIndex == -1) ttlIndex = downsampleTtls.size - 1
         downsampleConfig.resolutions(ttlIndex).toMillis -> downsampledDatasetRefs(ttlIndex)
       case _ => ???
     }
   }
 
-  private def makePagedPartition(part: RawPartData, firstSchemaId: Int): ReadablePartition = {
+  private def makePagedPartition(part: RawPartData, firstSchemaId: Int,
+                                 colIds: Seq[Types.ColumnId]): ReadablePartition = {
     val schemaId = RecordSchema.schemaID(part.partitionKey, UnsafeUtils.arayOffset)
     if (schemaId != firstSchemaId) {
       throw SchemaMismatch(schemas.schemaName(firstSchemaId), schemas.schemaName(schemaId))
     }
     // FIXME It'd be nice to pass in the correct partId here instead of -1
-    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part)
+    new PagedReadablePartition(schemas(schemaId), shardNum, -1, part, colIds)
   }
 
   /**
