@@ -4,7 +4,6 @@ import java.lang.{Long => jLong}
 import java.util
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
-import java.util.concurrent.locks.StampedLock
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
@@ -157,7 +156,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   protected val lock = new ReentrantLock()
 
   // Acquired when reclaiming on demand. Acquire shared lock to prevent block reclamation.
-  final val reclaimLock = new StampedLock
+  final val reclaimLock = new Latch
 
   override def blockSizeInBytes: Long = PageManager.getInstance().pageSize() * numPagesPerBlock
 
@@ -247,13 +246,13 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     */
   private def tryReclaimOnDemand(num: Int): Unit = {
     lock.unlock()
-    var stamp: Long = 0
+    var acquired: Boolean = false
     try {
       val start = System.nanoTime()
       // Give up after waiting (in total) a little over 16 seconds.
-      stamp = tryExclusiveReclaimLock(8192)
+      acquired = tryExclusiveReclaimLock(8192)
 
-      if (stamp == 0) {
+      if (!acquired) {
         // Don't stall ingestion forever. Some queries might return invalid results because
         // the lock isn't held. If the lock state is broken, then ingestion is really stuck
         // and the node must be restarted. Queries should always release the lock.
@@ -273,13 +272,13 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         tryReclaim(num)
       }
     } finally {
-      if (stamp != 0) {
-        reclaimLock.unlockWrite(stamp)
+      if (acquired) {
+        reclaimLock.releaseExclusive()
       }
     }
   }
 
-  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Long = {
+  private def tryExclusiveReclaimLock(finalTimeoutMillis: Int): Boolean = {
     // Attempting to acquire the exclusive lock must wait for concurrent queries to finish, but
     // waiting will also stall new queries from starting. To protect against this, attempt with
     // a timeout to let any stalled queries through. To prevent starvation of the exclusive
@@ -295,17 +294,17 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
 
     var timeout = 1;
     while (true) {
-      val stamp = reclaimLock.tryWriteLock(timeout, TimeUnit.MILLISECONDS)
-      if (stamp != 0) {
-        return stamp
+      val acquired = reclaimLock.tryAcquireExclusiveNanos(TimeUnit.MILLISECONDS.toNanos(timeout))
+      if (acquired) {
+        return true
       }
       timeout <<= 1
       if (timeout > finalTimeoutMillis) {
-        return 0
+        return false
       }
       Thread.`yield`()
     }
-    0 // never reached, but scala compiler complains otherwise
+    false // never reached, but scala compiler complains otherwise
   }
 
   /**
@@ -319,15 +318,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     var numFree: Int = 0
     val start = System.nanoTime()
     // Give up after waiting (in total) a little over 2 seconds.
-    val stamp = tryExclusiveReclaimLock(1024)
-    if (stamp == 0) {
+    val acquired = tryExclusiveReclaimLock(1024)
+    if (!acquired) {
       logger.warn(s"Lock for BlockManager.ensureFreePercent timed out: ${reclaimLock}")
       numFree = numFreeBlocks
     } else {
       try {
         numFree = ensureFreePercent(pct)
       } finally {
-        reclaimLock.unlockWrite(stamp)
+        reclaimLock.releaseExclusive()
       }
       val numBytes = numFree * blockSizeInBytes
       logger.debug(s"BlockManager.ensureFreePercent numFree: $numFree ($numBytes bytes)")
