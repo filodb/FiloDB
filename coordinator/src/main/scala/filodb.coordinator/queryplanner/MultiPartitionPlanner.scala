@@ -51,6 +51,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       queryParams.remoteQueryPath, queryParams.processFailure, processMultiPartition = false, queryParams.verbose)
   }
 
+  // scalastyle:off method.length
   def materializeSimpleQuery(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
     val routingKeys = getRoutingKeys(logicalPlan)
@@ -59,6 +60,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       val routingKeyMap = routingKeys.map(x => (x._1, x._2.get.head)).toMap
       val offsetMs = LogicalPlanUtils.getOffsetMillis(logicalPlan)
       val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
+      val isInstantQuery: Boolean = if (queryParams.startSecs == queryParams.endSecs) true else false
       val periodicSeriesTimeWithOffset = TimeRange((queryParams.startSecs * 1000) - offsetMs,
         (queryParams.endSecs * 1000) - offsetMs)
       val lookBackMs = getLookBackMillis(logicalPlan)
@@ -73,7 +75,8 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       var prevPartitionStart = periodicSeriesTimeWithOffset.startMs
       val execPlans = partitions.zipWithIndex.map { case (p, i) =>
         // First partition should start from query start time
-        val startMs = if (i == 0) queryParams.startSecs * 1000
+        // No need to calculate time according to step for instant queries
+        val startMs = if (i == 0 || isInstantQuery) queryParams.startSecs * 1000
                       else {
                         // Lookback not supported across partitions
                         val numStepsInPrevPartition = (p.timeRange.startMs - prevPartitionStart + lookBackMs) / stepMs
@@ -81,7 +84,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
                         lastPartitionInstant + stepMs
                       }
         prevPartitionStart = startMs
-        val endMs = p.timeRange.endMs + offsetMs
+        val endMs = if (isInstantQuery) queryParams.endSecs * 1000 else p.timeRange.endMs + offsetMs
         if (p.partitionName.equals(localPartitionName))
           localPartitionPlanner.materialize(
             copyLogicalPlanWithUpdatedTimeRange(logicalPlan, TimeRange(startMs, endMs)), qContext)
@@ -98,6 +101,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
       // Sort to move RemoteExec in end as it does not have schema
     }
   }
+  // scalastyle:on method.length
 
   def materializeBinaryJoin(logicalPlan: LogicalPlan, qContext: QueryContext): ExecPlan = {
 
@@ -119,7 +123,7 @@ class MultiPartitionPlanner(partitionLocationProvider: PartitionLocationProvider
         sortBy(_.timeRange.startMs)
       val partitionName = partitions.head.partitionName
 
-      // Binary Join supported only fro single partition now
+      // Binary Join supported only for single partition now
       if (partitions.forall(_.partitionName.equals((partitionName)))) {
         if (partitionName.equals(localPartitionName)) localPartitionPlanner.materialize(logicalPlan, qContext)
         else {
