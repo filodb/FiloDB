@@ -4,6 +4,7 @@ import scala.concurrent.Await
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import kamon.metric.{MeasurementUnit, MetricSnapshot, PeriodSnapshot}
 import kamon.metric.MeasurementUnit.{information, time}
 import kamon.metric.MeasurementUnit.Dimension.{Information, Time}
@@ -11,7 +12,6 @@ import kamon.module.{MetricReporter, Module, ModuleFactory, SpanReporter}
 import kamon.tag.TagSet
 import kamon.trace.Span
 import kamon.util.Clock
-import kamon.Kamon
 
 class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
 
