@@ -7,7 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.binaryrecord2.BinaryRecordRowReader
-import filodb.core.memstore.{MemStore, PartKeyRowReader}
+import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.PartitionSchema
 import filodb.core.query._
@@ -17,50 +17,16 @@ import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
 import filodb.query.Query.qLogger
 
-final case class PartKeysDistConcatExec(queryContext: QueryContext,
-                                        dispatcher: PlanDispatcher,
-                                        children: Seq[ExecPlan]) extends NonLeafExecPlan {
+trait MetadataDistConcatExec extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 
   override def enforceLimit: Boolean = false
 
   /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
-  override protected def args: String = ""
-
-  /**
-    * Compose the sub-query/leaf results here.
-    */
-  protected def compose(childResponses: Observable[(QueryResponse, Int)],
-                        firstSchema: Task[ResultSchema],
-                        querySession: QuerySession): Observable[RangeVector] = {
-    qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    val taskOfResults = childResponses.map {
-      case (QueryResult(_, _, result), _) => result
-      case (QueryError(_, ex), _)         => throw ex
-    }.toListL.map { resp =>
-      IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
-    }
-    Observable.fromTask(taskOfResults)
-  }
-
-}
-
-final case class LabelValuesDistConcatExec(queryContext: QueryContext,
-                                           dispatcher: PlanDispatcher,
-                                           children: Seq[ExecPlan]) extends NonLeafExecPlan {
-
-  require(!children.isEmpty)
-
-  override def enforceLimit: Boolean = false
-
-  /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
+   * Args to use for the ExecPlan for printTree purposes only.
+   * DO NOT change to a val. Increases heap usage.
+   */
   override protected def args: String = ""
 
   /**
@@ -76,24 +42,30 @@ final case class LabelValuesDistConcatExec(queryContext: QueryContext,
     }.toListL.map { resp =>
       var metadataResult = scala.collection.mutable.Set.empty[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
       resp.foreach { rv =>
-          metadataResult ++= rv.head.rows.map { rowReader =>
-            val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
-            rv.head match {
-              case srv: SerializedRangeVector =>
-                srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
-                   .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
-              case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
-            }
+        metadataResult ++= rv.head.rows.map { rowReader =>
+          val binaryRowReader = rowReader.asInstanceOf[BinaryRecordRowReader]
+          rv.head match {
+            case srv: SerializedRangeVector =>
+              srv.schema.toStringPairs (binaryRowReader.recordBase, binaryRowReader.recordOffset)
+                .map (pair => pair._1.utf8 -> pair._2.utf8).toMap
+            case _ => throw new UnsupportedOperationException("Metadata query currently needs SRV results")
           }
+        }
       }
-      //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new UTF8MapIteratorRowReader(metadataResult.toIterator))
     }
     Observable.fromTask(taskOfResults)
   }
-
 }
+
+final case class PartKeysDistConcatExec(queryContext: QueryContext,
+                                        dispatcher: PlanDispatcher,
+                                        children: Seq[ExecPlan]) extends MetadataDistConcatExec
+
+final case class LabelValuesDistConcatExec(queryContext: QueryContext,
+                                           dispatcher: PlanDispatcher,
+                                           children: Seq[ExecPlan]) extends MetadataDistConcatExec
 
 final case class PartKeysExec(queryContext: QueryContext,
                               dispatcher: PlanDispatcher,
@@ -114,29 +86,27 @@ final case class PartKeysExec(queryContext: QueryContext,
       case memStore: MemStore =>
         val response = memStore.partKeysWithFilters(dataset, shard, filters,
           fetchFirstLastSampleTimes, end, start, queryContext.sampleLimit)
-        Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), PartKeyRowReader(response)))
+        Observable.now(IteratorBackedRangeVector(
+          new CustomRangeVectorKey(Map.empty), UTF8MapIteratorRowReader(response)))
       case other =>
         Observable.empty
     }
     Kamon.currentSpan().mark("creating-resultschema")
-    val sch = new ResultSchema(Seq(ColumnInfo("TimeSeries", ColumnType.BinaryRecordColumn),
-      ColumnInfo("_firstSampleTime_", ColumnType.LongColumn),
-      ColumnInfo("_lastSampleTime_", ColumnType.LongColumn)), 3,
-                               Map(0 -> partSchema.binSchema))
+    val sch = new ResultSchema(Seq(ColumnInfo("Labels", ColumnType.MapColumn)), 1)
     ExecResult(rvs, Task.eval(sch))
   }
 
   def args: String = s"shard=$shard, filters=$filters, limit=${queryContext.sampleLimit}"
 }
 
-final case class  LabelValuesExec(queryContext: QueryContext,
-                                  dispatcher: PlanDispatcher,
-                                  dataset: DatasetRef,
-                                  shard: Int,
-                                  filters: Seq[ColumnFilter],
-                                  columns: Seq[String],
-                                  startMs: Long,
-                                  endMs: Long) extends LeafExecPlan {
+final case class LabelValuesExec(queryContext: QueryContext,
+                                 dispatcher: PlanDispatcher,
+                                 dataset: DatasetRef,
+                                 shard: Int,
+                                 filters: Seq[ColumnFilter],
+                                 columns: Seq[String],
+                                 startMs: Long,
+                                 endMs: Long) extends LeafExecPlan {
 
   override def enforceLimit: Boolean = false
 

@@ -30,13 +30,15 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n   " +
+    " http {\n      endpoint = localhost\n timeout = 10000\n    }\n  }\n}"
+
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
     withFallback(routingConfig)
   private val queryConfig = new QueryConfig(config)
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   val localPlanner = new SingleClusterPlanner(dsRef, schemas, localMapper, earliestRetainedTimestampFn = 0, queryConfig)
   val remotePlanner = new SingleClusterPlanner(dsRef, schemas, remoteMapper, earliestRetainedTimestampFn = 0,

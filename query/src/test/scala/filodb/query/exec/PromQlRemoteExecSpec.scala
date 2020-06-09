@@ -1,6 +1,5 @@
 package filodb.query.exec
 
-import com.typesafe.config.ConfigFactory
 import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
@@ -10,9 +9,9 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{PromQlQueryParams, QueryContext}
 import filodb.query
-import filodb.query.{Data, MetadataSampl, QueryResponse, QueryResult, Sampl}
+import filodb.query.{Data, QueryResponse, QueryResult, Sampl}
 
-class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
+class PromQlRemoteExecSpec extends FunSpec with Matchers with ScalaFutures {
   val timeseriesDataset = Dataset.make("timeseries",
     Seq("tags:map"),
     Seq("timestamp:ts", "value:double:detectDrops=true"),
@@ -24,10 +23,10 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   val queryContext = QueryContext()
-  val params = PromQlQueryParams(ConfigFactory.empty(), "", 0, 0 , 0)
+  val params = PromQlQueryParams("", 0, 0 , 0)
   it ("should convert matrix Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0), (2000000, 2.0), (3000000, 3.0))
-    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), Some(Seq(Sampl(1000, 1), Sampl(2000, 2), Sampl(3000, 3))), None)
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -40,7 +39,7 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should convert vector Data to QueryResponse ") {
     val expectedResult = List((1000000, 1.0))
-    val exec = PromQlExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = PromQlRemoteExec("", 60000, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val result = query.Result (Map("instance" ->"inst1"), None, Some(Sampl(1000, 1)))
     val res = exec.toQueryResponse(Data("vector", Seq(result)), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
@@ -52,12 +51,11 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it ("should convert vector Data to QueryResponse for MetadataQuery") {
-    val exec = PromLabelQueryExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = MetadataRemoteExec("", 60000, Map.empty,
+      queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
-    val result1 = query.Result (Map.empty, None, Some(MetadataSampl(map1)))
-    val result2 = query.Result (Map.empty, None, Some(MetadataSampl(map2)))
-    val res = exec.toQueryResponse(Data("vector", Seq(result1, result2)), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(Seq(map1, map2), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)
@@ -66,12 +64,10 @@ class PromQlExecSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it ("should convert vector Data to QueryResponse for Metadata series query") {
-    val exec = PromSeriesQueryExec(queryContext, dummyDispatcher, timeseriesDataset.ref, params)
+    val exec = MetadataRemoteExec("", 60000, Map.empty, queryContext, dummyDispatcher, timeseriesDataset.ref, params)
     val map1 = Map("instance" -> "inst-1", "last-sample" -> "6377838" )
     val map2 = Map("instance" -> "inst-2", "last-sample" -> "6377834" )
-    val result1 = query.Result (Map.empty, None, Some(MetadataSampl(map1)))
-    val result2 = query.Result (Map.empty, None, Some(MetadataSampl(map2)))
-    val res = exec.toQueryResponse(Data("vector", Seq(result1, result2)), "id", Kamon.currentSpan())
+    val res = exec.toQueryResponse(Seq(map1, map2), "id", Kamon.currentSpan())
     res.isInstanceOf[QueryResult] shouldEqual true
     val queryResult = res.asInstanceOf[QueryResult]
     val data = queryResult.result.flatMap(x=>x.rows.map{ r => r.getAny(0) }.toList)

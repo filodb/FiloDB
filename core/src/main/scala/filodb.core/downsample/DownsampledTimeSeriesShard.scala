@@ -21,6 +21,7 @@ import filodb.core.metadata.Schemas
 import filodb.core.query.{ColumnFilter, QuerySession}
 import filodb.core.store._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.ZeroCopyUTF8String._
 
 class DownsampledTimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -90,9 +91,13 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[PartKeyWithTimes] = {
+                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.take(limit).map { pk =>
-      PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
+      val partKey = PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
+      schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
+        pair._1.utf8 -> pair._2.utf8
+      }).toMap ++
+        Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
     }
   }
 
@@ -321,7 +326,6 @@ class DownsampledTimeSeriesShard(rawDatasetRef: DatasetRef,
       while(partIndex < partIds.length && numResultsReturned < limit && !foundValue) {
         val partId = partIds(partIndex)
 
-        import ZeroCopyUTF8String._
         //retrieve PartKey either from In-memory map or from PartKeyIndex
         val nextPart = partKeyFromPartId(partId)
 

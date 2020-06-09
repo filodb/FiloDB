@@ -29,7 +29,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n   " +
+    " http {\n      endpoint = localhost\n timeout = 10000\n    }\n  }\n}"
 
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
 
@@ -47,7 +48,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     ColumnFilter("job", Filter.Equals("myService")),
     ColumnFilter("le", Filter.Equals("0.3")))
 
-  private val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "sum(heap_usage)", 100, 1, 1000, None)
+  private val promQlQueryParams = PromQlQueryParams("sum(heap_usage)", 100, 1, 1000)
 
   val localPlanner = new SingleClusterPlanner(dsRef, schemas, mapperRef, earliestRetainedTimestampFn = 0, queryConfig)
 
@@ -109,9 +110,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate RemoteExecPlan with RawSeries time according to lookBack") {
@@ -121,7 +122,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"), Some(50000))
     val windowed = PeriodicSeriesWithWindowing(raw, from, 100, to, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "", from/1000, 1, to/1000, None)
+    val promQlQueryParams = PromQlQueryParams("", from/1000, 1, to/1000)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -140,10 +141,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual (2)
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
     child1.children.length shouldEqual (2) //default spread is 1 so 2 shards
 
@@ -184,9 +185,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure timerange coincide with query time range") {
@@ -208,9 +209,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate only PromQlExec when local failure starts before query end time and ends after query end time") {
@@ -232,9 +233,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan.asInstanceOf[PromQlExec].params.startSecs shouldEqual(from/1000)
-    execPlan.asInstanceOf[PromQlExec].params.endSecs shouldEqual(to/1000)
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(from/1000)
+    execPlan.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(to/1000)
   }
 
   it("should generate PromQlExecPlan and LocalPlan with RawSeries time according to lookBack and step") {
@@ -246,7 +247,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -266,10 +267,10 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val stitchRvsExec = execPlan.asInstanceOf[StitchRvsExec]
     stitchRvsExec.children.size shouldEqual 2
     stitchRvsExec.children(0).isInstanceOf[ReduceAggregateExec] shouldEqual (true)
-    stitchRvsExec.children(1).isInstanceOf[PromQlExec] shouldEqual (true)
+    stitchRvsExec.children(1).isInstanceOf[PromQlRemoteExec] shouldEqual (true)
 
     val child1 = stitchRvsExec.children(0).asInstanceOf[ReduceAggregateExec]
-    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlExec]
+    val child2 = stitchRvsExec.children(1).asInstanceOf[PromQlRemoteExec]
 
     child1.children.length shouldEqual 2 //default spread is 1 so 2 shards
 
@@ -301,7 +302,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -315,9 +316,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual true
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual true
 
-    val child = execPlan.asInstanceOf[PromQlExec]
+    val child = execPlan.asInstanceOf[PromQlRemoteExec]
 
     child.params.startSecs shouldEqual 900
     child.params.endSecs shouldEqual 1980
@@ -334,7 +335,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -373,7 +374,7 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     val raw = RawSeries(rangeSelector = intervalSelector, filters = f1, columns = Seq("value"))
     val windowed = PeriodicSeriesWithWindowing(raw, from * 1000, step * 1000, to * 1000, 5000, RangeFunctionId.Rate)
     val summed = Aggregate(AggregationOperator.Sum, windowed, Nil, Seq("job"))
-    val promQlQueryParams = PromQlQueryParams(ConfigFactory.empty, "dummy query", from, step, to, None)
+    val promQlQueryParams = PromQlQueryParams("dummy query", from, step, to)
 
     val failureProvider = new FailureProvider {
       override def getFailures(datasetRef: DatasetRef, queryTimeRange: TimeRange): Seq[FailureTimeRange] = {
@@ -387,9 +388,9 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
 
     val execPlan = engine.materialize(summed, QueryContext(origQueryParams = promQlQueryParams))
 
-    execPlan.isInstanceOf[PromQlExec] shouldEqual true
+    execPlan.isInstanceOf[PromQlRemoteExec] shouldEqual true
 
-    val child = execPlan.asInstanceOf[PromQlExec]
+    val child = execPlan.asInstanceOf[PromQlRemoteExec]
     child.params.startSecs shouldEqual from
     child.params.endSecs shouldEqual to
     child.params.stepSecs shouldEqual step
@@ -416,8 +417,8 @@ class HighAvailabilityPlannerSpec extends FunSpec with Matchers {
     // Because of offset starts time would be (700 - 600) = 100 seconds where there is failure
     // So PromQlExec is generated instead of local DistConcatExec. PromQlExec will have original query and start time
     // Start time with offset will be calculated by buddy pod
-    execPlan2.isInstanceOf[PromQlExec] shouldEqual (true)
-    execPlan2.asInstanceOf[PromQlExec].params.startSecs shouldEqual(700)
-    execPlan2.asInstanceOf[PromQlExec].params.endSecs shouldEqual(10000)
+    execPlan2.isInstanceOf[PromQlRemoteExec] shouldEqual (true)
+    execPlan2.asInstanceOf[PromQlRemoteExec].params.startSecs shouldEqual(700)
+    execPlan2.asInstanceOf[PromQlRemoteExec].params.endSecs shouldEqual(10000)
   }
 }
