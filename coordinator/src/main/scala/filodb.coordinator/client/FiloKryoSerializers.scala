@@ -87,14 +87,12 @@ class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
     val end = input.readLong()
     val spreadInt = input.readInt()
     val spread = if (spreadInt == -1) None else Some(spreadInt)
-    val endpointString = input.readString()
-    val endpoint = if (endpointString == "-1") None else Some(endpointString)
     val queryPathString = input.readString()
     val queryPath = if (queryPathString == "-1") None else Some(queryPathString)
-    val timeout = input.readLong()
     val procFailure = input.readBoolean()
     val procMultiPartition = input.readBoolean()
-    PromQlQueryParams(promQl, start, step, end, spread, endpoint, queryPath, timeout, procFailure, procMultiPartition)
+    val verbose = input.readBoolean()
+    PromQlQueryParams(promQl, start, step, end, spread, queryPath, procFailure, procMultiPartition, verbose)
   }
   override def write(kryo: Kryo, output: Output, promParam: PromQlQueryParams): Unit = {
     output.writeString(promParam.promQl)
@@ -102,10 +100,9 @@ class PromQlQueryParamsSerializer extends KryoSerializer[PromQlQueryParams] {
     output.writeLong(promParam.stepSecs)
     output.writeLong(promParam.endSecs)
     output.writeInt(promParam.spread.getOrElse(-1))
-    output.writeString(promParam.remoteQueryEndpoint.getOrElse("-1"))
     output.writeString(promParam.remoteQueryPath.getOrElse("-1"))
-    output.writeLong(promParam.httpRequestTimeoutMs)
     output.writeBoolean(promParam.processFailure)
     output.writeBoolean(promParam.processMultiPartition)
+    output.writeBoolean(promParam.verbose)
   }
 }

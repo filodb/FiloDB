@@ -673,18 +673,31 @@ class TimeSeriesShard(val ref: DatasetRef,
                           fetchFirstLastSampleTimes: Boolean,
                           endTime: Long,
                           startTime: Long,
-                          limit: Int): Iterator[PartKeyWithTimes] = {
+                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
     if (fetchFirstLastSampleTimes) {
       partKeyIndex.partKeyRecordsFromFilters(filter, startTime, endTime).iterator.map { pk =>
-        PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime)
-      }
+        val partKeyMap = convertPartKeyWithTimesToMap(
+          PartKeyWithTimes(pk.partKey, UnsafeUtils.arayOffset, pk.startTime, pk.endTime))
+        partKeyMap ++ Map(
+          ("_firstSampleTime_".utf8, pk.startTime.toString.utf8),
+          ("_lastSampleTime_".utf8, pk.endTime.toString.utf8))
+      } take(limit)
     } else {
       val partIds = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
       val inMem = InMemPartitionIterator2(partIds)
-      val inMemPartKeys = inMem.map { p => PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1) }
-      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partKeyFromPartId)
+      val inMemPartKeys = inMem.map { p =>
+        convertPartKeyWithTimesToMap(PartKeyWithTimes(p.partKeyBase, p.partKeyOffset, -1, -1))}
+      val skippedPartKeys = inMem.skippedPartIDs.iterator().map(partId => {
+        convertPartKeyWithTimesToMap(partKeyFromPartId(partId))})
       (inMemPartKeys ++ skippedPartKeys).take(limit)
     }
+  }
+
+  private def convertPartKeyWithTimesToMap(partKey: PartKeyWithTimes): Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = {
+    schemas.part.binSchema.toStringPairs(partKey.base, partKey.offset).map(pair => {
+      pair._1.utf8 -> pair._2.utf8
+    }).toMap ++
+      Map("_type_".utf8 -> Schemas.global.schemaName(RecordSchema.schemaID(partKey.base, partKey.offset)).utf8)
   }
 
   /**

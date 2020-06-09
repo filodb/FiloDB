@@ -1,6 +1,7 @@
 package filodb.coordinator.queryplanner
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.DatasetRef
 import filodb.core.query.{PromQlQueryParams, QueryConfig, QueryContext}
 import filodb.query.LogicalPlan
@@ -26,6 +27,11 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
   import LogicalPlanUtils._
   import QueryFailureRoutingStrategy._
 
+  val remoteHttpEndpoint: String = queryConfig.routingConfig.getString("remote.http.endpoint")
+
+  val remoteHttpTimeoutMs: Long =
+    queryConfig.routingConfig.config.as[Option[Long]]("remote.http.timeout").getOrElse(60000)
+
   /**
     * Converts Route objects returned by FailureProvider to ExecPlan
     */
@@ -49,13 +55,12 @@ class HighAvailabilityPlanner(dsRef: DatasetRef,
           val timeRange = route.timeRange.get
           val queryParams = qContext.origQueryParams.asInstanceOf[PromQlQueryParams]
           // Divide by 1000 to convert millis to seconds. PromQL params are in seconds.
-          val remoteHttpEndpoint = queryConfig.routingConfig.as[Option[String]]("remote.http.endpoint")
           val promQlParams = PromQlQueryParams(queryParams.promQl,
             (timeRange.startMs + offsetMs) / 1000, queryParams.stepSecs, (timeRange.endMs + offsetMs) / 1000,
-            queryParams.spread, remoteHttpEndpoint, Option.empty,
-            queryParams.httpRequestTimeoutMs, processFailure = false)
+            queryParams.spread, processFailure = false)
           logger.debug("PromQlExec params:" + promQlParams)
-          PromQlRemoteExec(qContext, InProcessPlanDispatcher, dsRef, promQlParams)
+          PromQlRemoteExec(remoteHttpEndpoint, remoteHttpTimeoutMs,
+            qContext, InProcessPlanDispatcher, dsRef, promQlParams)
       }
     }
 

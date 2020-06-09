@@ -6,12 +6,13 @@ import com.softwaremill.sttp.asynchttpclient.future.AsyncHttpClientFutureBackend
 import com.softwaremill.sttp.circe._
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.trace.Span
 import monix.eval.Task
 import monix.execution.Scheduler
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.sys.ShutdownHookThread
+
 import filodb.core.DatasetRef
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.query._
@@ -19,18 +20,24 @@ import filodb.core.store.ChunkSource
 import filodb.memory.format.RowReader
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
-import kamon.trace.Span
 
 trait RemoteExec extends LeafExecPlan {
 
   val params: PromQlQueryParams
 
-  protected def args: String = params.toString
+  val queryEndpoint: String
+
+  val requestTimeoutMs: Long
+
+  val urlParams: Map[String, Any]
+
+  def args: String = s"${params.toString}, queryEndpoint=$queryEndpoint, " +
+    s"requestTimeoutMs=$requestTimeoutMs, limit=${queryContext.sampleLimit}"
+
+  def limit: Int = ???
 
   /**
-   * Sub classes should override this method to provide a concrete
-   * implementation of the operation represented by this exec plan
-   * node
+   * Since execute is already overrided here, doExecute() can be empty.
    */
   def doExecute(source: ChunkSource,
                 querySession: QuerySession)
@@ -44,8 +51,11 @@ trait RemoteExec extends LeafExecPlan {
       .tag("query-id", queryContext.queryId)
       .start()
 
-    val httpEndpoint = params.remoteQueryEndpoint.get + params.remoteQueryPath.getOrElse("")
-    val queryResponse = sendHttpRequest(execPlan2Span, httpEndpoint, params.httpRequestTimeoutMs)
+    if (queryEndpoint == null) {
+      throw new BadQueryException("Remote Query endpoint can not be null in RemoteExec.")
+    }
+
+    val queryResponse = sendHttpRequest(execPlan2Span, queryEndpoint, requestTimeoutMs)
 
     // Please note that the following needs to be wrapped inside `runWithSpan` so that the context will be propagated
     // across threads. Note that task/observable will not run on the thread where span is present since
@@ -58,40 +68,40 @@ trait RemoteExec extends LeafExecPlan {
   def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
                      (implicit sched: Scheduler): Future[QueryResponse]
 
-  def getUrlParams(): Map[String, Any]
+  def getUrlParams(): Map[String, Any] = {
+    var finalUrlParams = urlParams ++
+      Map("start" -> params.startSecs,
+        "end" -> params.endSecs,
+        "time" -> params.endSecs,
+        "step" -> params.stepSecs,
+        "processFailure" -> params.processFailure,
+        "processMultiPartition" -> params.processMultiPartition,
+        "verbose" -> params.verbose)
+    if (params.spread.isDefined) finalUrlParams = finalUrlParams + ("spread" -> params.spread.get)
+    finalUrlParams
+  }
 
 }
 
-case class PromQlRemoteExec(queryContext: QueryContext,
+case class PromQlRemoteExec(queryEndpoint: String,
+                            requestTimeoutMs: Long,
+                            queryContext: QueryContext,
                             dispatcher: PlanDispatcher,
                             dataset: DatasetRef,
                             params: PromQlQueryParams,
                             numberColumnRequired: Boolean = false) extends RemoteExec {
 
-  val columns: Seq[ColumnInfo] = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
+  private val columns = Seq(ColumnInfo("timestamp", ColumnType.TimestampColumn),
     ColumnInfo(if (numberColumnRequired) "number" else "value", ColumnType.DoubleColumn))
-  val recSchema = SerializedRangeVector.toSchema(columns)
-  val resultSchema = ResultSchema(columns, 1)
+  private val recSchema = SerializedRangeVector.toSchema(columns)
+  private val resultSchema = ResultSchema(columns, 1)
+  private val builder = SerializedRangeVector.newBuilder()
 
-  val builder = SerializedRangeVector.newBuilder()
-
-  def limit: Int = ???
-
-  override def getUrlParams(): Map[String, Any] = {
-    var urlParams = Map("query" -> params.promQl,
-      "start" -> params.startSecs,
-      "end" -> params.endSecs,
-      "time" -> params.endSecs,
-      "step" -> params.stepSecs,
-      "processFailure" -> params.processFailure,
-      "processMultiPartition" -> params.processMultiPartition)
-    if (params.spread.isDefined) urlParams = urlParams + ("spread" -> params.spread.get)
-    urlParams
-  }
+  override val urlParams = Map("query" -> params.promQl)
 
   override def sendHttpRequest(execPlan2Span: Span, httpEndpoint: String, httpTimeoutMs: Long)
                      (implicit sched: Scheduler): Future[QueryResponse] = {
-    PromQlRemoteExec.httpGet(httpEndpoint, httpTimeoutMs, queryContext.submitTime, getUrlParams())
+    PromRemoteExec.httpGet(queryEndpoint, requestTimeoutMs, queryContext.submitTime, getUrlParams())
       .map { response =>
         response.unsafeBody match {
           case Left(error) => QueryError(queryContext.queryId, error.error)
@@ -129,7 +139,7 @@ case class PromQlRemoteExec(queryContext: QueryContext,
       }
       SerializedRangeVector(rv, builder, recSchema, printTree(useNewline = false))
       // TODO: Raw series resuls are incorrect
-      // TODO: verbose flag is not setting correct values
+      // TODO: can verbose flag affect stitching
     }
     span.finish()
     QueryResult(id, resultSchema, rangeVectors)
@@ -137,7 +147,7 @@ case class PromQlRemoteExec(queryContext: QueryContext,
 
 }
 
-object PromQlRemoteExec extends StrictLogging {
+object PromRemoteExec extends StrictLogging {
 
   import com.softwaremill.sttp._
   import io.circe.generic.auto._
@@ -150,7 +160,8 @@ object PromQlRemoteExec extends StrictLogging {
   ShutdownHookThread(shutdown())
 
   def httpGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
-  (implicit scheduler: Scheduler): Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
+  (implicit scheduler: Scheduler):
+  Future[Response[scala.Either[DeserializationError[io.circe.Error], SuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
     val url = uri"$httpEndpoint?$urlParams"
@@ -163,7 +174,8 @@ object PromQlRemoteExec extends StrictLogging {
   }
 
   def httpMetadataGet(httpEndpoint: String, httpTimeoutMs: Long, submitTime: Long, urlParams: Map[String, Any])
-             (implicit scheduler: Scheduler): Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
+                     (implicit scheduler: Scheduler):
+  Future[Response[scala.Either[DeserializationError[io.circe.Error], MetadataSuccessResponse]]] = {
     val queryTimeElapsed = System.currentTimeMillis() - submitTime
     val readTimeout = FiniteDuration(httpTimeoutMs - queryTimeElapsed, TimeUnit.MILLISECONDS)
     val url = uri"$httpEndpoint?$urlParams"

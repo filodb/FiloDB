@@ -187,7 +187,7 @@ extends MemStore with StrictLogging {
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
                           fetchFirstLastSampleTimes: Boolean, end: Long, start: Long,
-                          limit: Int): Iterator[PartKeyWithTimes] =
+                          limit: Int): Iterator[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
     getShard(dataset, shard).map(_.partKeysWithFilters(filters, fetchFirstLastSampleTimes,
       end, start, limit)).getOrElse(Iterator.empty)
 

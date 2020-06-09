@@ -30,7 +30,9 @@ class SinglePartitionPlannerSpec extends FunSpec with Matchers{
   private val dsRef = dataset.ref
   private val schemas = Schemas(dataset.schema)
 
-  private val routingConfigString = "routing {\n  buddy {\n    http {\n      timeout = 10.seconds\n    }\n  }\n}"
+  private val routingConfigString = "routing {\n  remote {\n   " +
+    " http {\n      endpoint = localhost\n timeout = 10000\n    }\n  }\n}"
+
   private val routingConfig = ConfigFactory.parseString(routingConfigString)
   private val config = ConfigFactory.load("application_test.conf").getConfig("filodb.query").
     withFallback(routingConfig)

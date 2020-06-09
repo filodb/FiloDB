@@ -12,7 +12,8 @@ final case class ExplainPlanResponse(debugInfo: Seq[String], status: String = "s
 
 final case class Data(resultType: String, result: Seq[Result])
 
-final case class MetadataSuccessResponse(data: Seq[Map[String, String]], status: String = "success") extends PromQueryResponse
+final case class MetadataSuccessResponse(data: Seq[Map[String, String]],
+                                         status: String = "success") extends PromQueryResponse
 
 final case class Result(metric: Map[String, String], values: Option[Seq[DataSampl]], value: Option[DataSampl] = None)
 
