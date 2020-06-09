@@ -7,6 +7,7 @@ import kamon.Kamon
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
+import filodb.coordinator.KamonShutdownHook
 import filodb.downsampler.DownsamplerContext
 import filodb.downsampler.chunk.DownsamplerSettings
 
@@ -94,13 +95,15 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
 
     val numShards = dsIndexJobSettings.numShards
 
+    KamonShutdownHook.registerShutdownHook()
+
     DownsamplerContext.dsLogger.info(s"Spark Job Properties: ${spark.sparkContext.getConf.toDebugString}")
     val startHour = fromHour
     val endHourExcl = toHourExcl
     spark.sparkContext
       .makeRDD(0 until numShards)
       .foreach { shard =>
-        Kamon.init() // kamon init should be first thing in worker jvm
+        KamonShutdownHook.registerShutdownHook()
         job.updateDSPartKeyIndex(shard, startHour, endHourExcl, doFullMigration)
       }
     DownsamplerContext.dsLogger.info(s"IndexUpdater Driver completed successfully")

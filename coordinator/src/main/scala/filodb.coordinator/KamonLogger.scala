@@ -1,5 +1,7 @@
 package filodb.coordinator
 
+import scala.concurrent.Await
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.metric.{MeasurementUnit, MetricSnapshot, PeriodSnapshot}
@@ -9,6 +11,7 @@ import kamon.module.{MetricReporter, Module, ModuleFactory, SpanReporter}
 import kamon.tag.TagSet
 import kamon.trace.Span
 import kamon.util.Clock
+import kamon.Kamon
 
 class KamonMetricsLogReporter extends MetricReporter with StrictLogging {
 
@@ -117,5 +120,28 @@ object KamonLogger {
   class SpanLogFactory extends ModuleFactory {
     override def create(settings: ModuleFactory.Settings): Module =
       new KamonSpanLogReporter
+  }
+}
+
+object KamonShutdownHook extends StrictLogging {
+
+  import scala.concurrent.duration._
+
+  private val shutdownHookAdded = new java.util.concurrent.atomic.AtomicBoolean(false)
+  def registerShutdownHook(): Unit = {
+    if (shutdownHookAdded.compareAndSet(false, true)) {
+      logger.info(s"Registering Kamon Shutdown Hook...")
+      Runtime.getRuntime.addShutdownHook(new Thread() {
+        override def run(): Unit = {
+          logger.info(s"Stopping Kamon modules - this will ensure that last few metrics are drained")
+          try {
+            Await.result(Kamon.stopModules(), 5.minutes)
+            logger.info(s"Finished stopping Kamon modules")
+          } catch { case e: Exception =>
+              logger.error(s"Exception when stopping Kamon Modules", e)
+          }
+        }
+      })
+    }
   }
 }
