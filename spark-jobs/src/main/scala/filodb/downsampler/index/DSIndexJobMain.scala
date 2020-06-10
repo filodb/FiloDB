@@ -103,6 +103,7 @@ class IndexJobDriver(dsSettings: DownsamplerSettings, dsIndexJobSettings: DSInde
     spark.sparkContext
       .makeRDD(0 until numShards)
       .foreach { shard =>
+        Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         job.updateDSPartKeyIndex(shard, startHour, endHourExcl, doFullMigration)
       }

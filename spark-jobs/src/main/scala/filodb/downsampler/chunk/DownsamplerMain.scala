@@ -106,6 +106,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
     spark.sparkContext
       .makeRDD(splits)
       .mapPartitions { splitIter =>
+        Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         import filodb.core.Iterators._
         val rawDataSource = batchDownsampler.rawCassandraColStore
@@ -120,6 +121,7 @@ class Downsampler(settings: DownsamplerSettings, batchDownsampler: BatchDownsamp
         batchIter // iterator of batches
       }
       .foreach { rawPartsBatch =>
+        Kamon.init()
         KamonShutdownHook.registerShutdownHook()
         batchDownsampler.downsampleBatch(rawPartsBatch, userTimeStart, userTimeEndExclusive)
       }

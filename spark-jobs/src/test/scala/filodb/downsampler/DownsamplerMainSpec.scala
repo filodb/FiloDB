@@ -321,15 +321,16 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     start until start + 6
   }
 
-  it("should simulate bulk part key records being written for migration") {
+  it("should simulate bulk part key records being written into raw for migration") {
     val partBuilder = new RecordBuilder(offheapMem.nativeMemoryManager)
     val schemas = Seq(Schemas.promHistogram, Schemas.gauge, Schemas.promCounter)
     case class PkToWrite(pkr: PartKeyRecord, shard: Int, updateHour: Long)
     val pks = for { i <- 0 to 10000 } yield {
       val schema = schemas(i % schemas.size)
-      val partKey = partBuilder.partKeyFromObjects(schema, s"metric$i", bulkSeriesTags)
+      val partKey = partBuilder.partKeyFromObjects(schema, s"bulkmetric$i", bulkSeriesTags)
       val bytes = schema.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, partKey)
-      PkToWrite(PartKeyRecord(bytes, 0L, 1000L, Some(-i)), i % numShards, bulkPkUpdateHours(i % bulkPkUpdateHours.size))
+      PkToWrite(PartKeyRecord(bytes, i, i + 500, Some(-i)), i % numShards,
+        bulkPkUpdateHours(i % bulkPkUpdateHours.size))
     }
 
     val rawDataset = Dataset("prometheus", Schemas.promHistogram)
@@ -391,7 +392,7 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     }.toSet
 
     // readKeys should not contain untyped part key - we dont downsample untyped
-    readKeys shouldEqual (0 to 10000).map(i => s"metric$i").toSet ++ (metricNames.toSet - untypedName)
+    readKeys shouldEqual (0 to 10000).map(i => s"bulkmetric$i").toSet ++ (metricNames.toSet - untypedName)
   }
 
   it("should read and verify gauge data in cassandra using PagedReadablePartition for 1-min downsampled data") {
@@ -733,7 +734,56 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
       .contains("No configuration setting found for key 'cardbuster'") shouldEqual true
   }
 
-  it ("should be able to bust cardinality in raw and downsample tables with spark job") {
+  it ("should be able to bust cardinality by time filter in downsample tables with spark job") {
+    val sparkConf = new SparkConf(loadDefaults = true)
+    sparkConf.setMaster("local[2]")
+    val deleteFilterConfig = ConfigFactory.parseString(
+      s"""
+         |filodb.cardbuster.delete-pk-filters = [
+         | {
+         |    _ns_ = "bulk_ns"
+         |    _ws_ = "bulk_ws"
+         | }
+         |]
+         |filodb.cardbuster.delete-startTimeGTE = "${Instant.ofEpochMilli(0).toString}"
+         |filodb.cardbuster.delete-endTimeLTE = "${Instant.ofEpochMilli(600).toString}"
+         |""".stripMargin)
+
+    val settings2 = new DownsamplerSettings(deleteFilterConfig.withFallback(conf))
+    val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
+    val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)
+    cardBuster.run(sparkConf).close()
+
+    sparkConf.set("spark.filodb.cardbuster.inDownsampleTables", "true")
+    cardBuster.run(sparkConf).close()
+  }
+
+  it("should verify bulk part key records are absent after card busting by time filter in downsample tables") {
+
+    def pkMetricName(pkr: PartKeyRecord): String = {
+      val strPairs = batchDownsampler.schemas.part.binSchema.toStringPairs(pkr.partKey, UnsafeUtils.arayOffset)
+      strPairs.find(p => p._1 == "_metric_").head._2
+    }
+
+    val readKeys = (0 until 4).flatMap { shard =>
+      val partKeys = downsampleColStore.scanPartKeys(batchDownsampler.downsampleRefsByRes(FiniteDuration(5, "min")),
+        shard)
+      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+    }.toSet
+
+    // downsample set should not have a few bulk metrics
+    readKeys.size shouldEqual 9904
+
+    val readKeys2 = (0 until 4).flatMap { shard =>
+      val partKeys = rawColStore.scanPartKeys(batchDownsampler.rawDatasetRef, shard)
+      Await.result(partKeys.map(pkMetricName).toListL.runAsync, 1 minutes)
+    }.toSet
+
+    // raw set should remain same since inDownsampleTables=true in
+    readKeys2.size shouldEqual 10006
+  }
+
+  it ("should be able to bust cardinality in both raw and downsample tables with spark job") {
     val sparkConf = new SparkConf(loadDefaults = true)
     sparkConf.setMaster("local[2]")
     val deleteFilterConfig = ConfigFactory.parseString( """
@@ -747,8 +797,11 @@ class DownsamplerMainSpec extends FunSpec with Matchers with BeforeAndAfterAll w
     val settings2 = new DownsamplerSettings(deleteFilterConfig.withFallback(conf))
     val dsIndexJobSettings2 = new DSIndexJobSettings(settings2)
     val cardBuster = new CardinalityBuster(settings2, dsIndexJobSettings2)
+
+    // first run for downsample tables
     cardBuster.run(sparkConf).close()
 
+    // then run for raw tables
     sparkConf.set("spark.filodb.cardbuster.inDownsampleTables", "false")
     cardBuster.run(sparkConf).close()
   }
