@@ -42,6 +42,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import client.QueryCommands._
   import NodeClusterActor._
 
+  import filodb.standalone.SimpleProfiler
+  val prof = new SimpleProfiler(5, 60, 50)
+
   val numShards = 32
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
@@ -104,6 +107,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].refreshIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
+  prof.start()
 
   // Stuff for directly executing queries ourselves
   val engine = new SingleClusterPlanner(dataset.ref, Schemas(dataset.schema), shardMapper, 0,
@@ -134,6 +138,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   def shutdownFiloActors(): Unit = {
     cluster.shutdown()
     println(s"Succeeded: $queriesSucceeded   Failed: $queriesFailed")
+    prof.stop()
   }
 
   // Window = 5 min and step=2.5 min, so 50% overlap
