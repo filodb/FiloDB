@@ -739,6 +739,17 @@ public class Latch implements Lock {
                         return true;
                     }
 
+                    if (!(node instanceof Shared) && mLatchState >= 0) {
+                        // Unpark any shared waiters that queued behind this exclusive request.
+                        WaitNode wnode = node;
+                        while ((wnode = wnode.mNext) instanceof Shared) {
+                            Object waiter = wnode.mWaiter;
+                            if (waiter instanceof Thread) {
+                                LockSupport.unpark((Thread) waiter);
+                            }
+                        }
+                    }
+
                     // Remove the node from the queue. If it's the first, it cannot be safely
                     // removed without the latch having been properly acquired. So let it
                     // linger around until the latch is released.
@@ -802,6 +813,10 @@ public class Latch implements Lock {
                 // be removed unless it's also the first. Bypass it now that a new last
                 // node has been enqueued.
                 cNextHandle.setRelease(pp, node);
+                // Return a more correct previous node, although it might be stale. Node
+                // removal is somewhat lazy, and accurate removal is performed when the
+                // exclusive latch is released.
+                prev = pp;
             }
         }
 
@@ -809,6 +824,12 @@ public class Latch implements Lock {
     }
 
     /**
+     * Should only be called after clearing the mWaiter field. Ideally, multiple threads
+     * shouldn't be calling this method, because it can cause nodes to be resurrected and
+     * remain in the queue longer than necessary. They'll get cleaned out eventually. The
+     * problem is caused by the prev node reference, which might have changed or have been
+     * removed by the time this method is called.
+     *
      * @param node node to remove, not null
      * @param prev previous node, not null
      */
@@ -856,6 +877,23 @@ public class Latch implements Lock {
             }
             trials = spin(trials);
         }
+    }
+
+    /**
+     * Returns the first waiter in the queue that's actually still waiting.
+     */
+    private WaitNode firstWaiter() {
+        WaitNode first = mLatchFirst;
+        WaitNode next;
+        if (first == null || first.mWaiter != null || (next = first.mNext) == null) {
+            return first;
+        }
+        if (next.mWaiter != null) {
+            return next;
+        }
+        // Clean out some stale nodes. Note that removing the first node isn't safe.
+        remove(next, first);
+        return null;
     }
 
     public final boolean hasQueuedThreads() {
@@ -1032,7 +1070,7 @@ public class Latch implements Lock {
             // Note: If mWaiter is null, then handoff was fair. The shared count should already
             // be correct, and this node won't be in the queue anymore.
 
-            WaitNode first = latch.mLatchFirst;
+            WaitNode first = latch.firstWaiter();
             if (first != null && !(first instanceof Shared)) {
                 return mWaiter == null ? 1 : -1;
             }
@@ -1058,10 +1096,12 @@ public class Latch implements Lock {
                         return 1;
                     }
 
-                    // Only remove node if this thread is the first shared latch owner. This
-                    // guarantees that no other thread will be concurrently removing nodes.
-                    // Nodes for other threads will have their nodes removed later, as latches
-                    // are released. Early removal is a garbage collection optimization.
+                    // Only instruct the caller to remove this node if this is the first shared
+                    // latch owner (the returned state value will be 0). This guarantees that
+                    // no other thread will be concurrently calling removeFirst. The node will
+                    // be removed after an exclusive latch is released, or when firstWaiter is
+                    // called again. Note that it's possible to return 0 every time, but only
+                    // if the caller is also instructed to never call removeFirst.
                     return state;
                 }
 
